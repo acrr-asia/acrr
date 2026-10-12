@@ -2,7 +2,7 @@
 
 A static, English-language research and technical publishing site. It has six sections: **Home**, **Blog**, **Series**, **Learning**, **Insights** and **About**, plus a **Tags** index (linked from the footer and from every tag). There is no backend and no database. The site is built with Astro, content lives in Markdown/MDX files with validated frontmatter, and the output is a folder of plain files (`dist/`) that any static host can serve.
 
-> **About the content.** Everything currently published in this repository is **sample content** and is labelled as such (`example: true` in frontmatter, plus a visible "Example" badge or notice). It illustrates the formats; it is not original research. **No founder biography, credentials, affiliations, publications, contact details or statistics have been supplied, so none appear on the site.** The five research areas are *proposed areas of interest*, not claims of active projects or a staffed laboratory. No Notion pages exist yet, so Learning entries show "Coming soon" and carry no link. See [Content rules](#content-rules).
+> **About the content.** The articles, series and insights in this repository are published content: none is marked `example` or `draft`. Series entries that have not been written are listed as "Planned". The `example` flag remains available for sample material (see [Draft versus example](#draft-versus-example)). **No founder biography, credentials, affiliations, publications, contact details or statistics have been supplied, so none appear on the site.** The five research areas are *proposed areas of interest*, not claims of active projects or a staffed laboratory. No Notion pages exist yet, so Learning entries show "Coming soon" and carry no link. See [Content rules](#content-rules).
 
 The full specification is in [idea-plan.md](idea-plan.md).
 
@@ -60,7 +60,10 @@ src/
   lib/path.ts       publicPath(): the extensionless public route for Astro.url.pathname
   plugins/          remark-reading-time.mjs
   styles/           tokens.css (design tokens), global.css, prose.css
-public/             favicon.svg, robots.txt (copied to dist/ unchanged)
+  components/Figure.astro          Captioned figure for diagrams in articles
+  components/diagrams/             Inline SVG diagrams (generated, theme-aware)
+public/             favicon.svg, robots.txt, CNAME (copied to dist/ unchanged)
+scripts/generate-diagrams.py Regenerates src/components/diagrams from the article formulas
 scripts/check-links.mjs      Internal link checker for dist/
 scripts/check-site-url.mjs   Warns (local) or fails (CI/deploy) when the sitemap/RSS contain localhost URLs
 pagefind.yml        Search-indexing options
@@ -98,13 +101,24 @@ publishedAt: 2026-09-20
 category: "Robotics and Control"
 tags: [control-theory, feedback]
 series: foundations-of-control-systems
-seriesOrder: 1
-draft: false
-example: true
+seriesOrder: 2
 ---
 ```
 
 Article bodies support GitHub-flavoured Markdown, MDX, syntax-highlighted code blocks (Shiki, light and dark themes), and LaTeX maths via KaTeX: `$a^2$` inline and `$$ ... $$` as a block. Reading time is calculated automatically from the article text. Every article page also gets a "Contents" aside built from its `##` and `###` headings (shown when there are at least two), older/newer article links based on publication date, and, for series articles, a series block with previous/next within the series.
+
+**Diagrams.** Diagrams are inline SVG, so they render on the page without images, scripts or external services, and follow light and dark mode. Each one is an Astro component in `src/components/diagrams/` that uses only the CSS classes defined under `.diagram-svg` in `src/styles/prose.css` (`ln`, `box`, `acc`, `mut`, `grid`, `band`, `region`, `dot`; text uses `small` and `var`), never hard-coded colours. Use it in an `.mdx` article inside the `Figure` component, which adds the caption:
+
+```mdx
+import Figure from '../../components/Figure.astro';
+import ControlLoop from '../../components/diagrams/ControlLoop.astro';
+
+<Figure caption="A closed loop: the controller acts on the error between reference and measurement.">
+  <ControlLoop />
+</Figure>
+```
+
+The existing diagrams are produced by `python3 scripts/generate-diagrams.py src/components/diagrams` (plot curves are computed from the formulas in the articles); edit the script and re-run it rather than editing the generated files. Each SVG has a `<title>` and `<desc>` for screen readers and is excluded from search excerpts; the caption is indexed. On narrow screens a diagram scrolls sideways instead of shrinking its labels.
 
 ### Series — `src/content/series/<id>.md`
 
@@ -190,7 +204,7 @@ If `SITE_URL` is not set the build falls back to `http://localhost:4321`, so tha
 
 So **set `SITE_URL` for every production build**.
 
-After deploying, add a `Sitemap: <your-origin>/sitemap-index.xml` line to `public/robots.txt`. The site assumes it is served from the root of its domain (there is no `base` path configured).
+`public/robots.txt` lists `Sitemap: https://acrr.asia/sitemap-index.xml`; change it if the domain changes. The site assumes it is served from the root of its domain (there is no `base` path configured).
 
 Every page has its own `<title>` and meta description, a skip link, one `<h1>`, and respects the visitor's light/dark preference.
 
@@ -206,7 +220,13 @@ General notes (the details depend on your provider; no account or hosting servic
 
 - **Build settings.** Build command `npm run build`, output directory `dist`, Node version 22.12 or newer, and the `SITE_URL` environment variable set to the public origin. On Netlify, Cloudflare Pages, Vercel and CI the build fails if `SITE_URL` is missing, which is intended: it stops a localhost sitemap and feed from being published.
 - **Cloudflare Pages / Netlify.** Connect the repository (or upload `dist/`) with the settings above. Both serve a top-level `404.html` as the not-found page and resolve extensionless URLs such as `/blog` to `blog.html`.
-- **GitHub Pages.** Publish the contents of `dist/` (for example from a workflow that runs the build and uploads `dist/`). `404.html` is used as the not-found page. Because routes assume the domain root, use a custom domain or a user/organisation site rather than a project sub-path, or configure `base` in `astro.config.mjs` (links in the source are written as root-relative paths and would then need adjusting).
+- **GitHub Pages (the configured target: https://acrr.asia).** `.github/workflows/deploy.yml` runs on every push to `master` (and manually from the Actions tab): `npm ci`, `npm run build` with `SITE_URL=https://acrr.asia`, `npm run check:links`, then it uploads `dist/` and deploys it. `public/CNAME` (copied to `dist/CNAME`) sets the custom domain. GitHub Pages serves `blog.html` for `/blog` and uses `404.html` as the not-found page. One-time setup, done by the repository owner:
+  1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+  2. **Settings → Pages → Custom domain:** `acrr.asia`, then tick **Enforce HTTPS** once the certificate has been issued (this can take a while after DNS is correct).
+  3. **DNS at the registrar for `acrr.asia`:** four `A` records for the apex `@` pointing to `185.199.108.153`, `185.199.109.153`, `185.199.110.153` and `185.199.111.153`; optionally four `AAAA` records to `2606:50c0:8000::153`, `2606:50c0:8001::153`, `2606:50c0:8002::153` and `2606:50c0:8003::153`; and, for `www.acrr.asia`, a `CNAME` record pointing to `<owner>.github.io` (the GitHub account or organisation that owns the repository). Remove any other `A`/`AAAA`/`CNAME` records for those names.
+  4. Optional but recommended: verify the domain under the account's or organisation's **Settings → Pages → Verified domains**, which prevents anyone else from claiming it on GitHub Pages.
+
+  The routes assume the domain root, so do not serve the site from a project sub-path (`<owner>.github.io/<repo>`) without configuring `base` in `astro.config.mjs`.
 - **Any other static host / your own server.** Serve `dist/` as-is. Routes are *extensionless* (`/blog`, `/blog/<slug>`) and the files are named `blog.html`, `blog/<slug>.html` (Astro `build.format: 'file'`). The host must try `<path>.html` for a request to `<path>`. In nginx that is `try_files $uri $uri.html $uri/ =404;`, and the not-found page is `404.html`.
 - Run `npm run check:links` before deploying to catch broken internal links.
 
@@ -216,7 +236,7 @@ These are acceptance criteria for this project, not suggestions:
 
 - English only.
 - Never fabricate a founder biography, credentials, affiliations, publications, collaborators, contact details, statistics, readership or citation figures, research results, project counts, or external URLs. Missing data stays missing.
-- Sample content is labelled (`example: true`); unfinished content is `draft: true`; planned content is labelled "Planned" or "Coming soon".
+- Sample content, if any is added, is labelled (`example: true`); unfinished content is `draft: true`; planned content is labelled "Planned" or "Coming soon".
 - Research areas are interests, not active projects. Do not overstate ACRR's size, activity or achievements.
 - Any statistic shown on the site must be computed from real content (the home page counts, for example, are computed from the content collections).
 - Technical writing must be original and technically correct.

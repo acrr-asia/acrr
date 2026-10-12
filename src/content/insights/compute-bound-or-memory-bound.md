@@ -7,10 +7,7 @@ tags:
   - performance
   - parallel-computing
   - engineering
-example: true
 ---
-
-*This is an illustrative example insight, not a research result, and the machine numbers below are hypothetical.*
 
 ## Established
 

@@ -7,10 +7,7 @@ tags:
   - numerical-methods
   - simulation
   - verification
-example: true
 ---
-
-*This is an illustrative example insight, not a research result.*
 
 ## Established
 
