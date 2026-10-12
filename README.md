@@ -107,7 +107,7 @@ seriesOrder: 2
 ---
 ```
 
-Article bodies support GitHub-flavoured Markdown, MDX, syntax-highlighted code blocks (Shiki, light and dark themes), and LaTeX maths via KaTeX: `$a^2$` inline and `$$ ... $$` as a block. Reading time is calculated automatically from the article text. Every article page also gets a "Contents" aside built from its `##` and `###` headings (shown when there are at least two), older/newer article links based on publication date, and, for series articles, a series block with previous/next within the series.
+Article bodies support GitHub-flavoured Markdown, MDX, syntax-highlighted code blocks (Shiki, light and dark themes), and LaTeX maths via KaTeX: `$a^2$` inline and `$$ ... $$` as a block. Reading time is calculated automatically from the article text. Every article page also gets a "Contents" list built from its `##` and `###` headings (shown when there are at least two; beside the text on wide screens, and on phones and tablets a bar pinned to the top of the screen that shows the current section and opens the full list), older/newer article links based on publication date, and, for series articles, a series block with previous/next within the series.
 
 **Diagrams.** Diagrams are inline SVG, so they render on the page without images, scripts or external services, and follow light and dark mode. There are two ways to add one.
 
