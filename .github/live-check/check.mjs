@@ -90,6 +90,8 @@ for (const scheme of ['light', 'dark']) {
       ogUrl: document.querySelector('meta[property="og:url"]')?.content,
       title: document.title,
       katex: document.querySelectorAll('.katex').length,
+      // a diagram frame that scrolls sideways at desktop width means the diagram is cut off
+      overflow: [...document.querySelectorAll('.diagram-frame')].filter((f) => f.scrollWidth > f.clientWidth + 1).length,
       // every diagram actually drew something with a non-zero box
       drawn: [...document.querySelectorAll('figure.diagram svg')].every((s) => {
         const r = s.getBoundingClientRect();
@@ -101,6 +103,7 @@ for (const scheme of ['light', 'dark']) {
         `Diagrams render on /blog/${slug}`, `svg=${counts.svg} mermaid=${counts.mermaid} mermaid-as-code=${counts.mermaidCode} drawn=${counts.drawn}`);
       result(counts.canonical === `${ORIGIN}/blog/${slug}` && counts.ogUrl === `${ORIGIN}/blog/${slug}`,
         `Canonical/og:url on /blog/${slug}`, String(counts.canonical));
+      result(counts.overflow === 0, `No diagram cut off at 1200px on /blog/${slug}`, `${counts.overflow} overflowing`);
       console.log(`INFO ${slug} title="${counts.title}" katex=${counts.katex}`);
     }
     const figs = page.locator('figure.diagram');
