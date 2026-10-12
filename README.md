@@ -10,11 +10,13 @@ The full specification is in [idea-plan.md](idea-plan.md).
 
 - **Node.js 22.12 or newer** (this is what Astro 7 requires; `package.json` declares it in `engines`). Older Node versions, including Node 20, will not run this project.
 - npm 9.6.5 or newer (bundled with Node 22).
+- **Chromium for Playwright**, used at build time to render Mermaid diagrams to SVG. Install it once after `npm install` with `npx playwright install chromium` (on Linux CI, `npx playwright install --with-deps chromium`). Without it, `npm run dev` and `npm run build` fail on any page that contains a Mermaid diagram.
 
 ## Install and run
 
 ```sh
 npm install
+npx playwright install chromium   # once; renders Mermaid diagrams during the build
 npm run dev
 ```
 
@@ -107,7 +109,23 @@ seriesOrder: 2
 
 Article bodies support GitHub-flavoured Markdown, MDX, syntax-highlighted code blocks (Shiki, light and dark themes), and LaTeX maths via KaTeX: `$a^2$` inline and `$$ ... $$` as a block. Reading time is calculated automatically from the article text. Every article page also gets a "Contents" aside built from its `##` and `###` headings (shown when there are at least two), older/newer article links based on publication date, and, for series articles, a series block with previous/next within the series.
 
-**Diagrams.** Diagrams are inline SVG, so they render on the page without images, scripts or external services, and follow light and dark mode. Each one is an Astro component in `src/components/diagrams/` that uses only the CSS classes defined under `.diagram-svg` in `src/styles/prose.css` (`ln`, `box`, `acc`, `mut`, `grid`, `band`, `region`, `dot`; text uses `small` and `var`), never hard-coded colours. Use it in an `.mdx` article inside the `Figure` component, which adds the caption:
+**Diagrams.** Diagrams are inline SVG, so they render on the page without images, scripts or external services, and follow light and dark mode. There are two ways to add one.
+
+*Mermaid* (easiest for flowcharts and sequence diagrams). Write a fenced code block with the language `mermaid` in any `.md` or `.mdx` article:
+
+````md
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as API
+    C->>A: Request + access token
+    A-->>C: 200 OK
+```
+````
+
+At build time `rehype-mermaid` renders it to an inline SVG in headless Chromium (configured in `astro.config.mjs`, with the `neutral` theme and a compact layout). `src/plugins/rehype-mermaid-figure.mjs` wraps it in the diagram frame, and `prose.css` (the `.mermaid-svg` rules) recolours it with the site's tokens, so it follows dark mode. A diagram with a Mermaid syntax error fails the build, naming the file. Long labels wrap; very wide diagrams scroll sideways on narrow screens rather than shrinking below a readable size. Mermaid diagrams have no caption and are excluded from search excerpts, so explain them in the surrounding text.
+
+*Hand-made SVG components* (for plots and engineering drawings). Each one is an Astro component in `src/components/diagrams/` that uses only the CSS classes defined under `.diagram-svg` in `src/styles/prose.css` (`ln`, `box`, `acc`, `mut`, `grid`, `band`, `region`, `dot`; text uses `small` and `var`), never hard-coded colours. Use it in an `.mdx` article inside the `Figure` component, which adds the caption:
 
 ```mdx
 import Figure from '../../components/Figure.astro';
@@ -218,9 +236,9 @@ Press `Ctrl+K` / `Cmd+K`, or use the Search button in the header. Search is Page
 
 General notes (the details depend on your provider; no account or hosting service is configured in this repository):
 
-- **Build settings.** Build command `npm run build`, output directory `dist`, Node version 22.12 or newer, and the `SITE_URL` environment variable set to the public origin. On Netlify, Cloudflare Pages, Vercel and CI the build fails if `SITE_URL` is missing, which is intended: it stops a localhost sitemap and feed from being published.
+- **Build settings.** Build command `npx playwright install --with-deps chromium && npm run build` (Chromium renders Mermaid diagrams), output directory `dist`, Node version 22.12 or newer, and the `SITE_URL` environment variable set to the public origin. On Netlify, Cloudflare Pages, Vercel and CI the build fails if `SITE_URL` is missing, which is intended: it stops a localhost sitemap and feed from being published.
 - **Cloudflare Pages / Netlify.** Connect the repository (or upload `dist/`) with the settings above. Both serve a top-level `404.html` as the not-found page and resolve extensionless URLs such as `/blog` to `blog.html`.
-- **GitHub Pages (the configured target: https://acrr.asia).** `.github/workflows/deploy.yml` runs on every push to `master` (and manually from the Actions tab): `npm ci`, `npm run build` with `SITE_URL=https://acrr.asia`, `npm run check:links`, then it uploads `dist/` and deploys it. `public/CNAME` (copied to `dist/CNAME`) sets the custom domain. GitHub Pages serves `blog.html` for `/blog` and uses `404.html` as the not-found page. One-time setup, done by the repository owner:
+- **GitHub Pages (the configured target: https://acrr.asia).** `.github/workflows/deploy.yml` runs on every push to `master` (and manually from the Actions tab): `npm ci`, `npx playwright install --with-deps chromium` (for Mermaid), `npm run build` with `SITE_URL=https://acrr.asia`, `npm run check:links`, then it uploads `dist/` and deploys it. `public/CNAME` (copied to `dist/CNAME`) sets the custom domain. GitHub Pages serves `blog.html` for `/blog` and uses `404.html` as the not-found page. One-time setup, done by the repository owner:
   1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
   2. **Settings → Pages → Custom domain:** `acrr.asia`, then tick **Enforce HTTPS** once the certificate has been issued (this can take a while after DNS is correct).
   3. **DNS at the registrar for `acrr.asia`:** four `A` records for the apex `@` pointing to `185.199.108.153`, `185.199.109.153`, `185.199.110.153` and `185.199.111.153`; optionally four `AAAA` records to `2606:50c0:8000::153`, `2606:50c0:8001::153`, `2606:50c0:8002::153` and `2606:50c0:8003::153`; and, for `www.acrr.asia`, a `CNAME` record pointing to `<owner>.github.io` (the GitHub account or organisation that owns the repository). Remove any other `A`/`AAAA`/`CNAME` records for those names.
