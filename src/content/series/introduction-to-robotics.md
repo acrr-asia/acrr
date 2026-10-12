@@ -3,7 +3,6 @@ title: "Introduction to Robotics"
 description: "A planned series that introduces robots as systems of structure, actuation, sensing, and computation connected by feedback."
 category: "Robotics and Control"
 status: "planned"
-example: true
 objectives:
   - "Describe a robot as mechanical structure, actuators, sensors, and computation connected by a control loop."
   - "Represent the position and orientation of rigid bodies using coordinate frames and rotation matrices."
@@ -21,5 +20,3 @@ plannedEntries:
 ---
 
 This series is planned and has not started publishing. The outline below describes the intended scope and may change before any entry is written.
-
-It is an illustrative example of how ACRR organizes multi-part material.

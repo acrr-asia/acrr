@@ -7,7 +7,6 @@ tags:
   - simulation
   - numerical-methods
   - verification
-example: true
 ---
 
 ## Established

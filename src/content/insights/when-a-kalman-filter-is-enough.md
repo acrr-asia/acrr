@@ -7,10 +7,7 @@ tags:
   - control-theory
   - robotics
   - state-estimation
-example: true
 ---
-
-*This is an illustrative example insight, not a research result.*
 
 ## Established
 

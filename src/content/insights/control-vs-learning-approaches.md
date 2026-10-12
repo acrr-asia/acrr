@@ -7,7 +7,6 @@ tags:
   - control-theory
   - machine-learning
   - robotics
-example: true
 ---
 
 ## Established
