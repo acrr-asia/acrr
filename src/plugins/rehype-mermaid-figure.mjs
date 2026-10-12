@@ -33,12 +33,12 @@ function wrap(svg) {
   const className = [].concat(svg.properties.className ?? []);
   svg.properties.className = [...className, 'mermaid-svg'];
   // Mermaid sets an inline max-width equal to the diagram's natural width. Add a min-width of
-  // 65% of it, so the diagram never shrinks below about 10px text: on a narrow screen the frame
+  // 60% of it, so the diagram never shrinks below about 10px text: on a narrow screen the frame
   // scrolls sideways instead (same behaviour as the hand-made diagrams).
   const style = String(svg.properties.style ?? '');
   const natural = /max-width:\s*([\d.]+)px/.exec(style);
   if (natural) {
-    const min = Math.round(Number(natural[1]) * 0.65);
+    const min = Math.round(Number(natural[1]) * 0.6);
     svg.properties.style = `${style.replace(/;?\s*$/, '')};min-width:${min}px`;
   }
   return {
