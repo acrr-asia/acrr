@@ -3,7 +3,6 @@ title: "Machine Learning Fundamentals"
 description: "A planned series on the core ideas behind learning from data: models, loss functions, optimization, and how to evaluate what a model has learned."
 category: "AI and Machine Learning"
 status: "planned"
-example: true
 objectives:
   - "Formulate a supervised learning problem in terms of a model, a loss function, and a data set."
   - "Explain gradient-based optimization and the role of the learning rate."
@@ -21,5 +20,3 @@ plannedEntries:
 ---
 
 This series is planned and has not started publishing. The outline below describes the intended scope and may change before any entry is written.
-
-It is an illustrative example of how ACRR organizes multi-part material.

@@ -7,10 +7,7 @@ tags:
   - robotics
   - machine-learning
   - simulation
-example: true
 ---
-
-*This is an illustrative example insight, not a research result.*
 
 ## Established
 
