@@ -8,6 +8,14 @@ ACRR (Advanced Computing & Robotics Research): a static, English-only research/t
 
 Stack: **Astro 7** (not 5; if an API looks unfamiliar read `node_modules/astro/dist` or its `.d.ts` files rather than guessing), MDX, TypeScript strict, content collections, remark-math + rehype-katex, Shiki, `@astrojs/sitemap`, `@astrojs/rss`, Pagefind. Requires **Node >= 22.12** (Astro 7's engines field) and Playwright's Chromium (`npx playwright install chromium`, once) because Mermaid diagrams are rendered at build time. No UI framework, no external fonts or CDNs. There is no test framework: verification is the build plus the link checker.
 
+## Workflow: skills and memory
+
+Project skills in `.claude/skills/` (use them; each loads its own checklist): `write-article`, `write-insight`, `plan-series` (series and Learning entries) for publishing; `editorial-review` for integrity/correctness review of content; `verify-site` after any change, before committing or claiming it works; `handoff` to save memory at the end of a session or when told to remember something.
+
+Memory is committed, because cloud sessions start from a fresh clone (`.claude/hooks/session-start.sh` installs dependencies there): short-term `.claude/memory/working-notes.md` (current task and next steps, imported below), long-term `.claude/memory/decisions.md` (dated decisions with reasons; read the relevant entries before changing an area) and this file (stable rules). Personal overrides go in the gitignored `CLAUDE.local.md` / `.claude/settings.local.json`.
+
+@.claude/memory/working-notes.md
+
 ## Commands (all verified)
 
 ```sh
