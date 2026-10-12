@@ -1,0 +1,120 @@
+---
+title: "Feedback and System Behavior"
+description: "How closing the loop changes the speed of a simple first-order system and how sensitive its output is to plant errors and disturbances, checked with a short simulation."
+publishedAt: 2026-09-20
+category: "Robotics and Control"
+tags:
+  - control-theory
+  - feedback
+  - engineering
+series: foundations-of-control-systems
+seriesOrder: 1
+draft: false
+example: true
+---
+
+*This is an illustrative example article written to demonstrate the site. It is not original research.*
+
+Feedback is the central idea of control engineering: measure what a system is doing, compare it with what you want, and let the difference drive the input. This note uses the smallest model that shows the effect, a first-order system, to see exactly what changes when the loop is closed. The answer is less obvious than it first looks. When the plant is known exactly, feedback does not make this system more accurate. It makes it faster, and it makes the output far less sensitive to errors in the model and to disturbances.
+
+## The plant without feedback
+
+Take a plant described by
+
+$$
+\dot{x}(t) = -a\,x(t) + b\,u(t), \qquad a > 0,\; b > 0,
+$$
+
+where $x$ is the output, $u$ is the input, and $a$ and $b$ are constants. With no input the state decays as $e^{-at}$, so the time constant is $\tau = 1/a$.
+
+In open loop the input is chosen without looking at $x$. For a constant reference $r$ the natural choice is the input that makes $\dot{x} = 0$ at $x = r$, which is $u = (a/b)\,r$. With $a = b = 1$ this is simply $u = r$, and the output settles at $x_{ss} = r$ with time constant $1$. On the nominal plant, then, open loop is already exact. Its weakness is that it works only if $a$ and $b$ are known exactly and nothing pushes on the plant: if the plant changes, or a disturbance acts on it, the input cannot react.
+
+## Closing the loop with proportional feedback
+
+Now let the input depend on the error between a constant reference $r$ and the measured output:
+
+$$
+u(t) = k\,\bigl(r - x(t)\bigr), \qquad k > 0.
+$$
+
+Substituting into the plant gives the closed-loop equation
+
+$$
+\dot{x}(t) = -(a + bk)\,x(t) + bk\,r.
+$$
+
+Two things follow directly. First, the decay rate changed from $a$ to $a + bk$, so the closed-loop time constant is $\tau_{cl} = 1/(a + bk)$. A larger gain makes the system respond faster. Second, for a constant reference the output settles where $\dot{x} = 0$:
+
+$$
+x_{ss} = \frac{bk}{a + bk}\,r, \qquad r - x_{ss} = \frac{a}{a + bk}\,r.
+$$
+
+The steady-state error shrinks as $k$ grows but never reaches zero with proportional action alone, because this plant has no integrator to hold the input at the required value.
+
+The table compares this with the open loop above for $a = 1$ and $b = 1$, on the nominal plant.
+
+| Controller | Pole | Time constant | Steady-state error (fraction of $r$) |
+| --- | --- | --- | --- |
+| Open loop, $u = r$ | -1 | 1 | 0 |
+| Feedback, $k = 1$ | -2 | 0.5 | 0.50 |
+| Feedback, $k = 4$ | -5 | 0.2 | 0.20 |
+| Feedback, $k = 9$ | -10 | 0.1 | 0.10 |
+
+Read the last column carefully. On the nominal plant the open loop has no error at all, so proportional feedback does not improve accuracy here. What it changes is speed: the time constant falls from 1 to 0.5, 0.2 and 0.1. The reason to accept the offset appears when the plant is not exactly what the model says.
+
+## A short simulation
+
+The explicit Euler method is enough to check the algebra. With $k = 4$ and $r = 1$ the table predicts $x_{ss} = 0.8$.
+
+```python
+a, b, k, r = 1.0, 1.0, 4.0, 1.0
+dt, x = 0.001, 0.0
+
+for _ in range(int(5 / dt)):       # simulate 5 seconds
+    u = k * (r - x)                # proportional feedback
+    x += dt * (-a * x + b * u)     # explicit Euler step
+
+print(round(x, 3))                 # 0.8
+```
+
+Running this prints `0.8`, matching $bk/(a + bk)$.
+
+## When the plant or the load changes
+
+Two perturbations show what the feedback buys. Both use $k = 4$, $r = 1$ and the open-loop input $u = r$, which was designed for $a = b = 1$.
+
+**A plant that decays 20% faster** ($a = 1.2$). Open loop settles at $x_{ss} = bu/a = 1/1.2 \approx 0.833$. Closed loop settles at $bk\,r/(a + bk) = 4/5.2 \approx 0.769$.
+
+**A constant disturbance $d$** added to the plant, so that $\dot{x} = -a\,x + b\,u + d$. In open loop the output settles at $(bu + d)/a$, so the disturbance moves it by $d/a$. In closed loop the equation becomes $\dot{x} = -(a + bk)\,x + bk\,r + d$, and the disturbance moves the output by only $d/(a + bk)$. For $a = b = 1$ and $k = 4$ that is one fifth as much.
+
+```python
+def settle(a, control, d=0.0, b=1.0, dt=0.001, T=10.0):
+    x = 0.0
+    for _ in range(int(T / dt)):
+        x += dt * (-a * x + b * control(x) + d)   # explicit Euler step
+    return x
+
+r = 1.0
+open_loop = lambda x: r                 # u = r, exact when a = b = 1
+closed_loop = lambda x: 4.0 * (r - x)   # k = 4
+
+cases = [("nominal", 1.0, 0.0), ("a = 1.2", 1.2, 0.0), ("d = 0.2", 1.0, 0.2)]
+for label, a, d in cases:
+    print(label, round(settle(a, open_loop, d), 3), round(settle(a, closed_loop, d), 3))
+```
+
+The three lines it prints are collected below, with the shift from the nominal output in brackets.
+
+| Case | Open loop, $u = r$ | Closed loop, $k = 4$ |
+| --- | --- | --- |
+| Nominal ($a = 1$, $d = 0$) | 1.000 | 0.800 |
+| Plant changed ($a = 1.2$) | 0.833 (-0.167) | 0.769 (-0.031) |
+| Disturbance ($d = 0.2$) | 1.200 (+0.200) | 0.840 (+0.040) |
+
+Notice what is being compared: how far the output moves, not how far it ends from the reference. The closed loop still carries its offset from the reference, and with a disturbance of the opposite sign its absolute error would be larger than the open loop's. What feedback has done is make the output move about five times less when the plant or the load changes. Removing the offset itself takes more than proportional action, typically an integrator.
+
+## What this model hides
+
+> A higher gain is not automatically better. The first-order model has no delay, no actuator limit and no measurement noise, and real systems have all three.
+
+Delays and unmodelled dynamics can turn a large gain into oscillation or instability, and saturation means the input cannot grow without bound. Treating $k$ as freely adjustable is an artifact of the model. Later notes in this series use state-space descriptions to reason about these limits more carefully.

@@ -1,0 +1,463 @@
+---
+/**
+ * Site search. Ctrl/Cmd+K (or any [data-search-open] element) opens a native <dialog>.
+ *
+ * - Powered by Pagefind, loaded lazily on first open via dynamic import of /pagefind/pagefind.js.
+ *   That file only exists after `npm run build` (pagefind runs on dist/), so in `npm run dev`
+ *   the dialog says so honestly instead of failing silently.
+ * - Native modal <dialog>: focus moves into the dialog, the page behind it is inert, Esc closes it,
+ *   and focus returns to the element that opened it (also restored explicitly below).
+ * - Result titles/URLs are set with textContent/href only. Excerpts come from Pagefind as HTML
+ *   containing <mark>; they are re-parsed in an inert document and rebuilt so that ONLY text and
+ *   <mark> survive.
+ */
+---
+<dialog id="site-search" class="site-search" aria-labelledby="site-search-title">
+  <div class="site-search__panel">
+    <div class="site-search__head">
+      <p id="site-search-title" class="eyebrow">Search</p>
+      <button type="button" class="site-search__close" data-search-close>Close <kbd>Esc</kbd></button>
+    </div>
+
+    <div role="search">
+      <label class="sr-only" for="site-search-input">Search the site</label>
+      <input
+        id="site-search-input"
+        class="site-search__input"
+        type="search"
+        name="q"
+        placeholder="Search the site"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        enterkeyhint="search"
+        aria-controls="site-search-results"
+        aria-describedby="site-search-status"
+      />
+    </div>
+
+    <p id="site-search-status" class="site-search__status" role="status" aria-live="polite"></p>
+    <ul id="site-search-results" class="site-search__results" hidden></ul>
+    <p class="site-search__hint">Arrow keys move between results. Enter opens the first result.</p>
+  </div>
+</dialog>
+
+<script>
+  interface PagefindResultData {
+    url: string;
+    /** Plain text of the whole page; used to verify that every query term really occurs. */
+    content?: string;
+    excerpt?: string;
+    /** `example` is set by Base.astro (`data-pagefind-meta="example:Example"`) on sample content. */
+    meta?: { title?: string; example?: string };
+  }
+  interface PagefindModule {
+    init?: () => Promise<void>;
+    search: (term: string) => Promise<{ results: { data: () => Promise<PagefindResultData> }[] }>;
+  }
+
+  const MAX_RESULTS = 8;
+  /** How many Pagefind hits are inspected before filtering; the site is small, so this is generous. */
+  const FETCH_LIMIT = 30;
+  const MIN_QUERY = 2;
+  const HINT = 'Type at least 2 characters to search the site.';
+  const UNAVAILABLE =
+    'Search index is built with npm run build and available in npm run preview.';
+
+  /** Pagefind is generated into dist/ after the Astro build, so it is not part of the bundle. */
+  let loading: Promise<PagefindModule | null> | null = null;
+  let failed = false;
+
+  function loadPagefind(retry = false): Promise<PagefindModule | null> {
+    if (retry && failed) {
+      loading = null;
+      failed = false;
+    }
+    loading ??= (async () => {
+      try {
+        // Built at runtime so the bundler leaves it alone; the file is absent in `astro dev`.
+        const url = `${location.origin}/pagefind/pagefind.js`;
+        const mod = (await import(/* @vite-ignore */ url)) as PagefindModule;
+        await mod.init?.();
+        return mod;
+      } catch {
+        failed = true;
+        return null;
+      }
+    })();
+    return loading;
+  }
+
+  /** Accepts only same-origin URLs and returns the extensionless, no-trailing-slash route. */
+  function toLocalHref(raw: string): string | null {
+    try {
+      const u = new URL(raw, location.origin);
+      if (u.origin !== location.origin) return null;
+      let path = u.pathname.replace(/(^|\/)index\.html$/, '$1').replace(/\.html$/, '');
+      if (path.length > 1) path = path.replace(/\/+$/, '');
+      return `${path}${u.search}${u.hash}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /*
+   * Pagefind silently falls back to shorter prefixes of a term when the whole word is not in the
+   * index: "kalman" then also finds pages with a word starting "k", and "notion" finds every page
+   * containing "not". Those hits are noise, so each result is checked against its own page text:
+   * every query term must occur there as the start of a word. A few inflected forms are accepted
+   * too (simulations -> simulation, integrating -> integration), because Pagefind stems words and
+   * those matches are legitimate.
+   */
+  const INFLECTIONS: [suffix: string, replacement: string][] = [
+    ['ations', 'at'], ['ation', 'at'], ['ions', ''], ['ion', ''], ['ing', ''],
+    ['ies', 'y'], ['es', ''], ['ed', ''], ['s', ''],
+  ];
+
+  /** Lower-case letter/digit runs, so punctuation (state-space, "quotes") never matters. */
+  function wordsOf(text: string): string[] {
+    return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  }
+
+  /** The term itself plus its crude stems (4+ letters), any of which may start a matching word. */
+  function acceptedForms(term: string): string[] {
+    const forms = new Set([term]);
+    for (const [suffix, replacement] of INFLECTIONS) {
+      if (!term.endsWith(suffix)) continue;
+      const stem = term.slice(0, -suffix.length) + replacement;
+      if (stem.length >= 4) forms.add(stem);
+    }
+    return [...forms];
+  }
+
+  function containsAllTerms(data: PagefindResultData, terms: string[][]): boolean {
+    if (typeof data.content !== 'string') return true; // nothing to verify against: keep Pagefind's hit
+    const pageWords = wordsOf(data.content);
+    return terms.every((forms) => pageWords.some((w) => forms.some((f) => w.startsWith(f))));
+  }
+
+  /** Copy Pagefind's excerpt into `target`, keeping text and <mark> only. */
+  function appendSafeExcerpt(target: HTMLElement, html: string): void {
+    const doc = new DOMParser().parseFromString(html, 'text/html'); // inert: nothing runs or loads
+    const copy = (from: Node, to: Node): void => {
+      for (const node of Array.from(from.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          to.appendChild(document.createTextNode(node.textContent ?? ''));
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          const name = node.nodeName.toLowerCase();
+          if (name === 'script' || name === 'style') continue;
+          if (name === 'mark') {
+            const mark = document.createElement('mark');
+            copy(node, mark);
+            to.appendChild(mark);
+          } else {
+            copy(node, to); // unknown element: keep its text, drop the tag
+          }
+        }
+      }
+    };
+    copy(doc.body, target);
+  }
+
+  function setup(
+    dialog: HTMLDialogElement,
+    input: HTMLInputElement,
+    statusEl: HTMLElement,
+    list: HTMLUListElement,
+  ): void {
+    if (typeof dialog.showModal !== 'function') return;
+
+    let token = 0;
+    let timer: number | undefined;
+    let settled = true; // false while a typed query has not produced its results yet
+    let opener: HTMLElement | null = null;
+    let downOnBackdrop = false;
+
+    const setStatus = (message: string) => {
+      statusEl.textContent = message;
+    };
+    const clearResults = () => {
+      list.replaceChildren();
+      list.hidden = true;
+    };
+    const resultLinks = () =>
+      Array.from(list.querySelectorAll<HTMLAnchorElement>('a.site-search__link'));
+
+    function render(items: PagefindResultData[]): void {
+      const frag = document.createDocumentFragment();
+      for (const item of items) {
+        const href = toLocalHref(item.url);
+        if (!href) continue;
+
+        const li = document.createElement('li');
+        li.className = 'site-search__item';
+
+        const link = document.createElement('a');
+        link.className = 'site-search__link';
+        link.href = href;
+        link.textContent = item.meta?.title?.trim() || href;
+
+        // Sample content must be recognisable in the result list, not only after opening the page.
+        let badge: HTMLSpanElement | null = null;
+        if (item.meta?.example) {
+          badge = document.createElement('span');
+          badge.className = 'badge notice site-search__badge';
+          badge.textContent = 'Example';
+        }
+
+        const path = document.createElement('span');
+        path.className = 'site-search__path';
+        path.textContent = href;
+
+        const excerpt = document.createElement('p');
+        excerpt.className = 'site-search__excerpt';
+        appendSafeExcerpt(excerpt, item.excerpt ?? '');
+
+        li.append(link);
+        if (badge) li.append(badge);
+        li.append(path, excerpt);
+        frag.appendChild(li);
+      }
+      list.replaceChildren(frag);
+      list.hidden = list.childElementCount === 0;
+    }
+
+    async function compute(stale: () => boolean, retry: boolean): Promise<void> {
+      const query = input.value.trim();
+
+      if (query.length < MIN_QUERY) {
+        clearResults();
+        const pf = await loadPagefind(retry);
+        if (!stale()) setStatus(pf ? HINT : UNAVAILABLE);
+        return;
+      }
+
+      setStatus('Searching…');
+      const pf = await loadPagefind(retry);
+      if (stale()) return;
+      if (!pf) {
+        clearResults();
+        setStatus(UNAVAILABLE);
+        return;
+      }
+
+      try {
+        const { results } = await pf.search(query);
+        if (stale()) return;
+        const candidates = await Promise.all(results.slice(0, FETCH_LIMIT).map((r) => r.data()));
+        if (stale()) return;
+        const terms = wordsOf(query).map(acceptedForms);
+        const matches = terms.length > 0 ? candidates.filter((d) => containsAllTerms(d, terms)) : [];
+        if (matches.length === 0) {
+          clearResults();
+          setStatus(`No results for “${query}”.`);
+          return;
+        }
+        render(matches.slice(0, MAX_RESULTS));
+        const total = matches.length;
+        const atLeast = results.length > FETCH_LIMIT ? '+' : ''; // hits beyond FETCH_LIMIT were not checked
+        setStatus(
+          `${total}${atLeast} ${total === 1 && !atLeast ? 'result' : 'results'}` +
+            (total > MAX_RESULTS ? `, showing the first ${MAX_RESULTS}` : ''),
+        );
+      } catch {
+        if (stale()) return;
+        clearResults();
+        setStatus('Search failed. Close and reopen search to try again.');
+      }
+    }
+
+    async function update(retry = false): Promise<void> {
+      const mine = ++token;
+      const stale = () => mine !== token;
+      try {
+        await compute(stale, retry);
+      } finally {
+        if (!stale()) settled = true;
+      }
+    }
+
+    function open(from: Element | null): void {
+      opener = from instanceof HTMLElement && from !== document.body ? from : null;
+      if (!dialog.open) dialog.showModal();
+      input.focus();
+      input.select();
+      void update(true);
+    }
+
+    // Open: Ctrl/Cmd+K anywhere, or any [data-search-open] element.
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key?.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (dialog.open) {
+          input.focus();
+          input.select();
+        } else {
+          open(document.activeElement);
+        }
+      }
+    });
+    document.addEventListener('click', (e) => {
+      const trigger = (e.target as Element | null)?.closest('[data-search-open]');
+      if (trigger) {
+        e.preventDefault();
+        open(trigger);
+      }
+    });
+
+    // Close: Esc is native; also the close button and a click that starts and ends on the backdrop.
+    dialog.addEventListener('pointerdown', (e) => {
+      downOnBackdrop = e.target === dialog;
+    });
+    dialog.addEventListener('click', (e) => {
+      const onClose = (e.target as Element | null)?.closest('[data-search-close]');
+      if (onClose || (downOnBackdrop && e.target === dialog)) dialog.close();
+      downOnBackdrop = false;
+    });
+    dialog.addEventListener('close', () => {
+      window.clearTimeout(timer);
+      token++; // discard any in-flight search
+      settled = true;
+      opener?.focus();
+      opener = null;
+    });
+
+    input.addEventListener('input', () => {
+      settled = false;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void update(), 150);
+    });
+
+    // Keyboard: arrows between input and results, Enter opens the first result, Tab stays inside.
+    dialog.addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement;
+
+      // Esc closes the dialog straight away. Without this, a type="search" field swallows the first
+      // Esc to clear its text, so the "Close Esc" hint would need two presses. (Not while an IME
+      // composition is open: Esc then cancels the composition.)
+      if (e.key === 'Escape' && !e.isComposing) {
+        e.preventDefault();
+        dialog.close();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        const focusable = Array.from(
+          dialog.querySelectorAll<HTMLElement>('button, input, a[href]'),
+        ).filter((el) => !el.closest('[hidden]'));
+        const first = focusable.at(0);
+        const last = focusable.at(-1);
+        if (!first || !last) return;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+
+      if (target === input) {
+        const firstLink = resultLinks().at(0);
+        if (e.key === 'ArrowDown' && firstLink) {
+          e.preventDefault();
+          firstLink.focus();
+        } else if (e.key === 'Enter' && !e.isComposing && settled && firstLink) {
+          e.preventDefault();
+          firstLink.click();
+        }
+      } else if (
+        target.classList.contains('site-search__link') &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+      ) {
+        e.preventDefault();
+        const links = resultLinks();
+        const index = links.indexOf(target as HTMLAnchorElement);
+        if (e.key === 'ArrowDown') {
+          links.at(index + 1)?.focus();
+        } else if (index > 0) {
+          links.at(index - 1)?.focus();
+        } else {
+          input.focus();
+        }
+      }
+    });
+
+    // Progressive enhancement of the header trigger(s).
+    const isApple = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    document.querySelectorAll<HTMLElement>('[data-search-open]').forEach((el) => {
+      el.setAttribute('aria-haspopup', 'dialog');
+      el.setAttribute('aria-keyshortcuts', 'Control+K Meta+K');
+      if (isApple) {
+        const label = el.getAttribute('aria-label');
+        if (label) el.setAttribute('aria-label', label.replace('Ctrl+K', 'Command+K'));
+        el.querySelectorAll('kbd').forEach((k) => {
+          k.textContent = '⌘ K';
+        });
+      }
+    });
+  }
+
+  const dialog = document.querySelector<HTMLDialogElement>('#site-search');
+  const input = document.querySelector<HTMLInputElement>('#site-search-input');
+  const statusEl = document.querySelector<HTMLElement>('#site-search-status');
+  const list = document.querySelector<HTMLUListElement>('#site-search-results');
+  if (dialog && input && statusEl && list) setup(dialog, input, statusEl, list);
+</script>
+
+<style is:global>
+  .site-search {
+    width: min(40rem, calc(100% - 2 * var(--gutter)));
+    max-height: min(34rem, calc(100dvh - 2 * var(--space-4)));
+    margin: var(--space-4) auto auto;
+    padding: 0;
+    border: 1px solid var(--ink-muted);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .site-search[open] { display: flex; flex-direction: column; }
+  .site-search::backdrop { background: color-mix(in srgb, var(--ink) 40%, transparent); }
+  html:has(.site-search[open]) { overflow: hidden; }
+  @media (min-width: 40rem) { .site-search { margin-top: 12vh; } }
+
+  .site-search__panel {
+    display: flex; flex-direction: column; gap: var(--space-2);
+    flex: 1 1 auto; min-height: 0; padding: var(--space-3);
+  }
+  .site-search__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  .site-search__head .eyebrow { margin: 0; }
+  .site-search__close {
+    font: inherit; font-size: 0.85rem; color: var(--ink-muted); background: none; cursor: pointer;
+    border: 1px solid var(--rule); border-radius: 4px; padding: 0.2rem 0.6rem; min-height: 2rem;
+  }
+  .site-search__close kbd { font-family: var(--font-mono); font-size: 0.72rem; margin-left: 0.25rem; }
+
+  .site-search__input {
+    width: 100%; font: inherit; font-size: 1rem; color: var(--ink); background: var(--bg-subtle);
+    border: 1px solid var(--ink-muted); border-radius: 4px; padding: 0.6rem 0.75rem;
+  }
+  /* The browser default placeholder colour (#757575) is under 4.5:1 on --bg-subtle (WCAG 1.4.3). */
+  .site-search__input::placeholder { color: var(--ink-muted); opacity: 1; }
+  .site-search__status { margin: 0; min-height: 1.5em; font-size: 0.9rem; color: var(--ink-muted); }
+
+  .site-search__results {
+    list-style: none; margin: 0; padding: 0; min-height: 0; overflow-y: auto;
+    border-top: 1px solid var(--rule);
+  }
+  .site-search__item { position: relative; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--rule); }
+  .site-search__item:hover, .site-search__item:focus-within { background: var(--bg-subtle); }
+  .site-search__link { font-family: var(--font-serif); font-weight: 600; color: var(--ink); text-decoration: none; }
+  .site-search__link:hover { text-decoration: underline; }
+  /* Stretched link: the whole result row is clickable while the link text stays the accessible name. */
+  .site-search__link::after { content: ''; position: absolute; inset: 0; }
+  .site-search__badge { margin-left: var(--space-2); white-space: nowrap; }
+  .site-search__path { display: block; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted); }
+  .site-search__excerpt { margin: var(--space-1) 0 0; font-size: 0.9rem; color: var(--ink-muted); }
+  .site-search__excerpt mark {
+    background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink);
+    border-radius: 2px; padding-inline: 0.1em;
+  }
+  .site-search__hint { margin: 0; font-size: 0.78rem; color: var(--ink-muted); }
+</style>

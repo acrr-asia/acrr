@@ -1,0 +1,194 @@
+---
+import { getEntry, type CollectionEntry } from 'astro:content';
+import Base from './Base.astro';
+import TagList from '../components/TagList.astro';
+import RelatedPosts from '../components/RelatedPosts.astro';
+import TableOfContents from '../components/TableOfContents.astro';
+import ArticlePager from '../components/ArticlePager.astro';
+import { formatDate, getPosts, getRelatedPosts, getSeriesPosts, slugify } from '../lib/content';
+
+interface Props {
+  post: CollectionEntry<'blog'>;
+  /** Reading time from the remark plugin; omitted when it could not be computed. */
+  minutesRead?: number;
+  /** Headings of the rendered body (from `render()`), used for the Contents aside. */
+  headings?: { depth: number; slug: string; text: string }[];
+}
+
+const { post, minutesRead, headings = [] } = Astro.props;
+const { data } = post;
+
+// Series context: previous/next among the articles that are actually listed.
+const seriesEntry = data.series ? await getEntry(data.series) : undefined;
+const seriesPosts = data.series ? await getSeriesPosts(data.series.id) : [];
+const position = seriesPosts.findIndex((p) => p.id === post.id);
+const prev = position > 0 ? seriesPosts[position - 1] : undefined;
+const next = position >= 0 ? seriesPosts[position + 1] : undefined;
+
+// Chronological neighbours for every article (series articles also get the series pager above it).
+const allPosts = await getPosts();
+const index = allPosts.findIndex((p) => p.id === post.id);
+const newer = index > 0 ? allPosts[index - 1] : undefined;
+const older = index >= 0 ? allPosts[index + 1] : undefined;
+
+const related = await getRelatedPosts(post, 3);
+const isoDate = data.publishedAt.toISOString().slice(0, 10);
+const hasReadingTime = typeof minutesRead === 'number' && minutesRead > 0;
+const eyebrow =
+  seriesEntry && data.seriesOrder
+    ? `part ${data.seriesOrder} · ${seriesEntry.data.title}`
+    : seriesEntry
+      ? seriesEntry.data.title
+      : 'article';
+---
+<Base title={data.title} description={data.description} example={data.example ? 'article' : undefined}>
+  <article class="article">
+    <p class="back"><a href="/blog">← Blog</a></p>
+
+    <header class="head">
+      <p class="eyebrow">{eyebrow}</p>
+      <h1>{data.title}</h1>
+      <p class="lede">{data.description}</p>
+      <p class="meta">
+        <time datetime={isoDate}>{formatDate(data.publishedAt)}</time>
+        <span>
+          <a href={`/blog/category/${slugify(data.category)}`} data-pagefind-filter="category">{data.category}</a>
+        </span>
+        {hasReadingTime && <span>{minutesRead} min read</span>}
+        {data.updatedAt && (
+          <span>Updated <time datetime={data.updatedAt.toISOString().slice(0, 10)}>{formatDate(data.updatedAt)}</time></span>
+        )}
+      </p>
+    </header>
+
+    {data.example && (
+      <aside class="callout" role="note" aria-label="Example article notice">
+        <span class="badge notice">Example article</span>
+        <span>
+          This is illustrative sample content that shows how the site presents an article. It is not original research.
+        </span>
+      </aside>
+    )}
+    {data.draft && (
+      <aside class="callout" role="note" aria-label="Draft notice">
+        <span class="badge">Draft</span>
+        <span>This article is unfinished. It is shown only in development and is not published.</span>
+      </aside>
+    )}
+
+    <TableOfContents headings={headings} />
+
+    <div class="prose">
+      <slot />
+    </div>
+
+    {data.tags.length > 0 && (
+      <footer class="tags-block">
+        <p class="label">Tags</p>
+        <TagList tags={data.tags} />
+      </footer>
+    )}
+
+    {seriesEntry && (
+      <nav class="series-nav" aria-labelledby="series-nav-title" data-pagefind-ignore>
+        <p class="eyebrow">series</p>
+        <h2 id="series-nav-title">
+          {data.seriesOrder ? `Part ${data.seriesOrder} of ` : 'Part of '}
+          <a href={`/series/${seriesEntry.id}`}>{seriesEntry.data.title}</a>
+        </h2>
+        {(prev || next) && (
+          <ul class="pager">
+            {prev && (
+              <li class="prev">
+                <span class="dir">← Previous in series</span>
+                <a href={`/blog/${prev.id}`}>{prev.data.title}</a>
+              </li>
+            )}
+            {next && (
+              <li class="next">
+                <span class="dir">Next in series →</span>
+                <a href={`/blog/${next.id}`}>{next.data.title}</a>
+              </li>
+            )}
+          </ul>
+        )}
+        <p class="all"><a href={`/series/${seriesEntry.id}`}>View the full series</a></p>
+      </nav>
+    )}
+
+    <ArticlePager older={older} newer={newer} />
+
+    <RelatedPosts posts={related} />
+
+    <p class="back bottom"><a href="/blog">← Back to all articles</a></p>
+  </article>
+</Base>
+
+<style>
+  /* Text column plus a sticky Contents aside on wide screens (placed by TableOfContents). */
+  .article { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 42rem; }
+  @media (min-width: 64rem) {
+    .article {
+      max-width: none;
+      grid-template-columns: minmax(0, 40rem) 15rem;
+      column-gap: var(--space-5);
+      justify-content: space-between;
+    }
+  }
+  .back { margin: 0 0 var(--space-4); font-family: var(--font-mono); font-size: 0.85rem; }
+  .back.bottom { margin: var(--space-5) 0 0; }
+  .head { margin-bottom: var(--space-4); }
+  .head h1 { margin-top: var(--space-2); }
+  .head .meta { margin: 0 0 var(--space-1); }
+  .head .meta > span::before {
+    content: '·';
+    content: '·' / '';
+    margin-right: 0.75rem;
+  }
+  .callout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--bg-subtle);
+    color: var(--ink-muted);
+    font-size: 0.95rem;
+  }
+  .tags-block {
+    margin-top: var(--space-5);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--rule);
+  }
+  .label {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+  }
+  .series-nav {
+    margin-top: var(--space-5);
+    padding: var(--space-4) 0 var(--space-3);
+    border-block: 1px solid var(--rule);
+  }
+  .series-nav h2 { margin: var(--space-1) 0 var(--space-3); font-size: 1.3rem; }
+  .pager {
+    list-style: none;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+    margin: 0 0 var(--space-3);
+    padding: 0;
+  }
+  .pager li { display: flex; flex-direction: column; gap: var(--space-1); }
+  .dir { font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); }
+  .pager a { font-family: var(--font-serif); font-size: 1.1rem; font-weight: 600; }
+  .all { margin: 0; font-size: 0.9rem; }
+  @media (min-width: 40rem) {
+    .pager { grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+    .pager .next { grid-column: 2; text-align: right; }
+  }
+</style>
