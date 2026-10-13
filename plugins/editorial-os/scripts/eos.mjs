@@ -845,6 +845,8 @@ function record(cfg, item, input) {
     critical: input.critical ?? [],
     findings: input.findings ?? { blocking: 0, shouldFix: 0, optional: 0, open: 0 },
     lint: lint.counts,
+    notVerified: input.notVerified ?? [],
+    changes: input.changes ?? [],
     reviewers: input.reviewers ?? [],
     reportRef: input.reportRef ?? null,
     notes: input.notes ?? '',
@@ -934,10 +936,15 @@ function validateSite(cfg, distArg) {
     }
     const ids = new Map();
     for (const m of html.matchAll(/\sid="([^"]+)"/g)) ids.set(m[1], (ids.get(m[1]) ?? 0) + 1);
-    for (const [id, n] of ids) if (n > 1 && !/^(mermaid|katex|svg)/.test(id)) add(page, 'duplicate-id', `id="${id}" appears ${n} times.`);
+    const ignoreIds = (vcfg.ignoreDuplicateIds ?? []).map((r) => new RegExp(r));
+    for (const [id, n] of ids) if (n > 1 && !ignoreIds.some((r) => r.test(id))) add(page, 'duplicate-id', `id="${id}" appears ${n} times.`);
     for (const m of html.matchAll(/<a\b[^>]*>(\s*)<\/a>/gi)) if (!/aria-label=/.test(m[0])) add(page, 'empty-link', 'Link with no text and no aria-label.');
     const text = main.replace(/<(pre|code|svg|script|style)\b[\s\S]*?<\/\1>/gi, '');
-    for (const m of text.matchAll(/[A-Za-z0-9.,;:!?]<(span|strong|em|a|code)\b(?![^>]*class="(?:katex|line|mord|mbin|mrel|mopen|mclose|mpunct|minner|mop|vlist|base|strut|pstrut|sizing|mspace|mfrac|frac-line|sqrt|svg-align|hide-tail|msupsub|accent|overline|underline|mtable|col-align|arraycolsep|delimsizing|nulldelimiter|enclosing|cancel|fbox|boxpad|anchor|katex-display|katex-html|katex-mathml))/g)) {
+    for (const m of text.matchAll(/[A-Za-z0-9.,;:!?]<(span|strong|em|a|code)\b/g)) {
+      // KaTeX splits operator names ("log", "arg") across spans by design; that is not glued prose.
+      if (/class="(?:m[a-z]+|katex[a-z-]*|base|vlist[a-z-]*)[^"]*"[^>]*>[^<]*$/.test(text.slice(Math.max(0, m.index - 80), m.index + 1))) continue;
+      // An opening quote written as an entity, or a decorative aria-hidden arrow, is not glued text.
+      if (/&[a-z]+;$|&#\d+;$/.test(text.slice(Math.max(0, m.index - 10), m.index + 1)) || /^<[a-z]+[^>]*aria-hidden="true"/.test(text.slice(m.index + 1, m.index + 200))) continue;
       add(page, 'glued-inline', `Text glued to <${m[1]}>: ...${text.slice(Math.max(0, m.index - 25), m.index + 12).replace(/\s+/g, ' ')}...`);
     }
     if (vcfg.maxDiagramMinWidthPx) {
@@ -1106,6 +1113,7 @@ const HELP = `editorial-os ${VERSION}: deterministic editorial checks and the pu
   eos refs [--json]                bibliography of every References section
   eos check-external [--json] [--strict]   fetch external URLs (unreachable = not verified, not broken)
   eos vale-style [--out dir]       export spelling, terms and phrases as a Vale style
+  eos syntax [paths...]            compile Markdown/MDX with the project's MDX compiler (fast, no site build)
   eos hook                         Claude Code PostToolUse hook: lint the edited content file
   eos hash <path>                  content hash used by records
 
@@ -1317,6 +1325,38 @@ async function main() {
       console.log(`\n## Built pages not backed by a content item (${inv.pages.length})\n`);
       console.log(mdTable(['Route', 'Kind', 'Lang', 'Title', 'Source'], inv.pages.map((p) => [p.route, p.kind, p.lang, p.title.replace(/\|/g, '\\|'), p.source ?? '-'])));
     }
+    return;
+  }
+
+  if (cmd === 'syntax') {
+    // Compile Markdown/MDX with the project's own @mdx-js/mdx (and remark-math if present), without a site build.
+    const { createRequire } = await import('node:module');
+    const req = createRequire(path.join(cfg._root, 'package.json'));
+    let compile;
+    let remarkMath = null;
+    try {
+      ({ compile } = await import(req.resolve('@mdx-js/mdx')));
+    } catch {
+      console.log('syntax: @mdx-js/mdx is not installed in this project; skipped (run the site build instead).');
+      return;
+    }
+    try {
+      remarkMath = (await import(req.resolve('remark-math'))).default;
+    } catch {}
+    const site = discover(cfg);
+    site.root = cfg._root;
+    let bad = 0;
+    for (const it of selectItems(site, args)) {
+      const src = it.text.slice(0, it.fm.end).replace(/[^\n]/g, '') + it.text.slice(it.fm.end);
+      try {
+        await compile(src, { remarkPlugins: remarkMath ? [remarkMath] : [], format: it.path.endsWith('.mdx') ? 'mdx' : 'md' });
+      } catch (e) {
+        bad++;
+        console.log(`${it.path}:${e.line ?? e.place?.line ?? '?'}: ${e.reason ?? e.message}`);
+      }
+    }
+    console.log(bad ? `${bad} file(s) failed to compile.` : 'All files compile.');
+    process.exitCode = bad ? 1 : 0;
     return;
   }
 
