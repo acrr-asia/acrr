@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/sensor-systems.md) as well.
 title: "Sensor Systems"
 description: "A series on the measurement chain, from a physical quantity to a trustworthy number: what a measurement is, how sensors convert physical effects into signals, and how those signals are conditioned, converted, cleaned, calibrated and combined."
 category: "Engineering"

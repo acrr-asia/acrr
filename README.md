@@ -1,6 +1,6 @@
 # ACRR — Advanced Computing & Robotics Research
 
-A static, English-language research and technical publishing site. It has six sections: **Home**, **Blog**, **Series**, **Learning**, **Insights** and **About**, plus a **Tags** index (linked from the footer and from every tag). There is no backend and no database. The site is built with Astro, content lives in Markdown/MDX files with validated frontmatter, and the output is a folder of plain files (`dist/`) that any static host can serve.
+A static research and technical publishing site in English, with Vietnamese translations under `/vi`. It has six sections: **Home**, **Blog**, **Series**, **Learning**, **Insights** and **About**, plus a **Tags** index (linked from the footer and from every tag). There is no backend and no database. The site is built with Astro, content lives in Markdown/MDX files with validated frontmatter, and the output is a folder of plain files (`dist/`) that any static host can serve.
 
 > **About the content.** The articles, series and insights in this repository are published content: none is marked `example` or `draft`. Series entries that have not been written are listed as "Planned". The `example` flag remains available for sample material (see [Draft versus example](#draft-versus-example)). **No founder biography, credentials, affiliations, publications, contact details or statistics have been supplied, so none appear on the site.** The five research areas are *proposed areas of interest*, not claims of active projects or a staffed laboratory. No Notion pages exist yet, so Learning entries show "Coming soon" and carry no link. See [Content rules](#content-rules).
 
@@ -202,6 +202,17 @@ A JSON array. Each object needs a unique `id`:
 
 An entry without `url` is shown as **Coming soon** with no link. The Learning page itself contains no editing instructions for visitors; this section is where they live. To publish a real resource (for example a Notion page once it exists), add its genuine `url` to the entry and set `status`; the page picks it up with an "Open resource" link and no redesign. Never put a placeholder or guessed URL here. An invalid URL fails the build.
 
+### Vietnamese translations
+
+The site is bilingual. English is the original language and lives at the root (`/blog/<slug>`); Vietnamese pages live under `/vi` (`/vi/blog/<slug>`), and a link in the header switches between the two versions of a page. **Read `docs/translation-vi.md` before translating**: it fixes where translation files go, which frontmatter fields are copied unchanged, the style and the glossary.
+
+- Translate an article by creating `src/content/blog/vi/<slug>.mdx` (same file name as the original). Series and insights work the same way (`src/content/series/vi/<id>.md`, `src/content/insights/vi/<id>.md`); learning entries take an optional `vi` object in `src/data/learning.json`.
+- The build fails when a translation has no original, or when a copied field (date, category, tags, series, order, status, draft, example, the number of planned entries) differs from the original. **When you publish a new entry of a series that has a Vietnamese translation, remove the planned entry from `src/content/series/vi/<id>.md` too.**
+- An article or insight without a translation still appears in Vietnamese listings, marked "Tiếng Anh", and links to the English page; it has no `/vi` page of its own.
+- Interface text is in `src/i18n/ui.ts`; page copy of Home, About and Learning sits in `src/views/` next to each view, in both languages. Pages in `src/pages/` and `src/pages/vi/` are thin wrappers around the same views.
+- Search keeps a separate index per language, so a search started on a Vietnamese page searches Vietnamese pages. `/vi/rss.xml` lists translated articles only. Pages with both versions carry `hreflang` links (with `SITE_URL` set), and the sitemap pairs them.
+- The generated SVG diagrams keep English labels; their captions are translated.
+
 ### Home and About text
 
 The five proposed research areas are defined once in `src/components/home/research-areas.ts` and used on both pages. The wording of the About page is in `src/pages/about.astro`. Personal information (biography, credentials, affiliations, contact details) should be added there only when the site's author supplies it.
@@ -315,7 +326,7 @@ The available review plugins in the Anthropic plugin directory were assessed for
 
 These are acceptance criteria for this project, not suggestions:
 
-- English only.
+- Written in English first; Vietnamese pages are translations of English originals and follow `docs/translation-vi.md`. No other languages.
 - Never fabricate a founder biography, credentials, affiliations, publications, collaborators, contact details, statistics, readership or citation figures, research results, project counts, or external URLs. Missing data stays missing.
 - Sample content, if any is added, is labelled (`example: true`); unfinished content is `draft: true`; planned content is labelled "Planned" or "Coming soon".
 - Research areas are interests, not active projects. Do not overstate ACRR's size, activity or achievements.

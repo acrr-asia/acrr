@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/industrial-automation.md) as well.
 title: "Industrial Automation"
 description: "A planned series on automating physical processes: logic and sequential control, programmable logic controllers, fieldbuses and industrial Ethernet, PID control of process variables, and networked automation with digital twins."
 category: "Engineering"

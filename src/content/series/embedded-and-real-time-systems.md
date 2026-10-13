@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/embedded-and-real-time-systems.md) as well.
 title: "Embedded and Real-Time Systems"
 description: "A planned series on the computers inside machines: microcontroller architecture, interrupts and DMA, on-board and in-vehicle buses, real-time operating systems and scheduling, and measuring timing."
 category: "Computing Systems"

@@ -50,9 +50,11 @@ if (!existsSync(distDir)) {
 }
 
 /** Files whose URLs are published to crawlers and feed readers. */
-const targets = readdirSync(distDir)
-  .filter((name) => name === 'rss.xml' || /^sitemap(-[^/\\]+)?\.xml$/.test(name))
-  .sort();
+// The Vietnamese feed is vi/rss.xml (see src/pages/vi/rss.xml.ts).
+const targets = [
+  ...readdirSync(distDir).filter((name) => name === 'rss.xml' || /^sitemap(-[^/\\]+)?\.xml$/.test(name)),
+  ...(existsSync(path.join(distDir, 'vi', 'rss.xml')) ? ['vi/rss.xml'] : []),
+].sort();
 
 if (targets.length === 0) {
   console.error(`check-site-url: found no rss.xml or sitemap*.xml in "${distDir}". Nothing to check.`);

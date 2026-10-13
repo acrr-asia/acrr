@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/introduction-to-robotics.md) as well.
 title: "Introduction to Robotics"
 description: "A series that introduces robots as systems of structure, actuation, sensing, and computation connected by feedback."
 category: "Robotics and Control"

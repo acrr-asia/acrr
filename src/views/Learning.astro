@@ -1,0 +1,160 @@
+---
+import { getCollection, type CollectionEntry } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import { slugify } from '../lib/content';
+import { langFromUrl, localizePath, t } from '../i18n/ui';
+
+type Entry = CollectionEntry<'learning'>;
+
+const lang = langFromUrl(Astro.url);
+const href = (path: string) => localizePath(path, lang);
+const entries = await getCollection('learning');
+// Text of an entry in the page's language (Vietnamese from the entry's optional `vi` object).
+const text = (e: Entry) => (lang === 'vi' && e.data.vi ? e.data.vi : e.data);
+const TYPE_VI: Record<Entry['data']['type'], string> = {
+  'Study notes': 'Ghi chú học tập',
+  Course: 'Khóa học',
+  Book: 'Sách',
+  'External reference': 'Tài liệu tham khảo bên ngoài',
+  'Learning path': 'Lộ trình học',
+};
+const typeLabel = (e: Entry) => (lang === 'vi' ? TYPE_VI[e.data.type] : e.data.type);
+// Authoring note (source only, not shown to visitors): real links are added by setting `url` on an
+// entry in src/data/learning.json. The notice below must stay true as that happens (see README).
+const hasLinks = entries.some((entry) => entry.data.url);
+
+const statusLabel: Record<Entry['data']['status'], string> = t(lang).status;
+
+// Group by topic: topics alphabetically, entries by title.
+const byTopic = new Map<string, Entry[]>();
+for (const entry of entries) {
+  const topic = text(entry).topic;
+  const list = byTopic.get(topic) ?? [];
+  list.push(entry);
+  byTopic.set(topic, list);
+}
+const groups = [...byTopic.entries()]
+  .sort(([a], [b]) => a.localeCompare(b, lang))
+  .map(([topic, items]) => ({
+    topic,
+    id: `topic-${slugify(topic)}`,
+    items: items.sort((a, b) => text(a).title.localeCompare(text(b).title, lang)),
+  }));
+const copy = {
+  en: {
+    title: 'Learning',
+    description: 'An index of planned learning paths, study notes and references. Entries without a public page are marked Coming soon.',
+    eyebrow: 'learning',
+    h1: 'Learning resources',
+    lede: 'An index of learning paths, study notes and external references. It points to material; it does not duplicate it.',
+    withLinks: ['Learning resources are being organised. Entries with a link open a public page; entries without one are marked', 'Coming soon', '. More links will appear here as resources are published. The written material on the site lives in the'],
+    noLinks: ['Learning resources are being organised. No entry below links to an external page yet, so each planned collection is marked', 'Coming soon', '. Links will appear here as resources are published. Until then, the written material on the site lives in the'],
+    blog: 'blog', and: 'and the', series: 'series',
+    empty: 'No learning resources are listed yet.',
+    open: 'Open resource', external: ' (external link, opens in a new tab)', soon: 'Coming soon',
+  },
+  vi: {
+    title: 'Học tập',
+    description: 'Danh mục các lộ trình học, ghi chú học tập và tài liệu tham khảo dự kiến. Các mục chưa có trang công khai được đánh dấu Sắp ra mắt.',
+    eyebrow: 'học tập',
+    h1: 'Tài nguyên học tập',
+    lede: 'Danh mục các lộ trình học, ghi chú học tập và tài liệu tham khảo bên ngoài. Danh mục chỉ dẫn đến tài liệu, không sao chép lại tài liệu.',
+    withLinks: ['Tài nguyên học tập đang được sắp xếp. Các mục có liên kết mở ra một trang công khai; các mục chưa có được đánh dấu', 'Sắp ra mắt', '. Sẽ có thêm liên kết khi tài nguyên được công bố. Các bài viết của trang nằm trong mục'],
+    noLinks: ['Tài nguyên học tập đang được sắp xếp. Chưa mục nào dưới đây có liên kết đến trang bên ngoài, nên mỗi bộ sưu tập dự kiến được đánh dấu', 'Sắp ra mắt', '. Liên kết sẽ xuất hiện ở đây khi tài nguyên được công bố. Trong lúc đó, các bài viết của trang nằm trong mục'],
+    blog: 'bài viết', and: 'và', series: 'loạt bài',
+    empty: 'Chưa có tài nguyên học tập nào.',
+    open: 'Mở tài nguyên', external: ' (liên kết ngoài, mở trong thẻ mới)', soon: 'Sắp ra mắt',
+  },
+}[lang];
+const notice = hasLinks ? copy.withLinks : copy.noLinks;
+---
+<Base title={copy.title} description={copy.description}>
+  <header class="page-head">
+    <p class="eyebrow">{copy.eyebrow}</p>
+    <h1>{copy.h1}</h1>
+    <p class="lede">{copy.lede}</p>
+  </header>
+
+  <div class="notice-box">
+    <p>
+      {notice[0]}{' '}<strong>{notice[1]}</strong>{notice[2]}{' '}<a href={href('/blog')}>{copy.blog}</a>{' '}{copy.and}{' '}<a href={href('/series')}>{copy.series}</a>.
+    </p>
+  </div>
+
+  {groups.length === 0 ? (
+    <p class="empty">{copy.empty}</p>
+  ) : (
+    groups.map((group) => (
+      <section class="topic" aria-labelledby={group.id}>
+        <h2 id={group.id}>{group.topic}</h2>
+        <ul class="list">
+          {group.items.map((entry) => (
+            <li class="resource">
+              <div class="body">
+                <h3>{text(entry).title}</h3>
+                <p class="meta">
+                  <span>{typeLabel(entry)}</span>
+                  <span class:list={['badge', { notice: entry.data.status !== 'planned' }]}>
+                    {statusLabel[entry.data.status]}
+                  </span>
+                </p>
+                <p class="desc">{text(entry).description}</p>
+              </div>
+              <div class="action">
+                {entry.data.url ? (
+                  <a href={entry.data.url} target="_blank" rel="noopener">
+                    {copy.open}
+                    <span class="sr-only">{copy.external}</span>
+                    <span aria-hidden="true"> ↗</span>
+                  </a>
+                ) : (
+                  <span class="soon">{copy.soon}</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))
+  )}
+</Base>
+
+<style>
+  .page-head { margin-bottom: var(--space-4); }
+  .page-head .eyebrow { margin: 0 0 var(--space-2); }
+  .page-head .lede { margin: 0; }
+
+  .notice-box {
+    max-width: var(--measure);
+    margin-bottom: var(--space-5);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-subtle);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+  }
+  .notice-box p { margin: 0; }
+
+  .empty {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 1px dashed var(--rule);
+    border-radius: 4px;
+    color: var(--ink-muted);
+  }
+
+  .topic { margin-bottom: var(--space-5); }
+  .topic h2 { margin: 0 0 var(--space-3); font-size: 1.35rem; }
+
+  .resource { display: grid; gap: var(--space-2) var(--space-4); }
+  .resource .body { min-width: 0; }
+  .resource h3 { font-size: 1.15rem; margin: 0 0 var(--space-1); }
+  .resource .meta { align-items: center; margin: 0 0 var(--space-2); }
+  .desc { margin: 0; color: var(--ink-muted); max-width: var(--measure); }
+  .action { font-weight: 600; }
+  .soon { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 400; color: var(--ink-muted); }
+
+  @media (min-width: 40rem) {
+    .resource { grid-template-columns: 1fr auto; align-items: start; }
+    .action { padding-top: 0.15rem; }
+  }
+</style>

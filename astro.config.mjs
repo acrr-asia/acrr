@@ -36,7 +36,8 @@ export default defineConfig({
   site,
   trailingSlash: 'never',
   build: { format: 'file' },
-  integrations: [mdx(), sitemap()],
+  // The sitemap pairs /x with /vi/x (hreflang alternates) wherever both pages exist.
+  integrations: [mdx(), sitemap({ i18n: { defaultLocale: 'en', locales: { en: 'en', vi: 'vi' } } })],
   markdown: {
     processor: unified({
       remarkPlugins: [remarkMath, remarkReadingTime],

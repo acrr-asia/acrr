@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/numerical-simulation.md) as well.
 title: "Numerical Simulation for Engineers"
 description: "A planned series on computing what equations predict: discretising differential equations, finite differences for heat and waves, solving large linear systems, the finite element method, and checking that a simulation can be trusted."
 category: "Mathematical Foundations"

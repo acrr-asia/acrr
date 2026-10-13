@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/identity-and-access-control.md) as well.
 title: "Identity and Access Control"
 description: "A series on how networked systems decide who is making a request and what that party may do, from the access-control model down to protocols and token formats."
 category: "Computing Systems"

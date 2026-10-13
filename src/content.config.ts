@@ -76,6 +76,8 @@ const learning = defineCollection({
     /** Only real URLs. Omit until the resource exists. */
     url: z.url().optional(),
     status: z.enum(['planned', 'in-progress', 'published']).default('planned'),
+    /** Vietnamese text of the entry (docs/translation-vi.md); the English text is used without it. */
+    vi: z.object({ title: z.string(), description: z.string(), topic: z.string() }).optional(),
   }),
 });
 
