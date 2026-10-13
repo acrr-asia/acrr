@@ -1,6 +1,6 @@
 ---
 title: "Inside a Microcontroller"
-description: "What embedded and real-time systems are and the vocabulary of deadlines, latency and jitter, then the parts of a microcontroller and how firmware drives them: the CPU core, flash and SRAM, the memory map and memory-mapped registers, reset and startup, clocks, timers, general-purpose I/O and the on-chip analog-to-digital converter."
+description: "Learn the timing vocabulary of real-time systems, the parts of a microcontroller from core and memory map to timers and ADC, and how firmware drives them."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -20,7 +20,7 @@ This first entry sets the foundation: the timing vocabulary the whole series use
 
 **Conventions.** Code is C11 (ISO/IEC 9899:2011). Examples assume a generic 32-bit Arm Cortex-M class microcontroller with a 48 MHz core clock and a 3.3 V supply; where an example depends on the Arm architecture, it says so. Peripheral register names and layouts in the code are invented for illustration and do not belong to any vendor's part, because every manufacturer lays out its peripherals differently; the reference manual of the chip in hand is always the authority. Time is in seconds with SI prefixes (1 µs = $10^{-6}$ s), frequency in hertz, and memory sizes use binary prefixes (1 KiB = 1024 bytes). Host-side code was compiled with the GNU Compiler Collection (GCC) version 13 using `-std=c11`, and Python examples use Python 3 with the standard library only.
 
-## 1. Embedded and Real-Time Systems
+## 1. Embedded and real-time systems
 
 ### 1.1 What an embedded system is
 
@@ -67,7 +67,7 @@ The five entries follow the path of data through an embedded system and then the
 | [Real-Time Operating Systems and Scheduling](/blog/real-time-operating-systems-and-scheduling) | Tasks, priorities and synchronization, and the analysis that shows whether every deadline can be met |
 | [Measuring Timing, Latency and Resource Use](/blog/measuring-timing-latency-and-resource-use) | Instrumenting firmware to measure execution time, latency, jitter, processor load and memory use, and checking the results against the analysis |
 
-## 2. The Microcontroller as a System on a Chip
+## 2. The microcontroller as a system on a chip
 
 ### 2.1 Microcontroller and microprocessor
 
@@ -86,7 +86,7 @@ The processor, the memories and the peripherals all hang off an on-chip bus (in 
 
 ### 2.2 The CPU core
 
-The **CPU core** fetches instructions from memory, decodes them and executes them. Its programmer-visible state is a small set of **registers**: on an Arm Cortex-M core, sixteen 32-bit registers, of which R13 is the **stack pointer** (SP), R14 the **link register** (LR, holding the return address of a function call) and R15 the **program counter** (PC, the address of the next instruction), plus a status register holding condition flags.
+The **CPU core** fetches instructions from memory, decodes them and executes them. Its programmer-visible state is a small set of **registers**. An Arm Cortex-M core has sixteen 32-bit registers plus a status register holding condition flags. Three of the sixteen have fixed roles: R13 is the **stack pointer** (SP), R14 the **link register** (LR, holding the return address of a function call) and R15 the **program counter** (PC, the address of the next instruction).
 
 Cortex-M is Arm's family of cores for microcontrollers, defined by the Armv6-M, Armv7-M and Armv8-M architecture profiles (the newest cores implement Armv8.1-M, an extension of Armv8-M). These are **load-store** architectures: arithmetic works only on registers, and separate load and store instructions move data between registers and memory. They are 32-bit machines, meaning registers, the natural integer size and addresses are 32 bits wide, so a core can address $2^{32}$ bytes (4 GiB). They execute the compact **Thumb** instruction set (16- and 32-bit instructions), which keeps programs small. Many microcontrollers use other cores (8-bit and 16-bit families remain common, as do RISC-V cores), but the ideas in this series apply to all of them.
 
@@ -101,7 +101,7 @@ A microcontroller has two kinds of on-chip memory with different jobs:
 
 Flash is denser and cheaper per bit, so a microcontroller typically has several times more flash than SRAM; 256 KiB of flash with 64 KiB of SRAM is a representative combination. Flash is also slower than a fast core: above a certain clock frequency, a read from flash needs one or more extra cycles called **wait states**, which the chip hides partly with prefetch buffers or a small cache. The exact threshold is in the datasheet, and it is one reason why the same code can take different times on the same chip at different clock settings.
 
-## 3. The Memory Map and Memory-Mapped I/O
+## 3. The memory map and memory-mapped I/O
 
 ### 3.1 One address space
 
@@ -195,7 +195,7 @@ Bit 5 is `0x20`, so the LED pin is an output and is driven high, then low; the s
 
 ### 3.3 Read-modify-write and its hazard
 
-The statement `GPIOA->DIR |= BIT(LED_PIN)` compiles to three steps: load the register, OR in the bit, store it back. If something else changes the register between the load and the store, that change is overwritten. On a single-core microcontroller the "something else" is usually an **interrupt handler**, code that the hardware runs between two instructions of the main program when an event occurs (the second entry treats interrupts in full). If the main program has loaded `OUT`, and an interrupt handler then sets a different bit in `OUT`, the main program's store puts back the old value and silently clears the handler's bit.
+The statement `GPIOA->DIR |= BIT(LED_PIN)` compiles to three steps: load the register, set the bit with a bitwise OR, store it back. If something else changes the register between the load and the store, that change is overwritten. On a single-core microcontroller the "something else" is usually an **interrupt handler**, code that the hardware runs between two instructions of the main program when an event occurs (the second entry treats interrupts in full). If the main program has loaded `OUT`, and an interrupt handler then sets a different bit in `OUT`, the main program's store puts back the old value and silently clears the handler's bit.
 
 This is why many peripherals provide separate **set** and **clear** registers, as the example does: a write of a 1 bit to `SET` changes only that bit in hardware, in a single store, so there is no window in which another update can be lost. Where the hardware offers no such register, the read-modify-write must be protected, a technique the second entry describes.
 
@@ -214,13 +214,13 @@ A C program for a microcontroller is linked into a few standard **sections**, an
 
 The stack grows and shrinks as functions are called and return, and its peak size is hard to know in advance; the fifth entry measures it. Many embedded projects avoid the heap altogether, or allocate from it only at startup, because allocation and freeing at run time can fragment a small heap and their timing is not bounded.
 
-A worked memory budget shows how quickly SRAM goes. A data logger records two channels of the analog-to-digital converter (ADC, Section 6.2) with 1000 samples each, stored as 16-bit values: $2 \times 1000 \times 2 = 4000$ bytes. Doubling that buffer so that one half can be written while the other is processed (a scheme the second entry uses with direct memory access, DMA) needs 8000 bytes, about 12 % of a 64 KiB SRAM, before any stack, communication buffers or operating-system structures are counted.
+A worked memory budget shows how quickly SRAM goes. A data logger records two channels of the analog-to-digital converter (ADC, Section 6.2) with 1000 samples each, stored as 16-bit values: $2 \times 1000 \times 2 = 4000$ bytes. Doubling that buffer so that one half can be written while the other is processed (a scheme the second entry uses with direct memory access, DMA) needs 8000 bytes, about 12% of a 64 KiB SRAM, before any stack, communication buffers or operating-system structures are counted.
 
-## 4. Reset, Startup and Clocks
+## 4. Reset, startup and clocks
 
 ### 4.1 From reset to main
 
-At power-up, or when a reset pin is pulled or a watchdog fires (Section 5.4), the core enters a defined **reset** state and starts executing from a fixed place. On Cortex-M cores, that place is described by the **vector table**, a table of 32-bit words at the start of the code region. (A chip whose flash sits at a higher address, such as the `0x0800_0000` of Section 3.1, either maps it to address 0 at reset or tells the core where the table is.) The first word is the initial value of the stack pointer, the second the address of the **reset handler**, the function that runs first; the following words are the addresses of the handlers for faults and interrupts, which the second entry uses.
+At power-up, or when a reset pin is pulled or a watchdog fires (Section 5.4), the core enters a defined **reset** state and starts executing from a fixed place. On Cortex-M cores, that place is described by the **vector table**, a table of 32-bit words at the start of the code region. (A chip whose flash sits at a higher address, such as the `0x0800_0000` of Section 3.1, either maps it to address 0 at reset or tells the core where the table is.) The first word is the initial value of the stack pointer, and the second is the address of the **reset handler**, the function that runs first. The following words are the addresses of the handlers for faults and interrupts, which the second entry uses.
 
 The reset handler belongs to the **startup code**, usually supplied with the toolchain or vendor package, and it does what the C language assumes has already happened before `main` is called:
 
@@ -235,7 +235,7 @@ The order varies: many startup files configure the clocks first, so that the cop
 
 Every synchronous circuit on the chip advances on edges of a **clock**, and the microcontroller can choose among several sources:
 
-- An **internal RC oscillator** (resistor-capacitor) needs no external parts and starts quickly, but its frequency depends on temperature and supply voltage, and its factory trim leaves a tolerance that the datasheet states.
+- An **internal resistor-capacitor (RC) oscillator** needs no external parts and starts quickly, but its frequency depends on temperature and supply voltage, and its factory trim leaves a tolerance that the datasheet states.
 - A **crystal oscillator** uses an external quartz crystal. Its frequency is far more accurate and stable, with tolerances specified in parts per million (ppm).
 - A **phase-locked loop** (PLL) multiplies a reference frequency up to the core frequency. An 8 MHz crystal and a PLL that multiplies by 6 give the 48 MHz used in this series.
 
@@ -245,13 +245,13 @@ Clock accuracy matters even when nothing seems to depend on it. A crystal with a
 
 ### 4.3 Clock gating and low-power modes
 
-Each peripheral's clock can be switched on and off individually by **clock gating**. After reset most peripheral clocks are off, to save power, so the first step in using any peripheral is to enable its clock in the clock controller; writes to a peripheral whose clock is off are commonly ignored, a frequent cause of "the register will not change" when starting with a new chip.
+Each peripheral's clock can be switched on and off individually by **clock gating**. After reset most peripheral clocks are off, to save power, so the first step in using any peripheral is to enable its clock in the clock controller. Writes to a peripheral whose clock is off are commonly ignored, a frequent cause of "the register will not change" when starting with a new chip.
 
 Power consumption in CMOS (complementary metal-oxide-semiconductor) logic rises roughly in proportion to clock frequency, so microcontrollers also offer **low-power modes**: the core stops while peripherals keep running (sleep), or most clocks stop and only a few wake-up sources remain (deep sleep or stop modes). On Cortex-M cores the `WFI` (wait for interrupt) instruction puts the core to sleep until an interrupt arrives. A battery-powered sensor node can spend nearly all of its time asleep, waking on a timer to take a reading, which is only possible because the timers keep counting while the core sleeps.
 
 ## 5. Timers
 
-A **timer** is a hardware counter clocked from the clock tree. Because it counts independently of the software, it can measure and generate time far more precisely than any software loop. Timers are the most used peripheral in real-time firmware.
+A **timer** is a hardware counter clocked from the clock tree. Because it counts independently of the software, it can measure and generate time far more precisely than any software loop. Timers are among the most used peripherals in real-time firmware.
 
 ### 5.1 Counter, prescaler and reload
 
@@ -319,7 +319,7 @@ In **input-capture** mode, a signal edge on a pin copies the counter's current v
 
 A **watchdog timer** counts down independently of the program and resets the chip when it reaches zero. The firmware must restart ("kick" or "feed") it periodically. If the program hangs, crashes into an endless loop or stops reaching the point where it feeds the watchdog, the reset returns the device to a known state. A watchdog only helps if it is fed from a place that proves the whole system is working, for example only after every periodic job has reported that it ran; feeding it from a timer interrupt would keep a hung main program alive indefinitely.
 
-## 6. General-Purpose I/O and the On-Chip ADC
+## 6. General-purpose I/O and the on-chip ADC
 
 ### 6.1 General-purpose I/O
 
@@ -345,14 +345,14 @@ How a conversion is started matters as much as its resolution:
 
 Hardware triggering is the general pattern for real-time input: let hardware decide **when** things happen, and leave software to decide **what** to do with them. Collecting the results, by polling a flag, by interrupt or by DMA, is the topic of the next entry.
 
-## 7. How Firmware Drives the Hardware
+## 7. How firmware drives the hardware
 
 ### 7.1 Layers of firmware
 
 Writing raw register accesses everywhere makes code unreadable and impossible to move to another chip. Firmware is therefore usually layered:
 
 - **Register definitions**: the structures and bit masks of Section 3.2, normally generated from the vendor's description of the chip.
-- **Drivers** (often called a hardware abstraction layer, HAL): functions such as `adc_start()` or `uart_write()` that hide register sequences behind an interface.
+- **Drivers**, which together form a hardware abstraction layer (HAL): functions such as `adc_start()` or `uart_write()` that hide register sequences behind an interface.
 - **Application**: the logic of the product, written against the driver interfaces.
 
 ### 7.2 The superloop
@@ -377,9 +377,9 @@ int main(void) {
 }
 ```
 
-(The functions are placeholders for drivers and application code; the fragment shows structure, not a complete program.) This **superloop** is easy to understand and is the right design for many small devices. Its weakness is timing: each check waits for everything else in the loop. If `update_display()` takes 20 ms, a sample that becomes ready just after the loop has checked for it waits more than 20 ms, a whole pass of the loop, to be processed, and the latency of every event depends on the execution time of every other piece of code. Adding a feature can break the timing of an unrelated one.
+(The functions are placeholders for drivers and application code; the fragment shows structure, not a complete program.) This **superloop** is easy to understand and is the right design for many small devices. Its weakness is timing: each check waits for everything else in the loop. If `update_display()` takes 20 ms, a sample that becomes ready just after the loop has checked for it waits more than 20 ms, a whole pass of the loop, to be processed. The latency of every event therefore depends on the execution time of every other piece of code. Adding a feature can break the timing of an unrelated one.
 
-The rest of the series removes that coupling step by step: interrupts and DMA let hardware events be handled when they happen rather than when the loop comes round to them (second entry), and a real-time operating system splits the program into prioritized tasks whose worst-case response times can be predicted (fourth entry) and checked by measurement (fifth entry).
+The rest of the series removes that coupling step by step. Interrupts and DMA let hardware events be handled when they happen rather than when the loop comes round to them (second entry). A real-time operating system splits the program into prioritized tasks whose worst-case response times can be predicted (fourth entry) and checked by measurement (fifth entry).
 
 ## 8. Exercises
 
@@ -424,12 +424,12 @@ $N = 48\,000\,000 / 25\,000 = 1920$ counts, so 1920 steps, a resolution of $\log
 
 </details>
 
-**Exercise 5.** A program has 1.2 KiB of initialized global variables and 6 KiB of zero-initialised ones. How much flash and how much SRAM do these occupy, and what does the startup code do with each?
+**Exercise 5.** A program has 1.2 KiB of initialized global variables and 6 KiB of zero-initialized ones. How much flash and how much SRAM do these occupy, and what does the startup code do with each?
 
 <details>
 <summary>Answer</summary>
 
-The initialized variables (`.data`) take 1.2 KiB of flash for their initial values and 1.2 KiB of SRAM at run time; the startup code copies them from flash to SRAM. The zero-initialised ones (`.bss`) take 6 KiB of SRAM and no flash beyond the code that clears them; the startup code fills them with zeros. In total 7.2 KiB of SRAM and 1.2 KiB of flash.
+The initialized variables (`.data`) take 1.2 KiB of flash for their initial values and 1.2 KiB of SRAM at run time; the startup code copies them from flash to SRAM. The zero-initialized ones (`.bss`) take 6 KiB of SRAM and no flash beyond the code that clears them; the startup code fills them with zeros. In total 7.2 KiB of SRAM and 1.2 KiB of flash.
 
 </details>
 
@@ -452,9 +452,9 @@ The next entry, [Interrupts, Polling and DMA](/blog/interrupts-polling-and-dma),
 
 ### References
 
-- ISO/IEC 9899:2011, *Information Technology: Programming Languages: C*, International Organization for Standardization.
 - Arm Limited, *Armv7-M Architecture Reference Manual*, document ARM DDI 0403.
-- J. Yiu, *The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors*, 3rd edition, Newnes, 2014.
-- E. A. Lee and S. A. Seshia, *Introduction to Embedded Systems: A Cyber-Physical Systems Approach*, 2nd edition, MIT Press, 2017.
+- ISO/IEC 9899:2011, *Information technology – Programming languages – C*, International Organization for Standardization, 2011.
+- H. Kopetz, *Real-Time Systems: Design Principles for Distributed Embedded Applications*, 2nd ed., Springer, 2011.
+- E. A. Lee and S. A. Seshia, *Introduction to Embedded Systems: A Cyber-Physical Systems Approach*, 2nd ed., MIT Press, 2017.
 - E. White, *Making Embedded Systems: Design Patterns for Great Software*, O'Reilly Media, 2011.
-- H. Kopetz, *Real-Time Systems: Design Principles for Distributed Embedded Applications*, 2nd edition, Springer, 2011.
+- J. Yiu, *The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors*, 3rd ed., Newnes, 2014.

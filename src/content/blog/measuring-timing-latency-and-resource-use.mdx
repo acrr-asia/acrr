@@ -1,6 +1,6 @@
 ---
 title: "Measuring Timing, Latency and Resource Use"
-description: "How to check by measurement what real-time analysis assumes: instrumenting firmware with GPIO pins, timers and cycle counters, measuring execution time, response time, interrupt latency and jitter, why the largest observed value is not the worst case, measuring processor load and stack and memory use, and feeding the results back into response-time analysis."
+description: "How to measure execution time, latency, jitter, processor load and memory use on embedded hardware, and feed the results back into response-time analysis."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -14,11 +14,11 @@ seriesOrder: 5
 
 [The fourth entry](/blog/real-time-operating-systems-and-scheduling) ended with a calculation that every task of an example system meets its deadline, and with a warning: the calculation is only as good as its inputs. Response-time analysis takes each task's worst-case execution time $C_i$, its period $T_i$ and its blocking time $B_i$ as given, and it says nothing about memory. This final entry is about obtaining and checking those inputs on real hardware, and about checking the outcomes the analysis predicts.
 
-It draws on the whole series. The timing terms (latency, response time, jitter as peak-to-peak spread) are those defined in [Section 1.2 of the first entry](/blog/inside-a-microcontroller#12-real-time-events-deadlines-latency-and-jitter); the timers and input capture of that entry are measuring instruments; the interrupt latency components of [the second entry](/blog/interrupts-polling-and-dma#32-interrupt-latency) are what a latency measurement must exercise; and the bus timings of [the third entry](/blog/serial-buses-uart-spi-i2c-and-can) can be measured in the same way as task timings.
+It draws on the whole series. The timing terms (latency, response time, jitter as peak-to-peak spread) are those defined in [Section 1.2 of the first entry](/blog/inside-a-microcontroller#12-real-time-events-deadlines-latency-and-jitter), and the timers and input capture of that entry are measuring instruments. The interrupt latency components of [the second entry](/blog/interrupts-polling-and-dma#32-interrupt-latency) are what a latency measurement must exercise; and the bus timings of [the third entry](/blog/serial-buses-uart-spi-i2c-and-can) can be measured in the same way as task timings.
 
-**Conventions.** As before: C11, a generic 32-bit Arm Cortex-M class microcontroller at 48 MHz, illustrative register and function names, and Python 3 with the standard library. One experiment uses the real-time interface of POSIX, the Portable Operating System Interface (IEEE Std 1003.1-2017; the interfaces used are unchanged in the current 2024 edition) on a desktop Linux system, and says so; its numbers describe that machine at that time, not a microcontroller. Example numbers that are not the output of a program in this entry are labeled as assumed. Abbreviations follow the earlier entries: general-purpose input/output (GPIO), interrupt service routine (ISR), direct memory access (DMA), real-time operating system (RTOS), universal asynchronous receiver-transmitter (UART), Controller Area Network (CAN), static RAM (SRAM) and the GNU Compiler Collection (GCC).
+**Conventions.** As before: C11, a generic 32-bit Arm Cortex-M class microcontroller at 48 MHz, illustrative register and function names, and Python 3 with the standard library. One experiment uses the real-time interface of the Portable Operating System Interface (POSIX), IEEE Std 1003.1-2017, on a desktop Linux system, and says so; the interfaces used are unchanged in the current 2024 edition. Its numbers describe that machine at that time, not a microcontroller. Example numbers that are not the output of a program in this entry are labeled as assumed. Abbreviations follow the earlier entries: general-purpose input/output (GPIO), interrupt service routine (ISR), direct memory access (DMA), real-time operating system (RTOS), universal asynchronous receiver-transmitter (UART), Serial Peripheral Interface (SPI), Inter-Integrated Circuit (I2C), Controller Area Network (CAN), static RAM (SRAM) and the GNU Compiler Collection (GCC).
 
-## 1. What to Measure and Why
+## 1. What to measure and why
 
 ### 1.1 Measurement checks the inputs and the outcomes
 
@@ -42,13 +42,13 @@ A job does not take the same time every time it runs. Its execution time varies 
 - **the hardware state**: flash wait states and prefetch buffers ([Section 2.3 of the first entry](/blog/inside-a-microcontroller#23-flash-and-sram)), caches on larger cores, and stalls when DMA uses the bus at the same moment ([Section 5.3 of the second entry](/blog/interrupts-polling-and-dma#53-costs-and-pitfalls-of-dma));
 - **interference** from ISRs and higher-priority tasks, which lengthens the elapsed time between a job's start and end without being part of its own execution time.
 
-Three values summarize the distribution of a job's own execution time: the **best-case execution time** (BCET), the true **worst-case execution time** (WCET), and the **high-water mark**, the largest value actually observed. The analysis needs the WCET. Measurement gives the high-water mark, which is never larger than the WCET and may be smaller. Much of this entry is about the gap between the two.
+Three values summarize the distribution of a job's own execution time: the **best-case execution time** (BCET), the true **worst-case execution time** (WCET), and the **high-water mark**, the largest value observed. The analysis needs the WCET. Measurement gives the high-water mark, which is never larger than the WCET and may be smaller. Much of this entry is about the gap between the two.
 
 ## 2. Instruments
 
 ### 2.1 GPIO pins and a logic analyzer
 
-The simplest and most widely used method is to drive a spare GPIO pin high when a piece of code starts and low when it ends, and to watch the pin with an oscilloscope or a **logic analyzer** (an instrument that samples many digital signals at once and displays them on a common time axis). The pulse width is the elapsed time of the code; its period and spread show the release jitter; and several pins, one per task or ISR, show how they preempt each other.
+The simplest method is to drive a spare GPIO pin high when a piece of code starts and low when it ends. The pin is watched with an oscilloscope or a **logic analyzer**, an instrument that samples many digital signals at once and displays them on a common time axis. The pulse width is the elapsed time of the code; its period and spread show the release jitter; and several pins, one per task or ISR, show how they preempt each other.
 
 Using a set and clear register ([Section 3.3 of the first entry](/blog/inside-a-microcontroller#33-read-modify-write-and-its-hazard)), each edge costs a single store instruction, a few cycles of about 20.8 ns each at 48 MHz, which is small enough for most measurements. The instrument's resolution is one sample period: a logic analyzer sampling at 100 million samples per second resolves 10 ns, finer than one processor cycle here.
 
@@ -115,20 +115,20 @@ Many Cortex-M cores also offer optional debug trace hardware, such as an instrum
 
 Instrumentation changes what it measures: it adds instructions, moves code to other flash addresses, and changes cache and prefetch behavior. This **probe effect** is small for a pin toggle or a counter read but not zero. The usual remedy is to leave lightweight instrumentation in the production firmware, so that the measured system and the shipped system are the same, rather than adding it for tests and removing it afterwards.
 
-## 3. Execution Time and Response Time
+## 3. Execution time and response time
 
 ### 3.1 Measuring under realistic and adverse conditions
 
 A measurement campaign for execution times runs the system long enough, and in enough situations, to drive each job down its slowest paths:
 
-- all operating modes, including start-up, error handling and recovery;
+- all operating modes, including startup, error handling and recovery;
 - inputs at their extremes, including those that saturate filters or trigger retries;
 - maximum load on everything else: all interrupts at their highest rates, DMA and buses busy, so that bus contention appears;
 - long runs, recording for each job the high-water mark and, for diagnosis, a histogram or a few percentiles.
 
 ### 3.2 Why the observed maximum is not the worst case
 
-A slow path that is taken rarely may simply not occur during the test. If a job takes its slowest path with probability $p$ each time it runs, independently, the probability that $n$ runs never take it is $(1 - p)^n$. (This Python fragment and the two later ones in this entry form one script.)
+A slow path that is taken rarely may not occur during the test at all. If a job takes its slowest path with probability $p$ each time it runs, independently, the probability that $n$ runs never take it is $(1 - p)^n$. (This Python fragment and the two later ones in this entry form one script.)
 
 ```python
 import math
@@ -197,7 +197,7 @@ With the margin, $\tau_3$'s execution time of 3.25 ms exceeds its original 3 ms 
 
 Separately, timestamp each job's release and completion on the running system and record the largest response time of each task. Every measured response time must be below the computed $R_i$. A measured value above it is not bad luck; it proves that the model is wrong, for example that an ISR or a critical section is missing from it, or that a task's $C_i$ was underestimated. The discrepancy is found and the model corrected before the margin is trusted again.
 
-## 4. Latency and Jitter
+## 4. Latency and jitter
 
 ### 4.1 Release jitter of a periodic task: an experiment
 
@@ -291,7 +291,7 @@ The results illustrate four points that hold far beyond this machine:
 
 The experiment also shows how to report timing measurements. A single average is nearly useless. The minimum, median, a high percentile, the maximum and the number of samples together describe the distribution; the peak-to-peak jitter is the maximum minus the minimum, as defined in the first entry; and a histogram reveals structure such as two distinct clusters (often two different code paths or a periodic interference). For a soft requirement, a percentile may be the right figure of merit. For a hard deadline only the maximum counts, and only together with an argument, from analysis and coverage, that the true worst case has been bounded.
 
-## 5. Processor Load
+## 5. Processor load
 
 ### 5.1 The idle counter
 
@@ -313,21 +313,21 @@ print(f"load = {1 - idle_loaded / idle_unloaded:.1%}")
 load = 60.0%
 ```
 
-A measured load below the analyzed utilization (0.857 in the worked design of [Section 4 of the fourth entry](/blog/real-time-operating-systems-and-scheduling#4-a-worked-design)) is expected, because the utilization uses worst-case execution times and the average job takes less. The measured load is headroom information, not a schedulability test: a processor at 60 % average load can still miss deadlines if the worst cases coincide, and one at 85 % can meet them all, as the analysis showed. If the idle loop goes into a low-power mode, the counter method no longer works, and per-task run-time statistics from the kernel, accumulated from a fast timer at each context switch, take its place.
+A measured load below the analyzed utilization (0.857 in the worked design of [Section 4 of the fourth entry](/blog/real-time-operating-systems-and-scheduling#4-a-worked-design)) is expected, because the utilization uses worst-case execution times and the average job takes less. The measured load is headroom information, not a schedulability test: a processor at 60% average load can still miss deadlines if the worst cases coincide, and one at 85% can meet them all, as the analysis showed. If the idle loop goes into a low-power mode, the counter method no longer works, and per-task run-time statistics from the kernel, accumulated from a fast timer at each context switch, take its place.
 
 ### 5.2 Bus load
 
 The same idea applies to the buses of the third entry. A CAN bus analyzer, or a CAN controller's own counters, gives the measured bus load and the rate of error frames, to be compared with the worst-case load computed from frame lengths. Error frames and retransmissions, which the computed load usually leaves out, are themselves a useful measurement: a rising error count is often the first sign of a wiring or termination fault.
 
-## 6. Memory Use
+## 6. Memory use
 
 ### 6.1 Static memory from the build
 
-The linker knows the size of every section described in [Section 3.4 of the first entry](/blog/inside-a-microcontroller#34-where-the-programs-data-lives), and the toolchain reports it, as a map file and through utilities such as GNU `size`, which prints the sizes of `text`, `data` and `bss`. Flash use is `text` plus `data` (the initial values); static SRAM use is `data` plus `bss`. With assumed sizes of 41 872 bytes of `text`, 1 228 of `data` and 6 144 of `bss`, the image needs 43 100 bytes of flash (16 % of 256 KiB) and 7 372 bytes of static SRAM (11 % of 64 KiB), to which the stacks and any heap must be added. Tracking these numbers on every build catches growth early.
+The linker knows the size of every section described in [Section 3.4 of the first entry](/blog/inside-a-microcontroller#34-where-the-programs-data-lives), and the toolchain reports it, as a map file and through utilities such as GNU `size`, which prints the sizes of `text`, `data` and `bss`. Flash use is `text` plus `data` (the initial values); static SRAM use is `data` plus `bss`. With assumed sizes of 41 872 bytes of `text`, 1 228 of `data` and 6 144 of `bss`, the image needs 43 100 bytes of flash (16% of 256 KiB) and 7 372 bytes of static SRAM (11% of 64 KiB), to which the stacks and any heap must be added. Tracking these numbers on every build catches growth early.
 
 ### 6.2 Stack high-water marks by painting
 
-Stack use is dynamic, and an overflow corrupts memory silently. **Stack painting** measures the peak: at start-up, fill each stack with a known pattern; after the system has run, find the deepest point at which the pattern has been overwritten. The part still holding the pattern was never used. Many RTOS kernels do this for every task stack and report the minimum free space. The following program demonstrates the method on an array that stands in for a 1 KiB task stack growing downward:
+Stack use is dynamic, and an overflow corrupts memory silently. **Stack painting** measures the peak: at startup, fill each stack with a known pattern; after the system has run, find the deepest point at which the pattern has been overwritten. The part still holding the pattern was never used. Many RTOS kernels do this for every task stack and report the minimum free space. The following program demonstrates the method on an array that stands in for a 1 KiB task stack growing downward:
 
 ```c
 /* C11. Stack painting, demonstrated on an array that stands in for a task's
@@ -377,22 +377,22 @@ int main(void) {
 high-water mark: 724 of 1024 bytes used (71 %), 300 bytes never touched
 ```
 
-The painting remembers the deep path (181 words, 724 bytes) even though later jobs used less. Like an execution-time high-water mark, it records only paths that actually ran, so a stack sized from it needs a margin, or a static bound. GCC's `-fstack-usage` option reports each function's own stack frame, and combining those figures along the deepest path of the call graph gives an upper bound, provided there is no recursion or call through a function pointer that the analysis cannot follow. Interrupts need stack space too. On Cortex-M the hardware pushes the interrupted context (32 bytes, more if floating-point state is saved) onto the stack in use when the interrupt arrives, and the handler then runs on the main stack. In the usual arrangement of Cortex-M kernels, where tasks run on their own stacks and handlers on the main stack, each task stack therefore needs room for one such frame, and the main stack must hold the deepest nesting of ISRs.
+The painting remembers the deep path (181 words, 724 bytes) even though later jobs used less. Like an execution-time high-water mark, it records only paths that ran, so a stack sized from it needs a margin, or a static bound. GCC's `-fstack-usage` option reports each function's own stack frame, and combining those figures along the deepest path of the call graph gives an upper bound, provided there is no recursion or call through a function pointer that the analysis cannot follow. Interrupts need stack space too. On Cortex-M the hardware pushes the interrupted context (32 bytes, more if floating-point state is saved) onto the stack in use when the interrupt arrives, and the handler then runs on the main stack. In the usual arrangement of Cortex-M kernels, where tasks run on their own stacks and handlers on the main stack, each task stack therefore needs room for one such frame, and the main stack must hold the deepest nesting of ISRs.
 
 Detection complements measurement. A **guard region** at the end of each stack, protected by the memory protection unit present on many Cortex-M cores, turns an overflow into an immediate fault instead of silent corruption, and Armv8-M Mainline cores (such as the Cortex-M33) have stack-limit registers that do the same in hardware.
 
 ### 6.3 The heap
 
-If the firmware uses dynamic allocation, the allocator's statistics (bytes in use, peak use, largest free block) are the measurements to watch. The largest free block matters as much as the total: after many allocations and frees of different sizes, the free memory can be split into pieces too small for a request even though their sum is large. This **fragmentation**, and the unbounded time some allocators take to search for a block, are why many real-time systems allocate only at start-up or use fixed-size block pools.
+If the firmware uses dynamic allocation, the allocator's statistics (bytes in use, peak use, largest free block) are the measurements to watch. The largest free block matters as much as the total: after many allocations and frees of different sizes, the free memory can be split into pieces too small for a request even though their sum is large. This **fragmentation**, and the unbounded time some allocators take to search for a block, are why many real-time systems allocate only at startup or use fixed-size block pools.
 
-## 7. A Verification Workflow
+## 7. A verification workflow
 
 The pieces fit into a cycle repeated whenever the firmware changes:
 
 ```mermaid
 flowchart TB
     A["Model: C, T, B, memory"] --> I["Instrument and stress test"]
-    I --> M["Compare measured with analysed"]
+    I --> M["Compare measured with analyzed"]
     M -->|"bound exceeded"| A
     M -->|"within bounds"| K["Track margins per build"]
 ```
@@ -414,7 +414,7 @@ flowchart TB
 
 </details>
 
-**Exercise 2.** A job's slow path occurs with probability $10^{-6}$ per run, independently. How many runs are needed for a 99 % chance of seeing it at least once? At a 4 ms period, how long is that?
+**Exercise 2.** A job's slow path occurs with probability $10^{-6}$ per run, independently. How many runs are needed for a 99% chance of seeing it at least once? At a 4 ms period, how long is that?
 
 <details>
 <summary>Answer</summary>
@@ -428,7 +428,7 @@ We need $(1 - 10^{-6})^n \le 0.01$, so $n \ge \ln 0.01 / \ln(1 - 10^{-6}) \appro
 <details>
 <summary>Answer</summary>
 
-$1 - 3.36/4.8 = 0.30$, a load of 30 %. It does not show that deadlines are met: it is an average, and deadlines depend on the worst-case coincidence of jobs, which only response-time analysis with valid worst-case inputs, checked by measured response times, can address.
+$1 - 3.36/4.8 = 0.30$, a load of 30%. It does not show that deadlines are met: it is an average, and deadlines depend on the worst-case coincidence of jobs, which only response-time analysis with valid worst-case inputs, checked by measured response times, can address.
 
 </details>
 
@@ -454,14 +454,14 @@ The model is wrong, since a correct model gives an upper bound. Likely causes: a
 | How is processor load measured? | With an idle counter ($1 - N/N_0$) or per-task run-time statistics; it is headroom, not a schedulability test. |
 | How is stack use measured? | By painting stacks with a pattern and finding the deepest overwritten word, plus static bounds and guard regions. |
 
-This entry completes the series. It began with the vocabulary of deadlines, latency and jitter and the parts of a microcontroller; moved data from peripherals to memory by polling, interrupts and DMA; carried it between chips and controllers over UART, SPI, I2C and CAN; organized the processing into prioritized tasks whose worst-case response times can be calculated; and ended by measuring the quantities that calculation depends on. The common thread is that in a real-time system timing is a design property: it is specified as deadlines, predicted by analysis from worst-case inputs, and confirmed by measurement on the real hardware.
+This entry completes the series. The series began with the vocabulary of deadlines, latency and jitter and the parts of a microcontroller, and moved data from peripherals to memory by polling, interrupts and DMA. It then carried that data between chips and controllers over UART, SPI, I2C and CAN, organized the processing into prioritized tasks whose worst-case response times can be calculated, and ended by measuring the quantities that calculation depends on. The common thread is that in a real-time system timing is a design property: it is specified as deadlines, predicted by analysis from worst-case inputs, and confirmed by measurement on the real hardware.
 
 ### References
 
-- R. Wilhelm, J. Engblom, A. Ermedahl, N. Holsti, S. Thesing, D. Whalley, G. Bernat, C. Ferdinand, R. Heckmann, T. Mitra, F. Mueller, I. Puaut, P. Puschner, J. Staschulat and P. Stenström, "The worst-case execution-time problem: Overview of methods and survey of tools", *ACM Transactions on Embedded Computing Systems*, 7(3), 2008.
-- G. C. Buttazzo, *Hard Real-Time Computing Systems: Predictable Scheduling Algorithms and Applications*, 3rd edition, Springer, 2011.
 - Arm Limited, *Armv7-M Architecture Reference Manual*, document ARM DDI 0403.
-- J. Yiu, *The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors*, 3rd edition, Newnes, 2014.
+- G. C. Buttazzo, *Hard Real-Time Computing Systems: Predictable Scheduling Algorithms and Applications*, 3rd ed., Springer, 2011.
 - IEEE Std 1003.1-2017, *IEEE Standard for Information Technology: Portable Operating System Interface (POSIX) Base Specifications*, Issue 7, IEEE, 2018.
-- E. A. Lee and S. A. Seshia, *Introduction to Embedded Systems: A Cyber-Physical Systems Approach*, 2nd edition, MIT Press, 2017.
+- E. A. Lee and S. A. Seshia, *Introduction to Embedded Systems: A Cyber-Physical Systems Approach*, 2nd ed., MIT Press, 2017.
 - E. White, *Making Embedded Systems: Design Patterns for Great Software*, O'Reilly Media, 2011.
+- R. Wilhelm, J. Engblom, A. Ermedahl, N. Holsti, S. Thesing, D. Whalley, G. Bernat, C. Ferdinand, R. Heckmann, T. Mitra, F. Mueller, I. Puaut, P. Puschner, J. Staschulat and P. Stenström, "The worst-case execution-time problem: Overview of methods and survey of tools," *ACM Transactions on Embedded Computing Systems*, vol. 7, no. 3, 2008.
+- J. Yiu, *The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors*, 3rd ed., Newnes, 2014.
