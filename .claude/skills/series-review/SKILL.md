@@ -108,4 +108,6 @@ Number findings in severity order (all blocking first). Use repository-relative 
 The review covers the English originals. Vietnamese translations (`src/content/blog/vi/`, `src/content/series/vi/`) are not reviewed, but when corrections are applied, apply the same change to the translation of every corrected article and series file that has one (following `docs/translation-vi.md`), in the same commit, and say so in the Resolution section.
 
 
+When the findings have been resolved (or there were none), `node scripts/series-pipeline.mjs stamp <id>` records the content hash of the reviewed series in the report's header (`- Content hash: ...`). The publication gate (`node scripts/series-pipeline.mjs gate`, run by the deploy workflow) refuses to publish a complete series without a current stamp, so any later edit to the series requires a new review. Do not stamp a report whose findings are unresolved.
+
 Reply with the report path, the counts by severity, and the blocking findings in one line each. Then offer to apply the recommended corrections. Apply them only on request, one commit per review, and re-run the build and link check afterwards.

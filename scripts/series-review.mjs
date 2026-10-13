@@ -12,7 +12,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SERIES_DIR = 'src/content/series';
@@ -167,8 +167,10 @@ function hook() {
   );
 }
 
-const [cmd, ...args] = process.argv.slice(2);
-try {
+// Run the CLI only when executed directly, so that other scripts can import the helpers.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+const [cmd, ...args] = isMain ? process.argv.slice(2) : [];
+if (isMain) try {
   if (cmd === 'list' && args[0]) {
     console.log(JSON.stringify(listSeries(args[0]), null, 2));
   } else if (cmd === 'detect') {

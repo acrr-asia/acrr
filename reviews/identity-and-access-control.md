@@ -4,6 +4,7 @@
 - Reviewed commit: 6e6f2ee
 - Date: 2026-10-13
 - Review: second pass, with the "Concept introduction" and "Stated versions and defaults" dimensions added to the review procedure after the first pass. The first pass (commit 841f4e6) found 11 findings, all of which were applied in commit 17cc179.
+- Content hash: sha256:2d91be1e1d44ac58a8767f0a27aaf1ed63a86322fa882af9a601fe81961a4653
 
 ## Summary
 
