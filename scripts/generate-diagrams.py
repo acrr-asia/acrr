@@ -318,3 +318,22 @@ svg('GaussianFusion', 620, 280, 'Fusing a predicted position with a range measur
     f'the measurement is centred at {zm:g} metres with standard deviation {math.sqrt(Rm):.2f} metres. The fused estimate is centred at {xf:.2f} metres, '
     f'between the two and closer to the more precise measurement, and is narrower than either, with standard deviation {math.sqrt(Pf):.2f} metres.',
     b)
+
+# ---------- 10. Nonlinearity of a platinum resistance sensor (PT100) ----------
+# Values from "Measurement Systems and Sensor Characteristics": R(T) = R0 (1 + A T + B T^2) with the
+# IEC 60751 coefficients for 0 to 100 degC; the plotted error is the deviation of R(T) from the
+# straight line through its end points, expressed in degC by dividing by the average sensitivity.
+R0, Ac, Bc = 100.0, 3.9083e-3, -5.775e-7
+Rpt = lambda T: R0*(1 + Ac*T + Bc*T*T)
+Savg = (Rpt(100) - Rpt(0)) / 100
+nl = lambda T: (Rpt(T) - (Rpt(0) + Savg*T)) / Savg
+P = Plot(60, 30, 520, 190, (0, 100), (0, 0.45))
+b = P.axes([0, 20, 40, 60, 80, 100], [0, 0.1, 0.2, 0.3, 0.4], 'temperature  ' + var('T') + '  (°C)', 'nonlinearity error  (°C)')
+b += P.curve(nl)
+b += f'  <circle class="dot" cx="{P.X(50):.1f}" cy="{P.Y(nl(50)):.1f}" r="3.5" />\n'
+b += text(P.X(50), P.Y(nl(50)) - 10, f'maximum {nl(50):.3f} °C at 50 °C', 'middle', 'small')
+b += text(P.X(50), P.Y(0.08), f'average sensitivity {Savg:.4f} Ω/°C', 'middle', 'small')
+svg('SensorNonlinearity', 620, 270, 'Nonlinearity error of a PT100 sensor between 0 and 100 degrees Celsius',
+    f'A curve of the difference between the PT100 resistance and the straight line joining its values at 0 and 100 degrees Celsius, '
+    f'expressed in degrees Celsius. The error is zero at both ends and rises to a maximum of about {nl(50):.2f} degrees at 50 degrees Celsius.',
+    b)
