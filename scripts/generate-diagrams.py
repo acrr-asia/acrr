@@ -296,3 +296,25 @@ svg('PlanarArmIK', 580, 360, 'Workspace of a two-link planar arm and the two joi
     f'A target at ({tx:.2f}, {ty:.2f}) is reached in two ways: with theta2 = 45 degrees and the elbow below the line from base to target (solid), '
     f'or with theta2 = −45 degrees and the elbow above it (dashed).',
     b)
+
+# ---------- 9. One-dimensional fusion of a prediction and a measurement ----------
+# Values from "Sensing and State Estimation: An Overview": predicted position 10.0 m with variance
+# 0.25 m^2, range measurement 10.6 m with variance 0.09 m^2; the fused estimate uses the article's
+# formulas K = P / (P + R), x = x_pred + K (z - x_pred), P' = (1 - K) P.
+xp, Pp, zm, Rm = 10.0, 0.25, 10.6, 0.09
+Kg = Pp / (Pp + Rm); xf = xp + Kg*(zm - xp); Pf = (1 - Kg)*Pp
+gauss = lambda m, v: (lambda x: math.exp(-(x - m)**2 / (2*v)) / math.sqrt(2*math.pi*v))
+P = Plot(56, 30, 540, 200, (8.8, 11.8), (0, 1.7))
+b = P.axes([9, 9.5, 10, 10.5, 11, 11.5], [0, 0.5, 1.0, 1.5], 'position  ' + var('x') + '  (m)', 'probability density')
+b += P.curve(gauss(xp, Pp), cls='ln')
+b += P.curve(gauss(zm, Rm), cls='mut', extra=' stroke-dasharray="5 4"')
+b += P.curve(gauss(xf, Pf))
+for m, v, label, dx, anchor in ((xp, Pp, 'prediction', -10, 'end'), (zm, Rm, 'measurement', 14, 'start'), (xf, Pf, 'fused estimate', 0, 'middle')):
+    peak = gauss(m, v)(m)
+    b += text(P.X(m) + dx, P.Y(peak) - 8, label, anchor, 'small')
+    b += line([(P.X(m), P.Y(0)), (P.X(m), P.Y(peak))], 'grid')
+svg('GaussianFusion', 620, 280, 'Fusing a predicted position with a range measurement',
+    f'Three bell-shaped curves over position. The prediction is centred at {xp:g} metres with standard deviation {math.sqrt(Pp):.2f} metres; '
+    f'the measurement is centred at {zm:g} metres with standard deviation {math.sqrt(Rm):.2f} metres. The fused estimate is centred at {xf:.2f} metres, '
+    f'between the two and closer to the more precise measurement, and is narrower than either, with standard deviation {math.sqrt(Pf):.2f} metres.',
+    b)
