@@ -12,8 +12,6 @@ objectives:
   - "Explain sampling, quantization and data conversion, and the noise that limits what can be detected."
   - "State and combine measurement uncertainties, and calibrate and fuse sensors."
 plannedEntries:
-  - title: "Sensing Principles: How Physical Effects Become Electrical Signals"
-    description: "Resistive, capacitive, inductive, piezoelectric, thermoelectric, optical and electrochemical sensing, and what each is good and bad at."
   - title: "Signal Conditioning: Bridges, Amplifiers and Analog Filters"
     description: "Excitation, Wheatstone bridges, operational and instrumentation amplifiers, and filters that prepare a sensor signal for conversion."
   - title: "Sampling, Quantization and Data Conversion"
