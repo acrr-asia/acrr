@@ -1,0 +1,432 @@
+---
+title: "Finite Differences for Heat and Waves"
+description: "Time stepping for the heat and wave equations: the method of lines and stiffness, the explicit, implicit and Crank–Nicolson schemes, truncation error and observed order in space and time, von Neumann stability analysis, the Lax equivalence theorem, the leapfrog scheme and the Courant–Friedrichs–Lewy condition, with every rate checked in Python."
+publishedAt: "2026-10-13"
+category: "Mathematical Foundations"
+tags:
+  - numerical-methods
+  - simulation
+  - finite-differences
+  - stability
+series: numerical-simulation
+seriesOrder: 2
+---
+
+[The first entry](/blog/from-differential-equations-to-discrete-problems) introduced the heat, wave and Poisson equations, replaced derivatives by difference quotients, and solved a steady problem on a grid. It also defined the terms used here: truncation error, consistency, stability, convergence and order of accuracy. This entry adds time. A time-dependent problem is advanced step by step from its initial condition, and each step can either be computed directly from the previous one (an **explicit** scheme) or require the solution of a system of equations (an **implicit** scheme). The choice decides how large a time step is allowed, and the reason is stability, not accuracy.
+
+The entry treats the heat equation first, because its schemes and their analysis are the clearest, and then the wave equation, where the Courant–Friedrichs–Lewy condition appears. Every claimed order of accuracy and every stability limit is checked by a short experiment. As in the first entry, the code uses Python 3 with numpy, double-precision arithmetic, and problems scaled to the unit interval; the example of Section 1.3 restores physical units.
+
+## 1. The Heat Equation on a Grid
+
+### 1.1 The model problem
+
+The model problem for the first half of this entry is
+
+$$
+u_t = \alpha\,u_{xx}, \quad 0 \lt x \lt L,\; t \gt 0, \qquad u(0,t) = u(L,t) = 0, \qquad u(x,0) = u_0(x),
+$$
+
+a rod with both ends held at a reference temperature (taken as zero) and an initial temperature profile $u_0$. Subscripts denote partial derivatives. Its exact solution is a sum of decaying sine modes:
+
+$$
+u(x,t) = \sum_{k=1}^{\infty} b_k\, e^{-\alpha (k\pi/L)^2 t} \sin\frac{k\pi x}{L},
+$$
+
+where the $b_k$ are the Fourier sine coefficients of $u_0$. Mode $k$ decays with rate $\alpha (k\pi/L)^2$, so short wavelengths die out much faster than long ones. This is the smoothing behavior of parabolic equations seen in the first entry, and it is also what makes the problem demanding for time-stepping schemes.
+
+### 1.2 The method of lines and stiffness
+
+On the grid $x_j = j\,\Delta x$, $\Delta x = L/N$, replacing $u_{xx}$ by the second difference at the interior points gives the semi-discrete system of the first entry's [method of lines](/blog/from-differential-equations-to-discrete-problems#43-the-method-of-lines):
+
+$$
+\frac{d\mathbf{U}}{dt} = \frac{\alpha}{\Delta x^2}\,T\,\mathbf{U},
+\qquad
+T = \begin{bmatrix}
+-2 & 1 & & \\
+1 & -2 & \ddots & \\
+& \ddots & \ddots & 1 \\
+& & 1 & -2
+\end{bmatrix},
+$$
+
+with $\mathbf{U}(t) = (U_1, \dots, U_{N-1})^{\mathsf T}$. The eigenvectors of $T$ are the sampled sine modes $\sin(k\pi x_j/L)$, exactly the shapes in the series above, and the eigenvalues of the system matrix are
+
+$$
+\lambda_k = -\frac{4\alpha}{\Delta x^2}\,\sin^2\!\frac{k\pi\Delta x}{2L}, \qquad k = 1, \dots, N-1 .
+$$
+
+For small $k$, $\sin z \approx z$ gives $\lambda_k \approx -\alpha(k\pi/L)^2$, the exact decay rate. For the highest mode, $\lambda_{N-1} \approx -4\alpha/\Delta x^2$. The ratio of the fastest to the slowest decay rate is $\cot^2(\pi/(2N)) \approx 4N^2/\pi^2$, about 4,050 for $N = 100$, and it grows fourfold each time the grid is refined by a factor of two. A system whose time scales are spread this widely is called **stiff**. The [numerical integration notes](/blog/numerical-integration-notes) showed what stiffness does to explicit Euler: it is stable only if $|1 + \Delta t\,\lambda| \le 1$ for every eigenvalue, which here means $\Delta t \le 2/|\lambda_{N-1}| \approx \Delta x^2/(2\alpha)$. The fastest mode, which carries almost none of the solution, dictates the step.
+
+### 1.3 A worked example in physical units
+
+A steel-like slab with $\alpha = 10^{-5}$ m²/s and thickness $L = 0.1$ m is discretized with $\Delta x = 1$ mm ($N = 100$). Then:
+
+- the slowest mode decays with time constant $L^2/(\alpha\pi^2) = 101$ s, so the interesting evolution takes several hundred seconds, and the first entry's diffusion-time estimate $L^2/\alpha$ is 1000 s;
+- the explicit limit is $\Delta t \le \Delta x^2/(2\alpha) = 0.05$ s, so 1000 s of simulated time needs 20,000 steps;
+- halving $\Delta x$ doubles the number of unknowns and quarters the allowed step, so the cost rises eightfold.
+
+Sections 2 to 4 develop the schemes behind these numbers and show how an implicit scheme removes the limit.
+
+## 2. The Explicit Scheme
+
+### 2.1 Forward in time, centered in space
+
+Replacing $u_t$ by a forward difference in time and $u_{xx}$ by the second difference at the old time level gives the **forward-time, centered-space** (FTCS) scheme:
+
+$$
+U_j^{n+1} = U_j^n + \mu\left(U_{j+1}^n - 2U_j^n + U_{j-1}^n\right),
+\qquad \mu = \frac{\alpha\,\Delta t}{\Delta x^2}.
+$$
+
+The dimensionless **mesh ratio** $\mu$ combines the time step, the grid spacing and the diffusivity, and it governs both stability and accuracy. FTCS is explicit Euler applied to the method-of-lines system: each new value is computed directly from three old ones, at a cost of a few operations per grid point.
+
+**Truncation error.** Substituting the exact solution and expanding in Taylor series about $(x_j, t^n)$, as in Section 5.1 of the first entry, gives
+
+$$
+\tau_j^n = \frac{u(x_j,t^{n+1}) - u(x_j,t^n)}{\Delta t} - \alpha\,\frac{u(x_{j+1},t^n) - 2u(x_j,t^n) + u(x_{j-1},t^n)}{\Delta x^2}
+= \frac{\Delta t}{2}u_{tt} - \frac{\alpha\,\Delta x^2}{12}u_{xxxx} + \cdots
+$$
+
+The scheme is first order in time and second order in space: $\tau = O(\Delta t + \Delta x^2)$.
+
+### 2.2 Stability by Fourier modes
+
+The **von Neumann method** studies how a scheme treats a single Fourier mode. Substituting $U_j^n = G^n e^{i j \xi}$, where $i = \sqrt{-1}$, $\xi$ is the mode's phase change per grid interval (for the $k$-th sine mode of Section 1.1, $\xi = k\pi\Delta x/L$) ($0 \le \xi \le \pi$ covers every mode the grid can represent), and $G^n$ is the $n$-th power of an **amplification factor** $G$, into the FTCS formula and dividing by $G^n e^{ij\xi}$:
+
+$$
+G(\xi) = 1 + \mu\left(e^{i\xi} - 2 + e^{-i\xi}\right) = 1 - 4\mu \sin^2\frac{\xi}{2}.
+$$
+
+Each step multiplies the mode by $G$. The scheme is stable when $|G(\xi)| \le 1$ for every $\xi$, so that no mode, and in particular no rounding or truncation error, can grow. The worst case is the shortest wave, $\xi = \pi$, where $G = 1 - 4\mu$. Requiring $1 - 4\mu \ge -1$ gives the stability condition
+
+$$
+\mu = \frac{\alpha\,\Delta t}{\Delta x^2} \le \frac{1}{2}.
+$$
+
+It is the same limit as the eigenvalue argument of Section 1.2, and for this problem the agreement is exact, because the sampled sine modes are the eigenvectors of the matrix. In general von Neumann analysis assumes constant coefficients and ignores boundaries (it is exact for periodic problems); for other problems it gives a necessary condition and, in practice, a reliable guide.
+
+A second way to see the limit: FTCS can be written $U_j^{n+1} = \mu U_{j-1}^n + (1 - 2\mu)U_j^n + \mu U_{j+1}^n$. For $\mu \le 1/2$ all three weights are nonnegative and sum to one, so each new value is an average of old values and no new maximum or minimum can appear, a discrete form of the **maximum principle** that the heat equation itself obeys. For $\mu \gt 1/2$ the middle weight is negative and that guarantee is lost.
+
+The following experiment starts from a "tent" profile, whose sharp corner excites every grid mode, and runs FTCS with $\alpha = 1$ on the unit interval just below and just above the limit.
+
+```python
+import numpy as np
+
+def ftcs(N, mu, t_end):
+    """Explicit scheme for u_t = u_xx on (0, 1), u = 0 at both ends."""
+    x = np.linspace(0.0, 1.0, N + 1)
+    U = np.minimum(x, 1.0 - x)          # a "tent": contains every grid mode
+    dt = mu / N**2                        # mu = alpha dt / dx^2 with alpha = 1
+    for _ in range(round(t_end / dt)):
+        U[1:-1] = U[1:-1] + mu * (U[2:] - 2.0 * U[1:-1] + U[:-2])
+    return np.max(np.abs(U))
+
+for mu in (0.49, 0.51):
+    print(f"mu = {mu}: max |U| at t = 0.5 is {ftcs(20, mu, 0.5):.3e}")
+```
+
+```text
+mu = 0.49: max |U| at t = 0.5 is 2.869e-03
+mu = 0.51: max |U| at t = 0.5 is 1.022e+02
+```
+
+The exact solution at $t = 0.5$ is dominated by its first mode, $\tfrac{4}{\pi^2}e^{-\pi^2/2}\sin\pi x$, whose maximum is $2.91\times10^{-3}$; the stable run reproduces it to within 2 %. A 4 % increase of the time step turns the same computation into a sawtooth of amplitude 100: the shortest mode is multiplied by $1 - 4(0.51) = -1.04$ at each of about 400 steps. Instability is not a gradual loss of accuracy but a sharp threshold.
+
+## 3. The Implicit Scheme
+
+### 3.1 Backward in time
+
+Evaluating the second difference at the new time level instead gives the **backward-time, centered-space** (BTCS) scheme, or fully implicit scheme:
+
+$$
+\frac{U_j^{n+1} - U_j^n}{\Delta t} = \alpha\,\frac{U_{j+1}^{n+1} - 2U_j^{n+1} + U_{j-1}^{n+1}}{\Delta x^2}
+\quad\Longleftrightarrow\quad
+-\mu U_{j-1}^{n+1} + (1 + 2\mu)U_j^{n+1} - \mu U_{j+1}^{n+1} = U_j^n .
+$$
+
+The new values are coupled, so each step solves a tridiagonal linear system; this is backward (implicit) Euler applied to the method-of-lines system. A tridiagonal system of $N - 1$ unknowns is solved in about $8N$ operations by the elimination algorithm shown in [the third entry](/blog/solving-large-linear-systems#22-banded-and-tridiagonal-systems), so a step costs only a few times more than an explicit one. Its truncation error is again $O(\Delta t + \Delta x^2)$.
+
+### 3.2 Unconditional stability
+
+The same substitution as in Section 2.2 gives
+
+$$
+G(\xi) = \frac{1}{1 + 4\mu \sin^2(\xi/2)},
+$$
+
+which lies between 0 and 1 for every $\xi$ and every $\mu \gt 0$. BTCS is **unconditionally stable**: no restriction on $\Delta t$ is needed for stability. The time step can be chosen for accuracy alone. In the example of Section 1.3, a step of 5 s ($\mu = 50$) is stable, and 1000 s takes 200 steps instead of 20,000. Moreover $G \to 0$ as $\mu\sin^2(\xi/2) \to \infty$: the fast modes are strongly damped, as they are in the exact solution.
+
+The price is accuracy in time. BTCS is only first order in $\Delta t$, so large steps are stable but not necessarily accurate.
+
+## 4. Crank–Nicolson and the θ-Scheme
+
+### 4.1 Averaging the two
+
+Averaging the explicit and implicit right-hand sides with a weight $\theta$ gives the **θ-scheme**:
+
+$$
+\frac{U_j^{n+1} - U_j^n}{\Delta t} = \alpha\left[\theta\,\delta^2 U_j^{n+1} + (1-\theta)\,\delta^2 U_j^n\right],
+\qquad
+\delta^2 U_j = \frac{U_{j+1} - 2U_j + U_{j-1}}{\Delta x^2}.
+$$
+
+$\theta = 0$ is FTCS, $\theta = 1$ is BTCS, and $\theta = 1/2$ is the **Crank–Nicolson** scheme, which applies the trapezoidal rule in time. Centering both sides at $t^{n+1/2}$ cancels the first-order time error, so Crank–Nicolson has truncation error $O(\Delta t^2 + \Delta x^2)$. Its amplification factor is
+
+$$
+G(\xi) = \frac{1 - 2\mu \sin^2(\xi/2)}{1 + 2\mu \sin^2(\xi/2)},
+$$
+
+and $|G| \le 1$ for all $\mu$: it is unconditionally stable as well. (For general $\theta$ the scheme is unconditionally stable when $\theta \ge 1/2$, and stable for $\mu \le 1/(2 - 4\theta)$ when $\theta \lt 1/2$.)
+
+### 4.2 Measuring the orders
+
+A convergence study checks these orders. The test problem has $\alpha = 1$, $L = 1$ and $u_0 = \sin\pi x$, so the exact solution is $u = e^{-\pi^2 t}\sin\pi x$ (Section 1.1 with a single mode). The script runs each scheme to $t = 0.1$ on grids with $N = 20, 40, 80, 160$, refining $\Delta t$ together with $\Delta x$, and reports the maximum error and the observed order (defined in Section 6.2 of the first entry).
+
+```python
+import numpy as np
+
+def theta_scheme(N, dt, theta, t_end=0.1):
+    """theta = 0: explicit (FTCS), 1: implicit (BTCS), 0.5: Crank-Nicolson.
+    Solves u_t = u_xx on (0, 1), u = 0 at x = 0 and x = 1, u(x, 0) = sin(pi x)."""
+    dx = 1.0 / N
+    x = np.linspace(0.0, 1.0, N + 1)
+    n = N - 1
+    T = (np.diag(-2.0 * np.ones(n)) + np.diag(np.ones(n - 1), 1)
+         + np.diag(np.ones(n - 1), -1)) / dx**2          # discrete u_xx
+    I = np.eye(n)
+    lhs = I - theta * dt * T
+    rhs = I + (1.0 - theta) * dt * T
+    U = np.sin(np.pi * x[1:-1])
+    steps = round(t_end / dt)
+    for _ in range(steps):
+        U = np.linalg.solve(lhs, rhs @ U)
+    exact = np.exp(-np.pi**2 * steps * dt) * np.sin(np.pi * x[1:-1])
+    return np.max(np.abs(U - exact))
+
+cases = [("explicit, dt = 0.4 dx^2", 0.0, lambda N: 0.4 / N**2),
+         ("implicit, dt = dx      ", 1.0, lambda N: 1.0 / N),
+         ("Crank-Nicolson, dt = dx", 0.5, lambda N: 1.0 / N)]
+for name, theta, dt_of in cases:
+    errs = [theta_scheme(N, dt_of(N), theta) for N in (20, 40, 80, 160)]
+    orders = [np.log2(errs[i] / errs[i + 1]) for i in range(3)]
+    print(name, " ".join(f"{e:.2e}" for e in errs),
+          "| observed order in dx:", " ".join(f"{p:.2f}" for p in orders))
+```
+
+```text
+explicit, dt = 0.4 dx^2 1.06e-03 2.65e-04 6.62e-05 1.65e-05 | observed order in dx: 2.00 2.00 2.00
+implicit, dt = dx       7.62e-02 4.14e-02 2.16e-02 1.11e-02 | observed order in dx: 0.88 0.94 0.97
+Crank-Nicolson, dt = dx 6.88e-03 1.69e-03 4.20e-04 1.05e-04 | observed order in dx: 2.03 2.01 2.00
+```
+
+(Dense `np.linalg.solve` is used for brevity; a production code would factor the tridiagonal matrix once and reuse it.) Each line confirms the analysis:
+
+- **Explicit**, with $\mu = 0.4$ fixed so that $\Delta t \propto \Delta x^2$: the error $O(\Delta t + \Delta x^2) = O(\Delta x^2)$ falls fourfold per halving, order 2.
+- **Implicit**, with $\Delta t = \Delta x$: the time error $O(\Delta t) = O(\Delta x)$ dominates and the observed order approaches 1 (it is below 1 on the coarsest grids, where higher-order terms still matter).
+- **Crank–Nicolson**, with the same large steps: order 2, and an error 100 times smaller than BTCS on the finest grid.
+
+How the time step is tied to the grid is part of the experiment: the observed order is that of the combined error, and a refinement in space alone eventually stalls at the time error.
+
+### 4.3 What Crank–Nicolson does not damp
+
+Crank–Nicolson has one weakness. As $\mu\sin^2(\xi/2)$ grows, its $G$ approaches $-1$, not 0. Fast modes, which the exact solution damps almost instantly, are instead kept at nearly full amplitude with an alternating sign. With smooth data they hardly exist, so this does not matter. With rough data, such as a jump between an initial temperature and a different boundary temperature, and a large $\mu$, it shows as an oscillation that persists for many steps. The experiment below starts from $u_0 = 1$ inside the rod with the ends held at 0, takes $\Delta x = 0.02$ and $\Delta t = 0.01$ (so $\mu = 25$), and prints the value next to the boundary.
+
+```python
+import numpy as np
+
+N, dt = 50, 0.01                     # dx = 0.02, so mu = dt / dx^2 = 25
+x = np.linspace(0.0, 1.0, N + 1)
+n = N - 1
+T = (np.diag(-2.0 * np.ones(n)) + np.diag(np.ones(n - 1), 1)
+     + np.diag(np.ones(n - 1), -1)) * N**2
+I = np.eye(n)
+for name, theta in (("implicit      ", 1.0), ("Crank-Nicolson", 0.5)):
+    U = np.ones(n)                   # u = 1 inside, u = 0 on the boundary
+    mins = []
+    for step in range(1, 11):
+        U = np.linalg.solve(I - theta * dt * T, (I + (1 - theta) * dt * T) @ U)
+        if step in (1, 2, 5, 10):
+            mins.append(f"step {step:2d}: U[0] = {U[0]:+.3f}")
+    print(name, " | ".join(mins))
+```
+
+```text
+implicit       step  1: U[0] = +0.181 | step  2: U[0] = +0.099 | step  5: U[0] = +0.053 | step 10: U[0] = +0.031
+Crank-Nicolson step  1: U[0] = -0.509 | step  2: U[0] = +0.577 | step  5: U[0] = -0.274 | step 10: U[0] = +0.219
+```
+
+The exact temperature stays between 0 and 1 and near the cold boundary is small and positive. BTCS gives exactly that. Crank–Nicolson produces a negative temperature after one step and flips sign from step to step; for the shortest grid mode its factor is $G = -0.96$, so ten steps reduce the oscillation by only a third. The scheme is stable (nothing grows) but not damping. In the language of the [numerical integration notes](/blog/numerical-integration-notes), the trapezoidal rule is A-stable (stable for every decaying mode) but not **L-stable** (its factor does not tend to zero for infinitely fast decay), while backward Euler is both. Common remedies are a few BTCS steps at the start, smaller initial steps, or simply BTCS where second-order time accuracy is not needed.
+
+## 5. Consistency, Stability, Convergence
+
+The experiments illustrate a general theorem. The **Lax equivalence theorem** (Lax and Richtmyer, 1956) states that for a well-posed linear initial value problem and a consistent finite-difference approximation to it, stability is necessary and sufficient for convergence. It turns the first entry's informal statement, consistency plus stability gives convergence, into a precise result, and it explains the division of labor in analyzing a scheme:
+
+- **Consistency and order** come from Taylor series (Sections 2.1 and 4.1): local and mechanical.
+- **Stability** comes from von Neumann analysis, the matrix eigenvalues of the method of lines, or an energy argument: global, and the step where schemes are won or lost.
+- **Convergence** then follows, with the order of the truncation error.
+
+The theorem applies to linear problems. Nonlinear problems need more care, but the same two checks, consistency and stability, remain the core of the analysis, and a measured convergence rate remains the test of whether an implementation lives up to them.
+
+## 6. The Wave Equation
+
+### 6.1 The leapfrog scheme
+
+For $u_{tt} = c^2 u_{xx}$, replacing both second derivatives by second differences gives the explicit **leapfrog** scheme (also called the central-difference scheme for the wave equation):
+
+$$
+U_j^{n+1} = 2U_j^n - U_j^{n-1} + \nu^2\left(U_{j+1}^n - 2U_j^n + U_{j-1}^n\right),
+\qquad \nu = \frac{c\,\Delta t}{\Delta x}.
+$$
+
+The dimensionless **Courant number** $\nu$ is the distance a wave travels in one step, measured in grid intervals. The scheme uses two old levels, so it needs a separate first step from the two initial conditions. With initial displacement $u_0$ and initial velocity $v_0$, a Taylor expansion in time using $u_{tt} = c^2u_{xx}$ gives $U_j^1 = U_j^0 + \Delta t\,v_0(x_j) + \tfrac{\nu^2}{2}\left(U_{j+1}^0 - 2U_j^0 + U_{j-1}^0\right)$, which keeps second-order accuracy. The truncation error of the scheme is $O(\Delta t^2 + \Delta x^2)$.
+
+### 6.2 Stability and the CFL condition
+
+Substituting $U_j^n = G^n e^{ij\xi}$ gives a quadratic for $G$:
+
+$$
+G^2 - 2\left(1 - 2\nu^2 \sin^2\frac{\xi}{2}\right)G + 1 = 0 .
+$$
+
+The product of its two roots is 1, so stability requires both to have modulus exactly 1, which happens when the middle coefficient satisfies $\left|1 - 2\nu^2\sin^2(\xi/2)\right| \le 1$, that is $\nu^2\sin^2(\xi/2) \le 1$ for every $\xi$. The condition is
+
+$$
+\nu = \frac{c\,\Delta t}{\Delta x} \le 1 .
+$$
+
+This is the **Courant–Friedrichs–Lewy (CFL) condition**, from the 1928 paper by Courant, Friedrichs and Lewy, and it has a direct physical meaning. The leapfrog value $U_j^n$ depends on grid values at most $n$ points to either side at the start, a distance $n\,\Delta x$. The exact solution at $(x_j, t^n)$ depends on initial data within distance $c\,t^n = c\,n\,\Delta t$, its **domain of dependence**. If $c\,\Delta t \gt \Delta x$, the exact solution depends on initial data that the scheme never looks at, and no refinement at fixed $\nu$ can fix that. The CFL condition (the numerical domain of dependence must contain the physical one) is necessary for the convergence of any explicit scheme for a hyperbolic problem; for leapfrog it is also sufficient.
+
+In two dimensions with equal spacing in $x$ and $y$, the same analysis gives $\nu \le 1/\sqrt{2}$ for leapfrog, and for the explicit heat scheme $\mu \le 1/4$: more neighbors mean a tighter limit.
+
+### 6.3 Checking order and the CFL limit
+
+The test problem is $c = 1$, $L = 1$, $u_0 = \sin\pi x$, $v_0 = 0$, with exact solution $u = \cos(\pi t)\sin(\pi x)$, run to $t = 2.5$ with three Courant numbers.
+
+```python
+import numpy as np
+
+def leapfrog(N, nu, t_end=2.5):
+    """u_tt = u_xx (c = 1) on (0, 1), u = 0 at both ends,
+    u(x, 0) = sin(pi x), u_t(x, 0) = 0; exact u = cos(pi t) sin(pi x)."""
+    dx = 1.0 / N
+    dt = nu * dx
+    x = np.linspace(0.0, 1.0, N + 1)
+    U_old = np.sin(np.pi * x)
+    lap = lambda U: np.concatenate(([0.0], U[2:] - 2 * U[1:-1] + U[:-2], [0.0]))
+    U = U_old + 0.5 * nu**2 * lap(U_old)          # first step, uses u_t(x, 0) = 0
+    steps = round(t_end / dt)
+    for _ in range(steps - 1):
+        U, U_old = 2 * U - U_old + nu**2 * lap(U), U
+    exact = np.cos(np.pi * steps * dt) * np.sin(np.pi * x)
+    return np.max(np.abs(U - exact))
+
+for nu in (0.5, 1.0, 1.05):
+    errs = [leapfrog(N, nu) for N in (20, 40, 80)]
+    print(f"nu = {nu}:", " ".join(f"{e:.2e}" for e in errs))
+```
+
+```text
+nu = 0.5: 6.06e-03 1.51e-03 3.79e-04
+nu = 1.0: 1.52e-15 8.04e-16 8.96e-16
+nu = 1.05: 8.45e-04 4.52e+08 7.64e+34
+```
+
+- At $\nu = 0.5$ the error falls by 4.0 per halving of $\Delta x$ (and $\Delta t$): second order.
+- At $\nu = 1$ the error is at rounding level. In one dimension with $\nu = 1$ the leapfrog update reproduces the exact traveling-wave solution at the grid points (it becomes a discrete form of d'Alembert's solution), a special property that does not carry over to two or three dimensions or to variable wave speed.
+- At $\nu = 1.05$, 5 % above the limit, the coarse run still looks acceptable, but refining makes it worse: more steps, each amplifying the shortest modes, give errors of $10^8$ and $10^{34}$. A computation that diverges under refinement is the signature of instability.
+
+One verification detail is worth noticing. The time $t = 2.5$ was chosen because $\cos(\pi t) = 0$ there. At $t = 1$, where $\cos(\pi t) = -1$ is at an extremum, a small phase error $\delta$ changes the solution only by about $\delta^2/2$, and the same script measures errors of $2.94\times10^{-6}$, $1.83\times10^{-7}$ and $1.15\times10^{-8}$, falling by 16 per halving, as if the scheme were fourth order. The scheme has not changed; the measurement point has hidden the leading error. Measuring at several times, or in a norm over the whole run, avoids such coincidences, a point taken up in [the fifth entry](/blog/verifying-and-validating-a-simulation).
+
+### 6.4 Numerical dispersion
+
+For $\nu \lt 1$ the scheme does not destroy waves, since $|G| = 1$, but it moves them at slightly wrong speeds. A mode with phase change $\xi$ per grid interval has wavelength $2\pi\Delta x/\xi$; let $\omega$ be its angular frequency in time. Writing $G = e^{-i\omega\Delta t}$ in the quadratic of Section 6.2 gives the scheme's **dispersion relation**
+
+$$
+\sin\frac{\omega\,\Delta t}{2} = \nu\,\sin\frac{\xi}{2},
+$$
+
+whereas for the exact equation a wave of that length, traveling at speed $c$, has $\omega\,\Delta t = \nu\,\xi$. For long waves ($\xi$ small) the two agree, but short waves travel too slowly. A sharp pulse, which contains many wavelengths, therefore spreads into a train of ripples trailing behind it: **numerical dispersion**. It is an error in phase, not amplitude, and it is reduced by using more grid points per wavelength or a higher-order scheme. At $\nu = 1$ the relation reduces to $\omega\,\Delta t = \xi$, the exact one, consistent with the exactness noted above.
+
+For waves, implicit schemes remove the CFL limit, but accuracy usually requires a time step comparable to $\Delta x/c$ anyway, since a wave must not cross many cells in one step to be resolved in time. Explicit schemes running close to their CFL limit are therefore the usual choice for wave propagation, while implicit schemes dominate for diffusion, where the explicit limit $\Delta t \propto \Delta x^2$ is far below what accuracy needs.
+
+## 7. Choosing a Scheme
+
+| Scheme | Equation | Order (time, space) | Stability | Cost per step | Use when |
+|---|---|---|---|---|---|
+| FTCS (explicit) | Heat | 1, 2 | $\mu \le 1/2$ (1D) | A few operations per point | Fine time resolution is wanted anyway, or small problems |
+| BTCS (implicit) | Heat | 1, 2 | Unconditional, strongly damping | One sparse linear solve | Large steps, rough data, steady state is the goal |
+| Crank–Nicolson | Heat | 2, 2 | Unconditional, weakly damping | One sparse linear solve | Smooth data, accuracy in time matters |
+| Leapfrog | Wave | 2, 2 | $\nu \le 1$ (1D) | A few operations per point | Wave propagation, with $\nu$ close to 1 |
+
+In two and three dimensions, the "one sparse linear solve" of an implicit step is no longer tridiagonal, and its cost decides whether implicit time stepping pays. That is the subject of the next entry.
+
+## 8. Exercises
+
+**Exercise 1.** A copper bar with $\alpha = 1.1\times10^{-4}$ m²/s (take this value as given) is modeled on a grid with $\Delta x = 2$ mm. What is the largest stable FTCS time step? How does it change if $\Delta x$ is reduced to 1 mm?
+
+<details>
+<summary>Answer</summary>
+
+$\Delta t \le \Delta x^2/(2\alpha) = (2\times10^{-3})^2/(2.2\times10^{-4}) = 0.018$ s. With $\Delta x = 1$ mm it falls by a factor of four, to about 0.0045 s.
+
+</details>
+
+**Exercise 2.** Derive the BTCS amplification factor of Section 3.2 by substituting $U_j^n = G^n e^{ij\xi}$.
+
+<details>
+<summary>Answer</summary>
+
+The scheme gives $G^{n+1}e^{ij\xi}\left[1 + 2\mu - \mu(e^{i\xi} + e^{-i\xi})\right] = G^n e^{ij\xi}$. Since $e^{i\xi} + e^{-i\xi} = 2\cos\xi$ and $2 - 2\cos\xi = 4\sin^2(\xi/2)$, the bracket is $1 + 4\mu\sin^2(\xi/2)$, so $G = 1/(1 + 4\mu\sin^2(\xi/2))$.
+
+</details>
+
+**Exercise 3.** A guitar string has wave speed $c = 300$ m/s (take this as given) and is simulated with $\Delta x = 5$ mm. What is the largest stable leapfrog time step, and what sampling frequency does it correspond to?
+
+<details>
+<summary>Answer</summary>
+
+$\Delta t \le \Delta x/c = 0.005/300 = 1.67\times10^{-5}$ s, a rate of 60,000 steps per second. Refining to $\Delta x = 2.5$ mm halves the step: for waves the explicit limit scales with $\Delta x$, not $\Delta x^2$.
+
+</details>
+
+**Exercise 4.** In the Crank–Nicolson experiment of Section 4.3, the amplification factor of the shortest grid mode is $-0.96$. How many steps does it take to reduce that mode by a factor of 100, and what does BTCS do to the same mode in one step?
+
+<details>
+<summary>Answer</summary>
+
+$\ln(100)/\ln(1/0.96) \approx 113$ steps (with the more precise value $G = -0.9607$, about 115). For BTCS, $G = 1/(1 + 4\cdot25\cdot\sin^2(49\pi/100)) \approx 0.0099$: the mode is reduced a hundredfold in a single step.
+
+</details>
+
+**Exercise 5.** Why does the leapfrog experiment at $\nu = 1.05$ look accurate on the coarsest grid but diverge on finer ones?
+
+<details>
+<summary>Answer</summary>
+
+The shortest grid mode is multiplied by a root of the quadratic of Section 6.2 with modulus about 1.84 at every step, starting from rounding level, roughly $10^{-16}$. The coarsest grid takes only 48 steps to reach $t = 2.5$, and $1.84^{48}\times10^{-16} \approx 5\times10^{-4}$, the size of the error observed. The finer grids take 95 and 190 steps, and since the growth compounds, the same estimate gives about $10^{10}$ and $10^{36}$, within a factor of about 100 of the observed $4.5\times10^{8}$ and $7.6\times10^{34}$, as close as a guessed starting amplitude allows. A refinement study exposes the instability that a single run hides.
+
+</details>
+
+## 9. Summary
+
+| Question | Answer |
+|---|---|
+| What makes the semi-discrete heat equation stiff? | Its decay rates range from about $\alpha\pi^2/L^2$ to $4\alpha/\Delta x^2$, a ratio of about $4N^2/\pi^2$. |
+| What limits the explicit (FTCS) scheme? | Stability: $\mu = \alpha\Delta t/\Delta x^2 \le 1/2$ in one dimension, so $\Delta t$ must shrink like $\Delta x^2$. |
+| What does von Neumann analysis compute? | The amplification factor $G(\xi)$ of each Fourier mode per step; stability requires $\lvert G\rvert \le 1$ for all modes. |
+| What do implicit schemes buy? | Unconditional stability, at the cost of a linear solve per step. |
+| How do BTCS and Crank–Nicolson differ? | BTCS is first order in time and strongly damps fast modes; Crank–Nicolson is second order but barely damps them, so rough data can oscillate. |
+| What does the Lax equivalence theorem say? | For a consistent scheme for a well-posed linear problem, stability is equivalent to convergence. |
+| What is the CFL condition? | The numerical domain of dependence must contain the physical one; for leapfrog, $\nu = c\Delta t/\Delta x \le 1$. |
+| What is numerical dispersion? | Waves of different lengths traveling at slightly wrong speeds, so pulses spread into ripples. |
+
+Implicit schemes and steady problems both end in a linear system at every step or once. In one dimension it is tridiagonal and cheap; in two and three dimensions it has millions of unknowns and a structure that decides which solver can handle it. The next entry, [Solving Large Linear Systems](/blog/solving-large-linear-systems), takes up that problem.
+
+### References
+
+- J. Crank and P. Nicolson, "A practical method for numerical evaluation of solutions of partial differential equations of the heat-conduction type", *Proceedings of the Cambridge Philosophical Society*, vol. 43, no. 1, pp. 50–67, 1947.
+- R. Courant, K. Friedrichs and H. Lewy, "Über die partiellen Differenzengleichungen der mathematischen Physik", *Mathematische Annalen*, vol. 100, pp. 32–74, 1928.
+- P. D. Lax and R. D. Richtmyer, "Survey of the stability of linear finite difference equations", *Communications on Pure and Applied Mathematics*, vol. 9, no. 2, pp. 267–293, 1956.
+- R. J. LeVeque, *Finite Difference Methods for Ordinary and Partial Differential Equations: Steady-State and Time-Dependent Problems*, SIAM, 2007.
+- K. W. Morton and D. F. Mayers, *Numerical Solution of Partial Differential Equations: An Introduction*, 2nd edition, Cambridge University Press, 2005.
+- J. C. Strikwerda, *Finite Difference Schemes and Partial Differential Equations*, 2nd edition, SIAM, 2004.

@@ -1,0 +1,453 @@
+---
+title: "The Finite Element Method"
+description: "The finite element method from its variational form: weak formulations and essential and natural boundary conditions, the energy principle, Galerkin's method and its best-approximation property, linear and quadratic elements in one dimension with element matrices and assembly, linear triangles in two dimensions, a priori error estimates checked by convergence studies, and how the method compares with finite differences."
+publishedAt: "2026-10-13"
+category: "Mathematical Foundations"
+tags:
+  - numerical-methods
+  - simulation
+  - finite-elements
+  - partial-differential-equations
+series: numerical-simulation
+seriesOrder: 4
+---
+
+Finite differences, the subject of [the first](/blog/from-differential-equations-to-discrete-problems) and [second](/blog/finite-differences-for-heat-and-waves) entries, approximate derivatives at the points of a grid. They are simple and efficient on rectangles, but awkward on a turbine blade, a bone or a bracket with holes, and awkward too when material properties jump from one region to another. The **finite element method** (FEM) starts from a different place: not from the differential equation at points, but from an integral statement of it, required to hold on average against a set of test functions. That change of viewpoint lets the method use meshes of triangles or tetrahedra that follow any shape, treats flux boundary conditions and discontinuous coefficients naturally, and comes with a theory that predicts its error.
+
+This entry builds the method step by step: the weak form of a boundary value problem and its equivalent energy-minimization form, Galerkin's method and why it gives the best approximation available in its space, linear and quadratic elements in one dimension with their element matrices and assembly, and linear triangles in two dimensions. Each convergence rate stated is checked by a computation. The result, as [the previous entry](/blog/solving-large-linear-systems) anticipated, is a sparse symmetric positive definite (SPD) system of the kind solved there. The code uses Python 3 with numpy in double precision.
+
+## 1. From Strong Form to Weak Form
+
+### 1.1 The model problem
+
+The one-dimensional model problem is steady heat conduction in a rod with conductivity $k(x) \gt 0$ (W/(m·K)) and a volumetric heat source $f(x)$ (W/m³; the $Q$ of the first entry, which there was divided by a constant $k$):
+
+$$
+-\bigl(k(x)\,u'(x)\bigr)' = f(x), \quad 0 \lt x \lt L, \qquad u(0) = 0, \qquad k(L)\,u'(L) = q_L .
+$$
+
+The left end is held at a reference temperature (a Dirichlet condition) and a heat flux $q_L$ (W/m²) enters at the right end (a Neumann condition, since $-k u'$ is the flux in the $+x$ direction). Writing the conductivity inside the derivative matters when $k$ varies: it is the flux $k u'$, not $u'$, that is continuous where materials meet. With constant $k = 1$ this is the first entry's $-u'' = f$.
+
+This form, which requires the equation to hold at every point and $u$ to have two derivatives, is the **strong form**.
+
+### 1.2 Multiply, integrate, integrate by parts
+
+Take any smooth **test function** $v(x)$ with $v(0) = 0$ (zero where $u$ is prescribed), multiply the equation by it, and integrate over the domain:
+
+$$
+-\int_0^L (k u')'\,v\,dx = \int_0^L f\,v\,dx .
+$$
+
+Integration by parts moves one derivative from $u$ to $v$:
+
+$$
+\int_0^L k\,u'\,v'\,dx - \bigl[k\,u'\,v\bigr]_0^L = \int_0^L f\,v\,dx .
+$$
+
+The boundary term at $x = 0$ vanishes because $v(0) = 0$, and at $x = L$ the flux condition gives $k(L)u'(L)v(L) = q_L\,v(L)$. The result is the **weak form**: find $u$ with $u(0) = 0$ such that
+
+$$
+a(u, v) = \ell(v) \quad \text{for all admissible } v,
+\qquad
+a(u,v) = \int_0^L k\,u'\,v'\,dx,
+\qquad
+\ell(v) = \int_0^L f\,v\,dx + q_L\,v(L).
+$$
+
+Three things have changed, and each matters for what follows.
+
+- **Fewer derivatives.** Only first derivatives appear, so $u$ and $v$ need only be continuous with square-integrable first derivatives, and their derivatives may jump. The set of such functions on $(0, L)$ is the **Sobolev space** $H^1$; the **admissible** functions here are those in $H^1$ that vanish at $x = 0$, written $V$. A continuous, piecewise-linear function belongs to $V$, though it has no second derivative at its kinks; that is what makes simple elements possible.
+- **Two kinds of boundary condition.** The Dirichlet condition is imposed on the space of functions itself: it is an **essential** boundary condition. The flux condition appears inside $\ell(v)$ and is satisfied by the weak solution automatically: it is a **natural** boundary condition. An insulated end ($q_L = 0$) needs no code at all.
+- **Symmetry.** $a(u, v) = a(v, u)$, which becomes the symmetry of the matrix.
+
+If the solution is smooth enough, the weak and strong forms are equivalent: reversing the integration by parts recovers the differential equation and the flux condition. Where $k$ jumps, the weak form is the more fundamental statement, since it holds where the strong form's second derivative does not exist.
+
+### 1.3 The energy principle
+
+Because $a$ is symmetric and $a(v, v) = \int k\,(v')^2\,dx \gt 0$ for every nonzero $v \in V$ (a function with $v' = 0$ and $v(0) = 0$ is zero), the weak problem is also a minimization problem. Define the **energy functional**
+
+$$
+J(v) = \tfrac{1}{2}\,a(v, v) - \ell(v).
+$$
+
+For the weak solution $u$ and any $w \in V$, expanding gives $J(u + w) = J(u) + \bigl[a(u, w) - \ell(w)\bigr] + \tfrac{1}{2}a(w, w)$. The bracket is zero by the weak form and the last term is positive unless $w = 0$, so $u$ is the unique minimizer of $J$ over $V$. In structural mechanics this is the principle of minimum potential energy (stored strain energy minus the work of the loads); in heat conduction it is a statement about a dissipation-like quantity. Its discrete counterpart is the function $\phi(\mathbf{V}) = \tfrac{1}{2}\mathbf{V}^{\mathsf T}A\mathbf{V} - \mathbf{b}^{\mathsf T}\mathbf{V}$ that conjugate gradients minimizes in [the third entry](/blog/solving-large-linear-systems#51-solving-by-minimizing). Minimizing $J$ over a finite-dimensional set of trial functions is the **Rayleigh–Ritz method**; for symmetric problems it gives the same equations as Galerkin's method, described next.
+
+## 2. Galerkin's Method
+
+### 2.1 From a space of functions to a matrix
+
+Choose a finite-dimensional subspace $V_h \subset V$ spanned by **basis functions** $\varphi_1, \dots, \varphi_n$, and look for the approximate solution
+
+$$
+u_h(x) = \sum_{j=1}^{n} U_j\,\varphi_j(x)
+$$
+
+that satisfies the weak form for every test function in $V_h$ (rather than in all of $V$): $a(u_h, v_h) = \ell(v_h)$ for all $v_h \in V_h$. This is **Galerkin's method**. Since both sides are linear in $v_h$, it suffices to take $v_h = \varphi_i$ for each $i$, which gives $n$ equations for the $n$ coefficients:
+
+$$
+\sum_{j=1}^{n} a(\varphi_j, \varphi_i)\,U_j = \ell(\varphi_i), \quad i = 1, \dots, n
+\qquad\Longleftrightarrow\qquad
+K\mathbf{U} = \mathbf{F},
+$$
+
+with the **stiffness matrix** $K_{ij} = a(\varphi_j, \varphi_i)$ and the **load vector** $F_i = \ell(\varphi_i)$, names inherited from structural mechanics. $K$ plays the role of the matrix $A$ of the earlier entries. It is symmetric because $a$ is, and positive definite because $\mathbf{V}^{\mathsf T}K\mathbf{V} = a(v_h, v_h) \gt 0$ for the nonzero function $v_h = \sum V_j\varphi_j$.
+
+### 2.2 Galerkin orthogonality and best approximation
+
+Subtracting the discrete equations from the exact weak form, which holds in particular for $v_h \in V_h$, gives **Galerkin orthogonality**:
+
+$$
+a(u - u_h, v_h) = 0 \quad \text{for all } v_h \in V_h .
+$$
+
+The error is orthogonal to the whole approximation space in the inner product $a(\cdot,\cdot)$. With the **energy norm** $\|v\|_a = \sqrt{a(v, v)}$, this means $u_h$ is the orthogonal projection of $u$ onto $V_h$, so
+
+$$
+\|u - u_h\|_a = \min_{v_h \in V_h}\|u - v_h\|_a .
+$$
+
+The Galerkin solution is the best approximation to the exact solution that the chosen space contains, measured in energy. (For problems where $a$ is not symmetric, **Céa's lemma** gives the weaker but still very useful statement that the error is within a constant factor of the best approximation.) The analysis of the method therefore reduces to a question of approximation: how well can functions in $V_h$ approximate the true solution? Section 4 answers it for polynomial elements.
+
+## 3. Linear Elements in One Dimension
+
+### 3.1 Elements and hat functions
+
+The "finite elements" are the pieces of a mesh and the simple functions defined on them. Divide $[0, L]$ by nodes $0 = x_0 \lt x_1 \lt \dots \lt x_N = L$ into **elements** $[x_e, x_{e+1}]$ of lengths $h_e$, which need not be equal. Let $V_h$ be the continuous functions that are linear on each element. Its natural basis is the set of **hat functions**: $\varphi_j$ equals 1 at node $x_j$, 0 at every other node, and is linear in between, so it is nonzero only on the two elements next to $x_j$. The coefficient $U_j$ is then the value of $u_h$ at node $j$, as in finite differences.
+
+Because each hat function overlaps only its neighbors, $a(\varphi_j, \varphi_i) = 0$ unless $|i - j| \le 1$: the stiffness matrix is tridiagonal. The locality of the basis functions is what makes FEM matrices sparse.
+
+### 3.2 Element matrices and assembly
+
+$K$ is not computed entry by entry. The integral $a(\varphi_j, \varphi_i)$ is a sum over elements, and on each element only two basis functions are nonzero: the two **shape functions** of that element. On element $e$, with local coordinate $s = (x - x_e)/h_e \in [0, 1]$, they are $N_1 = 1 - s$ and $N_2 = s$, with derivatives $\mp 1/h_e$. For constant $k$ on the element, the **element stiffness matrix** is
+
+$$
+K^{e} = \int_{x_e}^{x_{e+1}} k \begin{bmatrix} N_1'N_1' & N_1'N_2' \\ N_2'N_1' & N_2'N_2' \end{bmatrix} dx
+= \frac{k}{h_e}\begin{bmatrix} 1 & -1 \\ -1 & 1 \end{bmatrix},
+$$
+
+and the **element load vector** has entries $\int f N_i\,dx$ over the element. **Assembly** adds each element's $2\times2$ matrix into the rows and columns of its two global node numbers. Finally the essential condition is imposed: here the row and column of node 0, where $u = 0$ is known, are removed. Integrals that cannot be done exactly are evaluated by **Gauss–Legendre quadrature**, which with $m$ points integrates polynomials of degree up to $2m - 1$ exactly.
+
+On a uniform mesh with $k = 1$, assembly gives $K = \tfrac{1}{h}\,\text{tridiag}(-1, 2, -1)$, which is $h$ times the finite-difference matrix of the first entry; and $F_i \approx h\,f(x_i)$. Dividing by $h$ gives the finite-difference equations except for how the source is sampled. The two methods are close relatives in this simplest setting, and they diverge as soon as meshes become irregular or coefficients vary.
+
+### 3.3 Convergence of linear elements
+
+The script assembles and solves the first entry's test problem $-u'' = \pi^2\sin\pi x$, $u(0) = u(1) = 0$ (both ends Dirichlet), with a 4-point Gauss rule for the load, and measures three errors:
+
+- the **$L^2$ norm** $\|u - u_h\|_{L^2} = \bigl(\int_0^1 (u - u_h)^2\,dx\bigr)^{1/2}$, a root-mean-square error over the whole domain;
+- the **$H^1$ seminorm** $|u - u_h|_{H^1} = \bigl(\int_0^1 (u' - u_h')^2\,dx\bigr)^{1/2}$, the error in the derivative (the flux), which equals the energy norm when $k = 1$;
+- the maximum error at the nodes.
+
+```python
+import numpy as np
+
+# -u'' = f on (0, 1), u(0) = u(1) = 0, f = pi^2 sin(pi x), exact u = sin(pi x)
+f = lambda x: np.pi**2 * np.sin(np.pi * x)
+u = lambda x: np.sin(np.pi * x)
+du = lambda x: np.pi * np.cos(np.pi * x)
+gx, gw = np.polynomial.legendre.leggauss(4)       # 4-point Gauss rule on [-1, 1]
+
+def fem_p1(N):
+    nodes = np.linspace(0.0, 1.0, N + 1)
+    K = np.zeros((N + 1, N + 1))
+    F = np.zeros(N + 1)
+    for e in range(N):                             # loop over elements
+        a, b = nodes[e], nodes[e + 1]
+        h = b - a
+        xq = a + (gx + 1) * h / 2                  # quadrature points in element
+        wq = gw * h / 2
+        phi = np.array([(b - xq) / h, (xq - a) / h])  # the two hat-function pieces
+        K[e:e + 2, e:e + 2] += np.array([[1, -1], [-1, 1]]) / h
+        F[e:e + 2] += phi @ (wq * f(xq))
+    inner = slice(1, N)                            # u = 0 at both ends
+    U = np.zeros(N + 1)
+    U[inner] = np.linalg.solve(K[inner, inner], F[inner])
+    return nodes, U
+
+def errors(nodes, U):
+    l2 = h1 = 0.0
+    for e in range(len(nodes) - 1):
+        a, b = nodes[e], nodes[e + 1]
+        h = b - a
+        xq, wq = a + (gx + 1) * h / 2, gw * h / 2
+        uh = U[e] + (U[e + 1] - U[e]) * (xq - a) / h
+        duh = (U[e + 1] - U[e]) / h
+        l2 += wq @ (u(xq) - uh)**2
+        h1 += wq @ (du(xq) - duh)**2
+    return np.sqrt(l2), np.sqrt(h1), np.max(np.abs(U - u(nodes)))
+
+prev = None
+for N in (8, 16, 32, 64):
+    e = errors(*fem_p1(N))
+    rates = "" if prev is None else "  orders: L2 %.2f, H1 %.2f" % tuple(
+        np.log2(np.array(prev[:2]) / np.array(e[:2])))
+    print(f"N = {N:2d}: L2 error {e[0]:.2e}, H1 error {e[1]:.2e}, "
+          f"nodal error {e[2]:.1e}{rates}")
+    prev = e
+```
+
+```text
+N =  8: L2 error 9.92e-03, H1 error 2.51e-01, nodal error 2.2e-12
+N = 16: L2 error 2.49e-03, H1 error 1.26e-01, nodal error 8.7e-15  orders: L2 2.00, H1 1.00
+N = 32: L2 error 6.22e-04, H1 error 6.29e-02, nodal error 3.1e-15  orders: L2 2.00, H1 1.00
+N = 64: L2 error 1.56e-04, H1 error 3.15e-02, nodal error 9.1e-15  orders: L2 2.00, H1 1.00
+```
+
+The $L^2$ error is second order and the derivative error first order. A piecewise-linear function can follow a smooth curve to within $O(h^2)$, but its slope is constant on each element and so can match the true slope only to $O(h)$. The nodal values, remarkably, are exact up to quadrature and rounding error: for this one-dimensional problem with constant $k$, linear elements reproduce the exact solution at the nodes when the load is integrated exactly, a special property that does not hold in two dimensions. The comparison with the first entry is instructive: the finite-difference solution of the same problem had a nodal error of $1.3\times10^{-4}$ at $N = 80$. The two methods differ only in how $f$ enters the equations, and the Galerkin load $\int f\varphi_i\,dx$ is the better choice here.
+
+## 4. Higher-Order Elements and Error Estimates
+
+### 4.1 Quadratic elements
+
+Raising the polynomial degree on each element is the other way to improve accuracy. **Quadratic elements** use three nodes per element (the two ends and the midpoint) and the three quadratic shape functions that equal 1 at one of these nodes and 0 at the other two. With local coordinate $s \in [0, 1]$ these are $2(s - \tfrac12)(s - 1)$, $-4s(s - 1)$ and $2s(s - \tfrac12)$, and for constant $k$ the element stiffness matrix is
+
+$$
+K^{e} = \frac{k}{3h_e}\begin{bmatrix} 7 & -8 & 1 \\ -8 & 16 & -8 \\ 1 & -8 & 7 \end{bmatrix}.
+$$
+
+The global matrix now has a half-bandwidth of 2 instead of 1, but is still sparse and SPD.
+
+### 4.2 A priori error estimates
+
+The best-approximation property of Section 2.2 and standard interpolation estimates combine into the classical **a priori error estimates**. For elements of polynomial degree $d$ on a family of meshes of size $h$, and a solution smooth enough (with $d + 1$ square-integrable derivatives),
+
+$$
+|u - u_h|_{H^1} \le C\,h^{d}, \qquad \|u - u_h\|_{L^2} \le C'\,h^{d+1},
+$$
+
+with constants $C$, $C'$ that depend on the solution's derivatives and on the shape of the elements but not on $h$. The $H^1$ estimate follows directly from best approximation. The extra power in $L^2$ needs an additional argument, a duality argument usually credited to Aubin and Nitsche, which requires the problem itself to be smoothing enough (true for the model problem). Linear elements ($d = 1$) give the orders 1 and 2 observed in Section 3.3. The script below checks quadratic elements ($d = 2$) on the same problem, with a 5-point Gauss rule; its first lines also confirm the element matrix above.
+
+```python
+import numpy as np
+
+# Quadratic (P2) elements for the same problem: -u'' = pi^2 sin(pi x), u(0) = u(1) = 0.
+f = lambda x: np.pi**2 * np.sin(np.pi * x)
+u = lambda x: np.sin(np.pi * x)
+du = lambda x: np.pi * np.cos(np.pi * x)
+gx, gw = np.polynomial.legendre.leggauss(5)
+
+def shape(s):          # quadratic shape functions on [0, 1] (nodes 0, 1/2, 1) and derivatives
+    return (np.array([2*(s - .5)*(s - 1), -4*s*(s - 1), 2*s*(s - .5)]),
+            np.array([4*s - 3, -8*s + 4, 4*s - 1]))
+
+def fem_p2(N):
+    n = 2 * N + 1                                  # element end points and midpoints
+    K, F = np.zeros((n, n)), np.zeros(n)
+    h = 1.0 / N
+    s, w = (gx + 1) / 2, gw / 2                    # quadrature on the reference [0, 1]
+    phi, dphi = shape(s)
+    Ke = (dphi * w) @ dphi.T / h                   # = [[7,-8,1],[-8,16,-8],[1,-8,7]]/(3h)
+    for e in range(N):
+        idx = [2 * e, 2 * e + 1, 2 * e + 2]
+        K[np.ix_(idx, idx)] += Ke
+        F[idx] += phi @ (w * f(e * h + s * h)) * h
+    U = np.zeros(n)
+    U[1:-1] = np.linalg.solve(K[1:-1, 1:-1], F[1:-1])
+    l2 = h1 = 0.0
+    for e in range(N):
+        Ue = U[2 * e:2 * e + 3]
+        xq = e * h + s * h
+        l2 += (w * h) @ (u(xq) - Ue @ phi)**2
+        h1 += (w * h) @ (du(xq) - Ue @ dphi / h)**2
+    return np.sqrt(l2), np.sqrt(h1)
+
+prev = None
+for N in (4, 8, 16, 32):
+    e = np.array(fem_p2(N))
+    rates = "" if prev is None else "  orders: L2 %.2f, H1 %.2f" % tuple(np.log2(prev / e))
+    print(f"N = {N:2d}: L2 error {e[0]:.2e}, H1 error {e[1]:.2e}{rates}")
+    prev = e
+```
+
+```text
+N =  4: L2 error 1.95e-03, H1 error 5.06e-02
+N =  8: L2 error 2.46e-04, H1 error 1.27e-02  orders: L2 2.99, H1 1.99
+N = 16: L2 error 3.08e-05, H1 error 3.19e-03  orders: L2 3.00, H1 2.00
+N = 32: L2 error 3.85e-06, H1 error 7.98e-04  orders: L2 3.00, H1 2.00
+```
+
+Quadratic elements give orders 3 and 2, one more than linear elements in each norm, as the estimates predict. The cost per unknown is similar, so for smooth solutions higher degree buys accuracy cheaply: with 8 quadratic elements (17 nodes) the $L^2$ error is already below that of 32 linear elements (33 nodes).
+
+### 4.3 When the solution is not smooth
+
+The estimates assume a smooth solution, and the rates are limited by the solution's smoothness, not only by the degree of the elements. A re-entrant corner (such as the inner corner of an L-shaped plate), a point load, or a jump in the boundary conditions produces a solution whose derivatives are infinite or discontinuous somewhere, and uniform refinement then converges more slowly than $h^d$, whatever $d$ is. The remedy is to refine the mesh locally where the solution is rough: by hand, or automatically by **adaptive** methods that estimate the error element by element after each solve. That freedom to place small elements where they are needed, on a mesh that also follows curved boundaries, is the practical advantage of finite elements.
+
+## 5. Two Dimensions
+
+### 5.1 The weak form in two dimensions
+
+For $-\nabla\cdot(k\nabla u) = f$ in a domain $\Omega$, with $u = 0$ on part of the boundary $\Gamma_D$ and a prescribed flux $k\,\partial u/\partial n = g$ on the rest, $\Gamma_N$, the same three steps (multiply by a test function vanishing on $\Gamma_D$, integrate, and use the divergence theorem in place of integration by parts) give
+
+$$
+\int_\Omega k\,\nabla u\cdot\nabla v\,dA = \int_\Omega f\,v\,dA + \int_{\Gamma_N} g\,v\,ds
+\quad\text{for all admissible } v .
+$$
+
+Everything in Sections 1 and 2 carries over: essential and natural conditions, the energy principle, Galerkin orthogonality and best approximation.
+
+### 5.2 Linear triangles
+
+The domain is covered by a mesh of triangles that meet edge to edge. On each triangle, $u_h$ is linear, $u_h = c_0 + c_1x + c_2y$, determined by its three vertex values; across edges it is continuous. The basis function $\varphi_i$ is a "pyramid": 1 at node $i$, 0 at all others, linear on each triangle. On a triangle with vertices $(x_i, y_i)$, the three shape functions follow from inverting the $3\times3$ matrix with rows $[1, x_i, y_i]$; their gradients are constant on the triangle, so for constant $k$ the element stiffness matrix is simply
+
+$$
+K^{e}_{ij} = k\,|T|\,\nabla N_i\cdot\nabla N_j ,
+$$
+
+where $|T|$ is the triangle's area. The overall workflow is the same as in one dimension, and the same in every finite element code:
+
+```mermaid
+flowchart LR
+    G["Geometry"] --> M["Mesh"]
+    M --> E["Element<br/>matrices"]
+    E --> A["Assembly and<br/>boundary conditions"]
+    A --> S["Sparse solve"]
+    S --> P["Derived<br/>quantities"]
+```
+
+### 5.3 A two-dimensional computation
+
+The script below solves $-\nabla^2u = 2\pi^2\sin\pi x\,\sin\pi y$ on the unit square with $u = 0$ on the boundary (exact solution $\sin\pi x\sin\pi y$), on a mesh made by cutting each square of an $N\times N$ grid into two triangles along a diagonal. The load uses **vertex quadrature**: each vertex receives one third of the triangle's area times $f$ at that vertex. The script also compares the assembled stiffness matrix with the five-point matrix of [the third entry](/blog/solving-large-linear-systems#11-the-five-point-matrix), scaled by $h^2$.
+
+```python
+import numpy as np
+
+# -(u_xx + u_yy) = f on the unit square, u = 0 on the boundary,
+# f = 2 pi^2 sin(pi x) sin(pi y), exact u = sin(pi x) sin(pi y).
+f = lambda x, y: 2 * np.pi**2 * np.sin(np.pi * x) * np.sin(np.pi * y)
+u = lambda x, y: np.sin(np.pi * x) * np.sin(np.pi * y)
+
+def mesh(N):
+    """(N+1)^2 nodes; each small square is cut into two triangles."""
+    x = np.linspace(0.0, 1.0, N + 1)
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    pts = np.column_stack([X.ravel(), Y.ravel()])
+    idx = lambda i, j: i * (N + 1) + j
+    tris = []
+    for i in range(N):
+        for j in range(N):
+            a, b, c, d = idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)
+            tris += [(a, b, c), (a, c, d)]
+    return pts, np.array(tris)
+
+def solve(N):
+    pts, tris = mesh(N)
+    n = len(pts)
+    K, F = np.zeros((n, n)), np.zeros(n)
+    for t in tris:
+        P = pts[t]                                       # 3 x 2 vertex coordinates
+        M = np.column_stack([np.ones(3), P])             # rows [1, x_i, y_i]
+        area = abs(np.linalg.det(M)) / 2
+        G = np.linalg.inv(M)[1:, :].T                    # row i = gradient of phi_i
+        K[np.ix_(t, t)] += area * G @ G.T                # element stiffness
+        F[t] += area / 3 * f(P[:, 0], P[:, 1])           # vertex quadrature for the load
+    x, y = pts[:, 0], pts[:, 1]
+    free = (x > 0) & (x < 1) & (y > 0) & (y < 1)         # interior nodes
+    U = np.zeros(n)
+    U[free] = np.linalg.solve(K[np.ix_(free, free)], F[free])
+    return K[np.ix_(free, free)], np.max(np.abs(U - u(x, y)))
+
+prev = None
+for N in (8, 16, 32):
+    K, err = solve(N)
+    m = N - 1
+    T = 2 * np.eye(m) - np.eye(m, k=1) - np.eye(m, k=-1)
+    same = np.allclose(K, np.kron(np.eye(m), T) + np.kron(T, np.eye(m)))
+    rate = "" if prev is None else f", order {np.log2(prev / err):.2f}"
+    print(f"N = {N:2d}: max nodal error {err:.2e}{rate}; "
+          f"stiffness matrix = five-point matrix times h^2: {same}")
+    prev = err
+```
+
+```text
+N =  8: max nodal error 1.30e-02; stiffness matrix = five-point matrix times h^2: True
+N = 16: max nodal error 3.22e-03, order 2.01; stiffness matrix = five-point matrix times h^2: True
+N = 32: max nodal error 8.04e-04, order 2.00; stiffness matrix = five-point matrix times h^2: True
+```
+
+The nodal error converges at second order. The second column holds a lesson. On this particular mesh, the linear-triangle stiffness matrix is exactly $h^2$ times the five-point matrix (each right-angled triangle has no coupling between the two ends of its hypotenuse, so no diagonal neighbors appear; see Exercise 2), and vertex quadrature gives $F_i = h^2 f(x_i, y_i)$, since every interior node belongs to six triangles of total area $3h^2$. The finite element equations are therefore identical to the finite-difference equations of the third entry. On a uniform grid of a square, the finite element method has no advantage; its value lies in what finite differences cannot do easily: unstructured meshes that follow curved boundaries and are refined locally, coefficients that jump across material interfaces, flux conditions that need no special treatment, and error estimates that hold on general meshes.
+
+### 5.4 Meshes and elements in practice
+
+The constants in the error estimates depend on element shape. Triangles with angles close to $180°$ degrade accuracy, and very small angles worsen the condition number of $K$, so mesh generators aim for well-shaped elements. Beyond linear triangles, practical codes use quadratic triangles, bilinear and quadratic quadrilaterals, and their three-dimensional counterparts (tetrahedra and hexahedra). **Isoparametric** elements use the same shape functions to map a reference element onto a curved element of the mesh, so that curved boundaries are followed with the same accuracy as the solution. Time-dependent problems combine a finite element discretization in space with the time-stepping schemes of [the second entry](/blog/finite-differences-for-heat-and-waves), through the method of lines; the mass matrix $M_{ij} = \int\varphi_i\varphi_j\,dA$ then appears in front of the time derivative.
+
+## 6. Comparing the Three Families
+
+| | Finite differences | Finite elements | Finite volumes |
+|---|---|---|---|
+| Starting point | Differential equation at grid points | Weak (integral) form, test functions | Conservation law on each cell |
+| Geometry | Structured grids; boundaries awkward | Unstructured meshes; any shape | Unstructured meshes; any shape |
+| Boundary conditions | Ghost points, one-sided differences | Essential imposed, natural automatic | Fluxes on boundary faces |
+| Error theory | Truncation error plus stability | Best approximation, a priori estimates | Truncation and conservation arguments |
+| Typical use | Simple geometries, wave propagation, teaching | Structural mechanics, heat transfer, electromagnetics | Fluid dynamics, where local conservation is essential |
+
+The three families meet more often than the table suggests: on uniform meshes they often produce the same equations, as Sections 3.2 and 5.3 showed.
+
+## 7. Exercises
+
+**Exercise 1.** Derive the weak form of $-(k u')' = f$ on $(0, L)$ with $u(0) = 0$ and the Robin condition $-k(L)\,u'(L) = h_c\,\bigl(u(L) - u_\infty\bigr)$ at the right end (convective cooling, as in the first entry). Which terms change in $K$ and $\mathbf{F}$?
+
+<details>
+<summary>Answer</summary>
+
+The boundary term at $x = L$ is $k(L)u'(L)v(L) = -h_c\,(u(L) - u_\infty)\,v(L)$. Moving the term with $u$ to the left gives $\int_0^L k\,u'v'\,dx + h_c\,u(L)\,v(L) = \int_0^L f\,v\,dx + h_c\,u_\infty\,v(L)$. In the matrix, $h_c$ is added to the diagonal entry of the last node, and $h_c u_\infty$ to the last entry of the load vector. The Robin condition is natural, like the Neumann condition, and keeps $K$ symmetric positive definite.
+
+</details>
+
+**Exercise 2.** Compute the element stiffness matrix of a linear triangle with vertices $(0,0)$, $(h,0)$ and $(0,h)$, for $k = 1$. Why does it not depend on $h$?
+
+<details>
+<summary>Answer</summary>
+
+The shape functions are $N_1 = 1 - x/h - y/h$, $N_2 = x/h$, $N_3 = y/h$, with gradients $(-1,-1)/h$, $(1,0)/h$ and $(0,1)/h$. The area is $h^2/2$, so $K^e = \tfrac{1}{2}\begin{bmatrix} 2 & -1 & -1 \\ -1 & 1 & 0 \\ -1 & 0 & 1 \end{bmatrix}$. In two dimensions the gradients scale as $1/h$ and the area as $h^2$, so the product is independent of $h$. The zero couplings between nodes 2 and 3 (across the hypotenuse) are why the assembled matrix in Section 5.3 has no diagonal neighbors.
+
+</details>
+
+**Exercise 3.** From the table in Section 3.3, estimate the $H^1$ error of linear elements with $N = 256$, and the number of linear elements needed to match the $H^1$ error of 32 quadratic elements.
+
+<details>
+<summary>Answer</summary>
+
+First order: $3.15\times10^{-2}/4 \approx 7.9\times10^{-3}$ at $N = 256$. The quadratic $H^1$ error at $N = 32$ is $7.98\times10^{-4}$; linear elements reach it when $3.15\times10^{-2}\times 64/N = 7.98\times10^{-4}$, that is $N \approx 2{,}500$ elements, against 32 quadratic elements (65 nodes).
+
+</details>
+
+**Exercise 4.** What happens to the stiffness matrix if the problem of Section 1.1 has flux conditions at both ends and no Dirichlet condition?
+
+<details>
+<summary>Answer</summary>
+
+Every row of the assembled $K$ then sums to zero, because the element matrices do ($[1, -1]$ in each row), so the vector of all ones is in its null space and $K$ is singular. This is the discrete form of the first entry's observation that a pure Neumann problem fixes $u$ only up to a constant and has a solution only if the fluxes balance the sources. One nodal value must be prescribed, or a constraint added.
+
+</details>
+
+**Exercise 5.** Why is the Galerkin solution the best approximation in the energy norm, but not necessarily at the nodes or in the maximum norm?
+
+<details>
+<summary>Answer</summary>
+
+Galerkin orthogonality makes $u_h$ the orthogonal projection of $u$ onto $V_h$ in the inner product $a(\cdot,\cdot)$, which minimizes the error in the norm that inner product defines, the energy norm. Other norms are controlled only through estimates with constants. The nodal exactness in Section 3.3 is a special property of one-dimensional problems, not a consequence of best approximation.
+
+</details>
+
+## 8. Summary
+
+| Question | Answer |
+|---|---|
+| What is the weak form? | The equation multiplied by test functions and integrated, with derivatives moved onto the test functions by integration by parts: $a(u, v) = \ell(v)$ for all admissible $v$. |
+| Essential or natural? | Dirichlet conditions are imposed on the function space (essential); flux and Robin conditions appear in the weak form and are satisfied automatically (natural). |
+| What does the energy principle say? | For symmetric problems the weak solution minimizes $J(v) = \tfrac12 a(v,v) - \ell(v)$. |
+| What is Galerkin's method? | Requiring the weak form for all test functions in a finite-dimensional space; it yields $K\mathbf{U} = \mathbf{F}$ with $K$ sparse and SPD. |
+| Why is it accurate? | Galerkin orthogonality: the solution is the best approximation in the energy norm from the chosen space. |
+| How is $K$ built? | From small element matrices, assembled by adding them into the rows and columns of each element's nodes. |
+| What rates do polynomial elements give? | Degree $d$: $O(h^d)$ in the $H^1$ seminorm and $O(h^{d+1})$ in $L^2$ for smooth solutions (measured: 1 and 2 for linear, 2 and 3 for quadratic). |
+| When is FEM worth it over finite differences? | Complex geometry, local refinement, material interfaces, flux conditions, and when an error theory on general meshes is wanted. |
+
+Every convergence rate in this series so far was measured against a known exact solution. Real simulations have none, and a code can converge to the wrong answer, or to the right answer of the wrong equations. The final entry, [Verifying and Validating a Simulation](/blog/verifying-and-validating-a-simulation), turns the experiments of these four entries into a method for establishing how much a simulation result can be trusted.
+
+### References
+
+- G. Strang and G. J. Fix, *An Analysis of the Finite Element Method*, Prentice-Hall, 1973.
+- S. C. Brenner and L. R. Scott, *The Mathematical Theory of Finite Element Methods*, 3rd edition, Springer, 2008.
+- C. Johnson, *Numerical Solution of Partial Differential Equations by the Finite Element Method*, Cambridge University Press, 1987.
+- T. J. R. Hughes, *The Finite Element Method: Linear Static and Dynamic Finite Element Analysis*, Prentice-Hall, 1987 (reprinted by Dover, 2000).
+- O. C. Zienkiewicz, R. L. Taylor and J. Z. Zhu, *The Finite Element Method: Its Basis and Fundamentals*, 7th edition, Butterworth-Heinemann, 2013.
+- R. Courant, "Variational methods for the solution of problems of equilibrium and vibrations", *Bulletin of the American Mathematical Society*, vol. 49, no. 1, pp. 1–23, 1943.
