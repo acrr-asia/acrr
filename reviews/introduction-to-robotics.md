@@ -19,6 +19,14 @@ The four optional items are notation and wording. There are no blocking findings
 
 Findings: 0 blocking, 4 should fix, 4 optional.
 
+## Resolution
+
+All 8 findings (F1–F8) were applied as recommended on 2026-10-13, with one change of placement: the F4 paragraph on discrete-time models follows the Kalman filter equations rather than sitting between the model equations and the sentence that continues them. Afterwards:
+- `SITE_URL=https://acrr.asia npm run build` reported 0 errors and 0 warnings, and `npm run check:links` found every internal link resolved;
+- no text was glued to inline elements, and KaTeX reported no errors.
+
+Line numbers below refer to the reviewed commit, not to the corrected articles.
+
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
