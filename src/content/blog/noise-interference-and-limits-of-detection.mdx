@@ -1,0 +1,220 @@
+---
+title: "Noise, Interference and the Limits of Detection"
+description: "What sets the smallest change a sensor system can detect: how noise is described, the thermal, shot and flicker noise of physics and electronics, amplifier noise, averaging and dither, the ways interference couples into a circuit and how to keep it out, and how all of it adds up in a complete channel."
+publishedAt: "2026-10-13"
+category: "Engineering"
+tags:
+  - sensors
+  - measurement
+  - electronics
+series: sensor-systems
+seriesOrder: 5
+---
+
+import Figure from '../../components/Figure.astro';
+import NoiseDensity from '../../components/diagrams/NoiseDensity.astro';
+
+The first entry of this series said that a sensor's resolution is often set by the converter, "but noise usually limits it first". The previous entry treated one kind of noise, the quantization error of the converter, and found that a 24-bit converter divides a 3.3 V range into steps of 0.2 µV. Whether such fine steps carry information depends on everything else that disturbs the signal on its way from the sensor, and that is the subject of this entry.
+
+Two kinds of disturbance need to be kept apart:
+
+- **Noise** is the random fluctuation that physics adds to every signal: the thermal agitation of electrons in a resistor, the granularity of current made of individual charges, and slower fluctuations in materials and components. It cannot be removed, only limited.
+- **Interference** is an unwanted signal coupled in from an external source: mains wiring, motors, switching power supplies, radio transmitters. It is deterministic in principle, and good design can keep most of it out.
+
+The entry first introduces the vocabulary for describing noise, then the three fundamental noise mechanisms and the noise of amplifiers, then what averaging can and cannot do. It then turns to interference and the ways it couples into a circuit, and ends by adding everything up for the load-cell channel of the previous entries. Throughout, noise is computed at a temperature of 300 K (27 °C), and a noise voltage written without qualification is a root-mean-square value.
+
+## 1. Describing Noise
+
+### 1.1 RMS value and amplitude distribution
+
+A noise voltage $v_n(t)$ has, by definition, no predictable value at any instant, so it is described statistically. Its average is zero (any constant part counts as an offset, not as noise), and its size is given by the **root-mean-square** (RMS) value, the square root of the average of $v_n^2$. For a zero-mean signal this is the same as its standard deviation $\sigma$, which links noise directly to the uncertainty vocabulary of the first entry.
+
+Most noise has a **Gaussian** (normal) amplitude distribution, because it is the sum of many small independent contributions. A Gaussian signal has no maximum value, but large excursions are rare: it stays within $\pm 3.3\sigma$ for 99.9 % of the time. Datasheets and oscilloscope users therefore quote a **peak-to-peak** noise of about $6.6\,\sigma$, meaning the range exceeded only 0.1 % of the time.
+
+### 1.2 Noise spectral density
+
+Noise is spread over frequency, and how it is spread matters as much as how large it is. The **noise spectral density** says how much noise falls in each part of the spectrum. For a voltage it is written $e_n(f)$ and measured in volts per root hertz (V/√Hz): the RMS noise in a narrow band of width $\Delta f$ around $f$ is $e_n(f)\sqrt{\Delta f}$. The odd unit comes from the fact that **noise powers add, not noise voltages**: the mean square noise in a band is $e_n^2\,\Delta f$, and the RMS value is its square root.
+
+Noise whose density is the same at all frequencies is called **white noise**, by analogy with white light. Over a bandwidth $B$, white noise of density $e_n$ has an RMS value
+
+$$
+v_n = e_n \sqrt{B}.
+$$
+
+Two consequences follow. Reducing the bandwidth reduces the noise, but only by the square root: a hundred times less bandwidth gives ten times less noise. And independent noise sources combine by **root sum of squares**, exactly as independent uncertainty contributions did in the first entry: $v_n = \sqrt{v_1^2 + v_2^2 + \dots}$. The largest source therefore dominates quickly; a source a third the size of the largest adds only 5 % to the total.
+
+### 1.3 The noise bandwidth of a filter
+
+The bandwidth $B$ in the formula is not the filter's cut-off frequency $f_c$, because a real filter does not stop abruptly. The **equivalent noise bandwidth** (ENBW) is the width of an ideal brick-wall filter that would pass the same white-noise power: the integral of the squared magnitude response over all frequencies. For Butterworth low-pass filters of order $n$ it works out as
+
+| Filter | Equivalent noise bandwidth |
+|---|---|
+| First order | $\tfrac{\pi}{2}\,f_c \approx 1.57\,f_c$ |
+| Second-order Butterworth | $1.11\,f_c$ |
+| Fourth-order Butterworth | $1.03\,f_c$ |
+
+The gentle skirt of a first-order filter lets through 57 % more noise than its cut-off frequency suggests; a fourth-order filter is close to ideal. This is the quantitative form of the remark, in the signal-conditioning entry, that limiting bandwidth limits noise.
+
+## 2. Fundamental Noise Sources
+
+### 2.1 Thermal noise
+
+Every resistor at a temperature above absolute zero generates noise, because the electrons in it move randomly with thermal energy. This **thermal noise** (or Johnson–Nyquist noise, after the two physicists who measured and explained it in 1928) is white, and its voltage density is
+
+$$
+e_n = \sqrt{4kTR},
+$$
+
+where $k = 1.381 \times 10^{-23}$ J/K is the Boltzmann constant, $T$ the absolute temperature and $R$ the resistance. At 300 K a 1 kΩ resistor produces 4.07 nV/√Hz, and the density scales with $\sqrt{R}$: a 350 Ω strain-gauge bridge produces 2.41 nV/√Hz. Thermal noise belongs to the resistance itself, not to a defect of the component, so a better resistor cannot reduce it. Only lower resistance, lower temperature or less bandwidth can. Ideal capacitors and inductors, which dissipate no energy, generate none.
+
+One consequence appears in every sampling converter. The resistance of the switch that charges the sample-and-hold capacitor generates thermal noise, and integrating it over the bandwidth of the RC circuit gives a total that does not depend on $R$ at all: $v_n = \sqrt{kT/C}$. For a 1 pF capacitor that is 64 µV RMS, which is why high-resolution converters use large sampling capacitors.
+
+### 2.2 Shot noise
+
+An electric current is a flow of discrete charges. When the charges cross a potential barrier independently of one another, as they do in a p–n junction such as a photodiode, their arrival is random, and the current fluctuates around its average $I$. This **shot noise** is white, with a current density
+
+$$
+i_n = \sqrt{2qI},
+$$
+
+where $q = 1.602 \times 10^{-19}$ C is the elementary charge. (A current through a metal resistor shows practically no shot noise, because the charges' motions are strongly correlated; its noise is thermal.)
+
+The photodiode of the sensing-principles entry produces 0.55 µA from 1 µW of light. Its shot noise is $\sqrt{2 \times 1.602 \times 10^{-19} \times 0.55 \times 10^{-6}} \approx 0.42$ pA/√Hz. The 1 MΩ feedback resistor of the transimpedance amplifier in the signal-conditioning entry adds thermal noise current $\sqrt{4kT/R} \approx 0.13$ pA/√Hz. In that circuit's bandwidth of 160 kHz (first order, so an equivalent noise bandwidth of about 250 kHz), the combined noise is about 0.22 nA RMS against a signal of 550 nA: a **signal-to-noise ratio** (SNR, the ratio of signal RMS to noise RMS) of about 2500, or 68 dB. Because shot noise grows with $\sqrt{I}$, the SNR of a shot-noise-limited detector grows only with the square root of the light power.
+
+### 2.3 Flicker (1/f) noise
+
+Thermal and shot noise are white. Almost every electronic component also shows a third kind, whose density rises towards low frequencies: **flicker noise**, whose power density is proportional to $1/f$ (so its voltage density to $1/\sqrt{f}$), and which is therefore also called **1/f noise**. Its physical origins vary (charge trapping in semiconductors, fluctuations in contacts and films), and it has no single formula from first principles. It is described empirically by the **corner frequency** $f_c$ at which its density equals the white noise floor $e_w$:
+
+$$
+e_n(f) = e_w\sqrt{1 + \frac{f_c}{f}}.
+$$
+
+<Figure caption="Voltage noise density of an amplifier with a white noise floor of 10 nV/√Hz and a 1/f corner at 10 Hz, on logarithmic axes. Above the corner the noise is white; below it, the density rises as 1/√f.">
+  <NoiseDensity />
+</Figure>
+
+Flicker noise matters most to exactly the sensors this series has dealt with: those whose signals change slowly, such as weighing, temperature and pressure. Integrating the 1/f part of the density between $f_1$ and $f_2$ gives an RMS value of $e_w\sqrt{f_c \ln(f_2/f_1)}$, which depends only on the *ratio* of the frequencies. Every decade of frequency contributes the same noise, so extending a measurement towards lower frequencies (longer observation times) never stops adding noise.
+
+For the amplifier in the figure ($e_w = 10$ nV/√Hz, $f_c = 10$ Hz), the band from 0.1 to 10 Hz contains
+
+$$
+\underbrace{10\ \tfrac{\text{nV}}{\sqrt{\text{Hz}}}\sqrt{10\ \text{Hz} \times \ln 100}}_{1/f\ \text{part}\ \approx\ 67.9\ \text{nV}}
+\quad\text{and}\quad
+\underbrace{10\ \tfrac{\text{nV}}{\sqrt{\text{Hz}}}\sqrt{9.9\ \text{Hz}}}_{\text{white part}\ \approx\ 31.5\ \text{nV}},
+$$
+
+about 74.8 nV RMS in total, or roughly 0.5 µV peak-to-peak. The 1/f part dominates. Datasheets of precision amplifiers quote exactly this figure, the peak-to-peak noise from 0.1 to 10 Hz, because it is what limits slow measurements.
+
+## 3. Amplifier Noise
+
+An amplifier adds its own noise, and it is described by two sources placed at its input: a **voltage noise density** $e_n$ in series with the input and a **current noise density** $i_n$ flowing into it. The current noise produces a voltage across the source resistance $R_s$, and the source resistance adds its own thermal noise. All three are independent, so the total noise density referred to the input is
+
+$$
+e_\text{total} = \sqrt{e_n^2 + (i_n R_s)^2 + 4kTR_s}.
+$$
+
+Referring all noise to the input, rather than to the output, makes it directly comparable with the signal, whatever the gain.
+
+The formula explains how amplifiers are chosen. For a strain-gauge bridge ($R_s = 350$ Ω) and an amplifier with $e_n = 10$ nV/√Hz and $i_n = 0.1$ pA/√Hz, the three terms are 10, 0.035 and 2.41 nV/√Hz, and the total is 10.3 nV/√Hz: the amplifier's voltage noise dominates, and a lower-$e_n$ amplifier would help. For a high-resistance source, such as a 10 MΩ electrode, $i_n R_s$ is 1 µV/√Hz and dominates everything; there an amplifier with very low current noise (typically one with field-effect-transistor inputs) is needed, even if its voltage noise is higher.
+
+Flicker noise in the amplifier is fought differently. The **zero-drift** amplifiers mentioned in the signal-conditioning entry modulate the input signal to a high frequency inside the chip, amplify it there, where the amplifier's noise is white, and demodulate it back: the same synchronous-demodulation principle used for AC-excited sensors. The amplifier's own 1/f noise and drift then lie outside the band of the demodulated signal, and the white floor extends down to very low frequencies. Exciting a bridge with alternating voltage, rather than a steady one, achieves the same for the whole front end.
+
+## 4. Averaging and Dither
+
+The first entry noted that averaging $n$ independent readings reduces random error by a factor of $\sqrt{n}$. That is the time-domain view of the bandwidth argument above: averaging $n$ samples is a low-pass filter whose noise bandwidth is about $1/n$ of the original. Two cautions follow from the noise mechanisms:
+
+- **Averaging helps only for white noise.** For 1/f noise, consecutive samples are correlated, and averaging over a longer time also lets in lower-frequency noise. Beyond some averaging time, longer averaging stops improving the result and eventually makes it worse, as drift takes over. The Allan deviation, a plot of the scatter of averages against averaging time, is the standard tool for finding that optimum.
+- **Averaging needs noise to work below one quantization step.** The previous entry showed that a steady, noise-free signal produces the same code every time, with an error of up to $q/2$ that averaging cannot remove. Random noise of a suitable size, either already present or added deliberately as **dither**, makes the codes vary from sample to sample so that their average tracks the input between steps.
+
+The dither must be large enough. A simulation of Gaussian dither with a standard deviation of $0.25\,q$ leaves the average of many samples biased by up to about $0.09\,q$ at some input values; with $0.5\,q$ the bias falls below $0.01\,q$. With $\sigma = 0.5\,q$, each sample carries a total random error of $\sqrt{(0.5q)^2 + q^2/12} \approx 0.58\,q$ (dither plus quantization), and averaging 256 samples reduces it by 16, to about $q/28$: nearly five bits of resolution gained. The price is time. A converter sampling at 1 kHz then delivers 3.9 averaged readings per second. Dither trades bandwidth for resolution; it does not create information that the noise had destroyed.
+
+## 5. Interference
+
+Interference needs three things: a **source** of electrical energy, a **coupling path**, and a **receiver** sensitive to it, which in a sensor system is usually a high-impedance or high-gain input. Removing any one of the three removes the interference. The common sources are mains wiring (50 or 60 Hz depending on the country, and their harmonics), motors and their drives, switching power supplies and digital circuits, and radio transmitters. Four coupling paths cover almost every case.
+
+### 5.1 Conductive coupling: shared impedances and ground loops
+
+When two circuits share a conductor, the current of one produces a voltage that appears in the other. The usual culprit is a shared ground return. If a motor's current of 1 A returns through 10 mΩ of wire that the sensor's ground also uses, the sensor's reference point moves by 10 mV, more than the entire 6.6 mV full-scale output of the load cell in the previous entries.
+
+A **ground loop** is the same mechanism on a larger scale: a sensor grounded at one place and its instrument at another, with the cable's shield or return conductor connecting the two, closes a loop through which currents driven by the difference between the two "grounds" flow. The remedies are to give sensitive circuits their own return conductors that join others at a single point (**star grounding**), to measure differentially so that the ground difference becomes a common-mode voltage that the instrumentation amplifier rejects, and, when the grounds are far apart or at very different potentials, to break the loop with galvanic isolation, as described in the signal-conditioning entry.
+
+### 5.2 Capacitive coupling: electric fields
+
+Any two conductors form a capacitor, so a conductor at a changing voltage injects a current $i = C\,dv/dt$ into its neighbours. A sensor lead with a stray capacitance of only 1 pF to a 230 V, 50 Hz mains conductor receives a current of $2\pi \times 50 \times 10^{-12} \times 230 \approx 72$ nA RMS. What that current becomes depends on the impedance of the node it flows into, as long as that impedance is small compared with the 3.2 GΩ impedance of the 1 pF coupling capacitance:
+
+- into a 1 MΩ node (an electrode, a high-value resistor) it produces 72 mV RMS, enough to swamp any small signal;
+- into the 350 Ω output of a strain-gauge bridge it produces 25 µV RMS, and if both bridge leads run together, nearly the same on each, which the instrumentation amplifier rejects as common mode.
+
+Capacitive coupling is therefore a problem chiefly for high-impedance circuits. A conductive **electrostatic shield** around the sensitive conductor, connected to the circuit's reference, intercepts the field and returns the injected current to the reference instead of the signal. For low-frequency interference, the shield is connected at one end only, so that it does not itself form a ground loop.
+
+### 5.3 Inductive coupling: magnetic fields
+
+A changing magnetic flux through a loop induces a voltage in it. A loop of area $A$ in a uniform field $B(t)$ perpendicular to it picks up $v = A\,dB/dt$; for a sinusoidal field of amplitude $B_0$ at frequency $f$ the peak voltage is $2\pi f A B_0$. A sensor cable whose two conductors enclose 10 cm² near a transformer producing 10 µT at 50 Hz picks up $2\pi \times 50 \times 10^{-3} \times 10^{-5} \approx 3.1$ µV peak, about 2.2 µV RMS.
+
+The induced voltage is proportional to the loop area, so the remedy is to make the area small: run the signal conductor and its return together, and **twist** them. In a twisted pair, adjacent twists form loops of opposite orientation, whose induced voltages cancel. Shielding against low-frequency magnetic fields, unlike electric ones, needs thick, high-permeability material and is a last resort; increasing the distance from the source helps more, because the field of a transformer or motor falls off steeply with distance.
+
+### 5.4 Radio-frequency interference
+
+Radio transmitters, mobile phones and fast digital edges produce interference at megahertz to gigahertz frequencies, far above any sensor's band of interest. It would seem harmless, but amplifier inputs are nonlinear at such frequencies: they partly **rectify** the interference, turning it into a DC shift or a low-frequency signal that lies inside the band of interest and that no later filter can remove. The defence is a small RC low-pass filter directly at each amplifier input, with matched components on the two lines of a differential input so that it does not convert common-mode interference into a differential signal, together with shielded enclosures and short leads.
+
+### 5.5 A checklist
+
+| Coupling | Sensitive to | Remedies |
+|---|---|---|
+| Conductive (shared impedance, ground loop) | Currents in shared returns, potential differences between grounds | Separate returns joined at one point; differential measurement; isolation |
+| Capacitive (electric field) | High-impedance nodes, fast voltage changes nearby | Low impedance; shields connected at one end; differential measurement |
+| Inductive (magnetic field) | Large loop areas, large currents nearby | Twisted pairs; small loops; distance |
+| Radio frequency | Amplifier inputs, long unfiltered leads | RC input filters; shielded enclosures; short leads |
+
+Most of these remedies act at the source of the problem. A notch filter at 50 Hz, as the signal-conditioning entry warned, treats only one symptom of one kind of interference.
+
+## 6. The Limits of Detection
+
+### 6.1 A noise budget for the load-cell channel
+
+The pieces combine into a **noise budget** for the load-cell channel of the previous entries, measured over the 0.1 to 10 Hz band that a weighing application uses, and referred to the amplifier input:
+
+| Source | Noise in 0.1 to 10 Hz |
+|---|---|
+| Bridge thermal noise (350 Ω, 2.41 nV/√Hz) | 7.6 nV RMS |
+| Amplifier voltage noise, white part (10 nV/√Hz) | 31.5 nV RMS |
+| Amplifier voltage noise, 1/f part (corner 10 Hz) | 67.9 nV RMS |
+| Amplifier current noise in the bridge (0.035 nV/√Hz) | negligible |
+| **Total (root sum of squares)** | **about 75 nV RMS, 0.5 µV peak-to-peak** |
+
+Against a full-scale signal of 6.6 mV for a 10 kg load cell, 75 nV RMS corresponds to 0.11 g, and 0.5 µV peak-to-peak to about 0.75 g. Two figures of merit summarise this:
+
+- The **effective resolution** is the full scale divided by the RMS noise: $6.6\ \text{mV} / 75\ \text{nV} \approx 88\,000$, about 16.4 bits, a dynamic range of 99 dB.
+- The **noise-free resolution** is the full scale divided by the peak-to-peak noise: about 13 400 steps, or 13.7 bits. This is the number of steps a display can show without its last digit flickering.
+
+The comparison with the previous entry is instructive. A 16-bit converter, with 0.17 g per code, is roughly matched to this noise; a 24-bit converter offers steps of less than a milligram, but those extra bits record noise rather than load. Improving the measurement means reducing the amplifier's 1/f noise (with a zero-drift amplifier or AC excitation), narrowing the band, or averaging, not buying more converter bits. Below 0.1 Hz the same 1/f mechanism appears as **drift**, which is treated as a slowly varying systematic error and handled by calibration and zero tracking rather than by filtering.
+
+### 6.2 Detection limit
+
+The smallest signal a system can reliably detect, its **detection limit**, is set by the noise it must be distinguished from. A signal equal to the RMS noise (SNR = 1) is a common reference point, but a single reading at that level is as likely to be noise as signal. Analytical measurement therefore uses a stricter, widely adopted convention: the detection limit is **three standard deviations** of the readings obtained with no measurand present (the "blank"). For Gaussian noise, a reading more than $3\sigma$ above the blank's mean occurs by chance only about once in 740 trials.
+
+The detection limit is distinct from the resolution of the first entry, which concerns the smallest detectable *change* of an existing signal, but both are governed by the same noise, and both improve in the same ways: lower noise density, narrower bandwidth, and longer averaging as far as the 1/f noise allows.
+
+## 7. Summary
+
+| Question | Answer |
+|---|---|
+| What is the difference between noise and interference? | Noise is random fluctuation from physical processes and can only be limited; interference is coupled in from external sources and can largely be kept out. |
+| How is noise described? | By its RMS value (the standard deviation) and its spectral density in V/√Hz; white noise of density $e_n$ in bandwidth $B$ gives $e_n\sqrt{B}$. |
+| How do noise sources combine? | By root sum of squares, so the largest source dominates. |
+| What is a filter's noise bandwidth? | The width of an ideal filter passing the same noise: $1.57\,f_c$ for first order, $1.03\,f_c$ for fourth-order Butterworth. |
+| What is thermal noise? | $\sqrt{4kTR}$: 4.07 nV/√Hz for 1 kΩ at 300 K; it belongs to the resistance and cannot be designed away. |
+| What is shot noise? | $\sqrt{2qI}$ for current crossing a junction; it limits photodiode measurements. |
+| What is flicker noise? | Noise whose power density rises as $1/f$ below a corner frequency; it dominates slow measurements and is not reduced by longer averaging. |
+| What limits averaging and dither? | Averaging reduces white noise by $\sqrt{n}$ at the cost of bandwidth; dither of about half a step lets averages resolve below one step. |
+| How does interference couple in? | Through shared impedances, electric fields, magnetic fields and rectified radio frequency; each has its own remedy. |
+| What sets the detection limit? | The noise of the blank; a common convention is three standard deviations. |
+
+So far the series has followed a signal through separate components: a sensing element, conditioning electronics, a converter. The next entry looks at what happens when those components are built together on one chip: smart sensors and microelectromechanical systems (MEMS), with their own conditioning, conversion and self-calibration.
+
+### References
+
+- C. D. Motchenbacher and J. A. Connelly, *Low-Noise Electronic System Design*, Wiley, 1993.
+- H. W. Ott, *Electromagnetic Compatibility Engineering*, Wiley, 2009.
+- P. Horowitz and W. Hill, *The Art of Electronics*, 3rd edition, Cambridge University Press, 2015.
+- R. Pallàs-Areny and J. G. Webster, *Sensors and Signal Conditioning*, 2nd edition, Wiley, 2001.

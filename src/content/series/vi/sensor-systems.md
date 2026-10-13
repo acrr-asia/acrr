@@ -10,8 +10,6 @@ objectives:
   - "Giải thích lấy mẫu (sampling), lượng tử hóa (quantization) và chuyển đổi dữ liệu, cùng với nhiễu (noise) giới hạn những gì có thể phát hiện được."
   - "Phát biểu và tổng hợp độ không đảm bảo đo (measurement uncertainty), đồng thời hiệu chuẩn và hợp nhất (fusion) các cảm biến."
 plannedEntries:
-  - title: "Nhiễu, can nhiễu và giới hạn phát hiện"
-    description: "Nhiễu nhiệt (thermal noise), nhiễu bắn (shot noise) và nhiễu nhấp nháy (flicker noise), can nhiễu (interference) và nối đất (grounding), và cách nhiễu quyết định thay đổi nhỏ nhất mà một hệ thống cảm biến có thể phát hiện."
   - title: "Cảm biến thông minh (smart sensor) và MEMS"
     description: "Cảm biến chế tạo bằng vi gia công (microfabrication), mạch chuẩn hóa tích hợp trên chip và khả năng tự hiệu chuẩn (self-calibration), và những gì thay đổi khi cảm biến mang theo mạch điện tử của riêng nó."
   - title: "Hiệu chuẩn và hợp nhất đa cảm biến"

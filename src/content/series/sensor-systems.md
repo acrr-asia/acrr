@@ -13,8 +13,6 @@ objectives:
   - "Explain sampling, quantization and data conversion, and the noise that limits what can be detected."
   - "State and combine measurement uncertainties, and calibrate and fuse sensors."
 plannedEntries:
-  - title: "Noise, Interference and the Limits of Detection"
-    description: "Thermal, shot and flicker noise, interference and grounding, and how noise sets the smallest change a sensor system can detect."
   - title: "Smart Sensors and MEMS"
     description: "Microfabricated sensors, on-chip conditioning and self-calibration, and what changes when a sensor carries its own electronics."
   - title: "Calibration and Multisensor Fusion"
