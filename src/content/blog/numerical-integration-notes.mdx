@@ -1,7 +1,8 @@
 ---
 title: "Notes on Numerical Integration of ODEs"
-description: "Explicit Euler versus fourth-order Runge-Kutta on a test equation, and why accuracy and stability are separate questions."
+description: "Learn how explicit Euler and classical Runge–Kutta differ in order and cost, how to measure order, and why stability can limit the step before accuracy does."
 publishedAt: 2026-10-04
+updatedAt: "2026-10-13"
 category: "Mathematical Foundations"
 tags:
   - numerical-methods
@@ -12,11 +13,19 @@ tags:
 import Figure from '../../components/Figure.astro';
 import StabilityRegions from '../../components/diagrams/StabilityRegions.astro';
 
-Most simulations of physical systems reduce to the same task: advance an ordinary differential equation $\dot{y} = f(t, y)$ in small time steps of size $h$. The choice of method decides how much accuracy a given step size buys, and whether the result stays bounded at all. These notes compare two standard methods on the simplest useful test problem.
+Most simulations of physical systems reduce to the same task: advance an ordinary differential equation (ODE) $\dot{y} = f(t, y)$ from a known initial value in time steps of size $h$. The method chosen decides how much accuracy a given step size buys, and whether the computed solution stays bounded at all. These notes compare two standard one-step methods, explicit Euler and the classical fourth-order Runge–Kutta method, on a test equation that shows both effects, and keep the two questions apart: how accurate a method is, and when it is stable.
 
-## The test equation
+The notes assume calculus, including Taylor series, and the idea of an ODE with an initial condition. Section 4 also uses the eigenvalues of a linear system $\dot{\mathbf{x}} = A\mathbf{x}$, as introduced in the [state-space primer](/blog/state-space-models-primer). The code uses only the Python 3 standard library (it was run with Python 3.13) and double-precision (IEEE 754 binary64) floating-point arithmetic. The [Numerical Simulation for Engineers](/series/numerical-simulation) series applies these ideas to partial differential equations, whose discretization produces large systems of ODEs; Section 5 says where it continues from here.
 
-Consider $\dot{y} = \lambda y$ with $y(0) = 1$, whose exact solution is $y(t) = e^{\lambda t}$. Setting $\lambda = -1$ gives a decaying signal that is easy to check against.
+## 1. The test equation and two methods
+
+The **test equation** is
+
+$$
+\dot{y} = \lambda y, \qquad y(0) = 1,
+$$
+
+with exact solution $y(t) = e^{\lambda t}$. It is the standard model problem for two reasons. Its solution is known, so errors can be measured exactly. And a linear system $\dot{\mathbf{x}} = A\mathbf{x}$ with a diagonalizable matrix $A$ separates into one such equation for each eigenvalue $\lambda$ of $A$, so what a method does to $\dot{y} = \lambda y$ is what it does to each mode of the system. The constant $\lambda$ may be complex; $\lambda = -1$ gives a decaying signal that is easy to check against.
 
 **Explicit Euler** takes one slope evaluation per step:
 
@@ -24,9 +33,9 @@ $$
 y_{n+1} = y_n + h\,f(t_n, y_n).
 $$
 
-On the test equation this becomes $y_{n+1} = (1 + h\lambda)\,y_n$. The error made in one step is of order $h^2$, and accumulated over a fixed time interval the global error is of order $h$.
+On the test equation this becomes $y_{n+1} = (1 + h\lambda)\,y_n$.
 
-**Classical Runge-Kutta (RK4)** evaluates the slope four times per step:
+The **classical Runge–Kutta method** (RK4) evaluates the slope four times per step, at the start, twice at the midpoint and at the end:
 
 $$
 \begin{aligned}
@@ -43,9 +52,25 @@ $$
 y_{n+1} = y_n + \frac{h}{6}\,(k_1 + 2k_2 + 2k_3 + k_4).
 $$
 
-Its global error is of order $h^4$.
+Substituting $f(t, y) = \lambda y$ and writing $z = h\lambda$ gives $y_{n+1} = R(z)\,y_n$ with
 
-## Measuring the order
+$$
+R(z) = 1 + z + \frac{z^2}{2} + \frac{z^3}{6} + \frac{z^4}{24}.
+$$
+
+Both methods therefore multiply the solution by a fixed **amplification factor** per step: $R(z) = 1 + z$ for Euler, the polynomial above for RK4. The exact solution is multiplied by $e^{z}$.
+
+## 2. Local error, global error and order
+
+The **local error** of a method is the error it makes in one step when started from the exact value $y(t_n)$. The **global error** is the difference $y_n - y(t_n)$ after many steps, at a fixed final time $T$. A method has **order** $p$ if its global error at fixed $T$ behaves like $C\,h^p$ as $h \to 0$, for some constant $C$ that does not depend on $h$.
+
+The two are related by counting. Reaching $T$ takes $T/h$ steps. If each step makes a local error of size $O(h^{p+1})$, and the method does not amplify earlier errors (Section 4 makes that condition precise), the errors add up to about $(T/h)\,O(h^{p+1}) = O(h^p)$. One power of $h$ is lost in the accumulation.
+
+The test equation shows the local errors directly. The exact factor has the Taylor series $e^{z} = 1 + z + z^2/2 + z^3/6 + z^4/24 + z^5/120 + \dots$. Euler's factor $1 + z$ agrees with it up to the term in $z$, so its local error is $O(h^2)$ and its order is 1. RK4's factor agrees up to the term in $z^4$, so its local error is $O(h^5)$ and its order is 4. For a general nonlinear $f$ that is smooth enough, the same orders hold, which a Taylor expansion of the stages in $h$ shows; the derivation is longer and is given in the textbooks listed under References.
+
+## 3. Measuring the order
+
+An order can be checked by experiment: solve with several step sizes and see how fast the error falls. The script integrates $\dot{y} = -y$ from $t = 0$ to $t = 1$ with both methods.
 
 ```python
 import math
@@ -73,7 +98,7 @@ for h in (0.1, 0.05, 0.025):
     print(h, abs(euler(f, 0.0, 1.0, h, n) - exact), abs(rk4(f, 0.0, 1.0, h, n) - exact))
 ```
 
-Absolute error at $t = 1$, from running this script:
+Absolute error at $t = 1$, from running this script (rounded to three digits):
 
 | Step size $h$ | Euler | RK4 |
 | --- | --- | --- |
@@ -81,18 +106,53 @@ Absolute error at $t = 1$, from running this script:
 | 0.05 | $9.39 \times 10^{-3}$ | $2.00 \times 10^{-8}$ |
 | 0.025 | $4.65 \times 10^{-3}$ | $1.22 \times 10^{-9}$ |
 
-Halving $h$ roughly halves the Euler error and divides the RK4 error by about sixteen, consistent with first-order and fourth-order convergence.
+If the error is $C h^p$, halving $h$ divides it by $2^p$, so the **observed order** is $p \approx \log_2\bigl(e(h)/e(h/2)\bigr)$, where $e(h)$ is the error at step size $h$. From the table, the Euler ratios are 2.04 and 2.02 (observed orders 1.03 and 1.02), and the RK4 ratios are 16.7 and 16.3 (observed orders 4.06 and 4.03), consistent with first-order and fourth-order convergence. The agreement improves as $h$ shrinks, because the terms neglected in $C h^p$ shrink faster than the leading term.
 
-## Accuracy is not stability
+Order is not the whole cost comparison, because RK4 evaluates $f$ four times per step and Euler once. At equal work the gap is still large: Euler with $h = 0.025$ and RK4 with $h = 0.1$ both use 40 evaluations of $f$, and the RK4 error is about $10^4$ times smaller ($3.33\times10^{-7}$ against $4.65\times10^{-3}$). For smooth problems and moderate accuracy targets, a higher-order method usually wins in this way.
 
-For Euler on the test equation with real $\lambda < 0$, the numerical solution decays only if $|1 + h\lambda| \le 1$, which means $h \le 2/|\lambda|$. With $\lambda = -50$ and $h = 0.05$ the factor is $1 - 2.5 = -1.5$, so the computed solution grows in magnitude and flips sign at every step, even though the true solution decays quickly.
+The same experiment, run on a problem with a known solution, is the standard test that a simulation code is free of defects. The [fifth entry of the Numerical Simulation series](/blog/verifying-and-validating-a-simulation) develops it as code verification, for partial differential equations and for codes whose exact solution must be manufactured.
 
-> Choosing a step size by asking how accurate the answer should be is only half the job. For fast decaying dynamics the step size may be limited by stability instead.
+## 4. Accuracy is not stability
 
-RK4 has a larger stability region than Euler, but it is also bounded. On the negative real axis it reaches about $-2.79$, so the step $h\lambda = -2.5$ that makes Euler blow up is stable for RK4.
+For Euler on the test equation with real $\lambda < 0$, the numerical solution decays only if $|1 + h\lambda| \le 1$, which means $h \le 2/|\lambda|$. With $\lambda = -50$ and $h = 0.05$ the factor is $1 - 2.5 = -1.5$, so the computed solution grows in magnitude and flips sign at every step. After 20 steps, at $t = 1$, its magnitude is $1.5^{20} \approx 3.3\times10^{3}$, while the true solution has decayed to $e^{-50} \approx 2\times10^{-22}$.
+
+> Choosing a step size by how accurate the answer must be answers only one of the two questions. For fast-decaying dynamics the step size may be limited by stability instead, even where the fast component itself is too small to matter.
+
+A method is **absolutely stable** for a given $z = h\lambda$ if $|R(z)| \le 1$, so that no mode of the computed solution grows. The set of such $z$ in the complex plane is the method's **stability region**. For Euler it is the disc $|1 + z| \le 1$, of radius 1 centered at $-1$. RK4 has a larger stability region, but it is also bounded. On the negative real axis it reaches about $-2.79$ (the root of $|R(z)| = 1$ near $z = -2.79$, found numerically), so the step $h\lambda = -2.5$ that makes Euler blow up is stable for RK4: $R(-2.5) \approx 0.648$. On the imaginary axis it reaches $\pm 2\sqrt{2}\,j \approx \pm 2.83\,j$.
 
 <Figure caption="Stability regions in the complex hλ-plane. Euler is stable inside the dashed disc |1 + hλ| ≤ 1; RK4 inside the shaded region. The point hλ = −2.5 (λ = −50, h = 0.05) is outside the first and inside the second.">
   <StabilityRegions />
 </Figure>
 
-Stiff problems, where fast and slow dynamics coexist, usually call for implicit methods, which are outside the scope of these notes.
+The imaginary axis matters for oscillations. An undamped mode has $\lambda = \pm j\omega$, and Euler's factor there has magnitude $|1 + jh\omega| = \sqrt{1 + h^2\omega^2} > 1$ for every $h > 0$: explicit Euler makes an undamped oscillation grow at any step size, by a factor $1 + h^2\omega^2$ in energy per step. RK4 keeps such a mode bounded for $h\omega \le 2\sqrt{2}$, with a slight artificial damping.
+
+For a linear system $\dot{\mathbf{x}} = A\mathbf{x}$, the condition applies to every eigenvalue: the computed solution is stable only if $h\lambda_i$ lies in the stability region for each eigenvalue $\lambda_i$ of $A$. The [entry on stability and eigenvalues](/blog/stability-and-eigenvalues) shows the same comparison between the exact discrete-time map $e^{\lambda T}$ and Euler's $1 + \lambda T$.
+
+Stability is also not accuracy. At $h\lambda = -2.5$, RK4 multiplies the solution by $0.648$ per step, where the exact factor is $e^{-2.5} \approx 0.082$. The computed solution stays bounded, but after 20 steps it is about $1.7\times10^{-4}$ instead of $2\times10^{-22}$. A stable step only guarantees that errors do not grow; an accurate step is a separate requirement.
+
+## 5. Limits of these notes
+
+The comparison above rests on simplifications that matter in practice:
+
+- **Fixed step size.** Production ODE solvers adjust $h$ as they go. Embedded Runge–Kutta pairs compute two solutions of different order from the same slope evaluations and use their difference to estimate the local error and choose the next step. Order and stability still govern such solvers, but the step is no longer chosen by hand.
+- **Linear analysis.** Stability regions are derived for the linear test equation. For a nonlinear system they apply to its linearization about the current state, with the eigenvalues of the Jacobian matrix $\partial f / \partial y$ in place of $\lambda$; this is a local guide, not a guarantee.
+- **Stiffness.** When fast and slow dynamics coexist, the fastest mode limits an explicit method's step long after that mode has decayed, as in the example of Section 4. Such problems, called **stiff**, are usually solved with implicit methods, several of which (backward Euler and the trapezoidal rule among them) are stable for every $h\lambda$ in the left half-plane. The [second entry of the Numerical Simulation series](/blog/finite-differences-for-heat-and-waves) shows how a discretized heat equation becomes stiff, and compares explicit Euler, implicit (backward) Euler and the Crank–Nicolson method on it, using the stability regions of these notes.
+- **Rounding.** The errors in Section 3 are far above the double-precision unit roundoff of about $1.1\times10^{-16}$. With much smaller steps or much longer runs, rounding can matter; the note on [floating-point rounding in long simulations](/insights/floating-point-in-long-simulations) describes how to check.
+
+## 6. Summary
+
+| Property | Explicit Euler | Classical RK4 |
+| --- | --- | --- |
+| Evaluations of $f$ per step | 1 | 4 |
+| Amplification factor on $\dot{y} = \lambda y$ | $1 + z$ | $1 + z + z^2/2 + z^3/6 + z^4/24$ |
+| Order (global error at fixed $T$) | 1 | 4 |
+| Stable interval on the negative real axis | $-2 \le z \le 0$ | about $-2.79 \le z \le 0$ |
+| Undamped oscillation ($z$ imaginary) | Grows at every step size | Bounded for $\lvert z \rvert \le 2\sqrt{2}$ |
+
+Accuracy and stability limit the step size separately. Accuracy is governed by the order, which a refinement study measures; stability is governed by where $h\lambda$ falls relative to the stability region, for every mode of the system. A smooth, non-stiff problem is usually limited by accuracy, and there a higher-order method such as RK4 gives far more accuracy per evaluation. A problem with fast-decaying modes can be limited by stability first, and then an implicit method, as in the Numerical Simulation series, is the better choice.
+
+### References
+
+- J. C. Butcher, *Numerical Methods for Ordinary Differential Equations*, 3rd ed., Wiley, 2016.
+- E. Hairer, S. P. Nørsett and G. Wanner, *Solving Ordinary Differential Equations I: Nonstiff Problems*, 2nd rev. ed., Springer, 1993.
+- R. J. LeVeque, *Finite Difference Methods for Ordinary and Partial Differential Equations: Steady-State and Time-Dependent Problems*, SIAM, 2007.
