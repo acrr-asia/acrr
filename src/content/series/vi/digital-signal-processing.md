@@ -8,6 +8,7 @@ objectives:
   - "Dùng biến đổi z để phân tích tính ổn định và đáp ứng tần số (frequency response)."
   - "Tính toán và diễn giải phổ bằng DFT và FFT, bao gồm hiện tượng rò rỉ phổ (leakage) và việc dùng hàm cửa sổ (windowing)."
   - "Thiết kế bộ lọc FIR và IIR theo một đặc tả cho trước và hiện thực chúng trong giới hạn của phần cứng."
+  - "Xem một vòng điều khiển số như một hệ thống xử lý tín hiệu: rời rạc hóa (discretise) đối tượng điều khiển (plant) và bộ điều khiển, và tính đến thời gian trễ (delay) do lấy mẫu, giữ mẫu và lọc gây ra khi chọn tốc độ lấy mẫu."
 ---
 
 Loạt bài này dành cho các kỹ sư làm việc với tín hiệu đã lấy mẫu và muốn nắm được phần lý thuyết giúp họ suy luận về những gì mã chương trình của mình làm với các tín hiệu đó. Loạt bài giả định người đọc đã biết giải tích, số phức và đại số tuyến tính cơ bản, cùng với khái niệm lấy mẫu (sampling) được giới thiệu trong loạt bài về cảm biến; các ví dụ tính toán dùng Python 3 với NumPy. Qua năm bài, loạt bài xây dựng tín hiệu thời gian rời rạc và hệ thống tuyến tính bất biến theo thời gian từ những nguyên lý cơ bản, phân tích chúng bằng biến đổi z, đo phổ bằng DFT và FFT, thiết kế bộ lọc FIR và IIR trong giới hạn của độ dài từ hữu hạn (finite word length), và kết thúc bằng việc đặt một bộ lọc số vào trong một vòng phản hồi (feedback loop) để nó làm nhiệm vụ của một bộ điều khiển số.
