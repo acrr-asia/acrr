@@ -20,6 +20,8 @@ Every request that reaches a networked system asks it to do something: return a 
 
 Passwords, sessions, cookies, OAuth 2.0, OpenID Connect and JSON Web Tokens can look like a pile of unrelated technologies. They are easier to understand as answers to those two questions, or as ways of carrying an answer from the place where it was obtained to the place where it is needed. This entry therefore works from the general to the specific. It starts with the abstract model that every access-control mechanism implements, treats authentication and authorization separately, explains why distributed systems split the party that authenticates users from the parties that hold resources, and only then turns to tokens: what they contain, how they are validated, and how they expire and are revoked. Each protocol appears at the point where the problem it solves has been stated.
 
+Most of these mechanisms are Internet standards, published by the Internet Engineering Task Force (IETF) as numbered *Requests for Comments* (RFCs); browser behaviour is standardised by the World Wide Web Consortium (W3C) and the WHATWG. Each standard is cited by number where it first matters.
+
 ## 1. The Access-Control Model
 
 ### 1.1 Subjects, objects and the reference monitor
@@ -89,7 +91,7 @@ Authentication is a protocol between a **claimant**, who asserts an identity, an
 
 **Multi-factor authentication** requires authenticators from at least two *different* factors. Two passwords are not multi-factor; a password plus a code generated on a separate device is.
 
-Factors are not equally strong. A password or a one-time code can be typed into a convincing fake site, which then relays it to the real one: the user authenticates the attacker. An authenticator based on public-key cryptography and bound to the website's origin (the mechanism behind WebAuthn and passkeys) signs a challenge that includes the origin, so a signature produced for a look-alike domain is useless on the real one. This property, **phishing resistance**, is the main reason such authenticators are preferred where the risk justifies them.
+Factors are not equally strong. A password or a one-time code can be typed into a convincing fake site, which then relays it to the real one: the user authenticates the attacker. An authenticator based on public-key cryptography and bound to the website's origin, its scheme, host and port (the mechanism behind WebAuthn and passkeys) signs a challenge that includes the origin, so a signature produced for a look-alike domain is useless on the real one. This property, **phishing resistance**, is the main reason such authenticators are preferred where the risk justifies them.
 
 ### 2.2 Users and workloads
 
@@ -97,7 +99,7 @@ Not every principal is a person. A background service that calls another service
 
 - a **shared secret** (a client secret or API key) presented on each request or to obtain a token;
 - a **signed assertion**: a short statement signed with the workload's private key, which the verifier checks with the registered public key;
-- **mutual TLS**, in which the workload presents an X.509 certificate during the TLS handshake.
+- **mutual TLS**, in which the workload also presents an X.509 certificate during the TLS handshake (TLS and certificates are introduced in Section 3.1).
 
 Shared secrets are the simplest and the weakest: whoever copies the secret becomes the workload. Key-based methods never send the private key, so intercepting one request does not reveal it.
 
@@ -107,15 +109,21 @@ Authentication happens once, at sign-in. A user then makes hundreds of requests.
 
 ## 3. Carrying Authentication Across Requests
 
-### 3.1 HTTP is stateless
+### 3.1 HTTP, the protocol underneath
 
-HTTP treats each request independently: nothing in the protocol links a request to the one before it. A request consists of a method, a target, header fields and an optional body:
+Almost every exchange in this series travels over **HTTP**, the Hypertext Transfer Protocol. HTTP is an application-level request–response protocol: a **client** (a browser, an app, another service) sends a **request** to a **server**, and the server returns one **response**. A request names a **method**, which says what to do (`GET` to read, `POST` to submit, `DELETE` to remove, and others); a **target**, which says what to do it to (such as `/orders/123`); **header fields**, which carry metadata such as `Host`, `Accept` or `Authorization`; and an optional **body**. A response carries a three-digit **status code** (`200` for success, or `401` and `403` for the failures discussed in Section 4.4), header fields and usually a body. The meaning of all these parts is defined once, independently of how they are transmitted, in *HTTP Semantics* (RFC 9110).
+
+HTTP is **stateless**: each request is complete in itself, and nothing in the protocol links a request to the one before it. A server that has just answered a request from a user does not, from HTTP alone, know that the next request comes from the same user. A request looks like this:
 
 ```http
 GET /orders/123 HTTP/1.1
 Host: api.example.com
 Accept: application/json
 ```
+
+This example, like the other HTTP messages in this series, is written in the text format of HTTP/1.1, which is the easiest to read. HTTP/2 and HTTP/3 carry exactly the same methods, header fields, status codes and bodies in a binary framing (over TCP and over QUIC respectively), so nothing in this series depends on which version is in use.
+
+In practice HTTP runs inside **TLS** (Transport Layer Security), which encrypts the connection and lets the client verify the server's identity using an **X.509 certificate**: a statement, signed by a certificate authority that the client trusts, binding the server's name to its public key. HTTP over TLS is **HTTPS**. TLS protects messages in transit; it says nothing about who the user is, which is the problem the rest of this section addresses.
 
 Any notion of "this request comes from the same signed-in user as the last one" must be built on top of HTTP, by having the client attach something to every request. There are three basic strategies.
 
@@ -125,7 +133,7 @@ HTTP Basic authentication (RFC 7617) attaches the username and password, base64-
 
 ### 3.3 Strategy two: a reference to server-side state
 
-After authentication, the server creates a **session record** (subject, authentication time, method used, expiry) and stores it. The client receives only a long, unpredictable **session identifier**, usually in a cookie:
+After authentication, the server creates a **session record** (subject, authentication time, method used, expiry) and stores it. The client receives only a long, unpredictable **session identifier**, usually in a cookie (a small named value that the server asks the browser to store and to send back with later requests to the same site):
 
 ```http
 HTTP/1.1 303 See Other
@@ -135,7 +143,7 @@ Set-Cookie: sid=Q2hvb3NlIGEgcmFuZG9tIHZhbHVl; Path=/; Secure; HttpOnly; SameSite
 
 The browser returns the cookie on later requests to the same site, and the server looks the identifier up. The identifier is a **reference**: it means nothing by itself, and all the information lives on the server. Revocation is immediate: delete the record and the next request fails. The cost is that every request needs a lookup in a store that every server instance can reach.
 
-The cookie attributes are part of the security design. `Secure` restricts the cookie to HTTPS; `HttpOnly` hides it from page scripts, so a cross-site scripting bug cannot read it directly; `SameSite` limits when the browser attaches it to requests initiated by other sites, which reduces (but does not on its own eliminate) cross-site request forgery.
+The cookie attributes are part of the security design. `Secure` restricts the cookie to HTTPS; `HttpOnly` hides it from page scripts, so a cross-site scripting (XSS) bug, in which an attacker's script runs inside the application's pages, cannot read it directly; `SameSite` limits when the browser attaches it to requests initiated by other sites, which reduces (but does not on its own eliminate) cross-site request forgery (CSRF), in which another site makes the browser send a request that carries the user's cookie. The third entry treats both attacks in detail.
 
 ### 3.4 Strategy three: a self-contained token
 
@@ -194,9 +202,9 @@ Real systems mix them. A common pattern uses roles for coarse permissions ("supp
 
 ### 4.3 Where decisions are made and enforced
 
-Standards such as XACML separate a **policy enforcement point** (PEP), which intercepts the request and acts on the decision, from a **policy decision point** (PDP), which evaluates the policy. The separation lets policy change without redeploying every service, and lets one PDP serve many enforcement points.
+Standards such as XACML (the eXtensible Access Control Markup Language, from the OASIS standards consortium) separate a **policy enforcement point** (PEP), which intercepts the request and acts on the decision, from a **policy decision point** (PDP), which evaluates the policy. The separation lets policy change without redeploying every service, and lets one PDP serve many enforcement points.
 
-Enforcement can happen at more than one layer. A gateway in front of several services can reject requests that lack a valid token or a required scope. That check is cheap, but **it cannot know who owns order 123**. Only the service holding the order can make that check, so it must enforce authorization again at the object level. Missing object-level checks are the first entry, *Broken Object Level Authorization*, in the OWASP API Security Top 10 (2023 edition): a correctly authenticated user changes `/orders/123` to `/orders/124` and receives someone else's order.
+Enforcement can happen at more than one layer. A gateway in front of several services can reject requests that lack a valid token or a required scope. That check is cheap, but **it cannot know who owns order 123**. Only the service holding the order can make that check, so it must enforce authorization again at the object level. Missing object-level checks are the first entry, *Broken Object Level Authorization*, in the API Security Top 10 (2023 edition) of OWASP, the Open Worldwide Application Security Project: a correctly authenticated user changes `/orders/123` to `/orders/124` and receives someone else's order.
 
 ### 4.4 Reporting the outcome: 401 and 403
 
@@ -320,7 +328,7 @@ An opaque access token is a random string that the resource server cannot interp
 
 ### 6.3 The structure of a JSON Web Token
 
-A JSON Web Token (RFC 7519) is a set of claims encoded as JSON. In its common signed form (JSON Web Signature, RFC 7515) it has three base64url-encoded parts separated by dots:
+A JSON Web Token (RFC 7519) is a set of claims written in JSON (JavaScript Object Notation, a text format of named values, arrays and nested objects). In its common signed form (JSON Web Signature, RFC 7515) it has three parts separated by dots, each encoded in base64url (base64 with the URL-safe characters `-` and `_` and no padding, so that a token can travel in URLs and headers unchanged):
 
 ```text
 base64url(header) . base64url(payload) . base64url(signature)
@@ -367,7 +375,7 @@ A signed JWT is **not encrypted**. Anyone holding it can decode the header and p
 
 ### 6.4 Keys and algorithms
 
-With a **symmetric** algorithm such as HS256 (HMAC with SHA-256), the same secret both signs and verifies. Every verifier can therefore also forge tokens, so symmetric signing suits only a single party that verifies its own tokens.
+With a **symmetric** algorithm such as HS256 (HMAC with SHA-256: a hash keyed with the shared secret), the same secret both signs and verifies. Every verifier can therefore also forge tokens, so symmetric signing suits only a single party that verifies its own tokens.
 
 With an **asymmetric** algorithm such as RS256 (RSA) or ES256 (ECDSA), the issuer signs with a private key and verifiers check with the public key. The issuer publishes its public keys as a JSON Web Key Set (JWKS, RFC 7517), typically at a URL listed in its discovery document. The `kid` header selects the key, which allows **key rotation**: the issuer publishes the new key, starts signing with it, and removes the old key only after every token signed with it has expired.
 
@@ -528,7 +536,7 @@ Two failures are common here. The first is checking permissions only in the user
 | Stale authorization | Disabled account keeps working until tokens expire | Short access-token lifetimes, introspection or denylist for sensitive operations, refresh-token revocation |
 | Over-broad delegation | Client receives more access than its task needs | Narrow scopes, audience restriction per API, consent review |
 
-Two misconceptions deserve separate mention. **CORS is not access control**: it tells browsers which origins may read responses, but it does nothing to stop requests from non-browser clients. And **TLS is necessary but not sufficient**: it protects tokens in transit and nowhere else.
+Two misconceptions deserve separate mention. **CORS (Cross-Origin Resource Sharing) is not access control**: it tells browsers which origins may read responses, but it does nothing to stop requests from non-browser clients. And **TLS is necessary but not sufficient**: it protects tokens in transit and nowhere else.
 
 ## 11. Summary
 
@@ -552,7 +560,7 @@ The recurring lessons are short. Keep authentication and authorization separate,
 
 The standards referred to above, for readers who want the normative text:
 
-- HTTP Semantics: RFC 9110. HTTP Basic authentication: RFC 7617. Cookies: RFC 6265.
+- HTTP Semantics: RFC 9110. HTTP Basic authentication: RFC 7617. Cookies: RFC 6265 and its revision in progress at the IETF, which specifies `SameSite`.
 - OAuth 2.0: RFC 6749 (framework), RFC 6750 (bearer tokens), RFC 7636 (PKCE), RFC 7662 (introspection), RFC 7009 (revocation), RFC 8628 (device authorization), RFC 9068 (JWT access tokens), RFC 9700 (security best current practice).
 - Sender-constrained tokens: RFC 8705 (mutual TLS), RFC 9449 (DPoP).
 - JSON Web Token and related formats: RFC 7519 (JWT), RFC 7515 (JWS), RFC 7516 (JWE), RFC 7517 (JWK).
