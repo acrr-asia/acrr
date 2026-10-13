@@ -34,6 +34,15 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: npm run check:links
+      # Publication gate (scripts/series-pipeline.mjs): every complete series must carry a current,
+      # resolved series review, and no series may have gaps, duplicates or drafts in its order.
+      # A failure here stops the deployment, so nothing that fails validation is published.
+      - run: node scripts/series-pipeline.mjs gate
+      - run: node scripts/verify-live.mjs manifest dist > live-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-manifest
+          path: live-manifest.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
@@ -47,3 +56,23 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Post-publication check: every page in the sitemap must be served by the live site with the
+  # title the build produced. The report is in the job summary and kept as an artifact.
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: live-manifest
+      - run: node scripts/verify-live.mjs check "$SITE_URL" live-manifest.json --attempts 10 --delay 30 | tee live-verification.md
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-verification
+          path: live-verification.md

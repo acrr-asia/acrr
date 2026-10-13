@@ -267,6 +267,19 @@ General notes (the details depend on your provider; no account or hosting servic
 - **Any other static host / your own server.** Serve `dist/` as-is. Routes are *extensionless* (`/blog`, `/blog/<slug>`) and the files are named `blog.html`, `blog/<slug>.html` (Astro `build.format: 'file'`). The host must try `<path>.html` for a request to `<path>`. In nginx that is `try_files $uri $uri.html $uri/ =404;`, and the not-found page is `404.html`.
 - Run `npm run check:links` before deploying to catch broken internal links.
 
+## Series publication pipeline
+
+Finishing a series and publishing it follows one repeatable workflow, described step by step in `.claude/skills/complete-series/SKILL.md` (in Claude Code: `/complete-series`, or `/complete-series <series-id>`): find unfinished series, write the missing entries, review the whole series (below), resolve the findings, pass the gates, merge to `master`, and verify the live pages. Every step reads its state from the repository, so the work can stop and resume at any point.
+
+| Piece | Role |
+| --- | --- |
+| `node scripts/series-pipeline.mjs status` | Every series with its stage: `needs-writing`, `needs-review`, `needs-fixes`, `review-stale` or `ready`. |
+| `node scripts/series-pipeline.mjs stamp <id>` | After a review's findings are resolved, records the SHA-256 hash of the series file and its English articles in `reviews/<id>.md` (`- Content hash:`). Refuses a report with unresolved findings. |
+| `node scripts/series-pipeline.mjs gate` | The publication gate. Fails when a complete series has no review, unresolved findings, or a stamp that no longer matches its text (it was edited after the review), and when any series has gaps, duplicates or drafts in its order. Unfinished series do not block it: their written entries are published individually, as before. |
+| `.github/workflows/publication-gate.yml` | Runs the release build, the link check and the gate on every pull request to `master`. |
+| `.github/workflows/deploy.yml` | Runs the same checks before deploying (a failure stops the deployment), then the `verify` job fetches every sitemap page from the live site and checks for HTTP 200 and the expected `<h1>`, retrying while the deployment propagates. The result is in the run summary and the `live-verification` artifact. |
+| `node scripts/verify-live.mjs` | `manifest [dist]` lists the sitemap routes and their titles; `check <origin> <manifest.json>` verifies them against a running site (it also works against `npm run preview`). |
+
 ## Automated series review
 
 When a series is completed, every article in it is reviewed as a whole for technical accuracy, factual consistency, concept introduction, stated versions and defaults, logical flow, terminology, cross-article references, completeness, writing quality and fit with the series objectives and the [content rules](#content-rules). The review produces a report with findings and recommended corrections; it never edits the articles itself.
