@@ -251,7 +251,7 @@ b += f'  <circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="4" />\n'
 b += text(x+17, y-22, var('hλ') + ' = −2.5', 'middle', 'small')
 b += line([(x+3, y-5), (x+10, y-17)], 'mut')
 svg('StabilityRegions', 480, 365, 'Stability regions of explicit Euler and classical RK4',
-    'In the complex h-lambda plane, explicit Euler is stable inside the disc of radius 1 centred at minus 1. The RK4 region is larger: it reaches about minus 2.79 on the real axis and about plus and minus 2.83 j on the imaginary axis. The point h-lambda equal to minus 2.5, from lambda equal to minus 50 and h equal to 0.05, lies outside the Euler disc but inside the RK4 region.',
+    'In the complex h-lambda plane, explicit Euler is stable inside the disc of radius 1 centered at minus 1. The RK4 region is larger: it reaches about minus 2.79 on the real axis and about plus and minus 2.83 j on the imaginary axis. The point h-lambda equal to minus 2.5, from lambda equal to minus 50 and h equal to 0.05, lies outside the Euler disc but inside the RK4 region.',
     b)
 
 # ---------- 8. Planar two-link arm: workspace and the two inverse-kinematics solutions ----------
@@ -314,9 +314,9 @@ for m, v, label, dx, anchor in ((xp, Pp, 'prediction', -10, 'end'), (zm, Rm, 'me
     b += text(P.X(m) + dx, P.Y(peak) - 8, label, anchor, 'small')
     b += line([(P.X(m), P.Y(0)), (P.X(m), P.Y(peak))], 'grid')
 svg('GaussianFusion', 620, 280, 'Fusing a predicted position with a range measurement',
-    f'Three bell-shaped curves over position. The prediction is centred at {xp:g} metres with standard deviation {math.sqrt(Pp):.2f} metres; '
-    f'the measurement is centred at {zm:g} metres with standard deviation {math.sqrt(Rm):.2f} metres. The fused estimate is centred at {xf:.2f} metres, '
-    f'between the two and closer to the more precise measurement, and is narrower than either, with standard deviation {math.sqrt(Pf):.2f} metres.',
+    f'Three bell-shaped curves over position. The prediction is centered at {xp:g} meters with standard deviation {math.sqrt(Pp):.2f} meters; '
+    f'the measurement is centered at {zm:g} meters with standard deviation {math.sqrt(Rm):.2f} meters. The fused estimate is centered at {xf:.2f} meters, '
+    f'between the two and closer to the more precise measurement, and is narrower than either, with standard deviation {math.sqrt(Pf):.2f} meters.',
     b)
 
 # ---------- 10. Nonlinearity of a platinum resistance sensor (PT100) ----------
