@@ -3,6 +3,7 @@
 - Series: `numerical-simulation` (5 articles, status published, 0 planned entries)
 - Reviewed commit: 4520df1
 - Date: 2026-10-13
+- Content hash: sha256:aedec7fcc3d9ce6ec1f338484ff61759cdd93043766fb20a8b8dbeea0620013e
 
 ## Summary
 
