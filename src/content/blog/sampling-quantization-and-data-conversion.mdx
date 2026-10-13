@@ -1,0 +1,226 @@
+---
+title: "Sampling, Quantization and Data Conversion"
+description: "How a conditioned sensor voltage becomes a sequence of numbers: sampling and the sampling theorem, aliasing and anti-aliasing filters, quantization and its error, the static and dynamic errors of real converters, and the successive-approximation, delta-sigma and other converter architectures."
+publishedAt: "2026-10-13"
+category: "Engineering"
+tags:
+  - sensors
+  - measurement
+  - signal processing
+series: sensor-systems
+seriesOrder: 4
+---
+
+import Figure from '../../components/Figure.astro';
+import Aliasing from '../../components/diagrams/Aliasing.astro';
+
+The previous entry ended with a clean voltage: a sensor signal excited, amplified, shifted into the range 0 to 3.3 V and low-pass filtered. That voltage is still an **analog** signal: it is defined at every instant, and it can take any value within its range. A computer can store and process only a finite list of numbers. The **analog-to-digital converter** (ADC) produces that list, and in doing so it makes two separate approximations:
+
+- **Sampling** discretises time. The converter measures the signal only at regular instants, $t = nT_s$ for $n = 0, 1, 2, \dots$, where $T_s$ is the **sampling interval** and $f_s = 1/T_s$ the **sampling frequency** (or sampling rate), in samples per second or hertz. The result is a **discrete-time signal** $x[n] = x(nT_s)$.
+- **Quantization** discretises amplitude. Each sample is represented by one of a finite set of values, $2^N$ of them for an $N$-bit converter.
+
+The two approximations lose information in different ways. Sampling loses nothing, provided the signal contains no frequencies above a limit set by $f_s$; if it does, they are not merely lost but misrepresented as lower frequencies. Quantization always loses something, but the loss is bounded and can be made as small as needed by using more bits.
+
+This entry treats sampling first, then the anti-aliasing filter that makes it safe, then quantization, then the imperfections of real converters and the main ways converters are built. It ends with the reverse process, digital-to-analog conversion. Throughout, the converter is **unipolar** with an input range from 0 V to a **reference voltage** $V_\text{ref}$ (its **full-scale range**, FSR), which is the convention of most converters inside microcontrollers; bipolar converters differ only in how codes are assigned.
+
+## 1. Sampling and Aliasing
+
+### 1.1 What sampling cannot see
+
+Consider a sinusoid of frequency $f$ sampled at $f_s$. Its samples are $\cos(2\pi f\, n/f_s)$. Now take a second sinusoid whose frequency differs from the first by a whole multiple of the sampling frequency, $f + k f_s$. Its samples are
+
+$$
+\cos\!\left(2\pi (f + k f_s)\,\frac{n}{f_s}\right) = \cos\!\left(2\pi f\,\frac{n}{f_s} + 2\pi k n\right) = \cos\!\left(2\pi f\,\frac{n}{f_s}\right),
+$$
+
+because adding a whole number of turns, $2\pi kn$, does not change a cosine. The two sinusoids produce **identical samples**. The same is true of a sinusoid at $k f_s - f$, since the cosine is an even function. After sampling, nothing distinguishes these frequencies from one another. A component that appears at a frequency other than its own is called an **alias**, and the effect is **aliasing**.
+
+<Figure caption="Aliasing. A 9 Hz sinusoid (solid) sampled at 10 Hz yields the same samples (dots) as a 1 Hz sinusoid (dashed). From the samples alone, the 9 Hz signal is indistinguishable from a 1 Hz one.">
+  <Aliasing />
+</Figure>
+
+Every frequency therefore has an alias in the range from 0 to $f_s/2$, found by subtracting the nearest whole multiple of $f_s$ and taking the magnitude: $f_\text{alias} = |f - k f_s|$ for the integer $k$ that makes it smallest. The frequency $f_s/2$, half the sampling rate, is called the **Nyquist frequency**. Frequencies above it fold back below it, like a strip of paper folded at $f_s/2$, $f_s$, $3f_s/2$ and so on.
+
+Aliasing is not an abstract risk. A structure vibrating at 980 Hz, measured by an accelerometer sampled at 1 kHz, appears in the data as a 20 Hz vibration, indistinguishable from a real one. Mains interference at 50 Hz sampled at 60 Hz appears at 10 Hz. No processing of the samples can undo it, because the information that would distinguish the alias from a genuine signal is not in the samples.
+
+### 1.2 The sampling theorem
+
+The converse result says when nothing is lost. The **sampling theorem** (associated with Nyquist, Shannon, Kotelnikov and Whittaker) states:
+
+> A signal that contains no frequency components at or above $B$ is completely determined by its samples taken at a rate $f_s > 2B$.
+
+"Completely determined" means the continuous signal can be reconstructed exactly from the samples, in principle by an ideal low-pass filter that passes everything below $f_s/2$ and nothing above it. The rate $2B$ is often called the **Nyquist rate** of the signal. The condition is about the signal's content, not about the frequency of interest: a 10 Hz weighing signal accompanied by 1 kHz vibration is not band-limited to 10 Hz, and sampling it at 25 Hz will alias the vibration.
+
+Two practical consequences follow:
+
+- A real signal is never perfectly band-limited, so the theorem is satisfied only approximately, by attenuating everything above $f_s/2$ until its aliases are negligible.
+- Ideal brick-wall filters do not exist, so practical systems sample well above twice the highest frequency of interest, leaving a **transition band** in which the anti-aliasing filter can roll off.
+
+## 2. Anti-Aliasing Filters
+
+An **anti-aliasing filter** is an analog low-pass filter placed before the converter to remove components that would alias into the band of interest. It must be analog: once the signal is sampled, an alias is indistinguishable from real content, so a digital filter after the converter is too late.
+
+The requirement can be made precise. Suppose the band of interest is 0 to $f_p$ and the sampling rate is $f_s$. The frequencies that alias into the band of interest lie within $f_p$ of a multiple of $f_s$: the lowest such band is $f_s - f_p$ to $f_s + f_p$. The filter must attenuate everything from $f_s - f_p$ upwards enough to bring it below the smallest change the system is meant to resolve.
+
+The load-cell channel of the previous entry has a band of interest up to $f_p = 10$ Hz and a fourth-order Butterworth filter with a 10 Hz cut-off. If it is sampled at $f_s = 100$ Hz, the nearest aliasing band begins at 90 Hz, where the filter attenuates by
+
+$$
+20 \log_{10} \sqrt{1 + (90/10)^8} \approx 76.3\ \text{dB}.
+$$
+
+A 12-bit converter (Section 3) resolves one part in $2^{12} = 4096$, which is 72.2 dB below full scale. Interference at 90 Hz or above, even at the full amplitude of the signal, therefore aliases to less than one quantization step. The choice of $f_s$ also matters for mains interference specifically: at 100 Hz, 50 Hz mains interference aliases to 50 Hz, outside the band of interest, whereas at 60 Hz it would alias to 10 Hz, inside it.
+
+### 2.1 Oversampling
+
+Sampling much faster than the band of interest requires, **oversampling**, relaxes the analog filter. If the load cell were sampled at 1 kHz, the nearest aliasing band would start at 990 Hz, and even a simple first- or second-order filter would provide ample attenuation there. A digital low-pass filter then removes everything above 10 Hz, and the samples are thinned out (**decimated**) to a lower rate. Digital filters can be sharp, exactly repeatable and free of component drift, so this division of labour, a gentle analog filter and a steep digital one, is how most modern systems are designed. The digital signal processing series treats the digital half.
+
+## 3. Quantization
+
+### 3.1 Codes and the quantization step
+
+An $N$-bit converter divides its full-scale range into $2^N$ intervals and outputs an integer **code** from 0 to $2^N - 1$ identifying the interval the sample falls in. The width of each interval is the **quantization step**, also called one **least significant bit** (LSB):
+
+$$
+q = \frac{\text{FSR}}{2^N}.
+$$
+
+(Some texts define $q$ as $\text{FSR}/(2^N - 1)$; the difference is negligible for practical $N$, and this entry uses $\text{FSR}/2^N$, which matches how most converter datasheets specify the LSB.)
+
+| Resolution $N$ | Codes | $q$ for FSR = 3.3 V |
+|---|---|---|
+| 12 bits | 4096 | 0.806 mV |
+| 16 bits | 65 536 | 50.4 µV |
+| 24 bits | 16 777 216 | 0.197 µV |
+
+The **transfer function** of an ideal converter is a staircase. In the usual convention, which this entry follows, the code changes from $k-1$ to $k$ at an input of $(k - \tfrac12)q$, so each code is centred on the input value $kq$, and the **quantization error**, the difference between the input and the value its code represents, lies between $-q/2$ and $+q/2$.
+
+### 3.2 Quantization error as uncertainty
+
+When the signal moves across many steps between samples, the quantization error behaves like a random variable spread evenly over $\pm q/2$, unrelated to the signal. This is exactly the situation the first entry treated as a Type B evaluation with a rectangular distribution of half-width $a$: its standard uncertainty is $a/\sqrt{3}$. With $a = q/2$,
+
+$$
+u_q = \frac{q/2}{\sqrt{3}} = \frac{q}{\sqrt{12}} \approx 0.29\,q.
+$$
+
+For a 12-bit converter with a 3.3 V range, $u_q = 0.233$ mV.
+
+The model fails when the signal is steady and noise-free: then every sample has the same error, which is a systematic offset of up to $q/2$ that averaging cannot remove. In practice, a small amount of random noise, either present already or added deliberately (**dither**), restores the random behaviour, and averaging many samples can then resolve changes smaller than one step. The noise entry returns to this trade-off.
+
+### 3.3 Signal-to-quantization-noise ratio
+
+Treating the quantization error as noise gives a figure of merit for the converter. A full-scale sinusoid has a peak amplitude of $\text{FSR}/2$ and a root-mean-square (RMS) value of $\text{FSR}/(2\sqrt{2})$. The quantization noise has an RMS value of $q/\sqrt{12} = \text{FSR}/(2^N\sqrt{12})$. Their ratio, the **signal-to-quantization-noise ratio** (SQNR), is $2^N\sqrt{3/2}$, or in decibels
+
+$$
+\text{SQNR} = 20\log_{10}\!\left(2^N \sqrt{3/2}\right) \approx 6.02\,N + 1.76\ \text{dB}.
+$$
+
+Each additional bit adds about 6 dB. A 12-bit converter reaches 74.0 dB, a 16-bit converter 98.1 dB. These are the ideal limits; a real converter has additional noise and distortion and falls short of them (Section 4).
+
+### 3.4 What resolution buys
+
+In the load-cell channel, full load produces 0.9 of the converter's range. With 12 bits, that span covers $0.9 \times 4096 \approx 3686$ codes; for a load cell rated at 10 kg, one code corresponds to about 2.7 g. With 16 bits, the same span covers about 58 982 codes, about 0.17 g per code. Whether those extra bits carry information depends on whether the noise of the sensor and amplifier is smaller than one step. Often it is not, and then the useful resolution is set by noise rather than by the converter, as the first entry warned.
+
+## 4. Real Converters
+
+A real converter departs from the ideal staircase in ways that are specified separately in datasheets and defined in IEEE Std 1241. They divide into static errors, which affect slowly varying signals, and dynamic ones, which appear as the signal frequency rises.
+
+### 4.1 Static errors
+
+- **Offset error**: the whole staircase is shifted along the input axis, so a zero input does not give the ideal code.
+- **Gain error**: the slope of the staircase differs from the ideal, so the error grows in proportion to the input.
+- **Differential nonlinearity** (DNL): the deviation of each individual step's width from the ideal 1 LSB. A DNL of −1 LSB means a step of zero width: that code never appears, a **missing code**.
+- **Integral nonlinearity** (INL): the deviation of the actual transfer function from a straight line, at each code. It is the converter's counterpart of the linearity error in the first entry, and it is usually quoted with the offset and gain errors removed.
+
+Offset and gain errors are constant and are removed by calibrating the complete channel, as the previous entry recommended. Nonlinearity can be corrected only by a calibration with many points, so it usually remains as a contribution to the uncertainty.
+
+### 4.2 Dynamic errors and effective resolution
+
+At higher signal frequencies, noise, distortion and timing errors add to the quantization noise. They are measured together by applying a pure sinusoid and comparing the signal with everything else in the output: the **signal-to-noise-and-distortion ratio** (SINAD). Inverting the SQNR formula turns SINAD into the **effective number of bits** (ENOB), the resolution of an ideal converter with the same performance:
+
+$$
+\text{ENOB} = \frac{\text{SINAD} - 1.76\ \text{dB}}{6.02\ \text{dB}}.
+$$
+
+A 16-bit converter with a measured SINAD of 86 dB has an ENOB of 14.0 bits: its last two bits are, on average, noise.
+
+### 4.3 Sample-and-hold and timing jitter
+
+A conversion takes time, and the input must not change while it happens. Most converters therefore begin with a **sample-and-hold** circuit: a switch and a capacitor that track the input and then, at the sampling instant, freeze it for the duration of the conversion.
+
+The sampling instant itself is uncertain by a small random amount, the **aperture jitter** (together with jitter on the clock that triggers it). A timing error matters most where the signal changes fastest. A full-scale sinusoid $\tfrac12\text{FSR}\sin(2\pi f t)$ has a maximum slope of $\pi f\,\text{FSR}$, so a timing error $t_j$ causes an amplitude error of up to $\pi f\,\text{FSR}\,t_j$. Keeping that below half an LSB, $\text{FSR}/2^{N+1}$, requires
+
+$$
+t_j < \frac{1}{2^{N+1}\,\pi f}.
+$$
+
+For a 12-bit converter and a 1 kHz signal, the limit is about 39 ns, easily met. For 16 bits at 20 kHz it is about 0.12 ns, which demands a carefully designed clock. For the slow signals of most sensors, jitter is negligible; for vibration and acoustic measurement, it is not.
+
+## 5. Converter Architectures
+
+Converters trade speed against resolution, and a handful of architectures cover most needs.
+
+### 5.1 Successive approximation
+
+A **successive-approximation register** (SAR) converter finds the code by binary search. It contains a digital-to-analog converter (DAC), which turns a trial code into a voltage, and a comparator, which reports whether the held input is above or below it. Starting with the most significant bit, it sets each bit in turn, keeps it if the DAC voltage does not exceed the input, and clears it otherwise. An $N$-bit conversion takes $N$ comparisons.
+
+A 4-bit example with $V_\text{ref} = 3.3$ V (so $q = 0.206$ V) and an input of 2.000 V:
+
+| Step | Trial code | DAC voltage | Input ≥ DAC? | Result so far |
+|---|---|---|---|---|
+| 1 | 1000 | 1.650 V | Yes, keep | 1000 |
+| 2 | 1100 | 2.475 V | No, clear | 1000 |
+| 3 | 1010 | 2.063 V | No, clear | 1000 |
+| 4 | 1001 | 1.856 V | Yes, keep | 1001 |
+
+The result, code 9, represents 1.856 V, the largest step value not exceeding the input. (A converter that rounds to the nearest code, as in Section 3.1, adds half an LSB to the DAC voltages; the search is the same.) SAR converters typically offer 8 to 18 bits at rates from kilosamples to a few megasamples per second, with low power and no delay beyond one conversion. They are the converters built into most microcontrollers and suit multiplexed, general-purpose data acquisition.
+
+### 5.2 Delta-sigma
+
+A **delta-sigma** (ΔΣ) converter takes the opposite approach. It samples at a very high rate with a coarse quantizer, often a single comparator, and uses feedback around an integrator so that the average of the coarse output tracks the input. Two effects then raise the resolution:
+
+- **Oversampling** spreads the quantization noise over a band up to the high sampling frequency, so only a fraction of it falls in the band of interest. Oversampling alone, by a ratio OSR, improves the SQNR by $10\log_{10}(\text{OSR})$ dB, about 3 dB (half a bit) per doubling of the rate.
+- **Noise shaping** by the feedback loop pushes most of the remaining quantization noise to high frequencies, far above the band of interest, which improves the in-band SQNR much faster than oversampling alone.
+
+A digital **decimation filter** on the chip then removes the out-of-band noise and reduces the output rate. The results are resolutions of 16 to 24 bits at output rates from a few samples to a few hundred thousand samples per second. Delta-sigma converters dominate weighing, temperature measurement and audio. Their decimation filter can be designed to place zeros of its response at 50 and 60 Hz, rejecting mains interference, and their high internal rate relaxes the analog anti-aliasing filter to a simple RC network. Their cost is **latency**: the digital filter needs several output periods to settle after a step or after switching between inputs.
+
+### 5.3 Other architectures
+
+- **Flash** converters compare the input with all $2^N - 1$ thresholds at once, using one comparator per threshold. They are the fastest architecture, but the number of comparators doubles with each bit, which limits them to about 8 bits.
+- **Pipeline** converters chain several coarse stages, each resolving a few bits and passing on the remaining error. They reach hundreds of megasamples per second at 12 to 16 bits, for communications and imaging, at the cost of a delay of several samples.
+- **Integrating** (dual-slope) converters integrate the input for a fixed time and measure how long a reference takes to discharge the integrator. They are slow but precise, and an integration time equal to a whole number of mains periods rejects mains interference completely; they are common in digital multimeters.
+
+| Architecture | Typical resolution | Typical speed | Typical uses |
+|---|---|---|---|
+| Flash | 6 to 8 bits | Gigasamples per second | Oscilloscopes, very high-speed links |
+| Pipeline | 12 to 16 bits | Tens to hundreds of megasamples per second | Communications, imaging |
+| SAR | 8 to 18 bits | Kilo- to megasamples per second | Microcontrollers, general data acquisition |
+| Delta-sigma | 16 to 24 bits | Samples to hundreds of kilosamples per second | Weighing, temperature, audio |
+| Integrating | 12 to 22 bits | A few to a few hundred samples per second | Multimeters, panel meters |
+
+For the load cell of the previous entry, with a 10 Hz bandwidth and a need for fine resolution, a delta-sigma converter with a ratiometric reference and mains rejection is the natural choice.
+
+## 6. From Numbers Back to Voltages
+
+Many measurement systems also need the reverse conversion: to generate an excitation waveform, to drive an actuator, or to supply a reference. A **digital-to-analog converter** (DAC) turns a code $k$ into the voltage $kq$. Most DACs hold each value until the next one arrives, a **zero-order hold**, so their output is a staircase. The steps contain energy at multiples of the update rate, the images of the wanted signal, and a **reconstruction filter**, an analog low-pass filter after the DAC, smooths them away. It is the mirror image of the anti-aliasing filter, for the same reason: the sampling theorem's reconstruction assumes an ideal low-pass filter, and a real one needs a margin between the highest wanted frequency and half the update rate.
+
+## 7. Summary
+
+| Question | Answer |
+|---|---|
+| What does an ADC do? | It samples the signal at discrete instants (discretising time) and quantizes each sample to one of $2^N$ codes (discretising amplitude). |
+| What is aliasing? | Frequencies that differ by a multiple of $f_s$ give identical samples, so components above $f_s/2$ appear as lower frequencies and cannot be removed afterwards. |
+| What does the sampling theorem guarantee? | A signal with no components at or above $B$ is fully determined by samples taken at $f_s > 2B$. |
+| What does the anti-aliasing filter need to do? | Attenuate everything from $f_s - f_p$ upwards to below the system's resolution, before sampling. |
+| How large is the quantization step? | $q = \text{FSR}/2^N$: 0.806 mV for 12 bits and 3.3 V. |
+| What uncertainty does quantization contribute? | $q/\sqrt{12}$, from a rectangular distribution of half-width $q/2$, when the signal is busy or dithered. |
+| What is the ideal SQNR? | $6.02N + 1.76$ dB for a full-scale sinusoid; real converters are rated by SINAD and ENOB. |
+| How do SAR and delta-sigma converters differ? | SAR: binary search, moderate resolution, fast, no latency. Delta-sigma: oversampling and noise shaping, high resolution, slower, with filter latency. |
+
+The quantization noise of this entry is only one of the noise sources in a measurement system, and usually not the largest. The next entry turns to the others: thermal, shot and flicker noise, interference and grounding, and how they set the smallest change a sensor system can detect.
+
+### References
+
+- A. V. Oppenheim and R. W. Schafer, *Discrete-Time Signal Processing*, 3rd edition, Pearson, 2010.
+- W. Kester (ed.), *Data Conversion Handbook*, Newnes, 2005.
+- IEEE Std 1241-2010, *IEEE Standard for Terminology and Test Methods for Analog-to-Digital Converters*.
+- R. Pallàs-Areny and J. G. Webster, *Sensors and Signal Conditioning*, 2nd edition, Wiley, 2001.
