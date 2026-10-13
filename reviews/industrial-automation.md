@@ -3,6 +3,7 @@
 - Series: `industrial-automation` (5 articles, status published, 0 planned entries)
 - Reviewed commit: 6fe0853
 - Date: 2026-10-13
+- Content hash: sha256:e542d8a7c8ea29013800b8b575a45fc396da0aae2a523d5bee9a3f3684a2be99
 
 ## Summary
 The series is technically strong and well structured: it moves from Boolean logic and state machines through the PLC, fieldbuses and industrial Ethernet, and PID control to ISA-95, OPC UA and digital twins, and every worked example that could be recomputed was correct (all nine Python programs reproduce their printed output byte for byte, and the CRC, CAN frame, Ethernet timing, PTP, scaling, tuning and observer formulas check out). The problems are local. Three statements are wrong: the fourth entry says the control series "called regulation" what that series calls disturbance rejection; the second entry says the 4–20 mA loop current "must never fall below about 4 mA" a few lines before it lists NE 43 levels of 3.8 and 3.6 mA; and the third entry says CAN identifiers 0x123 and 0x124 differ only in their last two bits (they differ in three). The most important should-fix item is that the series presents IEC 61131-3:2013 as current although a fourth edition, which removes Instruction List, was published in May 2025. Other items are a link whose text names the control series but targets its first entry, a promise in the first entry that the second only partly keeps, an imprecise remark on Modbus data age, the NE 43 reference, the PNP/NPN regional remark, and some redundancy. With these corrections the series is ready.
