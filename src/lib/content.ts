@@ -1,4 +1,5 @@
 import { getCollection, type CollectionEntry } from 'astro:content';
+import { formatDate, localizePath, type Lang } from '../i18n/ui';
 
 /** Drafts are visible only in `astro dev`; production builds exclude them everywhere. */
 const showDrafts = import.meta.env.DEV;
@@ -10,7 +11,7 @@ const showDrafts = import.meta.env.DEV;
  */
 async function assertSeriesReferencesExist(): Promise<void> {
   const [allPosts, allSeries] = await Promise.all([getCollection('blog'), getCollection('series')]);
-  const known = new Set(allSeries.map((s) => s.id));
+  const known = new Set(allSeries.filter((s) => !s.id.startsWith('vi/')).map((s) => s.id));
   const broken = allPosts.filter((p) => p.data.series && !known.has(p.data.series.id));
   if (broken.length > 0) {
     const lines = broken.map((p) => `  - src/content/blog/${p.id}: series "${p.data.series?.id}"`);
@@ -20,41 +21,159 @@ async function assertSeriesReferencesExist(): Promise<void> {
   }
 }
 
-export async function getPosts(): Promise<CollectionEntry<'blog'>[]> {
+/** Language of an entry: translations live in a `vi/` subdirectory of their collection. */
+export function entryLang(entry: { id: string }): Lang {
+  return entry.id.startsWith('vi/') ? 'vi' : 'en';
+}
+
+/** The id an entry shares with its original (the translation's file name without `vi/`). */
+export function baseId(entry: { id: string }): string {
+  return entry.id.replace(/^vi\//, '');
+}
+
+export const postHref = (post: CollectionEntry<'blog'>) => localizePath(`/blog/${baseId(post)}`, entryLang(post));
+export const insightHref = (item: CollectionEntry<'insights'>) => localizePath(`/insights/${baseId(item)}`, entryLang(item));
+export const seriesHref = (series: CollectionEntry<'series'>) => localizePath(`/series/${baseId(series)}`, entryLang(series));
+
+const sameDate = (a?: Date, b?: Date) => (a?.valueOf() ?? null) === (b?.valueOf() ?? null);
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Pairs each original with its Vietnamese translation. A translation without an original, or one
+ * whose shared frontmatter has drifted from the original's, fails the build: those fields are
+ * copied, not translated (docs/translation-vi.md), so a mismatch means one file was edited and the
+ * other forgotten.
+ */
+function pairTranslations<E extends { id: string; data: Record<string, unknown> }>(
+  collection: string,
+  entries: E[],
+  shared: (original: E, translation: E) => string | null,
+): { originals: E[]; translations: Map<string, E> } {
+  const originals = entries.filter((e) => entryLang(e) === 'en');
+  const byId = new Map(originals.map((e) => [e.id, e]));
+  const translations = new Map<string, E>();
+  const problems: string[] = [];
+  for (const tr of entries.filter((e) => entryLang(e) === 'vi')) {
+    const original = byId.get(baseId(tr));
+    if (!original) {
+      problems.push(`  - src/content/${collection}/${tr.id}: no original "${baseId(tr)}"`);
+      continue;
+    }
+    const mismatch = shared(original, tr);
+    if (mismatch) problems.push(`  - src/content/${collection}/${tr.id}: ${mismatch} differs from the original`);
+    translations.set(original.id, tr);
+  }
+  if (problems.length > 0) {
+    throw new Error(`Invalid translations (see docs/translation-vi.md):\n${problems.join('\n')}`);
+  }
+  return { originals, translations };
+}
+
+async function blogEntries() {
   await assertSeriesReferencesExist();
-  const posts = await getCollection('blog', ({ data }) => showDrafts || !data.draft);
-  // Newest first. On the same date a later series entry counts as newer, then the id breaks
-  // ties so list and pager order never depend on load order.
-  return posts.sort(
-    (a, b) =>
-      b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf() ||
-      (b.data.seriesOrder ?? 0) - (a.data.seriesOrder ?? 0) ||
-      a.id.localeCompare(b.id),
-  );
+  const all = await getCollection('blog');
+  return pairTranslations('blog', all, (o, t) => {
+    const a = o.data, b = t.data;
+    if (!sameDate(a.publishedAt, b.publishedAt)) return 'publishedAt';
+    if (!sameDate(a.updatedAt, b.updatedAt)) return 'updatedAt';
+    if (a.category !== b.category) return 'category';
+    if (!sameList(a.tags, b.tags)) return 'tags';
+    if (a.series?.id !== b.series?.id) return 'series';
+    if (a.seriesOrder !== b.seriesOrder) return 'seriesOrder';
+    if (a.draft !== b.draft) return 'draft';
+    if (a.example !== b.example) return 'example';
+    return null;
+  });
 }
 
-export async function getInsights(): Promise<CollectionEntry<'insights'>[]> {
-  const items = await getCollection('insights', ({ data }) => showDrafts || !data.draft);
-  return items.sort((a, b) => b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf() || a.id.localeCompare(b.id));
+/** Newest first. On the same date a later series entry counts as newer, then the id breaks ties. */
+const byDate = (a: CollectionEntry<'blog'>, b: CollectionEntry<'blog'>) =>
+  b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf() ||
+  (b.data.seriesOrder ?? 0) - (a.data.seriesOrder ?? 0) ||
+  baseId(a).localeCompare(baseId(b));
+
+/**
+ * Listed articles in `lang`: every original article, replaced by its translation where one
+ * exists. In Vietnamese, untranslated articles are therefore listed in English (entryLang() tells
+ * which), and link to the English page.
+ */
+export async function getPosts(lang: Lang = 'en'): Promise<CollectionEntry<'blog'>[]> {
+  const { originals, translations } = await blogEntries();
+  return originals
+    .filter(({ data }) => showDrafts || !data.draft)
+    .map((p) => (lang === 'vi' ? (translations.get(p.id) ?? p) : p))
+    .sort(byDate);
 }
 
-export async function getSeriesList(): Promise<CollectionEntry<'series'>[]> {
-  return (await getCollection('series')).sort((a, b) => a.data.title.localeCompare(b.data.title));
+/** Translations only (they get their own routes, and the Vietnamese RSS feed lists them). */
+export async function getTranslatedPosts(lang: Exclude<Lang, 'en'>): Promise<CollectionEntry<'blog'>[]> {
+  return (await getPosts(lang)).filter((p) => entryLang(p) === lang);
+}
+
+/** The translation of an article (or insight, or series) into `lang`, if there is one. */
+export async function hasTranslation(collection: 'blog' | 'insights' | 'series', id: string): Promise<boolean> {
+  return (await getCollection(collection)).some((e) => e.id === `vi/${id}`);
+}
+
+async function insightEntries() {
+  const all = await getCollection('insights');
+  return pairTranslations('insights', all, (o, t) => {
+    const a = o.data, b = t.data;
+    if (!sameDate(a.publishedAt, b.publishedAt)) return 'publishedAt';
+    if (a.kind !== b.kind) return 'kind';
+    if (!sameList(a.tags, b.tags)) return 'tags';
+    if (a.draft !== b.draft) return 'draft';
+    if (a.example !== b.example) return 'example';
+    return null;
+  });
+}
+
+export async function getInsights(lang: Lang = 'en'): Promise<CollectionEntry<'insights'>[]> {
+  const { originals, translations } = await insightEntries();
+  return originals
+    .filter(({ data }) => showDrafts || !data.draft)
+    .map((i) => (lang === 'vi' ? (translations.get(i.id) ?? i) : i))
+    .sort((a, b) => b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf() || baseId(a).localeCompare(baseId(b)));
+}
+
+async function seriesEntries() {
+  const all = await getCollection('series');
+  return pairTranslations('series', all, (o, t) => {
+    const a = o.data, b = t.data;
+    if (a.category !== b.category) return 'category';
+    if (a.status !== b.status) return 'status';
+    if (a.example !== b.example) return 'example';
+    if (a.plannedEntries.length !== b.plannedEntries.length) return 'the number of plannedEntries';
+    return null;
+  });
+}
+
+/** Series in `lang` (translated where a translation exists), sorted by their displayed title. */
+export async function getSeriesList(lang: Lang = 'en'): Promise<CollectionEntry<'series'>[]> {
+  const { originals, translations } = await seriesEntries();
+  return originals
+    .map((s) => (lang === 'vi' ? (translations.get(s.id) ?? s) : s))
+    .sort((a, b) => a.data.title.localeCompare(b.data.title, lang));
+}
+
+/** The series entry for `id` in `lang` (its translation if there is one, else the original). */
+export async function getSeries(id: string, lang: Lang = 'en'): Promise<CollectionEntry<'series'> | undefined> {
+  return (await getSeriesList(lang)).find((s) => baseId(s) === id);
 }
 
 /** Published articles belonging to a series, in reading order. */
-export async function getSeriesPosts(seriesId: string): Promise<CollectionEntry<'blog'>[]> {
-  const posts = await getPosts();
+export async function getSeriesPosts(seriesId: string, lang: Lang = 'en'): Promise<CollectionEntry<'blog'>[]> {
+  const posts = await getPosts(lang);
   return posts
     .filter((p) => p.data.series?.id === seriesId)
     .sort((a, b) => (a.data.seriesOrder ?? 999) - (b.data.seriesOrder ?? 999));
 }
 
 /** Related by shared tags (weight 2) and category (weight 1); excludes the post itself. */
-export async function getRelatedPosts(post: CollectionEntry<'blog'>, limit = 3) {
-  const posts = await getPosts();
+export async function getRelatedPosts(post: CollectionEntry<'blog'>, limit = 3, lang: Lang = entryLang(post)) {
+  const posts = await getPosts(lang);
   return posts
-    .filter((p) => p.id !== post.id)
+    .filter((p) => baseId(p) !== baseId(post))
     .map((p) => ({
       p,
       score:
@@ -67,9 +186,7 @@ export async function getRelatedPosts(post: CollectionEntry<'blog'>, limit = 3) 
     .map((x) => x.p);
 }
 
-export function formatDate(d: Date): string {
-  return d.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-}
+export { formatDate };
 
 export const slugify = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -115,8 +232,8 @@ export interface TagEntry {
  * getInsights(), so a tag that only appears on a draft has no page in production. Sorted by
  * count (descending), then name.
  */
-export async function getTagIndex(): Promise<TagEntry[]> {
-  const [posts, insights] = await Promise.all([getPosts(), getInsights()]);
+export async function getTagIndex(lang: Lang = 'en'): Promise<TagEntry[]> {
+  const [posts, insights] = await Promise.all([getPosts(lang), getInsights(lang)]);
   const index = new Map<string, TagEntry>();
   // Spelling variants that differ only in case or spacing share a page on purpose ("Control Theory"
   // and "control-theory"). Anything else that lands on one slug is a collision: fail the build

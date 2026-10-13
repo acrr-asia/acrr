@@ -1,0 +1,226 @@
+---
+title: "Lấy mẫu, lượng tử hóa và chuyển đổi dữ liệu"
+description: "Điện áp cảm biến đã được chuẩn hóa trở thành một dãy số như thế nào: lấy mẫu và định lý lấy mẫu, chồng phổ và bộ lọc chống chồng phổ, lượng tử hóa và sai số của nó, các sai số tĩnh và động của bộ chuyển đổi thực, cùng các kiến trúc bộ chuyển đổi xấp xỉ liên tiếp, delta-sigma và các kiến trúc khác."
+publishedAt: "2026-10-13"
+category: "Engineering"
+tags:
+  - sensors
+  - measurement
+  - signal processing
+series: sensor-systems
+seriesOrder: 4
+---
+
+import Figure from '../../../components/Figure.astro';
+import Aliasing from '../../../components/diagrams/Aliasing.astro';
+
+Bài trước kết thúc với một điện áp sạch: tín hiệu cảm biến đã được cấp nguồn kích thích (excitation), khuếch đại, dịch vào dải 0 đến 3.3 V và lọc thông thấp. Điện áp đó vẫn là một tín hiệu **tương tự** (analog): nó xác định tại mọi thời điểm và có thể nhận bất kỳ giá trị nào trong dải của nó. Máy tính chỉ có thể lưu trữ và xử lý một danh sách hữu hạn các con số. **Bộ chuyển đổi tương tự – số** (analog-to-digital converter, ADC) tạo ra danh sách đó, và khi làm vậy nó thực hiện hai phép xấp xỉ riêng biệt:
+
+- **Lấy mẫu** (sampling) rời rạc hóa thời gian. Bộ chuyển đổi chỉ đo tín hiệu tại các thời điểm đều đặn, $t = nT_s$ với $n = 0, 1, 2, \dots$, trong đó $T_s$ là **chu kỳ lấy mẫu** (sampling interval) và $f_s = 1/T_s$ là **tần số lấy mẫu** (sampling frequency, hay tốc độ lấy mẫu – sampling rate), tính bằng số mẫu trên giây hoặc hertz. Kết quả là một **tín hiệu thời gian rời rạc** (discrete-time signal) $x[n] = x(nT_s)$.
+- **Lượng tử hóa** (quantization) rời rạc hóa biên độ. Mỗi mẫu được biểu diễn bằng một trong một tập hữu hạn các giá trị, gồm $2^N$ giá trị đối với bộ chuyển đổi $N$ bit.
+
+Hai phép xấp xỉ này làm mất thông tin theo những cách khác nhau. Lấy mẫu không làm mất gì, với điều kiện tín hiệu không chứa tần số nào vượt quá một giới hạn do $f_s$ quy định; nếu có, các tần số đó không chỉ bị mất mà còn bị thể hiện sai thành những tần số thấp hơn. Lượng tử hóa luôn làm mất một phần thông tin, nhưng phần mất đó bị chặn và có thể làm nhỏ tùy ý bằng cách dùng nhiều bit hơn.
+
+Bài này trình bày lấy mẫu trước, sau đó là bộ lọc chống chồng phổ giúp việc lấy mẫu trở nên an toàn, rồi đến lượng tử hóa, các khiếm khuyết của bộ chuyển đổi thực và những cách chính để xây dựng bộ chuyển đổi. Bài kết thúc với quá trình ngược lại, chuyển đổi số – tương tự. Xuyên suốt bài, bộ chuyển đổi được giả thiết là **đơn cực** (unipolar), với dải đầu vào từ 0 V đến một **điện áp tham chiếu** (reference voltage) $V_\text{ref}$ (tức **dải toàn thang** của nó – full-scale range, FSR); đây là quy ước của phần lớn các bộ chuyển đổi tích hợp trong vi điều khiển. Bộ chuyển đổi lưỡng cực (bipolar) chỉ khác ở cách gán mã.
+
+## 1. Lấy mẫu và chồng phổ
+
+### 1.1 Điều mà phép lấy mẫu không thấy được
+
+Xét một tín hiệu hình sin tần số $f$ được lấy mẫu với tần số $f_s$. Các mẫu của nó là $\cos(2\pi f\, n/f_s)$. Bây giờ lấy một tín hiệu hình sin thứ hai có tần số khác tần số thứ nhất một bội nguyên của tần số lấy mẫu, $f + k f_s$. Các mẫu của nó là
+
+$$
+\cos\!\left(2\pi (f + k f_s)\,\frac{n}{f_s}\right) = \cos\!\left(2\pi f\,\frac{n}{f_s} + 2\pi k n\right) = \cos\!\left(2\pi f\,\frac{n}{f_s}\right),
+$$
+
+vì cộng thêm một số nguyên vòng, $2\pi kn$, không làm thay đổi giá trị cosin. Hai tín hiệu hình sin cho ra **các mẫu giống hệt nhau**. Điều này cũng đúng với tín hiệu hình sin tần số $k f_s - f$, vì cosin là hàm chẵn. Sau khi lấy mẫu, không còn gì phân biệt các tần số này với nhau. Một thành phần xuất hiện ở tần số khác với tần số thật của nó được gọi là **thành phần chồng phổ** (alias), và hiện tượng này gọi là **chồng phổ** (aliasing).
+
+<Figure caption="Chồng phổ. Một tín hiệu hình sin 9 Hz (nét liền) được lấy mẫu ở 10 Hz cho ra các mẫu (chấm tròn) giống hệt các mẫu của một tín hiệu hình sin 1 Hz (nét đứt). Chỉ từ các mẫu, không thể phân biệt tín hiệu 9 Hz với một tín hiệu 1 Hz.">
+  <Aliasing />
+</Figure>
+
+Do đó mọi tần số đều có một thành phần chồng phổ trong dải từ 0 đến $f_s/2$, tìm được bằng cách trừ đi bội nguyên gần nhất của $f_s$ rồi lấy giá trị tuyệt đối: $f_\text{alias} = |f - k f_s|$ với số nguyên $k$ làm cho giá trị này nhỏ nhất. Tần số $f_s/2$, bằng một nửa tốc độ lấy mẫu, được gọi là **tần số Nyquist** (Nyquist frequency). Các tần số cao hơn nó bị gập ngược xuống dưới nó, giống như một dải giấy được gấp tại $f_s/2$, $f_s$, $3f_s/2$, v.v.
+
+Chồng phổ không phải là một rủi ro trừu tượng. Một kết cấu dao động ở 980 Hz, được đo bằng gia tốc kế lấy mẫu ở 1 kHz, sẽ xuất hiện trong dữ liệu như một dao động 20 Hz, không thể phân biệt với một dao động thật. Can nhiễu (interference) từ lưới điện 50 Hz được lấy mẫu ở 60 Hz sẽ xuất hiện ở 10 Hz. Không có cách xử lý mẫu nào có thể đảo ngược hiện tượng này, vì thông tin dùng để phân biệt thành phần chồng phổ với tín hiệu thật không có trong các mẫu.
+
+### 1.2 Định lý lấy mẫu
+
+Kết quả ngược lại cho biết khi nào không có gì bị mất. **Định lý lấy mẫu** (sampling theorem), gắn với tên tuổi của Nyquist, Shannon, Kotelnikov và Whittaker, phát biểu:
+
+> Một tín hiệu không chứa thành phần tần số nào bằng hoặc lớn hơn $B$ được xác định hoàn toàn bởi các mẫu của nó lấy với tốc độ $f_s > 2B$.
+
+"Được xác định hoàn toàn" nghĩa là tín hiệu liên tục có thể được khôi phục chính xác từ các mẫu, về nguyên tắc bằng một bộ lọc thông thấp lý tưởng cho qua mọi thành phần dưới $f_s/2$ và chặn hoàn toàn mọi thành phần trên đó. Tốc độ $2B$ thường được gọi là **tốc độ Nyquist** (Nyquist rate) của tín hiệu. Điều kiện này liên quan đến nội dung của tín hiệu, không phải đến tần số mà ta quan tâm: một tín hiệu cân 10 Hz đi kèm dao động 1 kHz thì không bị giới hạn băng tần ở 10 Hz, và lấy mẫu nó ở 25 Hz sẽ làm dao động đó bị chồng phổ.
+
+Có hai hệ quả thực tiễn:
+
+- Tín hiệu thực không bao giờ bị giới hạn băng tần một cách hoàn hảo, nên định lý chỉ được thỏa mãn gần đúng, bằng cách suy giảm mọi thành phần trên $f_s/2$ cho đến khi các thành phần chồng phổ của chúng trở nên không đáng kể.
+- Bộ lọc lý tưởng dạng "tường gạch" (brick-wall) không tồn tại, nên các hệ thống thực tế lấy mẫu ở tốc độ cao hơn nhiều so với hai lần tần số cao nhất cần quan tâm, chừa lại một **dải chuyển tiếp** (transition band) để bộ lọc chống chồng phổ suy giảm dần.
+
+## 2. Bộ lọc chống chồng phổ
+
+**Bộ lọc chống chồng phổ** (anti-aliasing filter) là một bộ lọc thông thấp tương tự đặt trước bộ chuyển đổi để loại bỏ các thành phần có thể chồng phổ vào dải tần cần quan tâm. Nó bắt buộc phải là bộ lọc tương tự: một khi tín hiệu đã được lấy mẫu, thành phần chồng phổ không thể phân biệt với nội dung thật, nên một bộ lọc số đặt sau bộ chuyển đổi là đã quá muộn.
+
+Yêu cầu này có thể phát biểu chính xác. Giả sử dải tần cần quan tâm là 0 đến $f_p$ và tốc độ lấy mẫu là $f_s$. Các tần số bị chồng phổ vào dải cần quan tâm nằm trong phạm vi $f_p$ quanh một bội của $f_s$: dải thấp nhất như vậy là từ $f_s - f_p$ đến $f_s + f_p$. Bộ lọc phải suy giảm mọi thành phần từ $f_s - f_p$ trở lên đủ để đưa chúng xuống dưới mức thay đổi nhỏ nhất mà hệ thống cần phân giải.
+
+Kênh cảm biến lực (load cell) của bài trước có dải tần cần quan tâm đến $f_p = 10$ Hz và một bộ lọc Butterworth bậc bốn với tần số cắt 10 Hz. Nếu lấy mẫu ở $f_s = 100$ Hz, dải chồng phổ gần nhất bắt đầu từ 90 Hz, tại đó bộ lọc suy giảm một lượng
+
+$$
+20 \log_{10} \sqrt{1 + (90/10)^8} \approx 76.3\ \text{dB}.
+$$
+
+Một bộ chuyển đổi 12 bit (Mục 3) phân giải được một phần $2^{12} = 4096$, tức 72.2 dB dưới toàn thang. Vì vậy, can nhiễu ở 90 Hz trở lên, kể cả khi có biên độ bằng toàn bộ biên độ tín hiệu, cũng chỉ chồng phổ thành một lượng nhỏ hơn một bước lượng tử. Việc chọn $f_s$ còn đặc biệt quan trọng đối với can nhiễu lưới điện: ở 100 Hz, can nhiễu lưới điện 50 Hz bị chồng phổ về 50 Hz, nằm ngoài dải cần quan tâm, trong khi ở 60 Hz nó sẽ bị chồng phổ về 10 Hz, nằm ngay trong dải đó.
+
+### 2.1 Lấy mẫu vượt mức
+
+Lấy mẫu nhanh hơn nhiều so với mức mà dải tần cần quan tâm đòi hỏi, tức **lấy mẫu vượt mức** (oversampling), giúp nới lỏng yêu cầu đối với bộ lọc tương tự. Nếu cảm biến lực được lấy mẫu ở 1 kHz, dải chồng phổ gần nhất sẽ bắt đầu từ 990 Hz, và ngay cả một bộ lọc đơn giản bậc một hoặc bậc hai cũng đủ suy giảm ở đó. Sau đó một bộ lọc thông thấp số loại bỏ mọi thành phần trên 10 Hz, và các mẫu được tỉa bớt (**giảm tốc độ mẫu** – decimation) xuống một tốc độ thấp hơn. Bộ lọc số có thể rất dốc, lặp lại chính xác và không bị trôi theo linh kiện, nên cách phân công này, một bộ lọc tương tự thoải mái và một bộ lọc số dốc, là cách phần lớn các hệ thống hiện đại được thiết kế. Loạt bài về xử lý tín hiệu số sẽ trình bày nửa phần số.
+
+## 3. Lượng tử hóa
+
+### 3.1 Mã và bước lượng tử
+
+Một bộ chuyển đổi $N$ bit chia dải toàn thang của nó thành $2^N$ khoảng và xuất ra một **mã** (code) nguyên từ 0 đến $2^N - 1$, cho biết mẫu rơi vào khoảng nào. Độ rộng của mỗi khoảng là **bước lượng tử** (quantization step), còn gọi là một **bit có trọng số nhỏ nhất** (least significant bit, LSB):
+
+$$
+q = \frac{\text{FSR}}{2^N}.
+$$
+
+(Một số tài liệu định nghĩa $q$ là $\text{FSR}/(2^N - 1)$; sự khác biệt là không đáng kể với các giá trị $N$ thực tế, và bài này dùng $\text{FSR}/2^N$, phù hợp với cách phần lớn datasheet của bộ chuyển đổi quy định LSB.)
+
+| Độ phân giải $N$ | Số mã | $q$ với FSR = 3.3 V |
+|---|---|---|
+| 12 bit | 4096 | 0.806 mV |
+| 16 bit | 65 536 | 50.4 µV |
+| 24 bit | 16 777 216 | 0.197 µV |
+
+**Hàm truyền** (transfer function) của một bộ chuyển đổi lý tưởng có dạng bậc thang. Theo quy ước thông dụng, cũng là quy ước bài này sử dụng, mã chuyển từ $k-1$ sang $k$ tại giá trị đầu vào $(k - \tfrac12)q$, nên mỗi mã có tâm tại giá trị đầu vào $kq$, và **sai số lượng tử** (quantization error), tức hiệu giữa giá trị đầu vào và giá trị mà mã của nó biểu diễn, nằm trong khoảng từ $-q/2$ đến $+q/2$.
+
+### 3.2 Sai số lượng tử xét như độ không đảm bảo đo
+
+Khi tín hiệu di chuyển qua nhiều bước giữa các lần lấy mẫu, sai số lượng tử hoạt động như một biến ngẫu nhiên phân bố đều trên $\pm q/2$ và không tương quan với tín hiệu. Đây chính là tình huống mà bài thứ nhất đã xử lý như một đánh giá loại B với phân bố chữ nhật có nửa độ rộng $a$: độ không đảm bảo đo chuẩn (standard uncertainty) của nó là $a/\sqrt{3}$. Với $a = q/2$,
+
+$$
+u_q = \frac{q/2}{\sqrt{3}} = \frac{q}{\sqrt{12}} \approx 0.29\,q.
+$$
+
+Với bộ chuyển đổi 12 bit có dải 3.3 V, $u_q = 0.233$ mV.
+
+Mô hình này không còn đúng khi tín hiệu ổn định và không có nhiễu: khi đó mọi mẫu đều có cùng một sai số, đó là một độ lệch hệ thống lên tới $q/2$ mà phép lấy trung bình không thể loại bỏ. Trong thực tế, một lượng nhỏ nhiễu ngẫu nhiên, hoặc vốn đã có sẵn hoặc được thêm vào có chủ đích (**dither**), sẽ khôi phục tính ngẫu nhiên, và khi đó việc lấy trung bình nhiều mẫu có thể phân giải những thay đổi nhỏ hơn một bước. Bài về nhiễu sẽ quay lại sự đánh đổi này.
+
+### 3.3 Tỉ số tín hiệu trên nhiễu lượng tử
+
+Xem sai số lượng tử như nhiễu cho ta một chỉ tiêu đánh giá bộ chuyển đổi. Một tín hiệu hình sin toàn thang có biên độ đỉnh $\text{FSR}/2$ và giá trị hiệu dụng (root-mean-square, RMS) $\text{FSR}/(2\sqrt{2})$. Nhiễu lượng tử có giá trị RMS $q/\sqrt{12} = \text{FSR}/(2^N\sqrt{12})$. Tỉ số giữa chúng, gọi là **tỉ số tín hiệu trên nhiễu lượng tử** (signal-to-quantization-noise ratio, SQNR), bằng $2^N\sqrt{3/2}$, hay tính theo decibel
+
+$$
+\text{SQNR} = 20\log_{10}\!\left(2^N \sqrt{3/2}\right) \approx 6.02\,N + 1.76\ \text{dB}.
+$$
+
+Mỗi bit thêm vào làm tăng khoảng 6 dB. Bộ chuyển đổi 12 bit đạt 74.0 dB, bộ chuyển đổi 16 bit đạt 98.1 dB. Đây là các giới hạn lý tưởng; bộ chuyển đổi thực có thêm nhiễu và méo nên không đạt tới các giới hạn này (Mục 4).
+
+### 3.4 Độ phân giải mang lại gì
+
+Trong kênh cảm biến lực, tải tối đa tạo ra 0.9 dải của bộ chuyển đổi. Với 12 bit, khoảng đo đó bao trùm $0.9 \times 4096 \approx 3686$ mã; với cảm biến lực định mức 10 kg, một mã tương ứng khoảng 2.7 g. Với 16 bit, cùng khoảng đo đó bao trùm khoảng 58 982 mã, khoảng 0.17 g mỗi mã. Các bit thêm vào đó có mang thông tin hay không phụ thuộc vào việc nhiễu của cảm biến và bộ khuếch đại có nhỏ hơn một bước hay không. Thường thì không, và khi đó độ phân giải hữu ích được quyết định bởi nhiễu chứ không phải bởi bộ chuyển đổi, như bài thứ nhất đã cảnh báo.
+
+## 4. Bộ chuyển đổi thực
+
+Một bộ chuyển đổi thực sai lệch so với hình bậc thang lý tưởng theo những cách được quy định riêng rẽ trong datasheet và được định nghĩa trong IEEE Std 1241. Chúng chia thành sai số tĩnh, ảnh hưởng đến các tín hiệu biến thiên chậm, và sai số động, xuất hiện khi tần số tín hiệu tăng lên.
+
+### 4.1 Sai số tĩnh
+
+- **Sai số lệch không** (offset error): toàn bộ hình bậc thang bị dịch dọc theo trục đầu vào, nên đầu vào bằng không không cho ra mã lý tưởng.
+- **Sai số độ lợi** (gain error): độ dốc của hình bậc thang khác với giá trị lý tưởng, nên sai số tăng tỉ lệ với đầu vào.
+- **Độ phi tuyến vi phân** (differential nonlinearity, DNL): độ lệch của độ rộng từng bước riêng lẻ so với giá trị lý tưởng 1 LSB. DNL bằng −1 LSB nghĩa là một bước có độ rộng bằng không: mã đó không bao giờ xuất hiện, gọi là **mã bị thiếu** (missing code).
+- **Độ phi tuyến tích phân** (integral nonlinearity, INL): độ lệch của hàm truyền thực so với một đường thẳng, tại mỗi mã. Đây là đại lượng tương ứng của bộ chuyển đổi với sai số tuyến tính trong bài thứ nhất, và thường được công bố sau khi đã loại bỏ sai số lệch không và sai số độ lợi.
+
+Sai số lệch không và sai số độ lợi là hằng số và được loại bỏ bằng cách hiệu chuẩn toàn bộ kênh đo, như bài trước đã khuyến nghị. Độ phi tuyến chỉ có thể được hiệu chỉnh bằng một phép hiệu chuẩn nhiều điểm, nên thường vẫn tồn tại như một thành phần đóng góp vào độ không đảm bảo đo.
+
+### 4.2 Sai số động và độ phân giải hiệu dụng
+
+Ở tần số tín hiệu cao hơn, nhiễu, méo và sai số định thời cộng thêm vào nhiễu lượng tử. Chúng được đo chung bằng cách đưa vào một tín hiệu hình sin thuần và so sánh tín hiệu với mọi thứ còn lại ở đầu ra: **tỉ số tín hiệu trên nhiễu và méo** (signal-to-noise-and-distortion ratio, SINAD). Đảo ngược công thức SQNR sẽ chuyển SINAD thành **số bit hiệu dụng** (effective number of bits, ENOB), tức độ phân giải của một bộ chuyển đổi lý tưởng có cùng chất lượng:
+
+$$
+\text{ENOB} = \frac{\text{SINAD} - 1.76\ \text{dB}}{6.02\ \text{dB}}.
+$$
+
+Một bộ chuyển đổi 16 bit có SINAD đo được là 86 dB có ENOB bằng 14.0 bit: hai bit cuối của nó, tính trung bình, là nhiễu.
+
+### 4.3 Mạch lấy mẫu và giữ, và độ rung pha định thời
+
+Một lần chuyển đổi cần thời gian, và đầu vào không được thay đổi trong lúc đó. Vì vậy phần lớn bộ chuyển đổi bắt đầu bằng một mạch **lấy mẫu và giữ** (sample-and-hold): một khóa chuyển mạch và một tụ điện bám theo đầu vào, rồi tại thời điểm lấy mẫu thì giữ cố định giá trị đó trong suốt thời gian chuyển đổi.
+
+Bản thân thời điểm lấy mẫu cũng không chắc chắn, lệch một lượng ngẫu nhiên nhỏ gọi là **độ rung pha khẩu độ** (aperture jitter), cùng với độ rung pha của xung nhịp kích hoạt nó. Sai số định thời có ảnh hưởng lớn nhất ở nơi tín hiệu thay đổi nhanh nhất. Một tín hiệu hình sin toàn thang $\tfrac12\text{FSR}\sin(2\pi f t)$ có độ dốc cực đại $\pi f\,\text{FSR}$, nên một sai số định thời $t_j$ gây ra sai số biên độ lên tới $\pi f\,\text{FSR}\,t_j$. Để giữ sai số này dưới nửa LSB, tức $\text{FSR}/2^{N+1}$, cần có
+
+$$
+t_j < \frac{1}{2^{N+1}\,\pi f}.
+$$
+
+Với bộ chuyển đổi 12 bit và tín hiệu 1 kHz, giới hạn này vào khoảng 39 ns, dễ dàng đáp ứng. Với 16 bit ở 20 kHz, nó vào khoảng 0.12 ns, đòi hỏi một xung nhịp được thiết kế cẩn thận. Với các tín hiệu chậm của phần lớn cảm biến, độ rung pha là không đáng kể; với phép đo dao động và âm thanh thì không phải vậy.
+
+## 5. Các kiến trúc bộ chuyển đổi
+
+Các bộ chuyển đổi đánh đổi giữa tốc độ và độ phân giải, và một số ít kiến trúc đáp ứng hầu hết các nhu cầu.
+
+### 5.1 Xấp xỉ liên tiếp
+
+Bộ chuyển đổi **thanh ghi xấp xỉ liên tiếp** (successive-approximation register, SAR) tìm mã bằng phương pháp tìm kiếm nhị phân. Nó chứa một bộ chuyển đổi số – tương tự (digital-to-analog converter, DAC) biến một mã thử thành điện áp, và một bộ so sánh (comparator) cho biết đầu vào đang được giữ cao hơn hay thấp hơn điện áp đó. Bắt đầu từ bit có trọng số lớn nhất, nó lần lượt đặt từng bit, giữ bit đó nếu điện áp DAC không vượt quá đầu vào, và xóa bit đó trong trường hợp ngược lại. Một lần chuyển đổi $N$ bit cần $N$ phép so sánh.
+
+Một ví dụ 4 bit với $V_\text{ref} = 3.3$ V (nên $q = 0.206$ V) và đầu vào 2.000 V:
+
+| Bước | Mã thử | Điện áp DAC | Đầu vào ≥ DAC? | Kết quả đến thời điểm này |
+|---|---|---|---|---|
+| 1 | 1000 | 1.650 V | Có, giữ | 1000 |
+| 2 | 1100 | 2.475 V | Không, xóa | 1000 |
+| 3 | 1010 | 2.063 V | Không, xóa | 1000 |
+| 4 | 1001 | 1.856 V | Có, giữ | 1001 |
+
+Kết quả, mã 9, biểu diễn 1.856 V, giá trị bậc lớn nhất không vượt quá đầu vào. (Một bộ chuyển đổi làm tròn về mã gần nhất, như ở Mục 3.1, sẽ cộng thêm nửa LSB vào các điện áp DAC; quá trình tìm kiếm vẫn như cũ.) Bộ chuyển đổi SAR thường có độ phân giải từ 8 đến 18 bit ở tốc độ từ vài kilomẫu đến vài megamẫu mỗi giây, tiêu thụ ít năng lượng và không có độ trễ nào ngoài một lần chuyển đổi. Đây là loại bộ chuyển đổi được tích hợp trong phần lớn vi điều khiển và phù hợp với việc thu thập dữ liệu đa năng, có dồn kênh (multiplexed).
+
+### 5.2 Delta-sigma
+
+Bộ chuyển đổi **delta-sigma** (ΔΣ) đi theo hướng ngược lại. Nó lấy mẫu ở tốc độ rất cao với một bộ lượng tử hóa thô, thường chỉ là một bộ so sánh duy nhất, và dùng phản hồi quanh một bộ tích phân để giá trị trung bình của đầu ra thô bám theo đầu vào. Khi đó có hai hiệu ứng làm tăng độ phân giải:
+
+- **Lấy mẫu vượt mức** trải nhiễu lượng tử ra trên một dải tần kéo dài đến tần số lấy mẫu cao, nên chỉ một phần của nó rơi vào dải cần quan tâm. Riêng việc lấy mẫu vượt mức theo một tỉ số OSR đã cải thiện SQNR thêm $10\log_{10}(\text{OSR})$ dB, khoảng 3 dB (nửa bit) mỗi lần tăng gấp đôi tốc độ.
+- **Định dạng nhiễu** (noise shaping) bởi vòng phản hồi đẩy phần lớn nhiễu lượng tử còn lại lên các tần số cao, xa phía trên dải cần quan tâm, nhờ đó cải thiện SQNR trong dải nhanh hơn nhiều so với chỉ lấy mẫu vượt mức.
+
+Sau đó một **bộ lọc giảm tốc độ mẫu** (decimation filter) số trên chip loại bỏ nhiễu ngoài dải và giảm tốc độ đầu ra. Kết quả là độ phân giải từ 16 đến 24 bit ở tốc độ đầu ra từ vài mẫu đến vài trăm nghìn mẫu mỗi giây. Bộ chuyển đổi delta-sigma chiếm ưu thế trong cân, đo nhiệt độ và âm thanh. Bộ lọc giảm tốc độ mẫu của chúng có thể được thiết kế để đặt các điểm không của đáp ứng tại 50 và 60 Hz, nhằm loại bỏ can nhiễu lưới điện, và tốc độ nội bộ cao của chúng cho phép bộ lọc chống chồng phổ tương tự chỉ cần là một mạch RC đơn giản. Cái giá phải trả là **độ trễ** (latency): bộ lọc số cần vài chu kỳ đầu ra để ổn định sau một bước nhảy hoặc sau khi chuyển giữa các đầu vào.
+
+### 5.3 Các kiến trúc khác
+
+- Bộ chuyển đổi **song song** (flash) so sánh đầu vào với toàn bộ $2^N - 1$ ngưỡng cùng lúc, dùng một bộ so sánh cho mỗi ngưỡng. Đây là kiến trúc nhanh nhất, nhưng số bộ so sánh tăng gấp đôi theo mỗi bit, điều này giới hạn chúng ở khoảng 8 bit.
+- Bộ chuyển đổi **đường ống** (pipeline) nối tiếp nhiều tầng thô, mỗi tầng phân giải vài bit và chuyển phần sai số còn lại cho tầng sau. Chúng đạt hàng trăm megamẫu mỗi giây ở 12 đến 16 bit, dùng cho truyền thông và tạo ảnh, với cái giá là độ trễ vài mẫu.
+- Bộ chuyển đổi **tích phân** (integrating, loại hai độ dốc – dual-slope) tích phân đầu vào trong một khoảng thời gian cố định và đo thời gian cần thiết để một nguồn tham chiếu xả hết bộ tích phân. Chúng chậm nhưng chính xác, và một thời gian tích phân bằng một số nguyên chu kỳ lưới điện sẽ loại bỏ hoàn toàn can nhiễu lưới điện; chúng phổ biến trong đồng hồ vạn năng số.
+
+| Kiến trúc | Độ phân giải điển hình | Tốc độ điển hình | Ứng dụng điển hình |
+|---|---|---|---|
+| Song song (flash) | 6 đến 8 bit | Gigamẫu mỗi giây | Máy hiện sóng, đường truyền tốc độ rất cao |
+| Đường ống (pipeline) | 12 đến 16 bit | Hàng chục đến hàng trăm megamẫu mỗi giây | Truyền thông, tạo ảnh |
+| SAR | 8 đến 18 bit | Kilomẫu đến megamẫu mỗi giây | Vi điều khiển, thu thập dữ liệu đa năng |
+| Delta-sigma | 16 đến 24 bit | Vài mẫu đến hàng trăm kilomẫu mỗi giây | Cân, nhiệt độ, âm thanh |
+| Tích phân | 12 đến 22 bit | Vài mẫu đến vài trăm mẫu mỗi giây | Đồng hồ vạn năng, đồng hồ đo gắn bảng |
+
+Đối với cảm biến lực của bài trước, với băng thông 10 Hz và yêu cầu độ phân giải cao, một bộ chuyển đổi delta-sigma có tham chiếu tỉ lệ (ratiometric) và khả năng loại bỏ can nhiễu lưới điện là lựa chọn tự nhiên.
+
+## 6. Từ con số trở lại điện áp
+
+Nhiều hệ thống đo cũng cần phép chuyển đổi ngược lại: để tạo dạng sóng kích thích, để điều khiển cơ cấu chấp hành, hoặc để cung cấp một giá trị tham chiếu. **Bộ chuyển đổi số – tương tự** (DAC) biến một mã $k$ thành điện áp $kq$. Phần lớn DAC giữ mỗi giá trị cho đến khi giá trị tiếp theo đến, gọi là **giữ bậc không** (zero-order hold), nên đầu ra của chúng có dạng bậc thang. Các bậc này chứa năng lượng tại các bội của tốc độ cập nhật, là các ảnh (image) của tín hiệu mong muốn, và một **bộ lọc khôi phục** (reconstruction filter), tức một bộ lọc thông thấp tương tự đặt sau DAC, làm trơn chúng đi. Nó là ảnh đối xứng của bộ lọc chống chồng phổ, vì cùng một lý do: phép khôi phục trong định lý lấy mẫu giả thiết một bộ lọc thông thấp lý tưởng, còn bộ lọc thực cần một khoảng dự trữ giữa tần số mong muốn cao nhất và một nửa tốc độ cập nhật.
+
+## 7. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| ADC làm gì? | Nó lấy mẫu tín hiệu tại các thời điểm rời rạc (rời rạc hóa thời gian) và lượng tử hóa mỗi mẫu thành một trong $2^N$ mã (rời rạc hóa biên độ). |
+| Chồng phổ là gì? | Các tần số khác nhau một bội của $f_s$ cho ra các mẫu giống hệt nhau, nên các thành phần trên $f_s/2$ xuất hiện như những tần số thấp hơn và không thể loại bỏ về sau. |
+| Định lý lấy mẫu đảm bảo điều gì? | Một tín hiệu không có thành phần nào bằng hoặc lớn hơn $B$ được xác định hoàn toàn bởi các mẫu lấy với $f_s > 2B$. |
+| Bộ lọc chống chồng phổ cần làm gì? | Suy giảm mọi thành phần từ $f_s - f_p$ trở lên xuống dưới độ phân giải của hệ thống, trước khi lấy mẫu. |
+| Bước lượng tử lớn bao nhiêu? | $q = \text{FSR}/2^N$: 0.806 mV với 12 bit và 3.3 V. |
+| Lượng tử hóa đóng góp độ không đảm bảo đo bao nhiêu? | $q/\sqrt{12}$, từ phân bố chữ nhật nửa độ rộng $q/2$, khi tín hiệu biến động nhiều hoặc có dither. |
+| SQNR lý tưởng là bao nhiêu? | $6.02N + 1.76$ dB đối với tín hiệu hình sin toàn thang; bộ chuyển đổi thực được đánh giá bằng SINAD và ENOB. |
+| Bộ chuyển đổi SAR và delta-sigma khác nhau thế nào? | SAR: tìm kiếm nhị phân, độ phân giải trung bình, nhanh, không có độ trễ. Delta-sigma: lấy mẫu vượt mức và định dạng nhiễu, độ phân giải cao, chậm hơn, có độ trễ của bộ lọc. |
+
+Nhiễu lượng tử trong bài này chỉ là một trong các nguồn nhiễu của hệ thống đo, và thường không phải nguồn lớn nhất. Bài tiếp theo sẽ chuyển sang các nguồn còn lại: nhiễu nhiệt, nhiễu bắn và nhiễu nhấp nháy, can nhiễu và nối đất, và cách chúng quyết định mức thay đổi nhỏ nhất mà một hệ thống cảm biến có thể phát hiện.
+
+### Tài liệu tham khảo
+
+- A. V. Oppenheim and R. W. Schafer, *Discrete-Time Signal Processing*, 3rd edition, Pearson, 2010.
+- W. Kester (ed.), *Data Conversion Handbook*, Newnes, 2005.
+- IEEE Std 1241-2010, *IEEE Standard for Terminology and Test Methods for Analog-to-Digital Converters*.
+- R. Pallàs-Areny and J. G. Webster, *Sensors and Signal Conditioning*, 2nd edition, Wiley, 2001.

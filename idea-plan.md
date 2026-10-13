@@ -8,7 +8,7 @@ ACRR (Advanced Computing & Robotics Research) is an independent research and tec
 
 The website should initially serve as a personal research platform and gradually evolve into a research lab ecosystem. It should support publishing technical articles, organizing research into series, curating learning resources, and sharing research insights.
 
-The website should be written entirely in English.
+The website is written in English, and is published in two languages: English (the original, at the domain root) and Vietnamese (translations, under `/vi`). Every article, series and insight is written in English first; Vietnamese translations follow and are labelled as translations, with the English original authoritative where they differ. Interface text exists in both languages. Translation rules: `docs/translation-vi.md`.
 
 ### Core objectives
 

@@ -72,12 +72,18 @@ function isCommit(rev) {
   }
 }
 
+/** Translation directories (src/content/blog/vi/...): reviews cover the English originals only. */
+const TRANSLATION_DIRS = new Set(['vi']);
+
 function walk(dir) {
   const abs = path.join(ROOT, dir);
   if (!existsSync(abs)) return [];
   return readdirSync(abs).flatMap((name) => {
     const rel = `${dir}/${name}`;
-    return statSync(path.join(ROOT, rel)).isDirectory() ? walk(rel) : /\.mdx?$/.test(name) ? [rel] : [];
+    if (statSync(path.join(ROOT, rel)).isDirectory()) {
+      return dir === BLOG_DIR && TRANSLATION_DIRS.has(name) ? [] : walk(rel);
+    }
+    return /\.mdx?$/.test(name) ? [rel] : [];
   });
 }
 

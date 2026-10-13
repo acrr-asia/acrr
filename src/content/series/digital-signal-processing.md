@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/digital-signal-processing.md) as well.
 title: "Digital Signal Processing for Engineers"
 description: "A planned series on processing sampled signals: discrete-time signals and systems, the z-transform, frequency analysis with the DFT and FFT, digital filter design, and the step from signal processing to digital control."
 category: "Mathematical Foundations"

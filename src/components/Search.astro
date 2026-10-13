@@ -10,23 +10,28 @@
  * - Result titles/URLs are set with textContent/href only. Excerpts come from Pagefind as HTML
  *   containing <mark>; they are re-parsed in an inert document and rebuilt so that ONLY text and
  *   <mark> survive.
+ * - Interface text comes from src/i18n/ui.ts (`searchUi`) through the dialog's data-ui attribute.
+ *   Pagefind keeps one index per <html lang>, so a page searches the content in its own language.
  */
+import { langFromUrl, searchUi } from '../i18n/ui';
+
+const s = searchUi(langFromUrl(Astro.url));
 ---
-<dialog id="site-search" class="site-search" aria-labelledby="site-search-title">
+<dialog id="site-search" class="site-search" aria-labelledby="site-search-title" data-ui={JSON.stringify(s.script)}>
   <div class="site-search__panel">
     <div class="site-search__head">
-      <p id="site-search-title" class="eyebrow">Search</p>
-      <button type="button" class="site-search__close" data-search-close>Close <kbd>Esc</kbd></button>
+      <p id="site-search-title" class="eyebrow">{s.title}</p>
+      <button type="button" class="site-search__close" data-search-close>{s.close} <kbd>Esc</kbd></button>
     </div>
 
     <div role="search">
-      <label class="sr-only" for="site-search-input">Search the site</label>
+      <label class="sr-only" for="site-search-input">{s.placeholder}</label>
       <input
         id="site-search-input"
         class="site-search__input"
         type="search"
         name="q"
-        placeholder="Search the site"
+        placeholder={s.placeholder}
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
@@ -38,7 +43,7 @@
 
     <p id="site-search-status" class="site-search__status" role="status" aria-live="polite"></p>
     <ul id="site-search-results" class="site-search__results" hidden></ul>
-    <p class="site-search__hint">Arrow keys move between results. Enter opens the first result.</p>
+    <p class="site-search__hint">{s.hint}</p>
   </div>
 </dialog>
 
@@ -60,9 +65,12 @@
   /** How many Pagefind hits are inspected before filtering; the site is small, so this is generous. */
   const FETCH_LIMIT = 30;
   const MIN_QUERY = 2;
-  const HINT = 'Type at least 2 characters to search the site.';
-  const UNAVAILABLE =
-    'Search index is built with npm run build and available in npm run preview.';
+  /** Interface text in the page's language (src/i18n/ui.ts, `searchUi().script`). */
+  const UI = JSON.parse(document.getElementById('site-search')?.dataset.ui ?? '{}') as Record<string, string>;
+  const HINT = UI.hint;
+  const UNAVAILABLE = UI.unavailable;
+  const fill = (template: string, values: Record<string, string | number>) =>
+    template.replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? ''));
 
   /** Pagefind is generated into dist/ after the Astro build, so it is not part of the bundle. */
   let loading: Promise<PagefindModule | null> | null = null;
@@ -116,7 +124,7 @@
 
   /** Lower-case letter/digit runs, so punctuation (state-space, "quotes") never matters. */
   function wordsOf(text: string): string[] {
-    return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+    return text.normalize('NFC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   }
 
   /** The term itself plus its crude stems (4+ letters), any of which may start a matching word. */
@@ -202,7 +210,7 @@
         if (item.meta?.example) {
           badge = document.createElement('span');
           badge.className = 'badge notice site-search__badge';
-          badge.textContent = 'Example';
+          badge.textContent = UI.example;
         }
 
         const path = document.createElement('span');
@@ -232,7 +240,7 @@
         return;
       }
 
-      setStatus('Searching…');
+      setStatus(UI.searching);
       const pf = await loadPagefind(retry);
       if (stale()) return;
       if (!pf) {
@@ -250,20 +258,20 @@
         const matches = terms.length > 0 ? candidates.filter((d) => containsAllTerms(d, terms)) : [];
         if (matches.length === 0) {
           clearResults();
-          setStatus(`No results for “${query}”.`);
+          setStatus(fill(UI.none, { query }));
           return;
         }
         render(matches.slice(0, MAX_RESULTS));
         const total = matches.length;
         const atLeast = results.length > FETCH_LIMIT ? '+' : ''; // hits beyond FETCH_LIMIT were not checked
         setStatus(
-          `${total}${atLeast} ${total === 1 && !atLeast ? 'result' : 'results'}` +
-            (total > MAX_RESULTS ? `, showing the first ${MAX_RESULTS}` : ''),
+          fill(total === 1 && !atLeast ? UI.one : UI.many, { n: `${total}${atLeast}` }) +
+            (total > MAX_RESULTS ? fill(UI.showing, { n: MAX_RESULTS }) : ''),
         );
       } catch {
         if (stale()) return;
         clearResults();
-        setStatus('Search failed. Close and reopen search to try again.');
+        setStatus(UI.failed);
       }
     }
 

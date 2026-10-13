@@ -1,6 +1,7 @@
 ---
 # Authoring note: when a planned entry is written, publish it as an article in
 # src/content/blog (with `series` and `seriesOrder`) and remove it from plannedEntries.
+# Remove it from the Vietnamese translation (src/content/series/vi/foundations-of-control-systems.md) as well.
 title: "Foundations of Control Systems"
 description: "A series on how feedback shapes the behavior of dynamical systems, from first principles to state-space models."
 category: "Robotics and Control"

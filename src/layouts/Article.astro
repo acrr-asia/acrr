@@ -1,11 +1,14 @@
 ---
-import { getEntry, type CollectionEntry } from 'astro:content';
+import type { CollectionEntry } from 'astro:content';
 import Base from './Base.astro';
 import TagList from '../components/TagList.astro';
 import RelatedPosts from '../components/RelatedPosts.astro';
 import TableOfContents from '../components/TableOfContents.astro';
 import ArticlePager from '../components/ArticlePager.astro';
-import { formatDate, getPosts, getRelatedPosts, getSeriesPosts, slugify } from '../lib/content';
+import {
+  baseId, entryLang, formatDate, getPosts, getRelatedPosts, getSeries, getSeriesPosts, hasTranslation, postHref, seriesHref, slugify,
+} from '../lib/content';
+import { categoryLabel, localizePath, t } from '../i18n/ui';
 
 interface Props {
   post: CollectionEntry<'blog'>;
@@ -17,63 +20,70 @@ interface Props {
 
 const { post, minutesRead, headings = [] } = Astro.props;
 const { data } = post;
+const lang = entryLang(post);
+const ui = t(lang);
+const id = baseId(post);
+// The same article in the other language: a translation always has its original; an original
+// may not have a translation yet.
+const counterpart = lang === 'en' ? ((await hasTranslation('blog', id)) ? `/blog/${id}` : null) : `/blog/${id}`;
+const blogHome = localizePath('/blog', lang);
 
 // Series context: previous/next among the articles that are actually listed.
-const seriesEntry = data.series ? await getEntry(data.series) : undefined;
-const seriesPosts = data.series ? await getSeriesPosts(data.series.id) : [];
+const seriesEntry = data.series ? await getSeries(data.series.id, lang) : undefined;
+const seriesPosts = data.series ? await getSeriesPosts(data.series.id, lang) : [];
 const position = seriesPosts.findIndex((p) => p.id === post.id);
 const prev = position > 0 ? seriesPosts[position - 1] : undefined;
 const next = position >= 0 ? seriesPosts[position + 1] : undefined;
 
 // Chronological neighbours for every article (series articles also get the series pager above it).
-const allPosts = await getPosts();
+const allPosts = await getPosts(lang);
 const index = allPosts.findIndex((p) => p.id === post.id);
 const newer = index > 0 ? allPosts[index - 1] : undefined;
 const older = index >= 0 ? allPosts[index + 1] : undefined;
 
-const related = await getRelatedPosts(post, 3);
+const related = await getRelatedPosts(post, 3, lang);
 const isoDate = data.publishedAt.toISOString().slice(0, 10);
 const hasReadingTime = typeof minutesRead === 'number' && minutesRead > 0;
-const eyebrow =
-  seriesEntry && data.seriesOrder
-    ? `part ${data.seriesOrder} · ${seriesEntry.data.title}`
-    : seriesEntry
-      ? seriesEntry.data.title
-      : 'article';
+const eyebrow = seriesEntry ? ui.partOf(data.seriesOrder, seriesEntry.data.title) : ui.articleEyebrow;
+// Neighbours that are not translated are listed in English.
+const foreignLang = (p: CollectionEntry<'blog'>) => (entryLang(p) !== lang ? 'en' : undefined);
 ---
-<Base title={data.title} description={data.description} example={data.example ? 'article' : undefined}>
+<Base title={data.title} description={data.description} example={data.example ? 'article' : undefined} counterpart={counterpart}>
   <article class="article">
-    <p class="back"><a href="/blog">← Blog</a></p>
+    <p class="back"><a href={blogHome}>{ui.backToBlog}</a></p>
 
     <header class="head">
       <p class="eyebrow" data-pagefind-ignore>{eyebrow}</p>
       <h1>{data.title}</h1>
       <p class="lede">{data.description}</p>
       <p class="meta dotted" data-pagefind-ignore>
-        <time datetime={isoDate}>{formatDate(data.publishedAt)}</time>
+        <time datetime={isoDate}>{formatDate(data.publishedAt, lang)}</time>
         <span>
-          <a href={`/blog/category/${slugify(data.category)}`} data-pagefind-filter="category">{data.category}</a>
+          <a href={localizePath(`/blog/category/${slugify(data.category)}`, lang)} data-pagefind-filter="category">{categoryLabel(data.category, lang)}</a>
         </span>
-        {hasReadingTime && <span>{minutesRead} min read</span>}
+        {hasReadingTime && <span>{ui.minRead(minutesRead)}</span>}
         {data.updatedAt && (
-          <span>Updated <time datetime={data.updatedAt.toISOString().slice(0, 10)}>{formatDate(data.updatedAt)}</time></span>
+          <span>{ui.updated} <time datetime={data.updatedAt.toISOString().slice(0, 10)}>{formatDate(data.updatedAt, lang)}</time></span>
         )}
       </p>
     </header>
 
     {data.example && (
-      <aside class="callout" role="note" aria-label="Example article notice">
-        <span class="badge notice">Example article</span>
-        <span>
-          This is illustrative sample content that shows how the site presents an article. It is not original research.
-        </span>
+      <aside class="callout" role="note" aria-label={ui.exampleArticle}>
+        <span class="badge notice">{ui.exampleArticle}</span>
+        <span>{ui.exampleArticleNotice}</span>
       </aside>
     )}
     {data.draft && (
-      <aside class="callout" role="note" aria-label="Draft notice">
-        <span class="badge">Draft</span>
-        <span>This article is unfinished. It is shown only in development and is not published.</span>
+      <aside class="callout" role="note" aria-label={ui.draft}>
+        <span class="badge">{ui.draft}</span>
+        <span>{ui.draftNotice}</span>
       </aside>
+    )}
+    {ui.translationNote && (
+      <p class="translation-note" data-pagefind-ignore>
+        {ui.translationNote}{' '}<a href={`/blog/${id}`} hreflang="en">{ui.translationLink}</a>.
+      </p>
     )}
 
     <TableOfContents headings={headings} />
@@ -84,35 +94,35 @@ const eyebrow =
 
     {data.tags.length > 0 && (
       <footer class="tags-block">
-        <p class="label">Tags</p>
+        <p class="label">{ui.tags}</p>
         <TagList tags={data.tags} />
       </footer>
     )}
 
     {seriesEntry && (
       <nav class="series-nav" aria-labelledby="series-nav-title" data-pagefind-ignore>
-        <p class="eyebrow">series</p>
+        <p class="eyebrow">{ui.seriesEyebrow}</p>
         <h2 id="series-nav-title">
-          {data.seriesOrder ? `Part ${data.seriesOrder} of ` : 'Part of '}
-          <a href={`/series/${seriesEntry.id}`}>{seriesEntry.data.title}</a>
+          {ui.partNOf(data.seriesOrder)}
+          <a href={seriesHref(seriesEntry)}>{seriesEntry.data.title}</a>
         </h2>
         {(prev || next) && (
           <ul class="pager">
             {prev && (
               <li class="prev">
-                <span class="dir">← Previous in series</span>
-                <a href={`/blog/${prev.id}`}>{prev.data.title}</a>
+                <span class="dir">{ui.prevInSeries}</span>
+                <a href={postHref(prev)} lang={foreignLang(prev)}>{prev.data.title}</a>
               </li>
             )}
             {next && (
               <li class="next">
-                <span class="dir">Next in series →</span>
-                <a href={`/blog/${next.id}`}>{next.data.title}</a>
+                <span class="dir">{ui.nextInSeries}</span>
+                <a href={postHref(next)} lang={foreignLang(next)}>{next.data.title}</a>
               </li>
             )}
           </ul>
         )}
-        <p class="all"><a href={`/series/${seriesEntry.id}`}>View the full series</a></p>
+        <p class="all"><a href={seriesHref(seriesEntry)}>{ui.fullSeries}</a></p>
       </nav>
     )}
 
@@ -120,7 +130,7 @@ const eyebrow =
 
     <RelatedPosts posts={related} />
 
-    <p class="back bottom"><a href="/blog">← Back to all articles</a></p>
+    <p class="back bottom"><a href={blogHome}>{ui.backToAll}</a></p>
   </article>
 </Base>
 
@@ -142,6 +152,7 @@ const eyebrow =
   .back a { display: inline-block; padding-block: 0.3rem; }
   .back.bottom { margin: var(--space-5) 0 0; }
   .head { margin-bottom: var(--space-4); }
+  .translation-note { margin: 0 0 var(--space-4); font-size: 0.9rem; color: var(--ink-muted); }
   .head h1 { margin-top: var(--space-2); }
   .head .meta { margin: 0 0 var(--space-1); }
   .callout {
