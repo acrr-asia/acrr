@@ -1,6 +1,6 @@
 ---
 title: "Sessions and Cookies in Depth"
-description: "How a web application keeps a user signed in between requests: session identifiers and their storage, cookie scope and attributes, the browser's notion of a site, session fixation, cross-site request forgery, timeouts and logout, treated as one design problem."
+description: "Learn how a web session keeps a user signed in: identifiers, cookie attributes and prefixes, sites and origins, fixation, forgery, timeouts and logout."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -14,18 +14,18 @@ series: identity-and-access-control
 seriesOrder: 3
 ---
 
-The previous entry ended at the moment of successful authentication: the user has proved control of an authenticator, perhaps a passkey, perhaps a password and a one-time code. That proof was expensive to obtain, and the user will now make many requests. The **session** is the mechanism that lets every one of those requests inherit the result of that single proof.
+The [previous entry](/blog/authenticators-passwords-otp-passkeys) ended at the moment of successful authentication: the user has proved control of an authenticator, perhaps a passkey, perhaps a password and a one-time code. That proof was expensive to obtain, and the user will now make many requests. The **session** is the mechanism that lets every one of those requests inherit the result of that single proof.
 
-A session is therefore a credential in its own right, and often a more valuable one than the password: it is already past every factor, it is presented on every request, and it lives inside a browser that also runs code from other sites. This entry treats the session as one design problem with several parts: the identifier, the cookie that carries it, the browser rules that decide when the cookie is sent, the attacks that exploit those rules, and the lifecycle that ends the session.
+A session is therefore a credential in its own right, and often a more valuable one than the password: it is already past every factor, it is presented on every request, and it lives inside a browser that also runs code from other sites. This entry treats the session as one design problem with several parts: the identifier, the cookie that carries it, the browser rules that decide when the cookie is sent, the attacks that exploit those rules, and the lifecycle that ends the session. Cookie behavior is described as RFC 6265 and its revision in progress at the IETF specify it, and as current browsers implement it.
 
-## 1. What a Session Is
+## 1. What a session is
 
 ### 1.1 The session record and the session identifier
 
 A session has two halves.
 
 - The **session record**, held by the server, describes the authenticated state: the subject, when and how they authenticated (which factors, what assurance), when the session was created, when it was last used, and anything the application caches against it.
-- The **session identifier** is a value given to the browser so that later requests can name the record. It carries no meaning itself; it is a reference, in the sense of the first entry of this series.
+- The **session identifier** is a value given to the browser so that later requests can name the record. It carries no meaning itself; it is a reference, in the sense of the [first entry](/blog/token-based-authentication#35-reference-versus-value) of this series.
 
 Anyone who presents the identifier is treated as the authenticated user. The identifier is a bearer credential, and everything in this entry follows from protecting it: keeping it unguessable, keeping it secret, controlling when the browser sends it, and limiting how long it is worth stealing.
 
@@ -42,9 +42,9 @@ The last row deserves emphasis. Session tables are copied into backups, logs and
 
 ### 1.3 Stateful and stateless sessions
 
-Some frameworks avoid the server-side record by putting the session data into the cookie and signing it (sometimes also encrypting it). This is the *value* model from the first entry, with the same trade-off: no lookup per request, but no way to end one session early except by changing the signing key, which ends all of them, or by keeping a server-side list of revoked sessions, which reintroduces state. Applications that need "sign out everywhere", administrator-initiated termination or immediate effect when an account is disabled are better served by a server-side record.
+Some frameworks avoid the server-side record by putting the session data into the cookie and signing it (sometimes also encrypting it). This is the *value* model from the first entry, with the same trade-off. No lookup is needed per request, but one session cannot be ended early except by changing the signing key, which ends all of them, or by keeping a server-side list of revoked sessions, which reintroduces state. Applications that need "sign out everywhere", administrator-initiated termination or immediate effect when an account is disabled are better served by a server-side record.
 
-## 2. Cookies: How the Identifier Travels
+## 2. Cookies: how the identifier travels
 
 ### 2.1 Setting and returning a cookie
 
@@ -90,7 +90,7 @@ Cookie scope is looser than the browser's same-origin policy. A page on `blog.ex
 
 Defenses are structural: use `__Host-` cookies for anything security-relevant, host user-supplied content on a separate registrable domain, and remove DNS records that point at resources no longer owned.
 
-## 3. Sites, Origins and When Cookies Are Sent
+## 3. Sites, origins and when cookies are sent
 
 ### 3.1 Origin and site
 
@@ -111,13 +111,13 @@ When a page on one site causes a request to another, the request is *cross-site*
 | `Lax` | Yes | Yes | No |
 | `None` (requires `Secure`) | Yes | Yes | Yes |
 
-`Strict` is the safest and has a visible cost: a user who follows a link from an email or another site to the application arrives without the session cookie and appears signed out on that first page. `Lax` keeps that navigation working, and it is safe only if requests using `GET` and other safe methods do not change state. That requirement already appears in HTTP's own definition of safe methods (RFC 9110); `Lax` turns a violation of it into a vulnerability.
+The `Strict` mode is the safest and has a visible cost: a user who follows a link from an email or another site to the application arrives without the session cookie and appears signed out on that first page. The `Lax` mode keeps that navigation working, and it is safe only if requests using `GET` and other safe methods do not change state. That requirement already appears in HTTP's own definition of safe methods (RFC 9110); `Lax` turns a violation of it into a vulnerability.
 
 Browsers differ in what they do when `SameSite` is absent; some treat the cookie as `Lax`, others as `None`. A session cookie should always set the attribute explicitly.
 
-## 4. Session Fixation
+## 4. Session fixation
 
-### 4.1 The attack
+### 4.1 How fixation works
 
 In a fixation attack, the attacker does not steal the victim's session identifier; the attacker **chooses** it in advance and gets the victim to authenticate with it.
 
@@ -142,9 +142,9 @@ The attack needs two things: a way to plant an identifier (a sibling subdomain s
 
 The fix is simple and complete: **issue a new session identifier whenever the privilege level of the session changes**: at sign-in, at step-up to a stronger authentication, at a change of role, at sign-out. The old identifier is invalidated on the server, so whatever an attacker planted becomes worthless at the moment it would have become valuable. Accepting session identifiers only from cookies, never from URLs, and using `__Host-` cookies remove the planting routes as well.
 
-## 5. Cross-Site Request Forgery
+## 5. Cross-site request forgery
 
-### 5.1 The attack
+### 5.1 How the forgery works
 
 Cookies are *ambient* credentials: the browser attaches them automatically to matching requests, whichever page triggered the request. Cross-site request forgery (CSRF) exploits this. A page on the attacker's site causes the victim's browser to send a request to the application; the browser attaches the victim's session cookie; the application sees an authenticated request and acts on it.
 
@@ -178,9 +178,9 @@ With a session cookie set to `SameSite=Lax` or `Strict`, the cross-site `POST` a
 A second layer checks something that a cross-site page cannot supply:
 
 - **Synchronizer token.** The server stores a random token in the session record and embeds it in each form or exposes it to the application's own scripts; state-changing requests must echo it in a form field or header. A cross-site page cannot read the token, because the same-origin policy prevents it from reading the application's pages.
-- **Signed double-submit token.** When server-side state is undesirable, the server sets a cookie containing a token cryptographically bound to the session (for example an HMAC of the session identifier) and requires the same value in a header. Binding to the session matters: an unbound double-submit token can be defeated by an attacker who can toss a cookie of their own choosing.
-- **Origin and fetch-metadata checks.** Browsers send an `Origin` header on every request whose method is not `GET` or `HEAD`, and on cross-origin requests made with CORS. Modern browsers also send `Sec-Fetch-Site` (`same-origin`, `same-site`, `cross-site` or `none`) on requests to HTTPS origins. A server can reject state-changing requests whose `Sec-Fetch-Site` is `cross-site`, or whose `Origin` is not its own, at very low cost.
-- **Custom request headers for APIs.** Browsers enforce **Cross-Origin Resource Sharing** (CORS): before sending a cross-origin request that a plain HTML form could not produce, such as one with a custom header or a JSON body, the browser first asks the server for permission with a *preflight* `OPTIONS` request, and sends the real request only if the server allows that origin. A cross-site page can therefore send a simple form `POST`, but cannot add a custom header such as `X-Requested-With` unless the server's CORS policy admits it. An API that requires a custom header, or a JSON content type, on every state-changing request is protected against form-based forgery, provided its CORS policy does not admit arbitrary origins with credentials.
+- **Signed double-submit token.** When server-side state is undesirable, the server sets a cookie containing a token cryptographically bound to the session, for example a hash-based message authentication code (HMAC) of the session identifier, and requires the same value in a header. Binding to the session matters: an unbound double-submit token can be defeated by an attacker who can toss a cookie of their own choosing.
+- **Origin and fetch-metadata checks.** Browsers send an `Origin` header on every request whose method is not `GET` or `HEAD`, and on cross-origin requests made under Cross-Origin Resource Sharing (CORS), described in the next item. Modern browsers also send `Sec-Fetch-Site` (`same-origin`, `same-site`, `cross-site` or `none`) on requests to HTTPS origins. A server can reject state-changing requests whose `Sec-Fetch-Site` is `cross-site`, or whose `Origin` is not its own, at little cost.
+- **Custom request headers for APIs.** Browsers enforce **CORS**: before sending a cross-origin request that a plain HTML form could not produce, such as one with a custom header or a JSON body, the browser first asks the server for permission with a *preflight* `OPTIONS` request, and sends the real request only if the server allows that origin. A cross-site page can therefore send a simple form `POST`, but cannot add a custom header such as `X-Requested-With` unless the server's CORS policy admits it. An API that requires a custom header, or a JSON content type, on every state-changing request is protected against form-based forgery, provided its CORS policy does not admit arbitrary origins with credentials.
 
 A robust configuration combines `SameSite` cookies, a fetch-metadata or `Origin` check, and a token for the most sensitive operations.
 
@@ -188,13 +188,13 @@ A robust configuration combines `SameSite` cookies, a fetch-metadata or `Origin`
 
 Login forms need protection too, even though the user is not yet signed in. In *login CSRF*, the attacker submits the login form with the **attacker's own** credentials from the victim's browser. The victim is now signed in to the attacker's account without noticing, and anything they then enter (a card number, a search history, a document) is saved where the attacker can read it. A pre-session anti-forgery token or an `Origin` check on the login endpoint prevents this.
 
-## 6. Cross-Site Scripting and the Limits of HttpOnly
+## 6. Cross-site scripting and the limits of HttpOnly
 
 `HttpOnly` stops scripts from **reading** the session cookie, so an injected script cannot exfiltrate it for use elsewhere. It does not stop the script from **using** the session: script running in the application's origin can issue requests with the cookie attached, read the responses (they are same-origin) and read any anti-forgery token on the page. Cross-site scripting (XSS) therefore defeats CSRF defenses and turns the browser into the attacker's client for as long as the page is open.
 
 The defenses against XSS (contextual output encoding, safe templating, a strict Content Security Policy, avoiding dangerous APIs that insert HTML) are outside the scope of this entry. The design point is that session security assumes the application's own origin is not running hostile script. `HttpOnly` limits the damage of a failure; it does not prevent the failure.
 
-## 7. Lifetime, Re-Authentication and Logout
+## 7. Lifetime, re-authentication and logout
 
 ### 7.1 Timeouts
 
@@ -224,17 +224,17 @@ Clear-Site-Data: "cookies", "storage"
 
 Users and administrators also need to end sessions they cannot reach: a list of the account's active sessions with device and time information, a "sign out everywhere" action, and automatic termination of all sessions when the password or authenticators change or the account is disabled. All of these are straightforward with server-side session records and awkward without them.
 
-When the application uses single sign-on, ending the application's session does not end the identity provider's session; the next visit may sign the user straight back in. Federated logout, mentioned in the first entry, is the protocol-level answer.
+When the application uses single sign-on, ending the application's session does not end the identity provider's session; the next visit may sign the user straight back in. Federated logout, mentioned in the [first entry](/blog/token-based-authentication#73-revocation-and-logout), is the protocol-level answer.
 
-## 8. Theft After Authentication
+## 8. Theft after authentication
 
 Malware that runs on the user's device can copy cookies out of the browser's storage and replay them from another machine, bypassing every authenticator discussed in the previous entry. Several measures reduce the value of a stolen identifier:
 
 - short absolute lifetimes and re-authentication for sensitive actions (Section 7);
 - detecting sudden changes in client characteristics (network, location, user agent) and requiring re-authentication, accepting that such signals are noisy and should trigger step-up rather than silent rejection;
-- binding the session to a key held by the device, so that a copied cookie is useless without the key. This is the session-layer counterpart of the sender-constrained tokens covered later in this series; browser proposals such as Device Bound Session Credentials aim to provide it for ordinary cookies.
+- binding the session to a key held by the device, so that a copied cookie is useless without the key. This is the session-layer counterpart of the sender-constrained tokens of the [sixth entry](/blog/sender-constrained-tokens); browser proposals such as Device Bound Session Credentials aim to provide it for ordinary cookies.
 
-## 9. A Reference Configuration
+## 9. A reference configuration
 
 Putting the pieces together, a server-rendered application on a single host might adopt the following:
 
@@ -259,15 +259,19 @@ Putting the pieces together, a server-rendered application on a single host migh
 | Which cookie attributes matter? | `Secure`, `HttpOnly`, an explicit `SameSite`, no `Domain`, and the `__Host-` prefix. |
 | How do site and origin differ? | An origin is scheme, host and port; a site is scheme plus registrable domain. `SameSite` protects against other sites, not against sibling subdomains. |
 | How is fixation prevented? | By issuing a new identifier at every change of privilege. |
-| How is CSRF prevented? | By `SameSite` cookies, safe methods that are actually safe, an `Origin` or fetch-metadata check, and anti-forgery tokens for sensitive actions and the login form. |
+| How is CSRF prevented? | By `SameSite` cookies, safe methods that change no state, an `Origin` or fetch-metadata check, and anti-forgery tokens for sensitive actions and the login form. |
 | What does HttpOnly not do? | It does not stop injected script from using the session. |
 | How does a session end? | By server-enforced idle and absolute timeouts and by server-side invalidation at logout; clearing the cookie alone is not enough. |
 
-The next entry moves from *who* the user is to *what* they may do: how authorization models represent policy, and how the choice between roles, attributes and relationships affects evaluation, auditing and change.
+The [next entry](/blog/authorization-models) moves from *who* the user is to *what* they may do: how authorization models represent policy, and how the choice between roles, attributes and relationships affects evaluation, auditing and change.
 
-### The specifications
+### References
 
-- Cookies: RFC 6265, *HTTP State Management Mechanism*, and its revision in progress at the IETF, which specifies `SameSite` and the cookie prefixes.
-- HTTP semantics and safe methods: RFC 9110. Strict Transport Security: RFC 6797.
-- Browser behavior: the WHATWG Fetch standard (requests, `Origin`), the W3C Fetch Metadata Request Headers specification (`Sec-Fetch-Site`), and the W3C Clear Site Data specification.
-- The Public Suffix List, maintained by the Mozilla community, which browsers use to determine registrable domains.
+- A. Barth, *HTTP State Management Mechanism*, RFC 6265, IETF, 2011.
+- S. Bingler, M. West and J. Wilander, Eds., *Cookies: HTTP State Management Mechanism*, draft-ietf-httpbis-rfc6265bis-22, IETF, 2025 (Internet-Draft, work in progress; specifies `SameSite` and the cookie prefixes).
+- R. Fielding, M. Nottingham and J. Reschke, Eds., *HTTP Semantics*, RFC 9110, IETF, 2022.
+- J. Hodges, C. Jackson and A. Barth, *HTTP Strict Transport Security (HSTS)*, RFC 6797, IETF, 2012.
+- Mozilla, *Public Suffix List*, maintained as a community resource and used by browsers to determine registrable domains, consulted October 2026.
+- M. West, Ed., *Clear Site Data*, W3C Working Draft, 2017.
+- M. West, Ed., *Fetch Metadata Request Headers*, W3C Working Draft, 2026.
+- Web Hypertext Application Technology Working Group (WHATWG), *Fetch Standard*, living standard, consulted October 2026.

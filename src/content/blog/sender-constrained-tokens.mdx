@@ -1,6 +1,6 @@
 ---
 title: "Sender-Constrained Tokens: DPoP and Mutual TLS"
-description: "Why bearer tokens can be replayed by anyone who obtains them, and how proof of possession fixes that: the confirmation claim, certificate-bound tokens with mutual TLS, DPoP proofs and nonces, what each mechanism does and does not protect against, and how to choose between them."
+description: "Learn how mutual TLS and DPoP bind an OAuth 2.0 token to a key the client holds, so that a stolen copy is useless, and when to choose each mechanism."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -13,13 +13,13 @@ series: identity-and-access-control
 seriesOrder: 6
 ---
 
-Every token in the previous entry was a **bearer** token: presenting it is sufficient to use it. The first entry compared such a token to cash, and the comparison is exact. A token copied from a log file, a misconfigured proxy, a compromised browser extension or a resource server that forwarded it carelessly works for whoever holds the copy, from wherever they are, until it expires.
+Every token in the [previous entry](/blog/oauth-grants-and-client-types) was a **bearer** token: presenting it is sufficient to use it. The [first entry](/blog/token-based-authentication#36-bearer-and-sender-constrained-tokens) compared such a token to cash, and the comparison is exact. A token copied from a log file, a misconfigured proxy, a compromised browser extension or a resource server that forwarded it carelessly works for whoever holds the copy, from wherever they are, until it expires.
 
 Short lifetimes, careful storage and audience restriction reduce the damage, but none of them changes the underlying property. **Sender-constrained** tokens do. A sender-constrained token is bound to a cryptographic key that the legitimate client holds, and a resource server accepts it only together with proof that the presenter controls that key. A copy of the token without the key is useless.
 
-This entry explains the general mechanism first, then the two standard ways of providing the proof (mutual TLS and DPoP), and ends with what binding does and does not protect against.
+This entry explains the general mechanism first, then the two standard ways of providing the proof: mutual TLS (RFC 8705) and Demonstrating Proof of Possession (DPoP, RFC 9449). It ends with what binding does and does not protect against, and how to choose between the two.
 
-## 1. Proof of Possession
+## 1. Proof of possession
 
 ### 1.1 The general pattern
 
@@ -27,13 +27,13 @@ All sender-constrained schemes follow the same three steps.
 
 1. **Binding at issuance.** When the client requests a token, it proves possession of a key. The authorization server records a reference to the client's public key in the token, or in the server-side state an opaque token points to.
 2. **Proof at use.** With every request to a resource server, the client proves possession of the same key: by completing a TLS handshake with it, or by signing a fresh statement about the request.
-3. **Comparison at the resource server.** The resource server checks that the key used in the proof is the key named in the token, in addition to all the usual checks from the first entry.
+3. **Comparison at the resource server.** The resource server checks that the key used in the proof is the key named in the token, in addition to all the usual checks from the [first entry](/blog/token-based-authentication#65-validating-an-access-token).
 
 The private key never leaves the client and is never sent with the token. Stealing the token alone gains the attacker nothing.
 
 ### 1.2 The confirmation claim
 
-RFC 7800 defines the `cnf` (confirmation) claim, through which a JWT names the key that must accompany it. Both standard mechanisms use it, with different members:
+RFC 7800 defines the `cnf` (confirmation) claim, through which a JSON Web Token (JWT) names the key that must accompany it. Both standard mechanisms use it, with different members:
 
 ```json
 {
@@ -45,7 +45,7 @@ RFC 7800 defines the `cnf` (confirmation) claim, through which a JWT names the k
 }
 ```
 
-Here `jkt` is the **JWK SHA-256 thumbprint** (RFC 7638) of a DPoP public key: a hash of the key's essential parameters in a canonical JSON form. For mutual TLS, the member is `x5t#S256`, the base64url-encoded SHA-256 hash of the client's DER-encoded certificate. For opaque tokens, the authorization server returns the same `cnf` object from its introspection endpoint. The key, access token and hashes in this entry's examples are the sample values from RFC 9449 and are consistent with one another: the `jkt` above is the thumbprint of the key in Section 3.2, and the `ath` there is the hash of the access token in Section 3.3.
+Here `jkt` is the **JSON Web Key (JWK) SHA-256 thumbprint** (RFC 7638) of a DPoP public key: a hash of the key's essential parameters in a canonical JSON form. For mutual TLS, the member is `x5t#S256`, the base64url-encoded SHA-256 hash of the client's certificate in its binary Distinguished Encoding Rules (DER) form. For opaque tokens, the authorization server returns the same `cnf` object from its introspection endpoint. The key, access token and hashes in this entry's examples are the sample values from RFC 9449, and they are consistent with one another. The `jkt` above is the thumbprint of the key in Section 3.2, and the `ath` there is the hash of the access token in Section 3.3.
 
 Note that `cnf` names a hash, not the key itself. The resource server computes the same hash over the key presented in the proof and compares the two.
 
@@ -59,7 +59,7 @@ RFC 8705 uses mTLS for two separate purposes in OAuth.
 
 ### 2.2 Client authentication
 
-As the previous entry described, a confidential client can authenticate to the token endpoint with its certificate instead of a secret:
+As the [previous entry](/blog/oauth-grants-and-client-types#13-client-authentication) described, a confidential client can authenticate to the token endpoint with its certificate instead of a secret:
 
 - with `tls_client_auth`, the certificate is issued by a public key infrastructure the authorization server trusts, and the client is identified by a registered attribute of the certificate such as its subject name;
 - with `self_signed_tls_client_auth`, the client registers its self-signed certificate (or its public key) directly, and no certificate authority is involved.
@@ -142,7 +142,7 @@ Its payload describes one request:
 |---|---|---|
 | `jti` | A unique identifier for this proof | The server can refuse a proof it has already seen |
 | `htm` | The HTTP method | A proof for `GET` cannot be reused for `DELETE` |
-| `htu` | The target URI, without query or fragment | A proof for one endpoint cannot be used at another |
+| `htu` | The target URI (uniform resource identifier), without query or fragment | A proof for one endpoint cannot be used at another |
 | `iat` | The creation time | Proofs are accepted only within a short window |
 | `ath` | The base64url SHA-256 hash of the access token | Ties the proof to one specific token |
 | `nonce` | A value supplied by the server, when it requires one | Prevents proofs from being prepared in advance (Section 3.5) |
@@ -208,7 +208,7 @@ HTTP/1.1 401 Unauthorized
 WWW-Authenticate: DPoP error="invalid_token", algs="ES256 PS256"
 ```
 
-A resource server that accepts DPoP-bound tokens must also refuse them when presented with the `Bearer` scheme, or an attacker could simply strip the binding by changing the scheme.
+A resource server that accepts DPoP-bound tokens must also refuse them when presented with the `Bearer` scheme, or an attacker could strip the binding by changing the scheme.
 
 ### 3.5 Nonces and pre-generated proofs
 
@@ -228,7 +228,7 @@ The client retries with the nonce in its proof. Since the server changes nonces 
 
 DPoP is only as strong as the client's protection of its private key. In a browser, the Web Cryptography API can generate a key marked **non-extractable**: script can ask the browser to sign with it, but cannot read the key's bytes. The key object can be kept in IndexedDB across page loads. On mobile platforms, keys can be generated in the device's hardware-backed keystore. In both cases the key cannot be copied off the device; malicious code can at most use it while it runs there.
 
-## 4. What Binding Does and Does Not Protect Against
+## 4. What binding does and does not protect against
 
 ### 4.1 What it stops
 
@@ -245,13 +245,13 @@ DPoP is only as strong as the client's protection of its private key. In a brows
 - **Code running on the client.** Malware or an injected script that can *use* the key, even if it cannot read it, can make authenticated requests while it runs. Binding stops tokens from being carried *away*; it does not stop abuse *in place*. A DPoP nonce limits this to the period of compromise.
 - **Stolen keys.** If the key is extractable and is stolen together with the token, the binding offers nothing. Key protection (non-extractable keys, hardware keystores, certificates in managed stores) is part of the design, not an afterthought.
 - **Authorization flaws.** A bound token held by the legitimate client still grants whatever the token grants. Object-level authorization, scopes and audiences remain essential.
-- **Session cookies.** Binding an OAuth token does nothing for the browser's session cookie with the application itself. The equivalent problem at the session layer was discussed in the third entry.
+- **Session cookies.** Binding an OAuth token does nothing for the browser's session cookie with the application itself. The equivalent problem at the session layer was discussed in the [third entry](/blog/sessions-and-cookies#8-theft-after-authentication).
 
 ### 4.3 A note on Token Binding
 
 An earlier attempt at the same goal, the Token Binding protocol (RFC 8471 to RFC 8473), bound tokens and cookies to keys negotiated in TLS. It required support in browsers, and browser support was withdrawn, so it is not a practical option today. DPoP was designed partly in response: it needs nothing from the browser beyond the Web Cryptography API that already exists.
 
-## 5. Choosing Between Mutual TLS and DPoP
+## 5. Choosing between mutual TLS and DPoP
 
 | Consideration | Mutual TLS | DPoP |
 |---|---|---|
@@ -267,7 +267,7 @@ In practice:
 
 - **Back-end services and high-assurance APIs** (financial-grade profiles, for example) commonly use **mutual TLS**, both to authenticate clients and to bind their tokens, because the infrastructure exists and the binding is free per request.
 - **Browser-based and mobile public clients** use **DPoP**, with non-extractable or hardware-backed keys, so that their access and refresh tokens cannot be replayed if they leak.
-- **Browser applications behind a BFF** may not need either for the browser itself, since tokens never reach it; the BFF can use mutual TLS or DPoP towards the APIs it calls.
+- **Browser applications behind a back end for front end (BFF)** may not need either for the browser itself, since tokens never reach it; the BFF can use mutual TLS or DPoP toward the APIs it calls.
 
 ## 6. Summary
 
@@ -281,12 +281,18 @@ In practice:
 | What do DPoP nonces add? | They stop proofs from being generated in advance by code that briefly gains use of the key. |
 | What is not protected? | Abuse by code that can use the key in place, extractable keys stolen with the token, and authorization mistakes. |
 
-The final entry of the series moves inside the system: how services authenticate to each other, how workloads obtain identities without long-lived secrets, and how a user's identity is carried safely across internal calls.
+The [final entry](/blog/service-to-service-authentication) of the series moves inside the system: how services authenticate to each other, how workloads obtain identities without long-lived secrets, and how a user's identity is carried safely across internal calls.
 
-### The specifications
+### References
 
-- Proof-of-possession semantics: RFC 7800 (`cnf` claim), RFC 7638 (JWK thumbprint).
-- Mutual TLS: RFC 8705 (OAuth 2.0 mutual-TLS client authentication and certificate-bound tokens), RFC 9440 (`Client-Cert` header field).
-- DPoP: RFC 9449.
-- Related: RFC 9700 (OAuth 2.0 security best current practice), RFC 7662 (token introspection), RFC 8471 to RFC 8473 (Token Binding, historical).
-- Browser keys: the W3C Web Cryptography API.
+- B. Campbell and M. Bishop, *Client-Cert HTTP Header Field*, RFC 9440, IETF, 2023.
+- B. Campbell, J. Bradley, N. Sakimura and T. Lodderstedt, *OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens*, RFC 8705, IETF, 2020.
+- D. Fett, B. Campbell, J. Bradley, T. Lodderstedt, M. Jones and D. Waite, *OAuth 2.0 Demonstrating Proof of Possession (DPoP)*, RFC 9449, IETF, 2023.
+- M. Jones, J. Bradley and H. Tschofenig, *Proof-of-Possession Key Semantics for JSON Web Tokens (JWTs)*, RFC 7800, IETF, 2016.
+- M. Jones and N. Sakimura, *JSON Web Key (JWK) Thumbprint*, RFC 7638, IETF, 2015.
+- T. Lodderstedt, J. Bradley, A. Labunets and D. Fett, *Best Current Practice for OAuth 2.0 Security*, RFC 9700, IETF, 2025.
+- A. Popov, Ed., M. Nystroem, D. Balfanz and J. Hodges, *The Token Binding Protocol Version 1.0*, RFC 8471, IETF, 2018 (no longer supported by browsers; Section 4.3).
+- A. Popov, Ed., M. Nystroem and D. Balfanz, *Transport Layer Security (TLS) Extension for Token Binding Protocol Negotiation*, RFC 8472, IETF, 2018.
+- A. Popov, M. Nystroem, D. Balfanz, Ed., N. Harper and J. Hodges, *Token Binding over HTTP*, RFC 8473, IETF, 2018.
+- J. Richer, Ed., *OAuth 2.0 Token Introspection*, RFC 7662, IETF, 2015.
+- M. Watson, Ed., *Web Cryptography API*, W3C Recommendation, 2017.
