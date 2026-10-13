@@ -1,0 +1,93 @@
+# AI editorial review of changed content (plugins/editorial-os/skills/editorial-review). It writes a
+# report per changed English article or insight and posts a summary on the pull request. It is
+# advisory: the blocking checks are in publication-gate.yml (eos lint, validate-site, gate).
+# One-time setup: the repository secret ANTHROPIC_API_KEY (the same one series-review.yml uses).
+# Without it the job reports that the review was skipped and succeeds, so it never blocks a merge.
+name: Editorial review
+
+on:
+  pull_request:
+    branches: [master]
+    paths: ['src/content/blog/*.md', 'src/content/blog/*.mdx', 'src/content/insights/*.md']
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 'Space-separated content files to review (for example src/content/blog/foo.mdx)'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: key
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "ANTHROPIC_API_KEY is not set; editorial review skipped." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - id: files
+        if: steps.key.outputs.present == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_FILES: ${{ inputs.files }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then files="$INPUT_FILES"
+          else files=$(git diff --name-only --diff-filter=AM "$BASE" HEAD -- 'src/content/blog/*.md' 'src/content/blog/*.mdx' 'src/content/insights/*.md' | tr '\n' ' '); fi
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "Files to review: $files"
+      - uses: actions/setup-node@v4
+        if: steps.files.outputs.files != ''
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.files.outputs.files != ''
+        run: npm ci
+      - if: steps.files.outputs.files != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Follow plugins/editorial-os/skills/editorial-review/SKILL.md for each of these files:
+            ${{ steps.files.outputs.files }}
+            The standards are editorial/standards.md and the configuration editorial/eos.config.json.
+            Report only: write one report per file to editorial/ci-reports/<slug>.md and change no
+            other file. Do not run eos record; review records are written by a person-approved pass.
+          claude_args: >-
+            --allowedTools "Read,Glob,Grep,WebSearch,WebFetch,Write(/editorial/ci-reports/**),Bash(npm run -s eos -- *),Bash(python3 *),Bash(mkdir -p editorial/ci-reports)"
+      - if: steps.files.outputs.files != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-review
+          path: editorial/ci-reports/
+          if-no-files-found: warn
+      - name: Comment on the pull request
+        if: steps.files.outputs.files != '' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "### Editorial review"
+            for f in editorial/ci-reports/*.md; do
+              [ -e "$f" ] || continue
+              echo; echo "**$(basename "$f" .md)**"; echo
+              sed -n '/^## Decision/,/^## /p' "$f" | sed '1d;$d' | head -n 40
+            done
+            printf '\nFull reports: the "editorial-review" artifact of %s\n' "$RUN_URL"
+          } > body.md
+          gh pr comment "$PR" --body-file body.md

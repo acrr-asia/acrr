@@ -915,8 +915,31 @@ function validateSite(cfg, distArg) {
   const pages = walk(dist).filter((f) => f.endsWith('.html') && !ignore.some((r) => r.test(f)));
   const issues = [];
   const add = (page, check, message) => issues.push({ page, check, message });
+  // Pages not generated from a content item (home, about, listings) are not linted as content,
+  // so their visible English text gets the spelling and phrase rules here.
+  const site = discover(cfg);
+  const variantMap = cfg.language?.variant ? spellingMap(cfg.language.variant) : new Map();
+  const phraseRes = (cfg._glossary.phrases ?? []).filter((p) => !p.severity).map((p) => ({ re: new RegExp(p.avoid, 'gi'), msg: p.message }));
   for (const page of pages) {
     const html = readFileSync(path.join(dist, page), 'utf8');
+    const route = `/${page.replace(/(index)?\.html$/, '')}`.replace(/\/$/, '') || '/';
+    if (!site.byRoute.has(route) && /<html[^>]*\blang="en/i.test(html)) {
+      const visible = decodeEntities(
+        html
+          .replace(/<(script|style|pre|code|svg|math)\b[\s\S]*?<\/\1>/gi, ' ')
+          .replace(/<span class="katex[\s\S]*?<\/span><\/span><\/span>/g, ' ')
+          .replace(/<[^>]+>/g, ' '),
+      );
+      const seenWords = new Set();
+      for (const m of visible.matchAll(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g)) {
+        const lw = m[0].toLowerCase();
+        if (variantMap.has(lw) && !seenWords.has(lw)) {
+          seenWords.add(lw);
+          add(page, 'spelling-variant', `"${m[0]}" is not ${cfg.language.variant} spelling; use "${matchCase(m[0], variantMap.get(lw))}".`);
+        }
+      }
+      for (const { re, msg } of phraseRes) for (const m of visible.matchAll(re)) add(page, 'phrases', `"${m[0]}": ${msg}`);
+    }
     const main = /<main\b[\s\S]*?<\/main>/i.exec(html)?.[0] ?? html;
     const h1 = (main.match(/<h1\b/gi) ?? []).length + (html.replace(main, '').match(/<h1\b/gi) ?? []).length;
     if (h1 !== 1) add(page, 'one-h1', `${h1} <h1> elements (expected exactly one).`);

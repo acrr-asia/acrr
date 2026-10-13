@@ -28,7 +28,7 @@ Contents
 ACRR publishes long-form technical writing that readers use to learn a subject and to check their own work. A reader can only trust such writing if every page meets the same standard. The standard has five parts, and each is reviewed independently, because strength in one never compensates for failure in another:
 
 1. **Correctness.** Statements, equations, numbers, code and diagrams are right, and the conditions under which they hold are stated.
-2. **Integrity.** Nothing is invented. Facts, interpretations, recommendations and open questions are labelled as what they are. Sources exist and say what they are cited for.
+2. **Integrity.** Nothing is invented. Facts, interpretations, recommendations and open questions are labeled as what they are. Sources exist and say what they are cited for.
 3. **Clarity.** The argument is organized so that a reader in the stated audience can follow it, and the prose is precise, plain and idiomatic.
 4. **Consistency.** Terms, notation, spelling, formatting and cross-references agree within a piece, across a series and across the site.
 5. **Publishability.** The page builds, renders, links, indexes and reads correctly, on narrow and wide screens, in light and dark mode, with assistive technology.
@@ -265,7 +265,7 @@ An editor who changes a technical sentence confirms that the new sentence is sti
 
 ### 7.5 Never fabricate
 
-Never invent references, quotations, experiments, data, measurements, results, benchmarks, statistics, credentials, biographies, affiliations, collaborators, readership or citation figures, contact details, project counts, URLs or technical capabilities. Missing information stays missing; a placeholder that a reader can see ("Coming soon", "Planned") is labelled as such. Sample or demonstration content carries `example: true` and an Example label everywhere it appears. These rules restate and extend the content-integrity rules in `CLAUDE.md`, which remain in force.
+Never invent references, quotations, experiments, data, measurements, results, benchmarks, statistics, credentials, biographies, affiliations, collaborators, readership or citation figures, contact details, project counts, URLs or technical capabilities. Missing information stays missing; a placeholder that a reader can see ("Coming soon", "Planned") is labeled as such. Sample or demonstration content carries `example: true` and an Example label everywhere it appears. These rules restate and extend the content-integrity rules in `CLAUDE.md`, which remain in force.
 
 ## 8. Policy D: website-wide consistency and page requirements
 
@@ -360,7 +360,7 @@ The values are configured in `eos.config.json` (`review`) and enforced by `eos r
 - [ ] `eos lint`: no errors; warnings resolved or justified in the record.
 - [ ] Build, link check and `eos validate-site` clean for the page.
 
-**Insight**: framing paragraph; the three sections in order; Established contains only verifiable claims, each sourced or common knowledge; Interpretation labelled as such; open questions are questions; links to the in-depth articles; metadata as above.
+**Insight**: framing paragraph; the three sections in order; Established contains only verifiable claims, each sourced or common knowledge; Interpretation labeled as such; open questions are questions; links to the in-depth articles; metadata as above.
 
 **Series overview**: sequence rationale; audience and prerequisites; shared conventions; 3-6 checkable objectives, each covered by an entry; description within limits; no promises the entries do not keep; series review current and stamped.
 
