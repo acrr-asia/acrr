@@ -1,7 +1,8 @@
 ---
-title: "Token-Based Authentication: From HTTP Requests to JWT, OAuth 2.0, and API Authorization"
-description: "A practical, end-to-end guide to HTTP fundamentals, token types, JWT validation, OAuth 2.0, OpenID Connect, refresh tokens, security controls, and ASP.NET Core."
+title: "Authentication and Authorization: From First Principles to Tokens"
+description: "A top-down account of access control in networked systems: the reference monitor, authentication and sessions, authorization models, delegation with OAuth 2.0 and OpenID Connect, and the design, validation and lifecycle of access tokens."
 publishedAt: "2026-10-12"
+updatedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
   - authentication
@@ -10,684 +11,549 @@ tags:
   - JWT
   - OAuth 2.0
   - OpenID Connect
-  - ASP.NET Core
+series: identity-and-access-control
+seriesOrder: 1
 draft: false
 ---
 
-Token-based authentication allows a client to present a token to a server as evidence of identity or access rights, instead of sending a username and password with every request.
+Every request that reaches a networked system asks it to do something: return a record, change a balance, start a machine. Before acting, the system must answer two questions about that request. *Who is asking?* And *is that party allowed to do this?* Authentication answers the first question; authorization answers the second.
 
-To understand the full mechanism, separate three questions:
+Passwords, sessions, cookies, OAuth 2.0, OpenID Connect and JSON Web Tokens can look like a pile of unrelated technologies. They are easier to understand as answers to those two questions, or as ways of carrying an answer from the place where it was obtained to the place where it is needed. This chapter therefore works from the general to the specific. It starts with the abstract model that every access-control mechanism implements, treats authentication and authorization separately, explains why distributed systems split the party that authenticates users from the parties that hold resources, and only then turns to tokens: what they contain, how they are validated, and how they expire and are revoked. Each protocol appears at the point where the problem it solves has been stated.
 
-- **Protocol:** What rules do the client and server use to communicate?
-- **Authentication (AuthN):** Who is the user or client?
-- **Authorization (AuthZ):** What is the user or client allowed to do?
+## 1. The Access-Control Model
 
-This guide starts with HTTP fundamentals, then explains login flows, token issuance and validation, OAuth 2.0 and OpenID Connect (OIDC), JWTs, refresh tokens, and common security concerns. The examples use REST APIs, HTTPS, and JWTs in a .NET-style backend.
+### 1.1 Subjects, objects and the reference monitor
 
-## 1. Overall Architecture
+Strip away the protocols and every access-control decision has the same shape. A **subject** (a person, or a program acting for one) requests an **action** (read, write, delete, execute) on an **object** (a file, a database row, an API resource). A decision function, given the subject, the action, the object and perhaps some context such as time or network location, returns *permit* or *deny*.
+
+The component that intercepts requests and applies that function is called a **reference monitor**, a term introduced in the 1972 Anderson report for the US Air Force. A reference monitor is useful only if three conditions hold:
+
+1. It is **always invoked**: no path to the object bypasses it.
+2. It is **tamper-proof**: the subject cannot alter the monitor or its policy.
+3. It is **small enough to be verified**: its correctness can be analysed and tested.
+
+Saltzer and Schroeder's 1975 paper *The Protection of Information in Computer Systems* restated the first condition as the principle of **complete mediation** (every access to every object must be checked) and added others that recur throughout this chapter: **least privilege** (grant only what a task requires), **fail-safe defaults** (deny unless access is explicitly permitted) and **separation of privilege**. A web API that checks permissions in most handlers but forgets one has violated complete mediation; a token that grants every permission the user holds when the client needs only one violates least privilege.
+
+### 1.2 Four distinct questions
+
+In practice the single decision function is split into stages, each answering a separate question:
+
+| Stage | Question | Typical evidence |
+|---|---|---|
+| Identification | Who does the requester *claim* to be? | A username, an email address, a client identifier |
+| Authentication | Can the requester *prove* that claim? | A password, a signature from a private key, a one-time code |
+| Authorization | Is this subject permitted to perform this action on this object? | Roles, attributes, ownership, policy |
+| Accountability | What happened, and who did it? | Audit logs that record the authenticated subject and the decision |
+
+Mixing these stages up causes real defects. A system that treats "the request carried a valid token" as "the request is allowed" has merged authentication into authorization. A system that logs only an IP address cannot attribute an action to an authenticated subject.
 
 ```mermaid
 flowchart TB
-    C["1. Client<br/>Browser / React / Mobile App"]
-    T["HTTPS<br/>HTTP Request / Response"]
-    API["2. API Gateway / Backend API<br/>Validate token → authenticate → authorize → process"]
-    IDP["Identity Provider<br/>Authenticate users and issue tokens"]
-    DB[("Application Database<br/>Business data, permissions, resources")]
-
-    C <--> T
-    T <--> API
-    C <--> IDP
-    API <--> DB
+    R["Request"] --> AN["Authentication<br/>Who is asking?"]
+    AN -->|"proof fails"| E401["Reject: unauthenticated"]
+    AN -->|"subject established"| AZ["Authorization<br/>May this subject do this?"]
+    AZ -->|"policy denies"| E403["Reject: forbidden"]
+    AZ -->|"policy permits"| OP["Perform the operation"]
+    AN -.-> LOG[("Audit log")]
+    AZ -.-> LOG
 ```
 
-This is a general architecture. The Identity Provider (IdP) can be a separate service or can be integrated into the backend.
+### 1.3 Vocabulary
 
-There are two related but distinct flows:
+The rest of the chapter uses the following terms precisely.
 
-1. **Authentication flow:** The client establishes identity and obtains a token.
-2. **API request flow:** The client presents an access token; the API validates it and checks permissions.
-
-## 2. Foundational Concepts
-
-### 2.1 Client, Server, and Resource
-
-| Concept | Meaning | Example |
+| Term | Meaning | Concrete instance |
 |---|---|---|
-| Client | Component that initiates a request | React app, mobile app |
-| Server | Component that receives and processes a request | ASP.NET Core API |
-| Resource | The item or operation being accessed | `/api/orders/123` |
-| Identity Provider (IdP) | System responsible for identity and authentication | Microsoft Entra ID |
-| Authorization Server | Issues access tokens under a defined authorization flow | OAuth 2.0 authorization server |
-| Resource Server | API that receives and validates access tokens | Order API |
-| Database | Stores business data or account information | SQL Server |
+| Principal | An entity that can be authenticated: a person, a device, or a piece of software | An employee; a scheduled billing job |
+| Identifier | A value that names a principal within some system | The string `user-48213`; an email address |
+| Credential / authenticator | Something the principal holds and uses to prove control of an identifier | A password; a private key stored on a security key |
+| Claim | A statement about a principal made by some party | "This subject's email address is verified" |
+| Client | Software that sends requests, on behalf of a user or on its own behalf | Code running in a browser tab; an app installed on a phone; a command-line tool; a nightly batch job |
+| Resource | The object a request acts on, usually named by a URL path | The order addressed by `/orders/123` |
+| Resource server | The service that holds resources and enforces access to them | An HTTP API that serves orders |
+| Identity provider (IdP) | A service that authenticates principals and issues statements about them | A company's single sign-on service |
+| Authorization server | In OAuth 2.0, the service that issues access tokens to clients | Often the same service as the identity provider |
+| Relying party | Any service that relies on another party's authentication result | An application that accepts sign-in from the company IdP |
 
-One system can perform several roles, or those roles can be split across services.
+One deployment may play several roles at once. A small application can authenticate its own users, issue its own tokens and serve its own resources; a large organisation usually separates those roles into different services. The roles are what matter, not the number of processes.
 
-### 2.2 What Is a Protocol?
+## 2. Authentication
 
-A **protocol** is a set of rules that specifies how components exchange information, including message structure, message order, and how results or errors are handled.
+### 2.1 What authentication proves
 
-| Protocol or standard | Role |
-|---|---|
-| TCP/IP | Network communication foundation |
-| TLS | Protects a connection's confidentiality and integrity |
-| HTTP | Defines request and response semantics |
-| HTTPS | HTTP protected by TLS |
-| OAuth 2.0 | Framework for delegated authorization |
-| OpenID Connect (OIDC) | Adds an identity layer on top of OAuth 2.0 |
-| JWT | A common token format; not a login protocol |
-| Bearer token | A credential presentation scheme in which possession of the token is sufficient to use it |
+Authentication is a protocol between a **claimant**, who asserts an identity, and a **verifier**, who checks the assertion. The claimant succeeds by demonstrating control of an authenticator that was previously bound to the identity. Authenticators are traditionally grouped into three factors:
 
-These concepts operate at different layers. JWT does not replace HTTPS, and OAuth 2.0 does not replace HTTP.
+- **Something you know**: a password or PIN.
+- **Something you have**: a phone running an authenticator app, a hardware security key, a smart card.
+- **Something you are**: a fingerprint or face, almost always used to unlock a local authenticator rather than sent to a server.
 
-### 2.3 HTTP Request Structure
+**Multi-factor authentication** requires authenticators from at least two *different* factors. Two passwords are not multi-factor; a password plus a code generated on a separate device is.
 
-An HTTP request typically contains a method, path, headers, and—when needed—a body.
+Factors are not equally strong. A password or a one-time code can be typed into a convincing fake site, which then relays it to the real one: the user authenticates the attacker. An authenticator based on public-key cryptography and bound to the website's origin (the mechanism behind WebAuthn and passkeys) signs a challenge that includes the origin, so a signature produced for a look-alike domain is useless on the real one. This property, **phishing resistance**, is the main reason such authenticators are preferred where the risk justifies them.
+
+### 2.2 Users and workloads
+
+Not every principal is a person. A background service that calls another service also needs an identity and a way to prove it, but it cannot type a password or touch a security key. Workloads typically authenticate with:
+
+- a **shared secret** (a client secret or API key) presented on each request or to obtain a token;
+- a **signed assertion**: a short statement signed with the workload's private key, which the verifier checks with the registered public key;
+- **mutual TLS**, in which the workload presents an X.509 certificate during the TLS handshake.
+
+Shared secrets are the simplest and the weakest: whoever copies the secret becomes the workload. Key-based methods never send the private key, so intercepting one request does not reveal it.
+
+### 2.3 Authentication is an event; requests are many
+
+Authentication happens once, at sign-in. A user then makes hundreds of requests. Asking for a password and a second factor on each of them is impractical, so the result of authentication has to be **carried forward**: the system issues something that later requests can present instead of the original credentials. Choosing what that something is, where it lives and how it can be withdrawn is the subject of the next section, and most of this chapter.
+
+## 3. Carrying Authentication Across Requests
+
+### 3.1 HTTP is stateless
+
+HTTP treats each request independently: nothing in the protocol links a request to the one before it. A request consists of a method, a target, header fields and an optional body:
 
 ```http
-GET /api/orders/123 HTTP/1.1
+GET /orders/123 HTTP/1.1
 Host: api.example.com
-Authorization: Bearer <access_token>
 Accept: application/json
 ```
 
-The request can be understood as follows:
+Any notion of "this request comes from the same signed-in user as the last one" must be built on top of HTTP, by having the client attach something to every request. There are three basic strategies.
 
-- **Method:** The intended operation, such as `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`.
-- **Path:** The resource address, such as `/api/orders/123`.
-- **HTTP version:** For example, HTTP/1.1 or HTTP/2. HTTP/2 changes message transport details while preserving HTTP semantics.
-- **Headers:** Metadata such as `Authorization`, `Content-Type`, and `Accept`.
-- **Body:** Data sent to the server, often JSON.
-- **Status code:** The result returned in the response, such as `200`, `401`, or `403`.
+### 3.2 Strategy one: send the credential every time
 
-An example login request:
+HTTP Basic authentication (RFC 7617) attaches the username and password, base64-encoded, to every request in the `Authorization` header. Base64 is an encoding, not encryption; the password is effectively sent in clear text inside the TLS connection. The approach is simple, and has three serious drawbacks: the long-lived secret is exposed on every request, it cannot incorporate a second factor without repeating it, and it cannot express anything narrower than "everything this user may do". It survives mainly in machine-to-machine settings and internal tools.
+
+### 3.3 Strategy two: a reference to server-side state
+
+After authentication, the server creates a **session record** (subject, authentication time, method used, expiry) and stores it. The client receives only a long, unpredictable **session identifier**, usually in a cookie:
 
 ```http
-POST /auth/login HTTP/1.1
+HTTP/1.1 303 See Other
+Location: /dashboard
+Set-Cookie: sid=Q2hvb3NlIGEgcmFuZG9tIHZhbHVl; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+The browser returns the cookie on later requests to the same site, and the server looks the identifier up. The identifier is a **reference**: it means nothing by itself, and all the information lives on the server. Revocation is immediate: delete the record and the next request fails. The cost is that every request needs a lookup in a store that every server instance can reach.
+
+The cookie attributes are part of the security design. `Secure` restricts the cookie to HTTPS; `HttpOnly` hides it from page scripts, so a cross-site scripting bug cannot read it directly; `SameSite` limits when the browser attaches it to requests initiated by other sites, which reduces (but does not on its own eliminate) cross-site request forgery.
+
+### 3.4 Strategy three: a self-contained token
+
+Alternatively, the issuer can put the session information *into* the value it hands out and sign it. A resource server that trusts the issuer's key can then verify the value and read the claims without contacting anyone. This is a **value** token, and the JSON Web Token (Section 6) is its most common format.
+
+```http
+GET /orders/123 HTTP/1.1
 Host: api.example.com
-Content-Type: application/json
-Accept: application/json
-
-{
-  "username": "user@example.com",
-  "password": "example-password"
-}
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOi...
 ```
 
-The password is sent in the request body. This is only appropriate when the connection is protected by HTTPS and the server handles credentials correctly. Never send passwords over plain HTTP.
+Value tokens scale well and work across organisational boundaries, because verification needs only a public key. Their weakness is the mirror image of the reference model's strength: once issued, a signed token remains verifiable until it expires, whatever happens to the account in the meantime.
 
-### 2.4 HTTP Response Structure
+### 3.5 Reference versus value
 
-A server response contains a status code, headers, and possibly a body.
+| Property | Reference (session ID, opaque token) | Value (signed token) |
+|---|---|---|
+| Where state lives | Server-side store | Inside the token |
+| What the verifier needs | Access to the store, or to the issuer's introspection endpoint | The issuer's public key (or shared secret) |
+| Revocation | Immediate: delete or flag the record | Not possible before expiry without extra machinery |
+| Size on the wire | Small | Grows with the number of claims |
+| Information exposed to the holder | None | All claims, unless the token is also encrypted |
+
+The distinction concerns *where the state lives*, not *how the value travels*. A cookie can carry a signed token, and an `Authorization` header can carry an opaque reference. Many systems combine both: a browser holds a session cookie, and the server behind it holds short-lived signed tokens to call other services.
+
+### 3.6 Bearer and sender-constrained tokens
+
+Most tokens on the web are **bearer tokens** (RFC 6750): whoever presents the token can use it, with no further proof. A bearer token is like cash; if it leaks through a log file, a proxy or a compromised browser extension, the finder can spend it until it expires.
+
+A **sender-constrained** token is bound to a key held by the legitimate client, and every use must be accompanied by proof of possession of that key. Two standard mechanisms exist: binding to the client's TLS certificate (RFC 8705) and DPoP, in which the client signs a small proof for each request (RFC 9449). Both make a stolen token useless without the key. Later entries in this series treat them in detail; for the rest of this chapter, "token" means bearer token unless stated otherwise.
+
+## 4. Authorization
+
+### 4.1 The inputs to a decision
+
+Once a request's subject is established, the authorization decision considers:
+
+- **the subject**: identifier, roles, group memberships, organisation, assurance level of the authentication;
+- **the action**: read, create, update, delete, or a domain operation such as "approve refund";
+- **the resource**: its type, owner, organisation, classification;
+- **the context**: time, network location, device posture, the scopes granted to the client.
+
+### 4.2 Models
+
+Authorization models differ in how they represent the relation between these inputs.
+
+| Model | Policy expressed as | Strength | Weakness |
+|---|---|---|---|
+| Access control list (ACL) | Per object: which subjects may perform which actions | Simple; easy to answer "who can access this object?" | Hard to answer "what can this subject access?"; lists grow with users |
+| Capability | Per subject: an unforgeable reference granting specific rights to specific objects | Natural delegation; no global lookup | Revoking a capability that has been passed on is difficult |
+| Role-based (RBAC) | Subjects get roles; roles carry permissions | Matches organisational structure; easy to review | Role explosion when permissions depend on many attributes |
+| Attribute-based (ABAC) | Rules over subject, resource, action and context attributes | Expressive; handles conditions such as "same department, office hours" | Harder to audit; rule interactions can surprise |
+| Relationship-based (ReBAC) | Permissions derived from a graph of relations (owner of, member of, parent folder of) | Fits sharing and hierarchies, as in document systems | Requires a graph store and careful consistency |
+
+Real systems mix them. A common pattern uses roles for coarse permissions ("support staff may view orders") and attributes or relations for the fine-grained part ("only orders belonging to the subject's own organisation").
+
+### 4.3 Where decisions are made and enforced
+
+Standards such as XACML separate a **policy enforcement point** (PEP), which intercepts the request and acts on the decision, from a **policy decision point** (PDP), which evaluates the policy. The separation lets policy change without redeploying every service, and lets one PDP serve many enforcement points.
+
+Enforcement can happen at more than one layer. A gateway in front of several services can reject requests that lack a valid token or a required scope. That check is cheap, but **it cannot know who owns order 123**. Only the service holding the order can make that check, so it must enforce authorization again at the object level. Missing object-level checks are the first entry, *Broken Object Level Authorization*, in the OWASP API Security Top 10 (2023 edition): a correctly authenticated user changes `/orders/123` to `/orders/124` and receives someone else's order.
+
+### 4.4 Reporting the outcome: 401 and 403
+
+HTTP (RFC 9110) defines two status codes for failed access, and they correspond to the two stages:
+
+- **401 Unauthorized** means the request lacks valid authentication credentials. Despite its name, it is about authentication. The response must include a `WWW-Authenticate` header naming the scheme the client should use.
+- **403 Forbidden** means the server understood the request and refuses to perform it. Re-authenticating as the same subject will not help.
 
 ```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-Cache-Control: no-store
-
-{
-  "id": 123,
-  "status": "Processing"
-}
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm="orders", error="invalid_token", error_description="The access token expired"
 ```
 
-Common status codes include:
+For bearer tokens, RFC 6750 defines three error codes: `invalid_request` (sent with 400), `invalid_token` (sent with 401) and `insufficient_scope` (sent with 403). A server may also answer **404 Not Found** instead of 403 when merely confirming that a resource exists would leak information.
 
-| Status | Meaning |
+## 5. Delegation and Federation
+
+### 5.1 Why separate the identity provider from the application
+
+When every application keeps its own user database, each user has many passwords, each application must implement secure password storage, account recovery and multi-factor authentication, and disabling a departing employee means visiting every system. Centralising authentication in an **identity provider** solves these problems: applications become relying parties that accept the provider's statement that a user has authenticated.
+
+A second, separate problem is **delegation**. Suppose a user wants a printing service to fetch photos from their storage account. Before delegation protocols, the only way was to give the printing service the storage password, which grants it everything the user can do, indefinitely, with no way to revoke it short of changing the password. What is wanted is a credential that grants *this client* *this limited access* to *this resource server*, which the user can withdraw.
+
+OAuth 2.0 addresses delegation. OpenID Connect, built on top of it, addresses federated authentication.
+
+### 5.2 OAuth 2.0: delegated authorization
+
+OAuth 2.0 (RFC 6749) defines four roles:
+
+| Role | Responsibility |
 |---|---|
-| `200 OK` | Request succeeded |
-| `201 Created` | A resource was created |
-| `400 Bad Request` | The request is invalid |
-| `401 Unauthorized` | Authentication is missing or invalid |
-| `403 Forbidden` | The caller is authenticated but lacks permission |
-| `404 Not Found` | The resource was not found |
-| `429 Too Many Requests` | A rate limit was exceeded |
-| `500 Internal Server Error` | An unexpected server-side error occurred |
+| Resource owner | The user who can grant access to the resource |
+| Client | The application that wants access |
+| Authorization server | Authenticates the resource owner, obtains consent and issues tokens |
+| Resource server | Holds the resource and accepts access tokens |
 
-A `401` is commonly used when a token is missing, expired, or invalid. A `403` is commonly used when a valid identity does not meet the authorization policy. APIs may deliberately limit error details to avoid exposing sensitive information.
+The central artefact is the **access token**: a credential issued to a client that lets it call a resource server within a set of **scopes** and for a limited time. The key idea is that scopes limit the *client*, not the user. A client's effective permission is the intersection of what the user may do and what the token's scopes allow. A token with scope `orders.read` does not let a user read orders that the user could not read anyway; it stops the client from doing anything other than reading orders.
 
-## 3. What Is a Token?
+OAuth 2.0 is an authorization framework. An access token says that a client may access something; it is not, by itself, a statement to the client about who the user is. Systems that treated "obtained an access token" as "the user signed in" suffered impersonation bugs, which is why OpenID Connect exists.
 
-A token is a string or data structure representing a credential, claim, or permission under a specific security scheme.
+### 5.3 Client types
 
-Instead of sending a password with every request, the client presents a token:
+RFC 6749 divides clients by whether they can keep a secret.
 
-```http
-GET /api/orders/123 HTTP/1.1
-Host: api.example.com
-Authorization: Bearer eyJhbGciOi...
+- A **confidential client** runs on a server that the operator controls, such as a web application whose code executes on its own back end. It can hold a client secret or private key and authenticate itself to the authorization server.
+- A **public client** runs where the user, and therefore a potential attacker, can inspect it. The code of a single-page application is downloaded into every visitor's browser, and a native application's binary can be unpacked on any device. Any secret embedded in them is not secret.
+
+This distinction determines which flows are safe. A public client cannot prove its identity with a secret, so the protocol needs another way to make sure that the party redeeming an authorization code is the party that requested it. That is what PKCE provides.
+
+### 5.4 The authorization code flow with PKCE
+
+The authorization code grant with Proof Key for Code Exchange (PKCE, RFC 7636) is the recommended flow for any client acting on behalf of a user, public or confidential.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant C as Client
+    participant AS as Authorization server
+    participant RS as Resource server
+
+    C->>C: Create code_verifier, derive code_challenge
+    C->>AS: Redirect user to authorization endpoint
+    Note over C,AS: client_id, redirect_uri, scope, state, code_challenge
+    AS->>U: Authenticate, ask consent if needed
+    U->>AS: Complete authentication
+    AS-->>C: Redirect to redirect_uri with code and state
+    C->>C: Check state matches the request
+    C->>AS: Exchange code + code_verifier at token endpoint
+    AS->>AS: Check code, client, redirect_uri, PKCE
+    AS-->>C: Access token (+ ID token, refresh token)
+    C->>RS: Request with access token
+    RS-->>C: Response
 ```
 
-The server validates the token according to the relevant scheme. If it is valid, the server continues processing the request under the applicable authorization rules.
+The parameters each defend against a specific failure:
 
-Not every token contains user information, not every token is a JWT, and not every token can be validated entirely offline.
+- `redirect_uri` must exactly match a value registered for the client, so the code cannot be sent to an attacker's address.
+- `state` is an unpredictable value that the client checks on return; it ties the callback to a request this client actually started and blocks cross-site request forgery on the callback.
+- `code_challenge` is a hash of a random `code_verifier` that only the client knows. An attacker who intercepts the authorization code cannot exchange it without the verifier.
+- The **authorization code** is short-lived and single-use, and it travels through the browser; the tokens themselves are delivered on a direct back-channel request to the token endpoint.
 
-### 3.1 Common Token Types
+Other grants cover other situations. The **client credentials** grant lets a workload obtain a token for itself, with no user involved. The **device authorization** grant (RFC 8628) serves devices without a convenient browser, such as televisions. The **refresh token** grant (Section 7) renews access. Two grants from the original specification, the *implicit* grant and the *resource owner password credentials* grant, are deprecated by the OAuth 2.0 Security Best Current Practice (RFC 9700): the first returns tokens in the browser's address bar, and the second hands the user's password to the client, which is exactly what delegation was meant to avoid.
 
-| Token type | Purpose |
-|---|---|
-| Access token | Allows a client to access an API within the granted permissions |
-| Refresh token | Requests a new access token without requiring immediate interactive login |
-| ID token | Carries authentication information about a user in OIDC |
-| Session token / session ID | Refers to a login session managed by a server |
-| Password-reset token | Authorizes a password-reset operation |
-| Email-verification token | Verifies an email address |
+### 5.5 OpenID Connect: authentication on top of OAuth 2.0
 
-Access tokens and ID tokens are not interchangeable. Access tokens are intended for APIs; ID tokens are intended for the client to consume as part of OIDC authentication.
+OpenID Connect (OIDC) adds the missing statement about the user. When a client requests the `openid` scope, the provider returns an **ID token**: a signed JWT whose audience is the client and whose claims describe the authentication event (who the subject is, when they authenticated, and often how). OIDC also standardises a `nonce` parameter that binds the ID token to the client's request, a UserInfo endpoint for profile claims, and a discovery document from which a relying party can learn the provider's endpoints and signing keys.
 
-### 3.2 A Token Is Not Necessarily a JWT
+The ID token and the access token are easy to confuse and must not be interchanged:
 
-Two common approaches are opaque tokens and JWTs.
+| Property | ID token | Access token |
+|---|---|---|
+| Audience (`aud`) | The client (its `client_id`) | The resource server |
+| Consumed by | The client, to learn who signed in | The resource server, to decide access |
+| Format | Always a JWT | Opaque or JWT, at the issuer's choice |
+| Sent to APIs | No | Yes |
 
-**Opaque token**
+A resource server that accepts ID tokens would accept a token minted for a different application, which is exactly the confusion the `aud` claim exists to prevent.
+
+### 5.6 Federation and single sign-on
+
+Once applications rely on a shared provider, a user who has authenticated to the provider can sign in to further applications without presenting credentials again: **single sign-on**. Providers can also trust each other, so that users of one organisation can sign in to another organisation's applications. OIDC is the usual protocol for this on the modern web; SAML 2.0, an older XML-based standard, remains common in enterprise settings and plays the same role.
+
+## 6. Tokens in Detail
+
+### 6.1 Kinds of token
+
+| Token | Issued to | Presented to | Purpose |
+|---|---|---|---|
+| Access token | Client | Resource server | Authorise specific requests within scopes and a lifetime |
+| Refresh token | Client | Authorization server only | Obtain new access tokens without user interaction |
+| ID token | Client | Nobody; the client consumes it | Tell the client who authenticated and how |
+| Session identifier | Browser | The application that issued it | Refer to a server-side session record |
+| Single-purpose token | User (by email or link) | The issuing application | Authorise one operation, such as a password reset or email verification |
+
+Each kind should be accepted only by its intended recipient, for its intended purpose, and for no longer than that purpose needs.
+
+### 6.2 Opaque tokens and introspection
+
+An opaque access token is a random string that the resource server cannot interpret. To validate it, the resource server calls the authorization server's **introspection endpoint** (RFC 7662), which returns whether the token is active and, if so, its subject, scopes, audience and expiry. Introspection gives immediate revocation and keeps claims private, at the cost of a network call per request (usually softened by short caching).
+
+### 6.3 The structure of a JSON Web Token
+
+A JSON Web Token (RFC 7519) is a set of claims encoded as JSON. In its common signed form (JSON Web Signature, RFC 7515) it has three base64url-encoded parts separated by dots:
 
 ```text
-7f3c91a2...random-value
+base64url(header) . base64url(payload) . base64url(signature)
 ```
 
-The token does not expose its meaning to the client. The server may look up its state, consult a session store, or use an introspection endpoint to determine whether it is valid and what permissions apply.
-
-**JWT (JSON Web Token)**
-
-```text
-header.payload.signature
-```
-
-The token carries claims and can often be validated cryptographically without querying a database on every request, depending on the architecture and policy.
-
-An opaque token is not necessarily a session ID; it can be an OAuth 2.0 access token. JWTs can also be used in contexts other than access tokens.
-
-## 4. JWT: Structure and Validation
-
-JWT is a format for representing claims as JSON. A common form is a signed JWT using JSON Web Signature (JWS).
-
-### 4.1 The Three Parts of a Signed JWT
-
-```text
-BASE64URL(HEADER).
-BASE64URL(PAYLOAD).
-BASE64URL(SIGNATURE)
-```
-
-**Header** — identifies the signing algorithm and token type.
+The **header** names the algorithm and the key:
 
 ```json
-{
-  "alg": "RS256",
-  "typ": "JWT",
-  "kid": "key-2026"
-}
+{ "alg": "RS256", "typ": "at+jwt", "kid": "2026-10-signing" }
 ```
 
-**Payload** — contains claims about the subject, issuer, audience, validity period, and possibly permissions.
+The **payload** carries the claims:
 
 ```json
 {
   "iss": "https://id.example.com",
-  "sub": "user-123",
-  "aud": "orders-api",
-  "exp": 1791800000,
-  "scope": "orders.read"
+  "sub": "user-48213",
+  "aud": "https://api.example.com/orders",
+  "client_id": "photo-printer",
+  "scope": "orders.read",
+  "iat": 1791795600,
+  "exp": 1791796200,
+  "jti": "4f1c2b7e-0d5a-4c39-9a8e-6b2f1e7d3a10"
 }
 ```
 
-**Signature** — proves that the encoded header and payload have not been modified, assuming the signature is verified with the correct trusted key.
+The **signature** is computed over the exact bytes `base64url(header) + "." + base64url(payload)`. Here `iat` and `exp` are Unix timestamps ten minutes apart; all values are illustrative. The `at+jwt` type and the `client_id` claim come from the JWT profile for OAuth 2.0 access tokens (RFC 9068), which lets a resource server tell an access token apart from an ID token signed by the same issuer.
 
-Conceptually, with an asymmetric algorithm:
-
-```text
-Signature = Sign(
-  encodedHeader + "." + encodedPayload,
-  privateKey
-)
-```
-
-The values above are illustrative. The expiration value is a Unix timestamp.
-
-### 4.2 Important JWT Claims
+The registered claims have fixed meanings:
 
 | Claim | Meaning |
 |---|---|
-| `iss` | Issuer: the authority that issued the token |
-| `sub` | Subject: the entity represented by the token |
-| `aud` | Audience: the intended recipient |
-| `exp` | Expiration time |
-| `iat` | Issued-at time |
-| `nbf` | Token must not be accepted before this time |
-| `jti` | Token identifier, if used |
-| `scope` | Granted scope, commonly used in OAuth access tokens |
-| `roles` | Roles, if the issuer and application define and use this claim |
+| `iss` | Issuer: who created and signed the token |
+| `sub` | Subject: the principal the token is about |
+| `aud` | Audience: the recipient(s) that should accept it |
+| `exp` | Expiry: reject at or after this time |
+| `nbf` | Not before: reject before this time |
+| `iat` | Issued at |
+| `jti` | Unique token identifier, useful for replay detection and denylists |
 
-`scope` and `roles` are not guaranteed to appear in every token. Their representation depends on the issuer and authorization design.
+Claims such as `scope`, `roles` or `groups` are conventions defined by particular profiles or issuers, not by the JWT standard itself, and a resource server must know which ones its issuer uses.
 
-### 4.3 How Is a JWT Protected?
+A signed JWT is **not encrypted**. Anyone holding it can decode the header and payload. The signature guarantees integrity and origin, not confidentiality. Personal or sensitive data should stay out of the payload, or the token should be encrypted (JSON Web Encryption, RFC 7516), or an opaque token should be used instead.
 
-With a symmetric algorithm such as HS256, the issuer and verifier use the same secret.
+### 6.4 Keys and algorithms
 
-With an asymmetric algorithm such as RS256:
+With a **symmetric** algorithm such as HS256 (HMAC with SHA-256), the same secret both signs and verifies. Every verifier can therefore also forge tokens, so symmetric signing suits only a single party that verifies its own tokens.
 
-- The Identity Provider signs with a private key.
-- The API verifies the signature using the corresponding public key.
-- The API may obtain public keys from the issuer's JWKS endpoint and select the appropriate key using `kid`.
+With an **asymmetric** algorithm such as RS256 (RSA) or ES256 (ECDSA), the issuer signs with a private key and verifiers check with the public key. The issuer publishes its public keys as a JSON Web Key Set (JWKS, RFC 7517), typically at a URL listed in its discovery document. The `kid` header selects the key, which allows **key rotation**: the issuer publishes the new key, starts signing with it, and removes the old key only after every token signed with it has expired.
 
-A signature helps detect tampering; it does **not** encrypt the payload. Anyone who obtains a conventional signed JWT can generally decode and read its header and payload.
+### 6.5 Validating an access token
 
-Do not put passwords, API secrets, or sensitive data in a JWT payload merely because the token is signed.
+Decoding a token is not validating it. A resource server that receives a JWT access token should, in order:
 
-### 4.4 What Makes a JWT Valid?
+1. **Parse** the token strictly; reject anything malformed.
+2. **Check the algorithm** against an allow-list fixed in configuration. Never let the token's own `alg` header choose the algorithm. Accepting `"alg": "none"` disables the signature entirely, and accepting HS256 for a key meant for RS256 lets an attacker sign tokens using the *public* key as an HMAC secret (an *algorithm confusion* attack).
+3. **Select the key** by `kid` from the trusted issuer's key set, and **verify the signature**.
+4. **Check `iss`** equals the configured issuer exactly.
+5. **Check `aud`** contains this resource server's identifier.
+6. **Check time**: `exp` in the future and `nbf` (if present) in the past, allowing a small clock skew of seconds to a minute.
+7. **Check the type** (`typ` is `at+jwt` where the issuer follows RFC 9068), so an ID token cannot pass as an access token.
+8. **Check required claims** such as tenant or client, according to local policy.
 
-An API must not simply decode a JWT and trust its contents. Validation should include at least:
+Only then is the subject established. In language-neutral pseudocode:
 
-1. Verify the signature with a trusted key.
-2. Allow only explicitly configured signing algorithms.
-3. Verify that `iss` matches the configured issuer.
-4. Verify that `aud` identifies the API receiving the token.
-5. Verify that `exp` has not passed, and check `nbf` when present.
-6. Enforce other required conditions, such as token type, tenant, or mandatory claims.
+```text
+function authenticate(request):
+    token = bearer_token_from(request.headers["Authorization"])
+    if token is missing:
+        return reject(401, challenge = "Bearer")
 
-Only after token validation should the API evaluate access permissions. A valid token does not automatically grant access to every endpoint.
+    header, claims = decode_and_verify(
+        token,
+        allowed_algorithms = ["RS256"],
+        keys               = jwks_for(ISSUER),       # cached, refreshed on unknown kid
+        expected_issuer    = ISSUER,
+        expected_audience  = THIS_API,
+        expected_type      = "at+jwt",
+        clock_skew         = 60 seconds)
+    if verification failed:
+        return reject(401, challenge = "Bearer error=\"invalid_token\"")
 
-## 5. The Complete Token Authentication Flow
-
-The following model uses a separate frontend, Identity Provider, and API. The example assumes the user signs in with a username and password at the Identity Provider; real systems may use SSO, MFA, or other authentication methods.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant C as Client
-    participant I as Identity Provider
-    participant A as Backend API
-    participant D as Database
-
-    U->>C: Enter credentials
-    C->>I: Send credentials over HTTPS
-    I->>I: Verify credentials and MFA policy
-    I-->>C: Authentication result and token
-    C->>A: HTTPS request + Bearer access token
-    A->>A: Validate signature, issuer, audience, expiry
-    A->>A: Check scope, role, and policy
-    alt Token valid and permissions sufficient
-        A->>D: Query permitted data
-        D-->>A: Query result
-        A-->>C: 200 OK + JSON
-    else Token invalid or expired
-        A-->>C: 401 Unauthorized
-    else Permissions insufficient
-        A-->>C: 403 Forbidden
-    end
+    return Principal(subject = claims.sub,
+                     client  = claims.client_id,
+                     scopes  = split(claims.scope))
 ```
 
-### Step 1 — The User Signs In
+Mature libraries implement steps 1 to 6; the work left to the application is to configure them strictly and to keep the issuer, audience and algorithm list explicit.
 
-The client collects the required authentication input and sends it to the system responsible for authentication.
+## 7. The Token Lifecycle
 
-For applications using an external Identity Provider through OAuth 2.0/OIDC, the frontend should not automatically send a username and password to a custom `/auth/login` endpoint. Authorization Code Flow with PKCE is a common approach for interactive web and mobile applications.
+### 7.1 Expiry and the staleness window
 
-### Step 2 — The Identity Provider Verifies Identity
+A self-contained access token remains valid until `exp`, regardless of what happens to the account. If an administrator disables a user at 10:00 and the user's access token expires at 10:08, a resource server that validates tokens locally will keep accepting requests until 10:08. That interval is the **staleness window**, and its length equals the access-token lifetime. Short lifetimes, typically minutes, keep the window small. Where even that is too long, the resource server can introspect tokens, consult a denylist of revoked `jti` values, or check account status on sensitive operations.
 
-The Identity Provider checks credentials, account status, and relevant policies, such as MFA.
+### 7.2 Refresh tokens
 
-If authentication fails, it returns an error and does not issue tokens. If authentication succeeds, it completes the configured flow.
-
-### Step 3 — Tokens Are Issued
-
-Depending on the protocol and client type, the result may include an access token, an ID token, and a refresh token.
-
-- The access token is used to call an API.
-- The ID token communicates authentication information to the client under OIDC.
-- A refresh token, when issued, can request new tokens under the authorization server's rules.
-
-Not every flow issues all three tokens.
-
-### Step 4 — The Client Calls the API
-
-The client sends the access token in the HTTP `Authorization` header:
-
-```http
-GET /api/orders HTTP/1.1
-Host: api.example.com
-Authorization: Bearer <access_token>
-Accept: application/json
-```
-
-The client does not need to send the password again.
-
-### Step 5 — The API Validates the Token
-
-Authentication middleware checks the signature or the applicable token-validation mechanism, expiration, issuer, audience, and other configured requirements.
-
-If the token is invalid, the request is generally rejected with `401 Unauthorized`.
-
-### Step 6 — The API Checks Permissions
-
-After authentication, the application checks scopes, roles, policies, and access to the specific resource.
-
-For example:
-
-- `orders.read`: may read orders.
-- `orders.write`: may create or modify orders.
-- A user may only view orders belonging to their organization.
-
-These scope names are illustrative conventions. The actual names and enforcement depend on the application.
-
-### Step 7 — The API Executes Business Logic and Returns a Response
-
-Only after the request satisfies the applicable policies should the API perform the business operation and query data. It then returns an HTTP response.
-
-**The key boundary:** Authentication validates credentials; authorization determines permissions; business logic performs the operation.
-
-## 6. Where OAuth 2.0 and OpenID Connect Fit
-
-These concepts are frequently confused.
-
-**OAuth 2.0 is an authorization framework, not by itself a user-authentication protocol.** OpenID Connect adds an identity layer on top of OAuth 2.0.
-
-### 6.1 OAuth 2.0 Roles
-
-| Role | Example |
-|---|---|
-| Resource Owner | User who owns the data |
-| Client | Application requesting access |
-| Authorization Server | Server that issues access tokens |
-| Resource Server | API that receives access tokens |
-
-In an OIDC-enabled system, an Identity Provider often provides both user-authentication services and authorization-server capabilities.
-
-### 6.2 Authorization Code Flow with PKCE
-
-This is a recommended flow to study when building web or mobile applications that sign in through an Identity Provider.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant C as Client App
-    participant I as Identity Provider
-    participant A as API
-
-    C->>C: Generate code_verifier and code_challenge
-    C->>I: Redirect to authorization endpoint
-    Note over C,I: client_id, redirect_uri, scope, state, nonce, code_challenge
-    I->>U: Request sign-in and consent if required
-    U->>I: Complete sign-in
-    I-->>C: Redirect to callback with authorization code and state
-    C->>C: Validate state
-    C->>I: Exchange code + code_verifier for tokens
-    I->>I: Validate code, client, redirect URI, and PKCE
-    I-->>C: Access token, ID token, and refresh token if issued
-    C->>A: API request + access token
-    A-->>C: Response
-```
-
-Key parameters:
-
-- `client_id`: Identifier of the registered application.
-- `redirect_uri`: Registered callback address that receives the result.
-- `scope`: Requested permissions; OIDC requests normally include the `openid` scope.
-- `state`: Correlates the authorization request and callback and helps protect against certain CSRF attacks.
-- `nonce`: Binds an ID token to the authentication request and helps mitigate replay in applicable OIDC flows.
-- `code_challenge`: A value derived from the `code_verifier` and sent in the authorization request.
-- `authorization code`: A short-lived code exchanged for tokens.
-- `code_verifier`: A temporary secret generated by the client and presented when exchanging the code.
-
-PKCE helps prevent an attacker who intercepts an authorization code from exchanging it for tokens without the corresponding `code_verifier`.
-
-For browser-based applications such as SPAs, a Backend-for-Frontend (BFF) is also worth considering. In this architecture, the backend retains tokens and the browser uses a protected session cookie.
-
-### 6.3 Why Not Send an ID Token to an API Instead of an Access Token?
-
-The two tokens have different purposes.
-
-| Property | ID token | Access token |
-|---|---|---|
-| Intended recipient | Client application | Resource server / API |
-| Purpose | Communicates authentication result under OIDC | Grants access to resources |
-| `aud` | Contains the client ID | Must match the intended API |
-| Used to call an API | No, unless a separate, explicitly defined protocol says otherwise | Yes |
-
-The API must validate an access token against its own audience and policy. A valid ID token is not sufficient evidence that the caller is authorized to access an API.
-
-## 7. Access Token Expiration and Refresh Tokens
-
-Access tokens typically have shorter lifetimes than refresh tokens. When an access token expires, the client may request a new one without immediately prompting the user to sign in again, provided a refresh token was issued and remains valid.
+Short-lived access tokens would force frequent sign-ins without a way to renew them. A **refresh token** is a longer-lived credential that the client presents *only* to the authorization server to obtain a new access token. Because it never travels to resource servers, it is exposed in fewer places; and because the authorization server checks it on every use, it can be revoked at once.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant I as Authorization Server
-    participant A as API
+    participant AS as Authorization server
+    participant RS as Resource server
 
-    C->>A: Request + access token
-    A-->>C: 401 token expired
-    C->>I: Token request + refresh token
-    I->>I: Check expiry, client, and policy
+    C->>RS: Request + access token
+    RS-->>C: 401, error="invalid_token" (expired)
+    C->>AS: grant_type=refresh_token + refresh token
+    AS->>AS: Check token, client, revocation, policy
     alt Refresh token valid
-        I-->>C: New access token
-        Note over C,I: A new refresh token may also be issued
-        C->>A: Retry request + new access token
-        A-->>C: Response
-    else Refresh token invalid
-        I-->>C: Error: invalid_grant
-        C->>C: Require sign-in again
+        AS-->>C: New access token (+ new refresh token)
+        C->>RS: Retry request + new access token
+        RS-->>C: 200 OK
+    else Refresh token invalid or revoked
+        AS-->>C: 400, error="invalid_grant"
+        C->>C: Start a new sign-in
     end
 ```
 
-Important considerations:
+Three practices make refresh tokens safer:
 
-1. Not every `401` means the access token expired. An invalid signature, issuer, or audience can also cause a `401`.
-2. Refresh only according to the authorization server's protocol. Avoid infinite retry loops.
-3. With refresh-token rotation, the server issues a new refresh token and invalidates the previous one. Reuse of an old token may indicate theft and should be handled according to policy.
-4. Logout must be designed carefully: deleting a token from the client does not necessarily revoke an already-issued access token immediately.
-5. If permissions must be revoked quickly, the system may need token introspection, a denylist, server-side status checks, or another mechanism. A self-validating JWT does not automatically know that an account has just been disabled.
+- **Rotation.** Each use returns a new refresh token and invalidates the old one. If an old token is presented again, two parties hold copies, one of which must be an attacker; the authorization server should revoke the whole chain.
+- **Binding.** For confidential clients the refresh token is usable only with the client's own authentication; for public clients it can be sender-constrained with DPoP.
+- **Bounded lifetime.** An absolute maximum, independent of activity, forces periodic re-authentication.
 
-## 8. Where Should Tokens Be Stored?
+Clients should retry a request at most once after a refresh, and should not assume every 401 means "expired": a wrong audience or a revoked key also produces 401, and refreshing will not fix it.
 
-Token storage significantly affects security risk.
+### 7.3 Revocation and logout
 
-| Storage location | Assessment |
-|---|---|
-| Application memory | Limits persistence, but tokens are lost when the application is reinitialized |
-| `localStorage` | Readable by JavaScript; high risk if an XSS vulnerability occurs |
-| `sessionStorage` | Also readable by JavaScript; does not eliminate XSS risk |
-| `HttpOnly; Secure` cookie | JavaScript cannot read it, but suitable CSRF protection is still required |
-| Server-side session / BFF | Tokens can remain on the backend while the browser holds a session cookie |
+Signing out has several layers, and removing a token from the client covers only the first:
 
-No single storage strategy is best for every application.
+1. **Client:** discard the tokens it holds.
+2. **Authorization server:** revoke the refresh token (RFC 7009 defines a revocation endpoint) and end the provider's own session, or the next sign-in will succeed silently through single sign-on.
+3. **Other relying parties:** OIDC defines front-channel and back-channel logout so that a provider can notify the other applications that shared the session.
+4. **Resource servers:** outstanding self-contained access tokens remain valid until they expire, unless one of the measures in Section 7.1 is in place.
 
-- For web applications with a backend, a BFF and protected session cookies using `HttpOnly`, `Secure`, and suitable `SameSite` settings can reduce direct exposure of access tokens to JavaScript.
-- For a pure SPA, carefully assess token acquisition, storage, XSS, refresh behavior, and session lifetime.
-- For mobile applications, prefer credential storage protected by the operating system.
+A design review should state, for each kind of credential, how long it can outlive a sign-out or account suspension.
 
-Do not put access or refresh tokens in URL query strings. URLs can appear in logs, browser history, and analytics systems.
+## 8. Where the Client Keeps Its Tokens
 
-## 9. Security Controls
+A token's security depends as much on where it is stored as on how it was issued.
 
-A secure token-based implementation requires more than checking a JWT signature.
+| Location | Readable by page scripts | Main risk | Notes |
+|---|---|---|---|
+| Browser `localStorage` / `sessionStorage` | Yes | Any cross-site scripting bug can read and exfiltrate the token | Persists across reloads; easy, and therefore common |
+| Browser memory (a variable) | Yes, while the page runs | Scripting bugs can still use it | Lost on reload; requires silent renewal |
+| `HttpOnly; Secure` cookie | No | Cross-site request forgery; the browser sends it automatically | Requires `SameSite` and anti-forgery measures |
+| Server-side, behind a session cookie (back end for front end) | No; the browser never sees the tokens | Compromise of the back end | The browser holds only a session cookie; the back end holds the tokens and calls APIs |
+| Operating-system credential store (native apps) | Not to other apps | Compromise of the device | Keychain or keystore facilities protect the token at rest |
 
-### Transport Security
+For browser-based applications, the **back end for front end** (BFF) pattern is the most defensive arrangement: a confidential client on the server performs the OAuth flow and keeps the tokens, and the browser holds only an `HttpOnly` session cookie. A scripting bug can still make requests while the user's page is open, but it cannot steal a token for later use elsewhere.
 
-Use HTTPS/TLS and never send credentials over plain HTTP. Protect login and token-exchange endpoints as well as ordinary API endpoints.
+Wherever tokens are kept, they should never appear in URLs, because URLs are recorded in browser history, server logs, proxy logs and `Referer` headers.
 
-### Token Validation
+## 9. Enforcement at the Resource Server
 
-Validate the signature, allowed algorithm, `iss`, `aud`, `exp`, `nbf` when present, and required claims.
-
-### Credential Protection
-
-Do not log passwords, access tokens, or refresh tokens. Protect signing keys and client secrets.
-
-### Authorization
-
-Apply scopes, roles, policies, and resource-level checks. Authentication alone does not establish permission to access every record.
-
-### Token Lifecycle
-
-Define token lifetimes, refresh rotation, revocation, logout, account-disable behavior, and incident-response procedures.
-
-Common mistakes include:
-
-- Accepting JWTs without checking the signature or audience.
-- Trusting any algorithm specified in the JWT header.
-- Using an ID token as an access token.
-- Putting sensitive information in a JWT payload.
-- Storing refresh tokens where JavaScript can easily read them without assessing the risk.
-- Checking roles only in the frontend and not on the backend.
-- Treating CORS as authentication. CORS does not replace authentication or authorization.
-- Failing to enforce per-user or per-tenant data access even when the token is valid.
-
-## 10. Example: ASP.NET Core JWT Bearer Authentication
-
-ASP.NET Core Web API can use JWT Bearer Authentication to validate access tokens issued by an Identity Provider.
-
-The following example assumes that the provider issues signed JWTs and exposes OpenID Connect discovery metadata so the backend can discover issuer information and public signing keys. Replace the example URLs with your real configuration.
-
-```csharp
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddControllers();
-
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.Authority = "https://id.example.com";
-        options.Audience = "orders-api";
-
-        options.TokenValidationParameters =
-            new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ClockSkew = TimeSpan.FromMinutes(1)
-            };
-    });
-
-builder.Services.AddAuthorization();
-
-var app = builder.Build();
-
-app.UseHttpsRedirection();
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-app.MapControllers();
-
-app.Run();
-```
-
-Important settings:
-
-- `Authority`: The trusted Identity Provider address. Middleware can use its metadata to discover the issuer and signing keys.
-- `Audience`: The API for which the access token must have been issued.
-- `ValidateIssuer`: Validates the issuer.
-- `ValidateAudience`: Validates the audience.
-- `ValidateLifetime`: Checks token validity time.
-- `ValidateIssuerSigningKey`: Requires signature verification using the appropriate signing key.
-- `UseAuthentication()`: Establishes the request identity from the supplied credential.
-- `UseAuthorization()`: Enforces authorization rules.
-
-Middleware order matters: authentication must run before authorization.
-
-A protected endpoint can be written as follows:
-
-```csharp
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-
-[ApiController]
-[Route("api/orders")]
-public class OrdersController : ControllerBase
-{
-    [HttpGet]
-    [Authorize]
-    public IActionResult GetOrders()
-    {
-        return Ok(new
-        {
-            Message = "Authenticated request"
-        });
-    }
-}
-```
-
-`[Authorize]` requires the caller to be authenticated under the configured scheme. A production system should add appropriate policies, scopes, or roles and check access to individual orders. Being authenticated must not grant access to all data.
-
-The exact configuration depends on the token issued by the provider, claim mapping, .NET version, and authorization model. This example does not create a login endpoint or issue tokens; it configures the API to validate tokens.
-
-## 11. End-to-End Architecture: From Network to Business Logic
-
-This diagram places each concept in the context of the whole system.
+Putting the pieces together, a request to a resource server passes through the following pipeline:
 
 ```mermaid
 flowchart TB
-    U["User"]
-    C["Client: Browser / React / Mobile"]
-    NET["TCP/IP + TLS"]
-    HTTP["HTTP Request / Response"]
-    IDP["Identity Provider / Authorization Server"]
-    TOKEN["Access Token"]
-    API["API Gateway / ASP.NET Core API"]
-    AUTHN["Authentication: Validate Token"]
-    AUTHZ["Authorization: Scope / Role / Policy"]
-    BIZ["Business Logic"]
-    DB[("Application Database")]
-    RESP["HTTP Response: JSON + Status Code"]
-
-    U --> C
-    C -->|"OIDC login flow"| IDP
-    IDP -->|"Issue token"| TOKEN
-    TOKEN -->|"Client stores token securely"| C
-    C --> NET
-    NET --> HTTP
-    HTTP --> API
-    API --> AUTHN
-    AUTHN -->|"Valid"| AUTHZ
-    AUTHN -->|"Invalid"| ERR401["401 Unauthorized"]
-    AUTHZ -->|"Denied"| ERR403["403 Forbidden"]
-    AUTHZ -->|"Allowed"| BIZ
-    BIZ --> DB
-    DB --> BIZ
-    BIZ --> RESP
-    RESP --> C
+    IN["HTTPS request"] --> TLS["TLS terminated:<br/>confidentiality and server identity"]
+    TLS --> AUTHN["Authentication:<br/>extract and validate the token"]
+    AUTHN -->|"missing or invalid"| E401["401 + WWW-Authenticate"]
+    AUTHN -->|"subject established"| SCOPE["Coarse authorization:<br/>scope / role for this operation"]
+    SCOPE -->|"insufficient"| E403["403 Forbidden"]
+    SCOPE -->|"sufficient"| OBJ["Object-level authorization:<br/>may this subject act on this resource?"]
+    OBJ -->|"no"| E404["403, or 404 to hide existence"]
+    OBJ -->|"yes"| BIZ["Business logic and data access"]
+    BIZ --> OUT["Response"]
 ```
 
-Read the diagram in this order:
+The object-level check belongs next to the data, because only there is the resource's owner known:
 
-1. The client and server exchange data over HTTP protected by TLS.
-2. The client completes the sign-in flow with the Identity Provider and obtains a token.
-3. The client sends the access token when calling the API.
-4. The API validates the token before establishing the request identity.
-5. Authorization checks permission for the action and resource.
-6. Only an allowed request proceeds to business logic and data access.
-7. The API returns a result or error through an HTTP response.
+```text
+function get_order(request, order_id):
+    principal = authenticate(request)            # Section 6.5
+    require_scope(principal, "orders.read")       # coarse check -> 403
 
-## 12. Summary: Keep These Concepts Separate
+    order = orders.find(order_id)
+    if order is none or not can_view(principal, order):
+        return 404                                # do not reveal other tenants' orders
 
-| Concept | Question it answers |
-|---|---|
-| HTTP | How are requests and responses represented? |
-| HTTPS/TLS | How is data protected in transit? |
-| Authentication | Who is making the request? |
-| Authorization | What is the caller allowed to do? |
-| Token | Which credential represents the relevant identity or permission? |
-| JWT | How can claims be represented and cryptographically validated? |
-| OAuth 2.0 | How can a client be granted access to resources? |
-| OpenID Connect | How can a client authenticate a user through an Identity Provider? |
-| Access token | Which credential is used to access an API? |
-| Refresh token | Which credential can request a new token? |
-| Middleware | Which components process a request at each stage of the pipeline? |
-| Scope / Role / Policy | How are permissions represented and enforced? |
-| Session | How is login state managed across requests? |
+    audit.log(principal.subject, "read", order_id)
+    return 200, order
 
-A useful learning sequence is:
+function can_view(principal, order):
+    return order.organisation == organisation_of(principal.subject)
+        or has_role(principal.subject, "auditor")
+```
 
-**HTTP Request/Response → HTTPS/TLS → Authentication and Authorization → Tokens and JWT → OAuth 2.0/OIDC → Refresh and Revocation → ASP.NET Core implementation.**
+Two failures are common here. The first is checking permissions only in the user interface: hiding a button does not stop anyone sending the request directly. The second is filtering only list queries by owner while fetching single records by identifier alone, which is exactly the broken object-level authorization described in Section 4.3. The enforcement code should not trust identifiers, roles or tenant values supplied in the request body or query string when the same facts are available from the validated token or the database.
 
-Following this sequence builds an understanding of both token mechanics and the design of secure login, SSO, and REST API systems.
+## 10. Threats and Controls
+
+| Threat | What goes wrong | Primary controls |
+|---|---|---|
+| Credential phishing | User enters a password or one-time code on a fake site | Phishing-resistant authenticators (WebAuthn / passkeys) |
+| Credential stuffing | Passwords leaked elsewhere are tried here | Multi-factor authentication, rate limiting, breached-password checks |
+| Token theft and replay | A bearer token leaks through logs, storage or a malicious script | Short lifetimes, keep tokens out of URLs and logs, BFF, sender-constrained tokens |
+| Forged or altered token | Signature not checked, or algorithm chosen by the token | Strict validation with a fixed algorithm allow-list (Section 6.5) |
+| Token confusion | An ID token or a token for another API is accepted | Check `aud` and `typ` |
+| Authorization code interception | A code is captured during the redirect | Exact `redirect_uri` matching, PKCE, single-use short-lived codes |
+| Cross-site request forgery | A cookie-authenticated request is triggered from another site | `SameSite` cookies, anti-forgery tokens, `state` in OAuth flows |
+| Broken object-level authorization | Valid user reads or changes another user's resource | Object-level checks at the resource server, deny by default |
+| Stale authorization | Disabled account keeps working until tokens expire | Short access-token lifetimes, introspection or denylist for sensitive operations, refresh-token revocation |
+| Over-broad delegation | Client receives more access than its task needs | Narrow scopes, audience restriction per API, consent review |
+
+Two misconceptions deserve separate mention. **CORS is not access control**: it tells browsers which origins may read responses, but it does nothing to stop requests from non-browser clients. And **TLS is necessary but not sufficient**: it protects tokens in transit and nowhere else.
+
+## 11. Summary
+
+Access control reduces to one decision, made by a reference monitor that must see every request: may this subject perform this action on this object? Everything else in this chapter is machinery for making that decision reliably in a distributed system.
+
+| Layer | Question it answers | Mechanisms |
+|---|---|---|
+| Transport | Is the channel confidential, and is the server who it claims to be? | TLS |
+| Authentication | Who is the principal behind this request? | Passwords, multi-factor, passkeys, client credentials, mutual TLS |
+| Session continuity | How does a later request show it belongs to an earlier sign-in? | Session cookies (reference), signed tokens (value) |
+| Federation | How can one provider vouch for a user to many applications? | OpenID Connect, SAML 2.0 |
+| Delegation | How can a user grant a client limited access to a resource server? | OAuth 2.0 access tokens and scopes |
+| Token validation | Is this token genuine, current and meant for me? | Signature, `iss`, `aud`, `exp`, `typ`, algorithm allow-list, introspection |
+| Authorization | May this subject do this to this resource? | RBAC, ABAC, ReBAC; enforcement at object level |
+| Lifecycle | How does access end? | Expiry, refresh rotation, revocation, logout |
+| Accountability | What happened, and who did it? | Audit logs tied to authenticated subjects |
+
+The recurring lessons are short. Keep authentication and authorization separate, and enforce authorization where the data lives. Treat every bearer token as cash: give it a narrow audience, few scopes and a short life. Validate tokens strictly instead of decoding them. And for every credential the system issues, be able to say who may present it, to whom, for what, and how it is withdrawn.
+
+### The specifications
+
+The standards referred to above, for readers who want the normative text:
+
+- HTTP Semantics: RFC 9110. HTTP Basic authentication: RFC 7617. Cookies: RFC 6265.
+- OAuth 2.0: RFC 6749 (framework), RFC 6750 (bearer tokens), RFC 7636 (PKCE), RFC 7662 (introspection), RFC 7009 (revocation), RFC 8628 (device authorization), RFC 9068 (JWT access tokens), RFC 9700 (security best current practice).
+- Sender-constrained tokens: RFC 8705 (mutual TLS), RFC 9449 (DPoP).
+- JSON Web Token and related formats: RFC 7519 (JWT), RFC 7515 (JWS), RFC 7516 (JWE), RFC 7517 (JWK).
+- OpenID Connect Core 1.0, published by the OpenID Foundation.
