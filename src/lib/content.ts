@@ -23,8 +23,14 @@ async function assertSeriesReferencesExist(): Promise<void> {
 export async function getPosts(): Promise<CollectionEntry<'blog'>[]> {
   await assertSeriesReferencesExist();
   const posts = await getCollection('blog', ({ data }) => showDrafts || !data.draft);
-  // Newest first; the id breaks ties so list and pager order never depend on load order.
-  return posts.sort((a, b) => b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf() || a.id.localeCompare(b.id));
+  // Newest first. On the same date a later series entry counts as newer, then the id breaks
+  // ties so list and pager order never depend on load order.
+  return posts.sort(
+    (a, b) =>
+      b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf() ||
+      (b.data.seriesOrder ?? 0) - (a.data.seriesOrder ?? 0) ||
+      a.id.localeCompare(b.id),
+  );
 }
 
 export async function getInsights(): Promise<CollectionEntry<'insights'>[]> {
