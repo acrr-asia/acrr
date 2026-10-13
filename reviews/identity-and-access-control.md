@@ -17,6 +17,10 @@ The third objective (OpenID Connect) is only partly met, and three spellings bre
 
 Findings: 0 blocking, 7 should fix, 4 optional.
 
+## Resolution
+
+All 11 findings (F1–F11) were applied as recommended on 2026-10-13. Afterwards, `SITE_URL=https://acrr.asia npm run build` reported 0 errors and 0 warnings, and `npm run check:links` found every internal link resolved. Objective 3 is now met: entry 5 §3.4 covers ID token validation. Line numbers below refer to the reviewed commit, not to the corrected articles.
+
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
