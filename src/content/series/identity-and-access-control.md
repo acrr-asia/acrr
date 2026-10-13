@@ -11,8 +11,6 @@ objectives:
   - "Explain delegated authorization with OAuth 2.0 and federated authentication with OpenID Connect, including why public clients need PKCE."
   - "Validate an access token correctly and enforce object-level authorization at the resource server."
 plannedEntries:
-  - title: "Sessions and Cookies in Depth"
-    description: "Session identifiers, cookie attributes, fixation, CSRF and the browser's same-site rules, treated as one design problem."
   - title: "Authorization Models: RBAC, ABAC and Relationship-Based Access"
     description: "How each model represents policy, how decisions are evaluated, and how the choice affects auditing and change over time."
   - title: "OAuth 2.0 Grants and Client Types"
