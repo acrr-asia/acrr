@@ -68,6 +68,11 @@ public/             favicon.svg, robots.txt, CNAME (copied to dist/ unchanged)
 scripts/generate-diagrams.py Regenerates src/components/diagrams from the article formulas
 scripts/check-links.mjs      Internal link checker for dist/
 scripts/check-site-url.mjs   Warns (local) or fails (CI/deploy) when the sitemap/RSS contain localhost URLs
+scripts/series-review.mjs    Lists a series' articles and detects series that have just become complete
+.claude/skills/series-review/SKILL.md   The series review procedure (criteria, severity, report format)
+.claude/settings.json        Claude Code hook that starts the series review when a series is completed
+.github/workflows/series-review.yml     The same review in GitHub Actions, reported as an issue
+reviews/            Series review reports (reviews/<series-id>.md)
 pagefind.yml        Search-indexing options
 astro.config.mjs
 ```
@@ -156,6 +161,8 @@ The Markdown body below the frontmatter is shown as an introduction on the serie
 1. Create the article in `src/content/blog/` with `series: <series-id>` and a `seriesOrder`.
 2. If it was listed under `plannedEntries`, remove it from there so it is not shown twice.
 3. Update the series `status` when it changes.
+
+When the last planned entry is written, remove `plannedEntries` (or leave it empty) and set `status: "published"`. That is what "complete" means, and it starts the [automated series review](#automated-series-review).
 
 The series page lists published articles in `seriesOrder`, then the remaining planned entries. Progress ("2 of 4 entries published") is computed from the published articles and the planned entries; drafts never count.
 
@@ -247,6 +254,62 @@ General notes (the details depend on your provider; no account or hosting servic
   The routes assume the domain root, so do not serve the site from a project sub-path (`<owner>.github.io/<repo>`) without configuring `base` in `astro.config.mjs`.
 - **Any other static host / your own server.** Serve `dist/` as-is. Routes are *extensionless* (`/blog`, `/blog/<slug>`) and the files are named `blog.html`, `blog/<slug>.html` (Astro `build.format: 'file'`). The host must try `<path>.html` for a request to `<path>`. In nginx that is `try_files $uri $uri.html $uri/ =404;`, and the not-found page is `404.html`.
 - Run `npm run check:links` before deploying to catch broken internal links.
+
+## Automated series review
+
+When a series is completed, every article in it is reviewed as a whole for technical accuracy, factual consistency, logical flow, terminology, cross-article references, completeness, writing quality and fit with the series objectives and the [content rules](#content-rules). The review produces a report with findings and recommended corrections; it never edits the articles itself.
+
+**What "complete" means.** The series file has `status: "published"` and no `plannedEntries`. The review is triggered by the *transition* to that state, so it runs once per completion, not on every later edit. To review a series again, run it by hand (below).
+
+### Components
+
+| Piece | Role |
+| --- | --- |
+| `.claude/skills/series-review/SKILL.md` | The review itself: how to collect the series, the mechanical checks (build, link check, diagram widths, recomputable values), the eight review dimensions, severity levels, and the report format. Both triggers below run this one procedure. |
+| `scripts/series-review.mjs` | Dependency-free helper. `list <id>` prints the series and its articles in reading order, with warnings (gaps in `seriesOrder`, drafts, incomplete series). `detect <base> [head]` prints the ids of series that became complete between two commits. `hook` is the Claude Code hook entry point. |
+| `.claude/settings.json` | A Claude Code `PostToolUse` hook on `Edit` and `Write`. When an edit leaves a file in `src/content/series/` complete and the committed version (`HEAD`) was not, the hook adds a note to Claude's context naming the series and the skill, so Claude runs the review before the change is committed. Otherwise it does nothing. |
+| `.github/workflows/series-review.yml` | GitHub Actions. On a push to `master` that touches `src/content/series/`, it runs `detect` on the pushed range and, for each series that became complete, runs the skill with the official `anthropics/claude-code-action@v1`, uploads the report as an artifact and opens an issue titled "Series review: <title>". It can also be run by hand for any series. |
+| `reviews/<series-id>.md` | The report. Each run overwrites the previous report for that series. Commit it if you want to keep a record. |
+
+The two triggers cover different paths: the hook catches a series completed during a Claude Code session, and the workflow catches every completion that reaches `master`, however it was made (by hand, by Claude without the hook, or by merging a pull request).
+
+### Setup
+
+- **Claude Code (local or cloud sessions):** nothing to install. Claude Code reads `.claude/settings.json` and `.claude/skills/` from the repository. Node is already required by the project. Hooks in project settings may need to be approved once, depending on your Claude Code configuration (`/hooks` shows the active hooks).
+- **GitHub Actions:** add a repository secret named `ANTHROPIC_API_KEY` (**Settings → Secrets and variables → Actions → New repository secret**). To use a Claude subscription instead of an API key, create a token with `claude setup-token`, store it as `CLAUDE_CODE_OAUTH_TOKEN`, and in the workflow replace the `anthropic_api_key` line with `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`. The workflow uses the built-in `GITHUB_TOKEN` with `issues: write` to open the issue; no other permission is granted. Without the secret, the detection job still runs, but the review job fails at the Claude step.
+
+### Configuration
+
+- **Review criteria, severity levels and report format:** edit `.claude/skills/series-review/SKILL.md`. It is ordinary Markdown and is versioned with the content it reviews.
+- **What Claude may do in CI:** the `--allowedTools` list in `claude_args` in the workflow. It allows reading the repository, writing only under `reviews/`, and running `npm run build:local`, `npm run check:links`, `node scripts/series-review.mjs`, `git rev-parse` and `mkdir -p reviews`. Anything else is refused. In particular, CI cannot recompute hashes or numerical examples, so such values appear in the report's "Not verified" list. Run the review in a Claude Code session to have them checked.
+- **Model, turn limit and other CLI options:** add them to `claude_args` (for example `--model <model-id>` or `--max-turns <n>`).
+- **Trigger branch and paths:** the `on:` block in the workflow.
+
+### Running it
+
+- **Automatically in Claude Code:** complete a series (set `status: "published"`, remove `plannedEntries`). The hook asks Claude to run the review, and Claude replies with the report path and the blocking findings.
+- **Automatically on GitHub:** push or merge a commit that completes a series to `master`. The review runs as the **Series review** workflow and opens an issue.
+- **By hand in Claude Code:** `/series-review <series-id>`, or ask Claude to "review the <title> series".
+- **By hand on GitHub:** **Actions → Series review → Run workflow**, with the series id.
+
+The review reads every article in full, so it takes several minutes per series. The CI job also installs Chromium and builds the site.
+
+### Validating the setup
+
+1. Detection against history: `node scripts/series-review.mjs detect 5760f52 b45713e` prints `["identity-and-access-control"]` (the commit that completed that series), and `node scripts/series-review.mjs detect b45713e e3abd3f` prints `[]` (a commit that started a series without completing it).
+2. Listing: `node scripts/series-review.mjs list identity-and-access-control` prints seven articles in order and no warnings.
+3. The hook, without Claude Code: temporarily set an incomplete series to `status: "published"` and delete its `plannedEntries`, then run
+
+   ```sh
+   echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$PWD"'/src/content/series/<id>.md"}}' | CLAUDE_PROJECT_DIR=$PWD node scripts/series-review.mjs hook
+   ```
+
+   It prints a JSON object whose `additionalContext` names the series and the skill. Restore the file with `git checkout -- src/content/series/<id>.md`. For an unchanged file, an already-complete series or a file outside `src/content/series/`, it prints nothing.
+4. The workflow: once the secret is set, run **Series review** by hand for a completed series and check that the run uploads `series-review-<id>` and opens an issue.
+
+### Why these tools
+
+The available review plugins in the Anthropic plugin directory were assessed for this task. The official **code-review** plugin reviews code changes in pull requests, not long-form technical prose. The community **Proofread** plugin is limited to conservative proofreading, so it does not check technical accuracy, cross-article consistency or objectives. Other directory entries either review code, depend on other model providers, or connect to external services. None covers a series-level technical and editorial review, and adding a third-party plugin would add an unpinned dependency to the build path. The workflow is therefore built from first-party Claude Code features (a project skill, a hook, and the official GitHub Action) plus one script in the style of the existing `scripts/`. It adds no npm dependency, and the review criteria live in the repository next to the content rules they enforce.
 
 ## Content rules
 
