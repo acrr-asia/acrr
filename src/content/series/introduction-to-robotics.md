@@ -11,8 +11,6 @@ objectives:
   - "Explain forward and inverse kinematics for a simple planar arm."
   - "Outline the sense, plan, and act structure used in many robot software architectures."
 plannedEntries:
-  - title: "Forward and Inverse Kinematics of a Planar Arm"
-    description: "Computing end-effector position from joint angles, and the harder problem of going the other way."
   - title: "Sensing and State Estimation: An Overview"
     description: "Why robots rarely observe their state directly, and the basic idea of combining a model with noisy measurements."
 ---
