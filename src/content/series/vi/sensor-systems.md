@@ -10,8 +10,6 @@ objectives:
   - "Giải thích lấy mẫu (sampling), lượng tử hóa (quantization) và chuyển đổi dữ liệu, cùng với nhiễu (noise) giới hạn những gì có thể phát hiện được."
   - "Phát biểu và tổng hợp độ không đảm bảo đo (measurement uncertainty), đồng thời hiệu chuẩn và hợp nhất (fusion) các cảm biến."
 plannedEntries:
-  - title: "Cảm biến thông minh (smart sensor) và MEMS"
-    description: "Cảm biến chế tạo bằng vi gia công (microfabrication), mạch chuẩn hóa tích hợp trên chip và khả năng tự hiệu chuẩn (self-calibration), và những gì thay đổi khi cảm biến mang theo mạch điện tử của riêng nó."
   - title: "Hiệu chuẩn và hợp nhất đa cảm biến"
     description: "Hiệu chuẩn và tính liên kết chuẩn (traceability) trong thực tế, và việc kết hợp nhiều cảm biến không hoàn hảo thành một ước lượng tốt hơn."
 ---
