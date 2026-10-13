@@ -461,3 +461,45 @@ svg('NoiseDensity', 620, 286, 'Voltage noise density of an amplifier with a 1/f 
     'with falling frequency below it, as one over the square root of frequency, reaching about 316 nanovolts per root hertz at 0.01 hertz. '
     'The corner frequency, where the two asymptotes meet, is 10 hertz; there the density is the square root of two times the white level.',
     b)
+
+# ---------- 15. Capacitive MEMS accelerometer (schematic) ----------
+# Geometry of "Smart Sensors and MEMS": a proof mass on springs between two fixed electrodes. When the
+# case accelerates, the mass lags behind, one gap closes to d - x and the other opens to d + x, and
+# the difference between the two capacitances measures x and hence the acceleration.
+b = ''
+def zigzag_v(x, y0, y1, n=6, w=10):
+    pts = [(x, y0), (x, y0 + 8)]
+    h = (y1 - y0 - 16) / n
+    for i in range(n):
+        pts.append((x + (w if i % 2 == 0 else -w), y0 + 8 + (i + 0.5) * h))
+    pts += [(x, y1 - 8), (x, y1)]
+    return line(pts)
+# anchors (hatched) at top and bottom
+for ya, sgn in ((34, -1), (226, 1)):
+    b += line([(215, ya), (305, ya)])
+    for xx in range(219, 305, 10):
+        b += line([(xx, ya), (xx - 8, ya + sgn * 8)], 'mut')
+b += zigzag_v(260, 34, 90)
+b += zigzag_v(260, 170, 226)
+b += text(278, 66, 'spring ' + var('k'), 'start', 'small')
+# proof mass and fixed electrodes
+b += box(190, 90, 140, 80, 'proof mass', var('m'))
+for x0 in (110, 398):
+    b += f'  <rect class="region" x="{x0}" y="80" width="12" height="100" />\n'
+    b += line([(x0, 80), (x0 + 12, 80), (x0 + 12, 180), (x0, 180), (x0, 80)])
+b += text(116, 72, 'fixed electrode', 'middle', 'small')
+b += text(404, 72, 'fixed electrode', 'middle', 'small')
+b += text(156, 126, sub('C', '1'), 'middle')
+b += text(364, 126, sub('C', '2'), 'middle')
+b += text(156, 148, var('d') + ' + ' + var('x'), 'middle', 'small')
+b += text(364, 148, var('d') + ' − ' + var('x'), 'middle', 'small')
+# motion arrows: the mass moves right (x) relative to the case when the case accelerates left
+b += arrow([(320, 188), (370, 188)], 'acc')
+b += text(345, 206, 'mass displacement ' + var('x'), 'middle', 'small')
+b += arrow([(300, 252), (220, 252)])
+b += text(210, 256, 'case acceleration ' + var('a'), 'end', 'small')
+svg('MemsAccelerometer', 520, 266, 'Schematic of a capacitive MEMS accelerometer',
+    'A proof mass m hangs on springs between two anchors and sits between two fixed electrodes, forming capacitances C1 and C2. '
+    'When the case accelerates to the left, the mass lags behind and moves to the right relative to it by x: the gap to the left electrode '
+    'widens to d plus x and the gap to the right electrode narrows to d minus x, so C1 falls and C2 rises.',
+    b)
