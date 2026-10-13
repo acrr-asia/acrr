@@ -11,8 +11,6 @@ objectives:
   - "Explain forward and inverse kinematics for a simple planar arm."
   - "Outline the sense, plan, and act structure used in many robot software architectures."
 plannedEntries:
-  - title: "Coordinate Frames and Rigid-Body Transformations"
-    description: "Describing where things are, and how to convert between frames using rotations and translations."
   - title: "Forward and Inverse Kinematics of a Planar Arm"
     description: "Computing end-effector position from joint angles, and the harder problem of going the other way."
   - title: "Sensing and State Estimation: An Overview"
