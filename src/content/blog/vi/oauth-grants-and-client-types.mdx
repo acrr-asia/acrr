@@ -1,0 +1,314 @@
+---
+title: "Các luồng cấp quyền và loại client trong OAuth 2.0"
+description: "Cách một client OAuth 2.0 nhận token: các loại client và việc xác thực client, URI chuyển hướng cho client web, client gốc và client chạy trên trình duyệt, chi tiết luồng mã ủy quyền với PKCE, luồng client credentials, ủy quyền thiết bị, làm mới token, trao đổi token, và cách chọn giữa chúng."
+publishedAt: "2026-10-13"
+category: "Computing Systems"
+tags:
+  - OAuth 2.0
+  - authorization
+  - PKCE
+  - authentication
+series: identity-and-access-control
+seriesOrder: 5
+---
+
+Bài thứ nhất của loạt bài này giới thiệu OAuth 2.0 như lời giải cho một bài toán ủy nhiệm (delegation): người dùng muốn một client truy cập một máy chủ tài nguyên (resource server) thay mặt mình mà không phải giao mật khẩu. Bài đó trình bày một luồng, luồng mã ủy quyền (authorization code) với PKCE, và chỉ điểm qua tên các luồng còn lại. Bài này xem xét toàn bộ khung giao thức từ phía client: client là gì, nó chứng minh danh tính của mình ra sao, token đến được với nó bằng cách nào, và **luồng cấp quyền** (grant: giao thức mà qua đó client nhận được access token) nào phù hợp với tình huống nào.
+
+Ý tưởng xuyên suốt là một luồng cấp quyền được chọn bằng cách trả lời ba câu hỏi về tình huống, theo thứ tự: *Có người dùng tham gia không?* *Người dùng có dùng được trình duyệt trên thiết bị đang chạy client không?* *Client có giữ được bí mật không?* Phần lớn các tính chất bảo mật của các luồng cấp quyền suy ra từ những câu trả lời đó.
+
+## 1. Client
+
+### 1.1 Đăng ký
+
+Trước khi có thể yêu cầu token, client phải được **đăng ký** với máy chủ phân quyền (authorization server), hoặc bởi người quản trị, hoặc, khi máy chủ hỗ trợ, thông qua Dynamic Client Registration (đăng ký client động, RFC 7591). Việc đăng ký ghi lại ít nhất:
+
+- một **định danh client** (`client_id`), là thông tin công khai và xuất hiện trong URL trên trình duyệt;
+- các **URI chuyển hướng** (redirect URI) của client, tức những địa chỉ chính xác mà máy chủ phân quyền được phép gửi kết quả tới;
+- các **loại luồng cấp quyền** (grant type) mà client được dùng và, với client bảo mật (confidential client), cách nó sẽ **xác thực**;
+- siêu dữ liệu mô tả hiển thị cho người dùng trên màn hình xin sự đồng ý (consent), chẳng hạn tên và logo.
+
+Bản thân việc đăng ký đã là một biện pháp kiểm soát bảo mật. Một URI chuyển hướng quá dễ dãi, một loại luồng cấp quyền mà client không cần, hay một client bảo mật bị đăng ký thành client công khai, mỗi điều đều mở rộng những gì kẻ tấn công có thể làm với một mã bị bắt được hoặc một yêu cầu giả mạo.
+
+### 1.2 Client bảo mật và client công khai
+
+RFC 6749 phân chia client theo một tính chất duy nhất: **client có giữ được một thông tin xác thực (credential) bí mật trước người dùng và trước bất kỳ ai có được một bản sao mã của nó hay không?**
+
+- Một **client bảo mật** chạy trong một môi trường do bên vận hành kiểm soát, chẳng hạn máy chủ của một ứng dụng web hay một dịch vụ back-end. Nó có thể giữ một bí mật hoặc một khóa riêng mà người dùng không bao giờ nhìn thấy.
+- Một **client công khai** (public client) chạy ở nơi người dùng, và bất kỳ ai khác có bản sao, đều có thể xem xét nó: mã JavaScript được gửi tới trình duyệt, hoặc một ứng dụng cài trên điện thoại hay máy tính. Mọi bí mật nhúng trong nó đều có thể bị trích xuất, nên máy chủ phân quyền không được coi bí mật đó là bằng chứng danh tính.
+
+Cách phân loại này liên quan đến **cách triển khai**, không phải công nghệ. Cùng một framework có thể tạo ra một client bảo mật (mã chạy trên máy chủ, giữ token trong phiên) hoặc một client công khai (mã chạy trong trình duyệt, giữ token trong bộ nhớ). Một ứng dụng gốc (native application) không thể trở thành client bảo mật bằng cách làm rối mã (obfuscate) bí mật của nó.
+
+### 1.3 Xác thực client
+
+Một client bảo mật xác thực với **điểm cuối token** (token endpoint) của máy chủ phân quyền mỗi khi nó đổi một mã, làm mới một token hoặc yêu cầu token cho chính nó. Các phương thức chuẩn, từ yếu nhất đến mạnh nhất:
+
+| Phương thức | Client xuất trình gì | Ghi chú |
+|---|---|---|
+| `client_secret_basic` / `client_secret_post` | Một bí mật dùng chung, trong trường tiêu đề `Authorization` hoặc trong thân yêu cầu | Đơn giản; máy chủ lưu một bí mật mà nó phải bảo vệ, và bí mật được gửi đi trong mọi yêu cầu |
+| `private_key_jwt` | Một JWT ngắn hạn được ký bằng khóa riêng của client (RFC 7523, OpenID Connect) | Máy chủ chỉ lưu khóa công khai; không có gì tái sử dụng được đi qua đường truyền |
+| `tls_client_auth` / `self_signed_tls_client_auth` | Một chứng chỉ X.509 trong quá trình bắt tay TLS (RFC 8705) | Đồng thời cho phép ràng buộc token với chứng chỉ (một bài sau) |
+
+Các phương thức bất đối xứng có cùng ưu điểm so với bí mật dùng chung như passkey so với mật khẩu (như bài thứ hai đã giải thích): bên xác minh (verifier) không nắm giữ thứ gì cho phép kẻ tấn công mạo danh client, và một yêu cầu bị bắt được không thể bị phát lại vô thời hạn.
+
+## 2. URI chuyển hướng và các nền tảng client
+
+Mã ủy quyền (authorization code) đến với client qua một lần chuyển hướng trên trình duyệt. Nơi lần chuyển hướng đó có thể đến khác nhau theo nền tảng, và mỗi nền tảng có hướng dẫn riêng.
+
+### 2.1 Ứng dụng web phía máy chủ
+
+Một ứng dụng web có back-end phía máy chủ đăng ký các URI chuyển hướng HTTPS trên tên miền của chính nó, chẳng hạn `https://app.example.com/oauth/callback`. Mã đến máy chủ, và máy chủ đổi mã đó bằng thông tin xác thực client của mình. Đây là trường hợp đơn giản nhất, và ứng dụng phía máy chủ là một client bảo mật.
+
+### 2.2 Ứng dụng gốc
+
+RFC 8252, *OAuth 2.0 for Native Apps*, đưa ra hai quy tắc trung tâm.
+
+Thứ nhất, yêu cầu ủy quyền phải được mở trong một **tác nhân người dùng bên ngoài** (external user agent): trình duyệt hệ thống, hoặc một thẻ trình duyệt trong ứng dụng (in-app browser tab) được hệ điều hành cách ly khỏi ứng dụng. Một web view nhúng bên trong ứng dụng sẽ cho phép ứng dụng đọc mọi thứ người dùng gõ vào, kể cả mật khẩu của nhà cung cấp danh tính (identity provider), điều này làm mất đi chính mục đích của OAuth, đồng thời tước của người dùng phiên đăng nhập sẵn có của trình duyệt và các dấu hiệu chống lừa đảo giả mạo (phishing) của nó.
+
+Thứ hai, lần chuyển hướng phải quay về ứng dụng bằng một trong ba cơ chế:
+
+| Cơ chế | Ví dụ | Lưu ý |
+|---|---|---|
+| URI HTTPS được ứng dụng xác nhận quyền (claimed HTTPS URI) | `https://app.example.com/callback`, được ứng dụng xác nhận quyền thông qua cơ chế liên kết ứng dụng (app link) của nền tảng | Mạnh nhất: nền tảng kiểm chứng rằng ứng dụng gắn với tên miền đó |
+| Lược đồ URI dùng riêng (private-use URI scheme) | `com.example.app:/callback` (tên miền đảo ngược) | Một ứng dụng khác trên thiết bị có thể đăng ký cùng lược đồ và nhận được mã; PKCE là thứ làm cho điều này trở nên vô hại |
+| Giao diện loopback | `http://127.0.0.1:51234/callback` | Dành cho ứng dụng máy tính; ứng dụng lắng nghe trên một cổng cục bộ, và máy chủ phải chấp nhận mọi cổng tại địa chỉ đó |
+
+Ứng dụng gốc là client công khai, và chúng phải dùng PKCE.
+
+### 2.3 Ứng dụng chạy trên trình duyệt
+
+Một ứng dụng một trang (single-page application) có mã chạy trong trình duyệt có ba lựa chọn kiến trúc, được mô tả trong bản hướng dẫn đang được IETF soạn thảo cho các ứng dụng chạy trên trình duyệt:
+
+1. **Back end for front end (BFF).** Một thành phần phía máy chủ đóng vai client OAuth (bảo mật), giữ các token, và chỉ trao cho trình duyệt một cookie phiên `HttpOnly`; các lời gọi API của trình duyệt đi qua BFF. Token không bao giờ bị lộ cho JavaScript.
+2. **Back-end trung gian token** (token-mediating back end). Một thành phần phía máy chủ thực hiện việc đổi mã với tư cách client bảo mật nhưng chuyển access token cho trình duyệt, còn refresh token thì tự giữ. Access token bị lộ cho JavaScript; refresh token thì không.
+3. **Client công khai chạy trên trình duyệt.** Bản thân ứng dụng JavaScript là một client OAuth công khai dùng luồng mã ủy quyền với PKCE, giữ toàn bộ token trong trình duyệt.
+
+Các lựa chọn này đánh đổi sự tiện lợi với mức độ phơi nhiễm trước tấn công chèn mã độc liên trang (cross-site scripting, XSS). Mục 8 của bài thứ nhất và Mục 6 của bài thứ ba mô tả rủi ro này; BFF là lựa chọn phòng thủ tốt nhất trong ba.
+
+## 3. Luồng mã ủy quyền với PKCE
+
+### 3.1 Kênh trước và kênh sau
+
+Luồng mã ủy quyền chia giao thức thành hai kênh. **Kênh trước** (front channel) là trình duyệt của người dùng, mang các lần chuyển hướng giữa client và máy chủ phân quyền; đây là nơi người dùng xác thực và đồng ý, và nó bị phơi bày trước lịch sử trình duyệt, các tiện ích mở rộng và, trên một số nền tảng, các ứng dụng khác. **Kênh sau** (back channel) là một yêu cầu HTTPS trực tiếp từ client đến điểm cuối token; nó mang các token. Mã ủy quyền là cầu nối: một giá trị ngắn hạn, chỉ dùng được một lần, an toàn khi gửi qua kênh trước vì tự nó không đủ để nhận token.
+
+### 3.2 Chi tiết về PKCE
+
+Proof Key for Code Exchange (khóa chứng minh cho việc đổi mã, RFC 7636) ràng buộc mã với đúng thực thể client đã yêu cầu nó. Trước mỗi yêu cầu ủy quyền, client sinh một **code verifier** ngẫu nhiên mới dài 43 đến 128 ký tự và tính **code challenge**:
+
+```text
+code_verifier  = random string, 43–128 characters from [A-Z a-z 0-9 - . _ ~]
+code_challenge = BASE64URL( SHA-256( code_verifier ) )
+```
+
+Code challenge, cùng với `code_challenge_method=S256`, được đưa vào yêu cầu ủy quyền; code verifier ở lại với client. Khi đổi mã, client gửi code verifier, và máy chủ kiểm tra rằng giá trị băm của nó bằng code challenge đã ghi lại cho mã đó. Kẻ tấn công chặn được mã từ lần chuyển hướng (qua một ứng dụng độc hại đăng ký cùng lược đồ URI, một tệp nhật ký bị rò rỉ hoặc một tiện ích mở rộng của trình duyệt) không biết code verifier và không thể đổi mã. Phương thức `plain`, vốn gửi chính code verifier làm code challenge, không mang lại sự bảo vệ đó trước kẻ tấn công nhìn thấy yêu cầu ủy quyền và không nên được dùng.
+
+PKCE được đưa ra cho client công khai, nhưng nó cũng bảo vệ client bảo mật trước *tấn công chèn mã* (code injection), trong đó kẻ tấn công chèn một mã bị đánh cắp vào phiên của nạn nhân với client hợp lệ. Vì vậy, OAuth 2.0 Security Best Current Practice (thực tiễn tốt nhất hiện hành về bảo mật, RFC 9700) bắt buộc PKCE với client công khai và khuyến nghị nó cho mọi client.
+
+### 3.3 Các thông điệp
+
+Yêu cầu ủy quyền là một lần chuyển hướng trên trình duyệt (như mọi thông điệp HTTP trong loạt bài này, được trình bày theo cú pháp HTTP/1.1):
+
+```http
+GET /authorize?response_type=code
+    &client_id=photo-printer
+    &redirect_uri=https%3A%2F%2Fprint.example%2Fcallback
+    &scope=photos.read
+    &state=af0ifjsldkj
+    &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+    &code_challenge_method=S256 HTTP/1.1
+Host: id.example.com
+```
+
+Các dấu xuống dòng chỉ để dễ đọc; yêu cầu là một URL duy nhất. Giá trị tham số được mã hóa phần trăm (percent-encoded) để những ký tự có ý nghĩa đặc biệt trong URL được giữ nguyên: `https://` xuất hiện dưới dạng `https%3A%2F%2F`. Sau khi người dùng xác thực và đồng ý, máy chủ phân quyền chuyển hướng trở lại:
+
+```http
+HTTP/1.1 302 Found
+Location: https://print.example/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=af0ifjsldkj&iss=https%3A%2F%2Fid.example.com
+```
+
+Client kiểm tra rằng `state` khớp với giá trị nó đã lưu cho trình duyệt này, và rằng `iss` (RFC 9207) chỉ đúng máy chủ phân quyền mà nó đã gửi người dùng tới; điều này phòng chống *tấn công nhầm lẫn* (mix-up attack) khi một client làm việc với nhiều máy chủ phân quyền. Sau đó nó đổi mã trên kênh sau:
+
+```http
+POST /token HTTP/1.1
+Host: id.example.com
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic cGhvdG8tcHJpbnRlcjpleGFtcGxlLXNlY3JldA==
+
+grant_type=authorization_code
+&code=SplxlOBeZQQYbYS6WxSbIA
+&redirect_uri=https%3A%2F%2Fprint.example%2Fcallback
+&code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+```
+
+Trường tiêu đề `Authorization` dùng để xác thực một client bảo mật; client công khai bỏ trường này và chỉ gửi `client_id` của mình. Phản hồi mang các token:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "refresh_token": "8xLOxBtZp8",
+  "scope": "photos.read"
+}
+```
+
+Mọi giá trị ở đây chỉ mang tính minh họa. `Cache-Control: no-store` ngăn các thành phần trung gian lưu đệm token.
+
+### 3.4 Đăng nhập người dùng: ID token
+
+Khi client đưa phạm vi (scope) `openid` (và một `nonce` mới) vào yêu cầu ủy quyền, phản hồi token còn chứa một ID token (Mục 5.5 của bài thứ nhất). Trước khi coi người dùng là đã đăng nhập, client xác minh ID token theo yêu cầu của OpenID Connect Core:
+
+1. Xác minh chữ ký bằng một khóa trong tập khóa mà nhà cung cấp công bố, dùng thuật toán đã đăng ký cho client.
+2. Kiểm tra rằng `iss` bằng chính xác định danh bên phát hành (issuer identifier) của nhà cung cấp.
+3. Kiểm tra rằng `aud` chứa `client_id` của chính client; nếu nó liệt kê cả những đối tượng nhận khác, kiểm tra rằng `azp` là `client_id` của client.
+4. Kiểm tra rằng `exp` nằm ở tương lai và `iat` là gần đây.
+5. Kiểm tra rằng `nonce` bằng giá trị mà client đã gửi trong yêu cầu ủy quyền cho lần đăng nhập này.
+
+Chỉ khi đó client mới định danh người dùng, bằng cặp `iss` và `sub`. Những khẳng định (claim) như địa chỉ email là dữ liệu hồ sơ, không phải định danh ổn định: một địa chỉ có thể được cấp lại cho người khác, và hai nhà cung cấp có thể cùng khẳng định một địa chỉ.
+
+### 3.5 Gia cố kênh trước
+
+Hai chuẩn khác chuyển các tham số ra khỏi URL trên trình duyệt, nơi chúng có thể bị đọc hoặc sửa đổi:
+
+- **Pushed Authorization Requests** (PAR, yêu cầu ủy quyền đẩy trước, RFC 9126): client trước hết gửi trực tiếp các tham số ủy quyền đến máy chủ qua kênh sau, có xác thực chính mình, và nhận về một `request_uri` ngắn hạn; lần chuyển hướng trên trình duyệt sau đó chỉ mang `client_id` và `request_uri`.
+- **JWT-Secured Authorization Requests** (JAR, yêu cầu ủy quyền được bảo vệ bằng JWT, RFC 9101): các tham số được gửi dưới dạng một JWT có chữ ký, để máy chủ phân quyền có thể xác minh rằng chúng đến từ client mà không bị sửa đổi.
+
+Các hồ sơ (profile) đòi hỏi mức bảo đảm cao, chẳng hạn những hồ sơ dùng trong ngân hàng mở (open banking), thường yêu cầu một hoặc cả hai.
+
+## 4. Các luồng cấp quyền không cần trình duyệt trên client
+
+### 4.1 Client credentials: không có người dùng
+
+Khi một dịch vụ hành động nhân danh chính nó (một tác vụ chạy hằng đêm, một dịch vụ back-end gọi dịch vụ khác), không có người dùng nào để ủy nhiệm. Luồng **client credentials** cho phép một client bảo mật nhận token cho chính nó:
+
+```http
+POST /token HTTP/1.1
+Host: id.example.com
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials
+&scope=invoices.export
+&client_assertion_type=urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer
+&client_assertion=eyJhbGciOiJFUzI1NiJ9...
+```
+
+Ở đây client xác thực bằng `private_key_jwt`. Chủ thể của token là chính client, và quyền của nó phải là quyền của tác vụ, không phải quyền của bất kỳ người dùng nào. Không cần refresh token (RFC 6749 nói rằng không nên cấp), vì client chỉ việc lặp lại yêu cầu. Luồng này chỉ dành cho client bảo mật; client công khai không có thông tin xác thực nào để tự định danh.
+
+### 4.2 Ủy quyền thiết bị: thiết bị không có trình duyệt dùng được
+
+Một chiếc tivi, một công cụ dòng lệnh trên máy chủ từ xa hay một máy in có thể kết nối mạng nhưng không hiển thị được trình duyệt hoặc không tiện cho việc gõ mật khẩu. **Luồng ủy quyền thiết bị** (device authorization grant, RFC 8628) cho phép người dùng hoàn tất việc ủy quyền trên một thiết bị thứ hai, chẳng hạn điện thoại:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Thiết bị (client)
+    participant AS as Máy chủ phân quyền
+    actor U as Người dùng trên điện thoại
+
+    D->>AS: Yêu cầu mã thiết bị (client_id, scope)
+    AS-->>D: device_code, user_code, verification_uri, interval
+    D->>D: Hiển thị "Truy cập verification_uri và nhập user_code"
+    loop Mỗi interval giây
+        D->>AS: Thăm dò điểm cuối token với device_code
+        AS-->>D: authorization_pending
+    end
+    U->>AS: Mở verification_uri, đăng nhập, nhập user_code, phê duyệt
+    D->>AS: Thăm dò với device_code
+    AS-->>D: Access token (+ refresh token)
+```
+
+Thiết bị thăm dò (poll) không thường xuyên hơn khoảng `interval` mà máy chủ quy định, và tăng khoảng này thêm năm giây nếu nhận được `slow_down`; các lỗi kết thúc là `access_denied` và `expired_token`. `user_code` ngắn để người dùng gõ được, và điều đó khiến nó đoán được; trang xác minh phải giới hạn tần suất thử.
+
+Luồng này có một điểm yếu đặc trưng: người dùng phê duyệt một mã mà không thể kiểm chứng thiết bị nào đã hiển thị nó. Kẻ tấn công có thể khởi động một luồng thiết bị, gửi mã cho nạn nhân kèm một thông điệp nghe có vẻ hợp lý ("hãy nhập mã này để xác nhận tài khoản của bạn"), và nhận token khi nạn nhân phê duyệt. Máy chủ phân quyền giảm thiểu rủi ro này bằng cách hiển thị nổi bật tên client và các phạm vi được yêu cầu trên trang phê duyệt, cảnh báo người dùng, giữ cho mã có thời hạn ngắn, và chỉ cho phép luồng này với những client thực sự cần nó.
+
+## 5. Các luồng cấp quyền dựa trên một token sẵn có
+
+### 5.1 Làm mới
+
+Luồng **refresh token**, đã mô tả trong bài thứ nhất, gia hạn quyền truy cập mà không cần người dùng tham gia. Client có thể yêu cầu một phạm vi **hẹp hơn** lần cấp quyền ban đầu, nhưng không bao giờ được rộng hơn. RFC 9700 yêu cầu refresh token cấp cho client công khai phải hoặc là token ràng buộc bên gửi (sender-constrained token), hoặc được xoay vòng sau mỗi lần dùng, vì client công khai không thể xác thực khi xuất trình chúng.
+
+### 5.2 Trao đổi token: gọi tiếp sang dịch vụ khác
+
+Một máy chủ tài nguyên thường cần gọi một dịch vụ khác để hoàn tất một yêu cầu. Chuyển tiếp access token mà nó nhận được là một cách làm kém: đối tượng nhận (audience) của token đó là dịch vụ thứ nhất, và một dịch vụ thứ hai chấp nhận nó thì cũng sẽ chấp nhận token dành cho bất kỳ ai khác. **Trao đổi token** (token exchange, RFC 8693) cho phép dịch vụ thứ nhất yêu cầu máy chủ phân quyền cấp một token mới phù hợp cho chặng kế tiếp:
+
+```http
+POST /token HTTP/1.1
+Host: id.example.com
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange
+&subject_token=eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
+&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token
+&audience=https%3A%2F%2Finventory.example.com
+&scope=inventory.read
+```
+
+Dịch vụ thực hiện trao đổi xác thực với tư cách một client theo cách thông thường. Máy chủ có thể cấp một token đại diện cho người dùng (*mạo danh*, impersonation) hoặc một token ghi nhận cả người dùng lẫn dịch vụ đang hành động, dùng claim `act` (*ủy nhiệm*, delegation). Ủy nhiệm giữ cho dấu vết kiểm toán trung thực: dịch vụ kho hàng thấy được rằng dịch vụ đơn hàng đã hành động thay mặt alice, thay vì thấy như thể alice gọi trực tiếp đến nó. Bài cuối cùng của loạt bài này sẽ quay lại vấn đề truyền danh tính qua các dịch vụ.
+
+### 5.3 Assertion từ một bên phát hành khác
+
+Luồng **JWT bearer** (RFC 7523) cho phép client đổi một assertion có chữ ký, do một bên mà máy chủ phân quyền tin cậy phát hành (chẳng hạn nhà cung cấp danh tính của doanh nghiệp), lấy một access token. Nó được dùng để bắc cầu giữa các miền tin cậy, ví dụ khi các *workload* trong một môi trường nhận token từ một máy chủ phân quyền ở môi trường khác.
+
+### 5.4 Yêu cầu đúng đối tượng nhận
+
+Một client gọi đến nhiều máy chủ tài nguyên nên nhận một access token riêng cho mỗi máy chủ, mỗi token chỉ giới hạn cho một đối tượng nhận. Tham số `resource` (Resource Indicators, RFC 8707) chỉ định máy chủ tài nguyên dự kiến trong yêu cầu ủy quyền và yêu cầu token, để máy chủ có thể đặt `aud` chính xác và chọn phạm vi cũng như định dạng token phù hợp. Giới hạn đối tượng nhận làm giảm thiệt hại khi bất kỳ một máy chủ tài nguyên nào làm rò rỉ hoặc xử lý sai một token.
+
+## 6. Các luồng cấp quyền đã bị loại bỏ
+
+Hai luồng cấp quyền trong đặc tả ban đầu hiện được khuyến cáo không nên dùng.
+
+- Luồng **implicit** trả access token trực tiếp trong phần fragment của URL chuyển hướng, nhằm phục vụ các ứng dụng trình duyệt vào thời điểm chưa thể gửi yêu cầu khác nguồn gốc (cross-origin) đến điểm cuối token. Khi đó token bị phơi bày trước lịch sử trình duyệt, sự rò rỉ qua referrer và mọi đoạn script trên trang, và nó không thể được ràng buộc bên gửi hay gắn với client. RFC 9700 nói rằng không nên dùng luồng này; luồng mã ủy quyền với PKCE thay thế nó.
+- Luồng **resource owner password credentials** (thông tin đăng nhập của chủ sở hữu tài nguyên) để client thu thập tên đăng nhập và mật khẩu của người dùng rồi gửi chúng đến điểm cuối token. Nó trao cho client chính thông tin xác thực mà OAuth tồn tại để bảo vệ, tập cho người dùng thói quen gõ mật khẩu vào ứng dụng bên thứ ba, và không thể đáp ứng xác thực đa yếu tố (multi-factor authentication, MFA) hay xác thực chống phishing. RFC 9700 nói rằng không được dùng luồng này.
+
+Nỗ lực OAuth 2.1 tại IETF hợp nhất đặc tả cơ sở với các thực tiễn tốt nhất này: luồng mã ủy quyền bắt buộc PKCE, URI chuyển hướng phải được so sánh chính xác, và hai luồng bị loại bỏ được lược đi.
+
+## 7. Chọn luồng cấp quyền
+
+```mermaid
+flowchart TB
+    Q1{"Có người dùng tham gia không?"}
+    Q1 -->|"Không"| CC["Client credentials<br/>(chỉ client bảo mật)"]
+    Q1 -->|"Có"| Q2{"Người dùng có dùng được trình duyệt<br/>trên thiết bị chạy client không?"}
+    Q2 -->|"Không"| DEV["Luồng ủy quyền thiết bị"]
+    Q2 -->|"Có"| Q3{"Client có giữ được bí mật không?"}
+    Q3 -->|"Có"| ACC["Mã ủy quyền + PKCE<br/>có xác thực client"]
+    Q3 -->|"Không"| ACP["Mã ủy quyền + PKCE<br/>client công khai"]
+```
+
+Lưu đồ trên bao quát việc nhận token đầu tiên. Sau đó, luồng làm mới gia hạn token, trao đổi token tạo ra các token cho những lời gọi tiếp theo, và chỉ báo tài nguyên (resource indicator) giữ cho mỗi token nhắm vào một đối tượng nhận duy nhất.
+
+| Tình huống | Loại client | Luồng cấp quyền | Ghi chú |
+|---|---|---|---|
+| Ứng dụng web kết xuất phía máy chủ | Bảo mật | Mã ủy quyền + PKCE | Xác thực bằng `private_key_jwt` hoặc TLS hai chiều (mutual TLS) khi có thể |
+| Ứng dụng một trang | Bảo mật (BFF) hoặc công khai | Mã ủy quyền + PKCE | Ưu tiên BFF; nếu không, giữ token ngoài bộ lưu trữ bền vững |
+| Ứng dụng di động hoặc máy tính | Công khai | Mã ủy quyền + PKCE | Trình duyệt hệ thống; chuyển hướng HTTPS được xác nhận quyền khi có |
+| Tivi, CLI trên máy chủ từ xa | Công khai | Ủy quyền thiết bị | Hiển thị tên client và phạm vi khi phê duyệt; mã có thời hạn ngắn |
+| Tác vụ hoặc dịch vụ back-end hành động nhân danh chính nó | Bảo mật | Client credentials | Quyền của tác vụ, không phải của bất kỳ người dùng nào |
+| Dịch vụ gọi tiếp thay mặt người dùng | Bảo mật | Trao đổi token | Token mới cho mỗi đối tượng nhận; ghi nhận bên hành động |
+
+## 8. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| Luồng cấp quyền là gì? | Giao thức mà qua đó client nhận được access token từ máy chủ phân quyền. |
+| Điều gì phân biệt client bảo mật và client công khai? | Việc triển khai có giữ được một thông tin xác thực bí mật trước người dùng và trước bất kỳ ai có bản sao mã của nó hay không. |
+| Client bảo mật nên xác thực như thế nào? | Tốt nhất là bằng khóa riêng (`private_key_jwt`) hoặc chứng chỉ thay vì bí mật dùng chung. |
+| Vì sao ứng dụng gốc phải dùng trình duyệt hệ thống? | Một web view nhúng sẽ làm lộ thông tin xác thực của người dùng với nhà cung cấp danh tính cho ứng dụng. |
+| PKCE ngăn chặn điều gì? | Việc một mã ủy quyền bị chặn bắt hoặc bị chèn được đổi bởi bất kỳ ai khác ngoài thực thể client đã yêu cầu nó. |
+| Client đăng nhập người dùng bằng OpenID Connect như thế nào? | Bằng cách xác minh ID token (chữ ký, `iss`, `aud`, `exp`, `nonce`) và định danh người dùng bằng `iss` và `sub`. |
+| Khi nào luồng thiết bị phù hợp, và rủi ro của nó là gì? | Khi client không thể cung cấp một trình duyệt dùng được; người dùng có thể bị lừa phê duyệt mã của kẻ tấn công. |
+| Một dịch vụ nên gọi tiếp thay mặt người dùng như thế nào? | Bằng cách đổi token lấy một token mới nhắm vào dịch vụ kế tiếp, không phải chuyển tiếp token cũ. |
+| Những luồng cấp quyền nào đã bị loại bỏ? | Implicit và resource owner password credentials. |
+
+Bài tiếp theo giải quyết điểm yếu chung của mọi token trong bài này: chúng đều là bearer token. Bài đó cho thấy DPoP và TLS hai chiều ràng buộc một token với một khóa mà client nắm giữ như thế nào, để một token bị đánh cắp không thể bị phát lại.
+
+### Các đặc tả
+
+- Cốt lõi: RFC 6749 (OAuth 2.0), RFC 6750 (bearer token), RFC 7636 (PKCE), RFC 9700 (thực tiễn tốt nhất hiện hành về bảo mật), RFC 9207 (định danh bên phát hành).
+- Client: RFC 7591 (đăng ký client động), RFC 7523 (xác thực client bằng JWT và luồng JWT bearer), RFC 8705 (TLS hai chiều), RFC 8252 (ứng dụng gốc).
+- Các luồng cấp quyền và tham số khác: RFC 8628 (ủy quyền thiết bị), RFC 8693 (trao đổi token), RFC 8707 (chỉ báo tài nguyên), RFC 9126 (yêu cầu ủy quyền đẩy trước), RFC 9101 (yêu cầu ủy quyền được bảo vệ bằng JWT).
+- OpenID Connect: OpenID Connect Core 1.0 (xác minh ID token), do OpenID Foundation công bố.
+- Đang được IETF soạn thảo: OAuth 2.1, và OAuth 2.0 for Browser-Based Applications.

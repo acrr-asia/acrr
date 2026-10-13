@@ -1,0 +1,569 @@
+---
+title: "Xác thực và phân quyền: từ nguyên lý cơ bản đến token"
+description: "Trình bày từ trên xuống về kiểm soát truy cập trong các hệ thống mạng: bộ giám sát tham chiếu, xác thực và phiên, các mô hình phân quyền, ủy nhiệm với OAuth 2.0 và OpenID Connect, cùng việc thiết kế, xác minh và vòng đời của access token."
+publishedAt: "2026-10-12"
+updatedAt: "2026-10-13"
+category: "Computing Systems"
+tags:
+  - authentication
+  - authorization
+  - HTTP
+  - JWT
+  - OAuth 2.0
+  - OpenID Connect
+series: identity-and-access-control
+seriesOrder: 1
+draft: false
+---
+
+Mọi yêu cầu gửi đến một hệ thống mạng đều đề nghị hệ thống làm một việc gì đó: trả về một bản ghi, thay đổi một số dư, khởi động một cỗ máy. Trước khi hành động, hệ thống phải trả lời hai câu hỏi về yêu cầu ấy. *Ai đang yêu cầu?* Và *bên đó có được phép làm việc này không?* **Xác thực** (authentication) trả lời câu hỏi thứ nhất; **phân quyền** (authorization) trả lời câu hỏi thứ hai.
+
+Mật khẩu, phiên (session), cookie, OAuth 2.0, OpenID Connect và JSON Web Token có thể trông như một mớ công nghệ rời rạc. Chúng dễ hiểu hơn nhiều khi được xem là những câu trả lời cho hai câu hỏi trên, hoặc là những cách mang một câu trả lời từ nơi nó được xác lập đến nơi cần dùng đến nó. Vì vậy, bài này đi từ cái chung đến cái riêng. Bài bắt đầu bằng mô hình trừu tượng mà mọi cơ chế kiểm soát truy cập (access control) đều hiện thực, xét riêng xác thực và phân quyền, giải thích vì sao các hệ thống phân tán tách bên xác thực người dùng khỏi các bên nắm giữ tài nguyên, và chỉ sau đó mới chuyển sang token: token chứa gì, được xác minh như thế nào, hết hạn và bị thu hồi ra sao. Mỗi giao thức xuất hiện đúng vào lúc bài toán mà nó giải quyết đã được phát biểu.
+
+Phần lớn các cơ chế này là chuẩn Internet, do Lực lượng Đặc nhiệm Kỹ thuật Internet (Internet Engineering Task Force, IETF) công bố dưới dạng các tài liệu *Requests for Comments* (RFC) được đánh số; hành vi của trình duyệt do World Wide Web Consortium (W3C) và WHATWG chuẩn hóa. Mỗi chuẩn được dẫn theo số hiệu tại chỗ nó lần đầu trở nên quan trọng.
+
+## 1. Mô hình kiểm soát truy cập
+
+### 1.1 Chủ thể, đối tượng và bộ giám sát tham chiếu
+
+Bỏ qua các giao thức, mọi quyết định kiểm soát truy cập đều có cùng một dạng. Một **chủ thể** (subject), tức một người hoặc một chương trình hành động thay cho người đó, yêu cầu thực hiện một **hành động** (action: đọc, ghi, xóa, thực thi) trên một **đối tượng** (object: một tệp, một hàng trong cơ sở dữ liệu, một tài nguyên API). Một hàm quyết định, nhận vào chủ thể, hành động, đối tượng và có thể thêm một số ngữ cảnh như thời gian hay vị trí mạng, trả về *cho phép* (permit) hoặc *từ chối* (deny).
+
+Thành phần chặn các yêu cầu và áp dụng hàm đó được gọi là **bộ giám sát tham chiếu** (reference monitor), một thuật ngữ được đưa ra trong báo cáo Anderson năm 1972 cho Không quân Hoa Kỳ. Một bộ giám sát tham chiếu chỉ hữu ích khi thỏa mãn ba điều kiện:
+
+1. Nó **luôn được gọi đến**: không có đường nào đến đối tượng mà bỏ qua được nó.
+2. Nó **không thể bị can thiệp**: chủ thể không thể sửa đổi bộ giám sát hay chính sách của nó.
+3. Nó **đủ nhỏ để kiểm chứng**: tính đúng đắn của nó có thể được phân tích và kiểm thử.
+
+Bài báo năm 1975 của Saltzer và Schroeder, *The Protection of Information in Computer Systems*, phát biểu lại điều kiện thứ nhất thành nguyên tắc **kiểm soát toàn diện** (complete mediation: mọi truy cập đến mọi đối tượng đều phải được kiểm tra) và bổ sung những nguyên tắc khác sẽ trở lại nhiều lần trong bài này: **đặc quyền tối thiểu** (least privilege: chỉ cấp những gì một tác vụ cần), **mặc định an toàn** (fail-safe defaults: từ chối trừ khi truy cập được cho phép một cách tường minh) và **tách biệt đặc quyền** (separation of privilege). Một API web kiểm tra quyền trong hầu hết các hàm xử lý nhưng quên mất một hàm là đã vi phạm nguyên tắc kiểm soát toàn diện; một token cấp mọi quyền mà người dùng có trong khi client chỉ cần một quyền là đã vi phạm nguyên tắc đặc quyền tối thiểu.
+
+### 1.2 Bốn câu hỏi riêng biệt
+
+Trong thực tế, hàm quyết định duy nhất ấy được chia thành nhiều giai đoạn, mỗi giai đoạn trả lời một câu hỏi riêng:
+
+| Giai đoạn | Câu hỏi | Bằng chứng điển hình |
+|---|---|---|
+| Định danh (identification) | Bên yêu cầu *tự nhận* là ai? | Một tên người dùng, một địa chỉ email, một định danh client |
+| Xác thực (authentication) | Bên yêu cầu có *chứng minh* được điều mình tự nhận không? | Một mật khẩu, một chữ ký tạo bằng khóa riêng, một mã dùng một lần |
+| Phân quyền (authorization) | Chủ thể này có được phép thực hiện hành động này trên đối tượng này không? | Vai trò, thuộc tính, quyền sở hữu, chính sách |
+| Truy trách nhiệm (kiểm toán, audit) | Điều gì đã xảy ra, và ai đã làm? | Nhật ký kiểm toán (audit log) ghi lại chủ thể đã được xác thực và quyết định đã đưa ra |
+
+Nhập nhằng giữa các giai đoạn này gây ra những lỗi thực sự. Một hệ thống coi "yêu cầu mang một token hợp lệ" là "yêu cầu được phép" đã gộp xác thực vào phân quyền. Một hệ thống chỉ ghi lại địa chỉ IP thì không thể quy một hành động về một chủ thể đã được xác thực.
+
+```mermaid
+flowchart TB
+    R["Yêu cầu"] --> AN["Xác thực<br/>Ai đang yêu cầu?"]
+    AN -->|"chứng minh thất bại"| E401["Từ chối: chưa xác thực"]
+    AN -->|"đã xác lập chủ thể"| AZ["Phân quyền<br/>Chủ thể này có được làm việc này không?"]
+    AZ -->|"chính sách từ chối"| E403["Từ chối: bị cấm"]
+    AZ -->|"chính sách cho phép"| OP["Thực hiện thao tác"]
+    AN -.-> LOG[("Nhật ký kiểm toán")]
+    AZ -.-> LOG
+```
+
+### 1.3 Thuật ngữ
+
+Phần còn lại của bài dùng các thuật ngữ sau với nghĩa chính xác như dưới đây.
+
+| Thuật ngữ | Ý nghĩa | Ví dụ cụ thể |
+|---|---|---|
+| *Principal* | Một thực thể có thể được xác thực: một người, một thiết bị hoặc một phần mềm | Một nhân viên; một tác vụ tính cước chạy theo lịch |
+| Định danh (identifier) | Một giá trị dùng để gọi tên một *principal* trong một hệ thống nào đó | Chuỗi `user-48213`; một địa chỉ email |
+| Thông tin xác thực (credential) / phương tiện xác thực (authenticator) | Thứ mà *principal* nắm giữ và dùng để chứng minh mình kiểm soát một định danh | Một mật khẩu; một khóa riêng lưu trong khóa bảo mật phần cứng |
+| Claim | Một khẳng định (claim) về một *principal* do một bên nào đó đưa ra | "Địa chỉ email của chủ thể này đã được xác minh" |
+| Client | Phần mềm gửi yêu cầu, thay mặt một người dùng hoặc thay mặt chính nó | Mã chạy trong một tab trình duyệt; một ứng dụng cài trên điện thoại; một công cụ dòng lệnh; một tác vụ xử lý theo lô chạy hằng đêm |
+| Tài nguyên (resource) | Đối tượng mà một yêu cầu tác động lên, thường được gọi tên bằng một đường dẫn URL | Đơn hàng có địa chỉ `/orders/123` |
+| Máy chủ tài nguyên (resource server) | Dịch vụ nắm giữ tài nguyên và thực thi việc kiểm soát truy cập đến chúng | Một API HTTP phục vụ đơn hàng |
+| Nhà cung cấp danh tính (identity provider, IdP) | Một dịch vụ xác thực các *principal* và đưa ra các khẳng định về họ | Dịch vụ đăng nhập một lần của một công ty |
+| Máy chủ phân quyền (authorization server) | Trong OAuth 2.0, dịch vụ cấp access token cho client | Thường chính là dịch vụ nhà cung cấp danh tính |
+| Bên tin cậy (relying party) | Bất kỳ dịch vụ nào dựa vào kết quả xác thực của một bên khác | Một ứng dụng chấp nhận đăng nhập qua IdP của công ty |
+
+Một hệ thống triển khai có thể đóng nhiều vai trò cùng lúc. Một ứng dụng nhỏ có thể tự xác thực người dùng của mình, tự cấp token và tự phục vụ tài nguyên; một tổ chức lớn thường tách các vai trò đó thành những dịch vụ khác nhau. Điều quan trọng là các vai trò, không phải số tiến trình.
+
+## 2. Xác thực
+
+### 2.1 Xác thực chứng minh điều gì
+
+Xác thực là một giao thức giữa một **bên yêu cầu xác thực** (claimant), bên khẳng định một danh tính, và một **bên xác minh** (verifier), bên kiểm tra khẳng định đó. Bên yêu cầu xác thực thành công bằng cách chứng tỏ mình kiểm soát một phương tiện xác thực đã được gắn với danh tính đó từ trước. Theo truyền thống, phương tiện xác thực được chia thành ba yếu tố:
+
+- **Thứ bạn biết**: một mật khẩu hoặc mã PIN.
+- **Thứ bạn có**: một điện thoại chạy ứng dụng xác thực, một khóa bảo mật phần cứng, một thẻ thông minh.
+- **Thứ bạn là**: vân tay hoặc khuôn mặt, hầu như luôn được dùng để mở khóa một phương tiện xác thực cục bộ chứ không được gửi lên máy chủ.
+
+**Xác thực đa yếu tố** (multi-factor authentication, MFA) đòi hỏi phương tiện xác thực thuộc ít nhất hai yếu tố *khác nhau*. Hai mật khẩu không phải là đa yếu tố; một mật khẩu cộng với một mã sinh ra trên một thiết bị riêng thì là đa yếu tố.
+
+Các yếu tố không mạnh như nhau. Một mật khẩu hay một mã dùng một lần có thể bị gõ vào một trang giả mạo trông rất thật, trang này sau đó chuyển tiếp nó đến trang thật: người dùng đã xác thực hộ kẻ tấn công. Một phương tiện xác thực dựa trên mật mã khóa công khai và được gắn với *origin* của trang web, tức scheme, host và cổng của nó (cơ chế đứng sau WebAuthn và passkey), sẽ ký một thử thách (challenge) có chứa origin, nên một chữ ký tạo ra cho một tên miền nhái là vô dụng trên tên miền thật. Tính chất này, **khả năng chống phishing** (phishing resistance; phishing là lừa đảo giả mạo), là lý do chính khiến những phương tiện xác thực như vậy được ưu tiên ở nơi mức rủi ro đòi hỏi.
+
+### 2.2 Người dùng và *workload*
+
+Không phải *principal* nào cũng là con người. Một dịch vụ nền gọi đến một dịch vụ khác cũng cần một danh tính và một cách để chứng minh danh tính đó, nhưng nó không thể gõ mật khẩu hay chạm vào khóa bảo mật. Các *workload* (phần mềm hoạt động thay mặt chính nó) thường xác thực bằng:
+
+- một **bí mật dùng chung** (shared secret: client secret hoặc khóa API) được xuất trình trong mỗi yêu cầu hoặc để lấy token;
+- một **khẳng định có chữ ký** (signed assertion): một khẳng định ngắn được ký bằng khóa riêng của *workload*, bên xác minh kiểm tra nó bằng khóa công khai đã đăng ký;
+- **TLS hai chiều** (mutual TLS), trong đó *workload* cũng xuất trình một chứng chỉ X.509 trong quá trình bắt tay TLS (TLS và chứng chỉ được giới thiệu ở Mục 3.1).
+
+Bí mật dùng chung là cách đơn giản nhất và cũng yếu nhất: ai sao chép được bí mật thì trở thành *workload* đó. Các phương pháp dựa trên khóa không bao giờ gửi khóa riêng đi, nên chặn bắt được một yêu cầu cũng không làm lộ khóa.
+
+### 2.3 Xác thực là một sự kiện; yêu cầu thì có rất nhiều
+
+Xác thực xảy ra một lần, lúc đăng nhập. Sau đó người dùng gửi hàng trăm yêu cầu. Đòi mật khẩu và yếu tố thứ hai cho từng yêu cầu là không khả thi, nên kết quả của việc xác thực phải được **mang tiếp**: hệ thống cấp một thứ gì đó mà các yêu cầu sau có thể xuất trình thay cho thông tin xác thực ban đầu. Chọn thứ đó là gì, nó nằm ở đâu và có thể bị rút lại như thế nào là chủ đề của mục tiếp theo, và của phần lớn bài này.
+
+## 3. Mang kết quả xác thực qua nhiều yêu cầu
+
+### 3.1 HTTP, giao thức nằm bên dưới
+
+Hầu như mọi trao đổi trong loạt bài này đều đi qua **HTTP**, Giao thức Truyền tải Siêu văn bản (Hypertext Transfer Protocol). HTTP là một giao thức yêu cầu – phản hồi ở tầng ứng dụng: một **client** (trình duyệt, ứng dụng, một dịch vụ khác) gửi một **yêu cầu** (request) đến một **máy chủ** (server), và máy chủ trả về một **phản hồi** (response). Một yêu cầu nêu một **phương thức** (method), cho biết phải làm gì (`GET` để đọc, `POST` để gửi dữ liệu, `DELETE` để xóa, cùng một số phương thức khác); một **đích** (target), cho biết làm việc đó với cái gì (chẳng hạn `/orders/123`); các **trường tiêu đề** (header field), mang siêu dữ liệu như `Host`, `Accept` hay `Authorization`; và một **thân** (body) tùy chọn. Một phản hồi mang một **mã trạng thái** (status code) ba chữ số (`200` khi thành công, hoặc `401` và `403` cho các thất bại bàn đến ở Mục 4.4), các trường tiêu đề và thường có một thân. Ý nghĩa của tất cả các phần này được định nghĩa một lần, độc lập với cách chúng được truyền đi, trong *HTTP Semantics* (RFC 9110).
+
+HTTP là giao thức **phi trạng thái** (stateless): mỗi yêu cầu tự đầy đủ, và không có gì trong giao thức nối một yêu cầu với yêu cầu trước nó. Một máy chủ vừa trả lời một yêu cầu của một người dùng, nếu chỉ dựa vào HTTP, không biết rằng yêu cầu tiếp theo đến từ cùng người dùng đó. Một yêu cầu trông như sau:
+
+```http
+GET /orders/123 HTTP/1.1
+Host: api.example.com
+Accept: application/json
+```
+
+Ví dụ này, giống như các thông điệp HTTP khác trong loạt bài, được viết theo định dạng văn bản của HTTP/1.1, định dạng dễ đọc nhất. HTTP/2 và HTTP/3 mang đúng những phương thức, trường tiêu đề, mã trạng thái và thân như vậy trong một cách đóng khung nhị phân (lần lượt trên TCP và trên QUIC), nên không điều gì trong loạt bài phụ thuộc vào phiên bản đang dùng.
+
+Trong thực tế, HTTP chạy bên trong **TLS** (Transport Layer Security, bảo mật tầng giao vận), giao thức mã hóa kết nối và cho phép client xác minh danh tính của máy chủ bằng một **chứng chỉ X.509**: một khẳng định, được ký bởi một tổ chức cấp chứng chỉ (certificate authority) mà client tin cậy, gắn tên của máy chủ với khóa công khai của nó. HTTP trên TLS là **HTTPS**. TLS bảo vệ thông điệp trên đường truyền; nó không nói gì về người dùng là ai, và đó là bài toán mà phần còn lại của mục này giải quyết.
+
+Bất kỳ khái niệm nào kiểu "yêu cầu này đến từ cùng người dùng đã đăng nhập như yêu cầu trước" đều phải được xây dựng bên trên HTTP, bằng cách để client đính kèm một thứ gì đó vào mọi yêu cầu. Có ba chiến lược cơ bản.
+
+### 3.2 Chiến lược thứ nhất: gửi thông tin xác thực mỗi lần
+
+Xác thực HTTP Basic (RFC 7617) đính tên người dùng và mật khẩu, mã hóa base64, vào mọi yêu cầu trong tiêu đề `Authorization`. Base64 là một cách mã hóa biểu diễn (encoding), không phải mã hóa bảo mật (encryption); trên thực tế mật khẩu được gửi dưới dạng văn bản rõ bên trong kết nối TLS. Cách này đơn giản nhưng có ba nhược điểm nghiêm trọng: bí mật dài hạn bị phơi ra trong mọi yêu cầu, nó không thể kết hợp một yếu tố thứ hai mà không phải lặp lại yếu tố đó, và nó không thể diễn tả điều gì hẹp hơn "mọi thứ người dùng này được phép làm". Nó chủ yếu còn tồn tại trong các bối cảnh máy với máy và các công cụ nội bộ.
+
+### 3.3 Chiến lược thứ hai: một tham chiếu đến trạng thái phía máy chủ
+
+Sau khi xác thực, máy chủ tạo một **bản ghi phiên** (session record: chủ thể, thời điểm xác thực, phương thức đã dùng, thời hạn) và lưu lại. Client chỉ nhận được một **định danh phiên** (session identifier) dài, không thể đoán trước, thường nằm trong một cookie (một giá trị nhỏ có tên mà máy chủ yêu cầu trình duyệt lưu lại và gửi trả kèm các yêu cầu sau đến cùng trang web):
+
+```http
+HTTP/1.1 303 See Other
+Location: /dashboard
+Set-Cookie: sid=Q2hvb3NlIGEgcmFuZG9tIHZhbHVl; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+Trình duyệt gửi trả cookie trong các yêu cầu sau đến cùng trang web, và máy chủ tra cứu định danh đó. Định danh là một **tham chiếu** (reference): tự nó không mang ý nghĩa gì, và toàn bộ thông tin nằm trên máy chủ. Việc thu hồi có hiệu lực ngay: xóa bản ghi là yêu cầu tiếp theo sẽ thất bại. Cái giá phải trả là mỗi yêu cầu cần một lần tra cứu trong một kho lưu trữ mà mọi phiên bản (instance) máy chủ đều truy cập được.
+
+Các thuộc tính của cookie là một phần của thiết kế bảo mật. `Secure` giới hạn cookie chỉ dùng qua HTTPS; `HttpOnly` ẩn cookie khỏi các script của trang, nên một lỗi **chèn mã độc liên trang** (cross-site scripting, XSS), trong đó script của kẻ tấn công chạy bên trong các trang của ứng dụng, không thể đọc trực tiếp cookie đó; `SameSite` giới hạn những trường hợp trình duyệt đính cookie vào các yêu cầu do trang web khác khởi tạo, giúp giảm (nhưng tự nó không loại bỏ được) tấn công **giả mạo yêu cầu liên trang** (cross-site request forgery, CSRF), trong đó một trang web khác khiến trình duyệt gửi đi một yêu cầu mang cookie của người dùng. Bài thứ ba trình bày chi tiết cả hai kiểu tấn công này.
+
+### 3.4 Chiến lược thứ ba: một token tự chứa
+
+Một cách khác là bên cấp đưa thông tin phiên *vào trong* chính giá trị mà nó trao đi và ký lên giá trị đó. Một máy chủ tài nguyên tin cậy khóa của bên cấp khi đó có thể xác minh giá trị và đọc các claim mà không cần liên hệ với ai. Đây là một token kiểu **giá trị** (value), và JSON Web Token (Mục 6) là định dạng phổ biến nhất của nó.
+
+```http
+GET /orders/123 HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJzdWIiOi...
+```
+
+Token kiểu giá trị mở rộng quy mô tốt và hoạt động được qua ranh giới giữa các tổ chức, vì việc xác minh chỉ cần một khóa công khai. Điểm yếu của nó là hình ảnh phản chiếu của điểm mạnh ở mô hình tham chiếu: một khi đã được cấp, một token có chữ ký vẫn xác minh được cho đến khi hết hạn, bất kể điều gì xảy ra với tài khoản trong thời gian đó.
+
+### 3.5 Tham chiếu và giá trị
+
+| Tính chất | Tham chiếu (định danh phiên, token mờ) | Giá trị (token có chữ ký) |
+|---|---|---|
+| Trạng thái nằm ở đâu | Kho lưu trữ phía máy chủ | Bên trong token |
+| Bên xác minh cần gì | Truy cập vào kho lưu trữ, hoặc vào điểm cuối kiểm tra trạng thái token (introspection endpoint) của bên cấp | Khóa công khai (hoặc bí mật dùng chung) của bên cấp |
+| Thu hồi | Tức thì: xóa hoặc đánh dấu bản ghi | Không thể trước khi hết hạn nếu không có cơ chế bổ sung |
+| Kích thước khi truyền | Nhỏ | Tăng theo số lượng claim |
+| Thông tin lộ ra cho bên nắm giữ | Không có | Mọi claim, trừ khi token cũng được mã hóa |
+
+Sự phân biệt này liên quan đến việc *trạng thái nằm ở đâu*, không phải *giá trị được truyền đi bằng cách nào*. Một cookie có thể mang một token có chữ ký, và một tiêu đề `Authorization` có thể mang một tham chiếu mờ (opaque). Nhiều hệ thống kết hợp cả hai: trình duyệt giữ một cookie phiên, còn máy chủ phía sau giữ các token có chữ ký, thời hạn ngắn, để gọi đến các dịch vụ khác.
+
+### 3.6 Bearer token và token ràng buộc bên gửi
+
+Phần lớn token trên web là **bearer token** (RFC 6750; *bearer* là "người cầm"): ai xuất trình token thì dùng được nó, không cần chứng minh gì thêm. Một bearer token giống như tiền mặt; nếu nó bị lộ qua một tệp nhật ký, một proxy hay một tiện ích mở rộng trình duyệt bị chiếm quyền, người nhặt được có thể tiêu nó cho đến khi nó hết hạn.
+
+Một **token ràng buộc bên gửi** (sender-constrained token) được gắn với một khóa do client hợp lệ nắm giữ, và mỗi lần sử dụng phải kèm theo bằng chứng sở hữu (proof of possession) khóa đó. Có hai cơ chế chuẩn: gắn với chứng chỉ TLS của client (RFC 8705) và DPoP, trong đó client ký một bằng chứng nhỏ cho mỗi yêu cầu (RFC 9449). Cả hai đều khiến một token bị đánh cắp trở nên vô dụng nếu không có khóa. Các bài sau trong loạt bài trình bày chi tiết hai cơ chế này; trong phần còn lại của bài, "token" có nghĩa là bearer token trừ khi nói khác.
+
+## 4. Phân quyền
+
+### 4.1 Đầu vào của một quyết định
+
+Khi chủ thể của một yêu cầu đã được xác lập, quyết định phân quyền xét đến:
+
+- **chủ thể**: định danh, vai trò, nhóm mà chủ thể là thành viên, tổ chức, mức độ đảm bảo của lần xác thực;
+- **hành động**: đọc, tạo, cập nhật, xóa, hoặc một thao tác nghiệp vụ như "duyệt hoàn tiền";
+- **tài nguyên**: loại, chủ sở hữu, tổ chức, mức phân loại của nó;
+- **ngữ cảnh**: thời gian, vị trí mạng, tình trạng thiết bị, các phạm vi (scope) đã cấp cho client.
+
+### 4.2 Các mô hình
+
+Các mô hình phân quyền khác nhau ở cách chúng biểu diễn mối quan hệ giữa các đầu vào này.
+
+| Mô hình | Chính sách được biểu diễn dưới dạng | Điểm mạnh | Điểm yếu |
+|---|---|---|---|
+| Danh sách kiểm soát truy cập (access control list, ACL) | Theo từng đối tượng: chủ thể nào được thực hiện hành động nào | Đơn giản; dễ trả lời "ai truy cập được đối tượng này?" | Khó trả lời "chủ thể này truy cập được những gì?"; danh sách phình ra theo số người dùng |
+| Năng lực (capability) | Theo từng chủ thể: một tham chiếu không thể giả mạo, cấp những quyền cụ thể trên những đối tượng cụ thể | Ủy nhiệm tự nhiên; không cần tra cứu toàn cục | Khó thu hồi một năng lực đã được chuyển tiếp cho bên khác |
+| Dựa trên vai trò (RBAC) | Chủ thể được gán vai trò; vai trò mang các quyền | Khớp với cơ cấu tổ chức; dễ rà soát | Bùng nổ số vai trò khi quyền phụ thuộc vào nhiều thuộc tính |
+| Dựa trên thuộc tính (ABAC) | Các quy tắc trên thuộc tính của chủ thể, tài nguyên, hành động và ngữ cảnh | Giàu sức biểu đạt; xử lý được các điều kiện như "cùng phòng ban, trong giờ hành chính" | Khó kiểm toán hơn; tương tác giữa các quy tắc có thể gây bất ngờ |
+| Dựa trên quan hệ (ReBAC) | Quyền suy ra từ một đồ thị quan hệ (chủ sở hữu của, thành viên của, thư mục cha của) | Phù hợp với chia sẻ và cấu trúc phân cấp, như trong các hệ thống tài liệu | Cần một kho lưu trữ đồ thị và phải giữ nhất quán cẩn thận |
+
+Các hệ thống thực tế kết hợp chúng. Một cách làm phổ biến dùng vai trò cho các quyền thô ("nhân viên hỗ trợ được xem đơn hàng") và dùng thuộc tính hoặc quan hệ cho phần chi tiết ("chỉ những đơn hàng thuộc tổ chức của chính chủ thể").
+
+### 4.3 Quyết định được đưa ra và thực thi ở đâu
+
+Các chuẩn như XACML (eXtensible Access Control Markup Language, của hiệp hội chuẩn OASIS) tách **điểm thực thi chính sách** (policy enforcement point, PEP), nơi chặn yêu cầu và hành động theo quyết định, khỏi **điểm quyết định chính sách** (policy decision point, PDP), nơi đánh giá chính sách. Sự tách biệt này cho phép thay đổi chính sách mà không phải triển khai lại mọi dịch vụ, và cho phép một PDP phục vụ nhiều điểm thực thi.
+
+Việc thực thi có thể diễn ra ở nhiều tầng. Một cổng (gateway) đặt trước nhiều dịch vụ có thể từ chối những yêu cầu thiếu token hợp lệ hoặc thiếu phạm vi cần thiết. Phép kiểm tra đó rẻ, nhưng **nó không thể biết ai sở hữu đơn hàng 123**. Chỉ dịch vụ nắm giữ đơn hàng mới thực hiện được phép kiểm tra đó, nên dịch vụ này phải thực thi phân quyền một lần nữa ở mức đối tượng. Thiếu các phép kiểm tra ở mức đối tượng là mục đầu tiên, *Broken Object Level Authorization* (lỗi phân quyền ở mức đối tượng), trong danh sách API Security Top 10 (phiên bản 2023) của OWASP, Open Worldwide Application Security Project: một người dùng đã được xác thực đúng cách đổi `/orders/123` thành `/orders/124` và nhận được đơn hàng của người khác.
+
+### 4.4 Báo kết quả: 401 và 403
+
+HTTP (RFC 9110) định nghĩa hai mã trạng thái cho truy cập thất bại, và chúng tương ứng với hai giai đoạn:
+
+- **401 Unauthorized** nghĩa là yêu cầu thiếu thông tin xác thực hợp lệ. Bất chấp cái tên, mã này nói về xác thực. Phản hồi phải có một tiêu đề `WWW-Authenticate` nêu tên cơ chế (scheme) mà client cần dùng.
+- **403 Forbidden** nghĩa là máy chủ hiểu yêu cầu và từ chối thực hiện nó. Xác thực lại với cùng chủ thể sẽ không giúp được gì.
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm="orders", error="invalid_token", error_description="The access token expired"
+```
+
+Với bearer token, RFC 6750 định nghĩa ba mã lỗi: `invalid_request` (gửi kèm 400), `invalid_token` (gửi kèm 401) và `insufficient_scope` (gửi kèm 403). Máy chủ cũng có thể trả lời **404 Not Found** thay cho 403 khi chỉ riêng việc xác nhận một tài nguyên tồn tại đã làm lộ thông tin.
+
+## 5. Ủy nhiệm và liên kết danh tính
+
+### 5.1 Vì sao tách nhà cung cấp danh tính khỏi ứng dụng
+
+Khi mỗi ứng dụng giữ cơ sở dữ liệu người dùng riêng, mỗi người dùng có nhiều mật khẩu, mỗi ứng dụng phải tự hiện thực việc lưu mật khẩu an toàn, khôi phục tài khoản và xác thực đa yếu tố, và vô hiệu hóa tài khoản của một nhân viên nghỉ việc nghĩa là phải đi qua từng hệ thống. Tập trung việc xác thực vào một **nhà cung cấp danh tính** giải quyết những vấn đề này: các ứng dụng trở thành bên tin cậy, chấp nhận khẳng định của nhà cung cấp rằng một người dùng đã được xác thực.
+
+Một vấn đề thứ hai, riêng biệt, là **ủy nhiệm** (delegation). Giả sử một người dùng muốn một dịch vụ in ảnh lấy ảnh từ tài khoản lưu trữ của họ. Trước khi có các giao thức ủy nhiệm, cách duy nhất là đưa mật khẩu tài khoản lưu trữ cho dịch vụ in, và như thế là cấp cho nó mọi thứ người dùng có thể làm, vô thời hạn, không có cách nào thu hồi ngoài việc đổi mật khẩu. Điều cần có là một thông tin xác thực cấp cho *client này* *quyền truy cập giới hạn này* đến *máy chủ tài nguyên này*, và người dùng có thể rút lại.
+
+OAuth 2.0 giải quyết bài toán ủy nhiệm. OpenID Connect, được xây dựng bên trên nó, giải quyết bài toán xác thực liên kết (federated authentication).
+
+### 5.2 OAuth 2.0: phân quyền ủy nhiệm
+
+OAuth 2.0 (RFC 6749) định nghĩa bốn vai trò:
+
+| Vai trò | Trách nhiệm |
+|---|---|
+| Chủ sở hữu tài nguyên (resource owner) | Người dùng có thể cấp quyền truy cập tài nguyên |
+| Client | Ứng dụng muốn có quyền truy cập |
+| Máy chủ phân quyền | Xác thực chủ sở hữu tài nguyên, lấy sự đồng ý (consent) và cấp token |
+| Máy chủ tài nguyên | Nắm giữ tài nguyên và chấp nhận access token |
+
+Sản phẩm trung tâm là **access token**: một thông tin xác thực cấp cho một client, cho phép nó gọi một máy chủ tài nguyên trong giới hạn một tập **phạm vi** (scope) và trong một khoảng thời gian có hạn. Ý tưởng then chốt là phạm vi giới hạn *client*, không giới hạn người dùng. Quyền thực tế của một client là phần giao giữa những gì người dùng được phép làm và những gì các phạm vi của token cho phép. Một token có phạm vi `orders.read` không cho người dùng đọc những đơn hàng mà vốn dĩ họ không được đọc; nó ngăn client làm bất cứ điều gì khác ngoài việc đọc đơn hàng.
+
+OAuth 2.0 là một khung phân quyền. Một access token nói rằng một client được phép truy cập một thứ gì đó; tự nó không phải là một khẳng định gửi tới client về việc người dùng là ai. Những hệ thống coi "đã lấy được access token" là "người dùng đã đăng nhập" từng mắc các lỗi mạo danh, và đó là lý do OpenID Connect ra đời.
+
+### 5.3 Các loại client
+
+RFC 6749 chia client theo việc chúng có giữ được bí mật hay không.
+
+- Một **client bảo mật** (confidential client) chạy trên một máy chủ do bên vận hành kiểm soát, chẳng hạn một ứng dụng web có mã thực thi trên back end của chính nó. Nó có thể giữ một client secret hoặc một khóa riêng và tự xác thực với máy chủ phân quyền.
+- Một **client công khai** (public client) chạy ở nơi người dùng, và do đó một kẻ tấn công tiềm năng, có thể xem xét nó. Mã của một ứng dụng trang đơn (single-page application) được tải về trình duyệt của mọi người truy cập, và tệp nhị phân của một ứng dụng gốc (native application) có thể được giải nén trên bất kỳ thiết bị nào. Mọi bí mật nhúng trong chúng đều không còn là bí mật.
+
+Sự phân biệt này quyết định luồng nào là an toàn. Một client công khai không thể chứng minh danh tính của mình bằng một bí mật, nên giao thức cần một cách khác để bảo đảm rằng bên đổi một mã ủy quyền lấy token chính là bên đã yêu cầu mã đó. Đó là điều PKCE cung cấp.
+
+### 5.4 Luồng mã ủy quyền với PKCE
+
+Luồng cấp quyền (grant) bằng mã ủy quyền (authorization code) với Proof Key for Code Exchange (PKCE, RFC 7636; khóa bằng chứng cho việc đổi mã) là luồng được khuyến nghị cho mọi client hành động thay mặt một người dùng, dù là client công khai hay client bảo mật.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Người dùng
+    participant C as Client
+    participant AS as Máy chủ phân quyền
+    participant RS as Máy chủ tài nguyên
+
+    C->>C: Tạo code_verifier, suy ra code_challenge
+    C->>AS: Chuyển hướng người dùng đến điểm cuối phân quyền
+    Note over C,AS: client_id, redirect_uri, scope, state, code_challenge
+    AS->>U: Xác thực, xin đồng ý nếu cần
+    U->>AS: Hoàn tất xác thực
+    AS-->>C: Chuyển hướng đến redirect_uri kèm code và state
+    C->>C: Kiểm tra state khớp với yêu cầu
+    C->>AS: Đổi code + code_verifier tại điểm cuối token
+    AS->>AS: Kiểm tra code, client, redirect_uri, PKCE
+    AS-->>C: Access token (+ ID token, refresh token)
+    C->>RS: Yêu cầu kèm access token
+    RS-->>C: Phản hồi
+```
+
+Mỗi tham số chống lại một kiểu thất bại cụ thể:
+
+- `redirect_uri` phải khớp chính xác với một giá trị đã đăng ký cho client, để mã không thể bị gửi đến địa chỉ của kẻ tấn công.
+- `state` là một giá trị không thể đoán trước mà client kiểm tra khi được chuyển hướng trở lại; nó gắn lời gọi lại (callback) với một yêu cầu mà chính client này đã khởi tạo, và chặn giả mạo yêu cầu liên trang nhắm vào lời gọi lại.
+- `code_challenge` là giá trị băm của một `code_verifier` ngẫu nhiên mà chỉ client biết. Kẻ tấn công chặn được mã ủy quyền cũng không thể đổi nó lấy token nếu không có `code_verifier`.
+- **Mã ủy quyền** có thời hạn ngắn và chỉ dùng được một lần, và nó đi qua trình duyệt; còn bản thân các token được trao trong một yêu cầu kênh sau (back-channel) trực tiếp đến điểm cuối token.
+
+Các luồng cấp quyền khác phục vụ những tình huống khác. Luồng **client credentials** cho phép một *workload* lấy token cho chính nó, không có người dùng tham gia. Luồng **device authorization** (RFC 8628) phục vụ các thiết bị không có trình duyệt thuận tiện, như TV. Luồng **refresh token** (Mục 7) gia hạn quyền truy cập. Hai luồng trong đặc tả ban đầu, luồng *implicit* và luồng *resource owner password credentials*, đã bị loại bỏ (deprecated) theo OAuth 2.0 Security Best Current Practice (RFC 9700): luồng thứ nhất trả token về trong thanh địa chỉ của trình duyệt, còn luồng thứ hai trao mật khẩu của người dùng cho client, đúng điều mà ủy nhiệm muốn tránh.
+
+### 5.5 OpenID Connect: xác thực bên trên OAuth 2.0
+
+OpenID Connect (OIDC) bổ sung khẳng định còn thiếu về người dùng. Khi một client yêu cầu phạm vi `openid`, nhà cung cấp trả về một **ID token**: một JWT có chữ ký, có đối tượng nhận (audience) là client và có các claim mô tả sự kiện xác thực (chủ thể là ai, xác thực lúc nào, và thường cả cách thức). OIDC cũng chuẩn hóa một tham số `nonce` gắn ID token với yêu cầu của client, một điểm cuối UserInfo cho các claim hồ sơ, và một tài liệu khám phá (discovery document) để bên tin cậy biết được các điểm cuối và khóa ký của nhà cung cấp.
+
+ID token và access token dễ bị nhầm lẫn và không được dùng thay cho nhau:
+
+| Tính chất | ID token | Access token |
+|---|---|---|
+| Đối tượng nhận (`aud`) | Client (`client_id` của nó) | Máy chủ tài nguyên |
+| Bên sử dụng | Client, để biết ai đã đăng nhập | Máy chủ tài nguyên, để quyết định quyền truy cập |
+| Định dạng | Luôn là JWT | Mờ hoặc JWT, tùy bên cấp chọn |
+| Gửi đến API | Không | Có |
+
+Một máy chủ tài nguyên chấp nhận ID token sẽ chấp nhận cả một token được tạo ra cho một ứng dụng khác, đúng sự nhầm lẫn mà claim `aud` tồn tại để ngăn chặn.
+
+### 5.6 Liên kết danh tính và đăng nhập một lần
+
+Khi các ứng dụng cùng dựa vào một nhà cung cấp chung, người dùng đã xác thực với nhà cung cấp có thể đăng nhập vào các ứng dụng khác mà không phải xuất trình thông tin xác thực lần nữa: đó là **đăng nhập một lần** (single sign-on, SSO). Các nhà cung cấp cũng có thể tin cậy lẫn nhau, để người dùng của một tổ chức đăng nhập được vào ứng dụng của một tổ chức khác; đó là **liên kết danh tính** (federation). OIDC là giao thức thường dùng cho việc này trên web hiện đại; SAML 2.0, một chuẩn cũ hơn dựa trên XML, vẫn phổ biến trong môi trường doanh nghiệp và đóng cùng vai trò.
+
+## 6. Token chi tiết
+
+### 6.1 Các loại token
+
+| Token | Cấp cho | Xuất trình cho | Mục đích |
+|---|---|---|---|
+| Access token | Client | Máy chủ tài nguyên | Phân quyền cho những yêu cầu cụ thể trong giới hạn phạm vi và thời hạn |
+| Refresh token | Client | Chỉ máy chủ phân quyền | Lấy access token mới mà không cần người dùng tương tác |
+| ID token | Client | Không ai; client tự sử dụng | Cho client biết ai đã xác thực và bằng cách nào |
+| Định danh phiên | Trình duyệt | Ứng dụng đã cấp nó | Tham chiếu đến một bản ghi phiên phía máy chủ |
+| Token đơn mục đích | Người dùng (qua email hoặc đường liên kết) | Ứng dụng đã cấp nó | Cho phép một thao tác duy nhất, như đặt lại mật khẩu hoặc xác minh email |
+
+Mỗi loại chỉ nên được chấp nhận bởi bên nhận dự kiến của nó, cho đúng mục đích dự kiến, và không lâu hơn thời gian mục đích đó cần.
+
+### 6.2 Token mờ và kiểm tra trạng thái token
+
+Một access token mờ (opaque token) là một chuỗi ngẫu nhiên mà máy chủ tài nguyên không thể diễn giải. Để xác minh nó, máy chủ tài nguyên gọi đến **điểm cuối kiểm tra trạng thái token** (introspection endpoint, RFC 7662) của máy chủ phân quyền; điểm cuối này trả về token còn hiệu lực hay không và, nếu còn, chủ thể, phạm vi, đối tượng nhận và thời hạn của nó. Kiểm tra trạng thái token cho phép thu hồi tức thì và giữ kín các claim, đổi lại phải tốn một lời gọi mạng cho mỗi yêu cầu (thường được giảm nhẹ bằng bộ nhớ đệm ngắn hạn).
+
+### 6.3 Cấu trúc của một JSON Web Token
+
+Một JSON Web Token (RFC 7519) là một tập claim viết bằng JSON (JavaScript Object Notation, một định dạng văn bản gồm các giá trị có tên, mảng và đối tượng lồng nhau). Ở dạng có chữ ký thông dụng (JSON Web Signature, RFC 7515), nó có ba phần ngăn cách bởi dấu chấm, mỗi phần được mã hóa base64url (base64 với các ký tự an toàn cho URL `-` và `_` và không có phần đệm, để token đi qua URL và tiêu đề mà không bị thay đổi):
+
+```text
+base64url(header) . base64url(payload) . base64url(signature)
+```
+
+**Phần đầu** (header) nêu thuật toán và khóa:
+
+```json
+{ "alg": "RS256", "typ": "at+jwt", "kid": "2026-10-signing" }
+```
+
+**Phần thân** (payload) mang các claim:
+
+```json
+{
+  "iss": "https://id.example.com",
+  "sub": "user-48213",
+  "aud": "https://api.example.com/orders",
+  "client_id": "photo-printer",
+  "scope": "orders.read",
+  "iat": 1791795600,
+  "exp": 1791796200,
+  "jti": "4f1c2b7e-0d5a-4c39-9a8e-6b2f1e7d3a10"
+}
+```
+
+**Chữ ký** (signature) được tính trên đúng các byte `base64url(header) + "." + base64url(payload)`. Ở đây `iat` và `exp` là các mốc thời gian Unix cách nhau mười phút; mọi giá trị chỉ mang tính minh họa. Kiểu `at+jwt` và claim `client_id` đến từ hồ sơ JWT cho access token OAuth 2.0 (RFC 9068), giúp máy chủ tài nguyên phân biệt một access token với một ID token do cùng một bên cấp ký.
+
+Các claim đã đăng ký có ý nghĩa cố định:
+
+| Claim | Ý nghĩa |
+|---|---|
+| `iss` | Bên cấp (issuer): ai đã tạo và ký token |
+| `sub` | Chủ thể (subject): *principal* mà token nói về |
+| `aud` | Đối tượng nhận (audience): (các) bên nhận được phép chấp nhận token |
+| `exp` | Hết hạn (expiry): từ chối kể từ thời điểm này trở đi |
+| `nbf` | Không trước (not before): từ chối trước thời điểm này |
+| `iat` | Thời điểm cấp (issued at) |
+| `jti` | Định danh duy nhất của token, hữu ích để phát hiện phát lại (replay) và cho danh sách chặn |
+
+Những claim như `scope`, `roles` hay `groups` là quy ước do từng hồ sơ hoặc bên cấp cụ thể định nghĩa, không phải do bản thân chuẩn JWT, và máy chủ tài nguyên phải biết bên cấp của mình dùng những claim nào.
+
+Một JWT có chữ ký **không được mã hóa**. Bất kỳ ai cầm nó đều giải mã được phần đầu và phần thân. Chữ ký bảo đảm tính toàn vẹn và nguồn gốc, không bảo đảm tính bí mật. Dữ liệu cá nhân hoặc nhạy cảm nên nằm ngoài phần thân, hoặc token nên được mã hóa (JSON Web Encryption, RFC 7516), hoặc nên dùng token mờ thay thế.
+
+### 6.4 Khóa và thuật toán
+
+Với một thuật toán **đối xứng** như HS256 (HMAC với SHA-256: một hàm băm có khóa là bí mật dùng chung), cùng một bí mật vừa ký vừa xác minh. Do đó mọi bên xác minh cũng có thể giả mạo token, nên ký đối xứng chỉ phù hợp khi một bên duy nhất tự xác minh token của chính mình.
+
+Với một thuật toán **bất đối xứng** như RS256 (RSA) hoặc ES256 (ECDSA), bên cấp ký bằng khóa riêng và các bên xác minh kiểm tra bằng khóa công khai. Bên cấp công bố các khóa công khai của mình dưới dạng một JSON Web Key Set (JWKS, RFC 7517), thường tại một URL được liệt kê trong tài liệu khám phá. Tiêu đề `kid` chọn khóa, nhờ đó có thể **xoay vòng khóa** (key rotation): bên cấp công bố khóa mới, bắt đầu ký bằng nó, và chỉ gỡ khóa cũ sau khi mọi token ký bằng khóa cũ đã hết hạn.
+
+### 6.5 Xác minh một access token
+
+Giải mã một token không phải là xác minh nó. Một máy chủ tài nguyên nhận một access token dạng JWT nên lần lượt:
+
+1. **Phân tích cú pháp** token một cách nghiêm ngặt; từ chối mọi thứ sai định dạng.
+2. **Kiểm tra thuật toán** theo một danh sách cho phép (allow-list) cố định trong cấu hình. Không bao giờ để chính tiêu đề `alg` của token chọn thuật toán. Chấp nhận `"alg": "none"` là vô hiệu hóa hoàn toàn chữ ký, còn chấp nhận HS256 cho một khóa dành cho RS256 cho phép kẻ tấn công ký token bằng cách dùng khóa *công khai* làm bí mật HMAC (một kiểu tấn công *nhầm lẫn thuật toán*, algorithm confusion).
+3. **Chọn khóa** theo `kid` từ bộ khóa của bên cấp được tin cậy, và **xác minh chữ ký**.
+4. **Kiểm tra `iss`** bằng đúng bên cấp đã cấu hình.
+5. **Kiểm tra `aud`** có chứa định danh của máy chủ tài nguyên này.
+6. **Kiểm tra thời gian**: `exp` ở tương lai và `nbf` (nếu có) ở quá khứ, cho phép một độ lệch đồng hồ (clock skew) nhỏ, từ vài giây đến một phút.
+7. **Kiểm tra kiểu** (`typ` là `at+jwt` khi bên cấp tuân theo RFC 9068), để một ID token không thể lọt qua như một access token.
+8. **Kiểm tra các claim bắt buộc** như tổ chức thuê (tenant) hay client, theo chính sách cục bộ.
+
+Chỉ khi đó chủ thể mới được xác lập. Viết bằng mã giả không phụ thuộc ngôn ngữ:
+
+```text
+function authenticate(request):
+    token = bearer_token_from(request.headers["Authorization"])
+    if token is missing:
+        return reject(401, challenge = "Bearer")
+
+    header, claims = decode_and_verify(
+        token,
+        allowed_algorithms = ["RS256"],
+        keys               = jwks_for(ISSUER),       # cached, refreshed on unknown kid
+        expected_issuer    = ISSUER,
+        expected_audience  = THIS_API,
+        expected_type      = "at+jwt",
+        clock_skew         = 60 seconds)
+    if verification failed:
+        return reject(401, challenge = "Bearer error=\"invalid_token\"")
+
+    return Principal(subject = claims.sub,
+                     client  = claims.client_id,
+                     scopes  = split(claims.scope))
+```
+
+(Chú thích trong mã: bộ khóa được lưu đệm và được làm mới khi gặp một `kid` chưa biết.) Các thư viện đã trưởng thành hiện thực các bước từ 1 đến 6; phần việc còn lại của ứng dụng là cấu hình chúng một cách nghiêm ngặt và giữ cho bên cấp, đối tượng nhận và danh sách thuật toán luôn tường minh.
+
+## 7. Vòng đời của token
+
+### 7.1 Hết hạn và khoảng hiệu lực lỗi thời
+
+Một access token tự chứa vẫn hợp lệ cho đến `exp`, bất kể điều gì xảy ra với tài khoản. Nếu quản trị viên vô hiệu hóa một người dùng lúc 10:00 và access token của người dùng đó hết hạn lúc 10:08, một máy chủ tài nguyên xác minh token cục bộ sẽ tiếp tục chấp nhận yêu cầu cho đến 10:08. Khoảng thời gian đó là **khoảng hiệu lực lỗi thời** (staleness window), và nó có thể dài bằng thời hạn của access token. Thời hạn ngắn, thường vài phút, giữ cho khoảng này nhỏ. Khi ngay cả như vậy vẫn là quá dài, máy chủ tài nguyên có thể kiểm tra trạng thái token, tra một danh sách chặn (denylist) các giá trị `jti` đã bị thu hồi, hoặc kiểm tra trạng thái tài khoản cho các thao tác nhạy cảm.
+
+### 7.2 Refresh token
+
+Access token thời hạn ngắn sẽ buộc người dùng đăng nhập thường xuyên nếu không có cách gia hạn. Một **refresh token** là một thông tin xác thực có thời hạn dài hơn mà client *chỉ* xuất trình cho máy chủ phân quyền để lấy access token mới. Vì nó không bao giờ đi đến các máy chủ tài nguyên, nó bị phơi ra ở ít nơi hơn; và vì máy chủ phân quyền kiểm tra nó mỗi lần sử dụng, nó có thể bị thu hồi ngay lập tức.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant AS as Máy chủ phân quyền
+    participant RS as Máy chủ tài nguyên
+
+    C->>RS: Yêu cầu + access token
+    RS-->>C: 401, error="invalid_token" (hết hạn)
+    C->>AS: grant_type=refresh_token + refresh token
+    AS->>AS: Kiểm tra token, client, thu hồi, chính sách
+    alt Refresh token hợp lệ
+        AS-->>C: Access token mới (+ refresh token mới)
+        C->>RS: Gửi lại yêu cầu + access token mới
+        RS-->>C: 200 OK
+    else Refresh token không hợp lệ hoặc đã bị thu hồi
+        AS-->>C: 400, error="invalid_grant"
+        C->>C: Bắt đầu một lần đăng nhập mới
+    end
+```
+
+Ba cách làm giúp refresh token an toàn hơn:
+
+- **Xoay vòng.** Mỗi lần sử dụng trả về một refresh token mới và vô hiệu hóa token cũ. Nếu một token cũ được xuất trình lại, thì có hai bên đang giữ bản sao, và một trong hai chắc chắn là kẻ tấn công; máy chủ phân quyền nên thu hồi toàn bộ chuỗi.
+- **Ràng buộc.** Với client bảo mật, refresh token chỉ dùng được kèm với việc xác thực của chính client đó; với client công khai, nó có thể được ràng buộc bên gửi bằng DPoP.
+- **Thời hạn có giới hạn.** Một mức tối đa tuyệt đối, không phụ thuộc vào hoạt động, buộc người dùng phải xác thực lại định kỳ.
+
+Client nên gửi lại một yêu cầu nhiều nhất một lần sau khi làm mới, và không nên cho rằng mọi phản hồi 401 đều có nghĩa là "đã hết hạn": sai đối tượng nhận hay một khóa đã bị thu hồi cũng tạo ra 401, và làm mới token sẽ không khắc phục được.
+
+### 7.3 Thu hồi và đăng xuất
+
+Đăng xuất có nhiều tầng, và xóa token khỏi client chỉ bao phủ tầng đầu tiên:
+
+1. **Client:** loại bỏ các token mà nó đang giữ.
+2. **Máy chủ phân quyền:** thu hồi refresh token (RFC 7009 định nghĩa một điểm cuối thu hồi) và kết thúc phiên của chính nhà cung cấp, nếu không lần đăng nhập tiếp theo sẽ thành công một cách âm thầm thông qua đăng nhập một lần.
+3. **Các bên tin cậy khác:** OIDC định nghĩa đăng xuất qua kênh trước (front-channel) và kênh sau (back-channel) để nhà cung cấp có thể thông báo cho các ứng dụng khác đã dùng chung phiên.
+4. **Máy chủ tài nguyên:** các access token tự chứa còn lưu hành vẫn hợp lệ cho đến khi hết hạn, trừ khi đã áp dụng một trong các biện pháp ở Mục 7.1.
+
+Một buổi rà soát thiết kế nên nêu rõ, với từng loại thông tin xác thực, nó có thể tồn tại lâu hơn một lần đăng xuất hay một lần đình chỉ tài khoản bao lâu.
+
+## 8. Client lưu token ở đâu
+
+Độ an toàn của một token phụ thuộc vào nơi nó được lưu không kém gì vào cách nó được cấp.
+
+| Vị trí | Script của trang đọc được không | Rủi ro chính | Ghi chú |
+|---|---|---|---|
+| `localStorage` / `sessionStorage` của trình duyệt | Có | Bất kỳ lỗi chèn mã độc liên trang nào cũng có thể đọc và tuồn token ra ngoài | Tồn tại qua các lần tải lại trang; dễ dùng, nên phổ biến |
+| Bộ nhớ của trình duyệt (một biến) | Có, trong khi trang đang chạy | Lỗi script vẫn có thể dùng nó | Mất khi tải lại trang; cần gia hạn âm thầm |
+| Cookie `HttpOnly; Secure` | Không | Giả mạo yêu cầu liên trang; trình duyệt tự động gửi cookie | Cần `SameSite` và các biện pháp chống giả mạo |
+| Phía máy chủ, sau một cookie phiên (back end for front end) | Không; trình duyệt không bao giờ thấy token | Back end bị xâm nhập | Trình duyệt chỉ giữ một cookie phiên; back end giữ token và gọi các API |
+| Kho thông tin xác thực của hệ điều hành (ứng dụng gốc) | Không với các ứng dụng khác | Thiết bị bị xâm nhập | Các cơ chế keychain hoặc keystore bảo vệ token khi lưu trữ |
+
+Với các ứng dụng chạy trên trình duyệt, mẫu **back end for front end** (BFF) là cách bố trí phòng thủ tốt nhất: một client bảo mật trên máy chủ thực hiện luồng OAuth và giữ token, còn trình duyệt chỉ giữ một cookie phiên `HttpOnly`. Một lỗi script vẫn có thể gửi yêu cầu khi trang của người dùng đang mở, nhưng không thể đánh cắp token để dùng về sau ở nơi khác.
+
+Dù token được lưu ở đâu, chúng không bao giờ được xuất hiện trong URL, vì URL được ghi lại trong lịch sử trình duyệt, nhật ký máy chủ, nhật ký proxy và tiêu đề `Referer`.
+
+## 9. Thực thi tại máy chủ tài nguyên
+
+Ghép các phần lại với nhau, một yêu cầu đến máy chủ tài nguyên đi qua chuỗi xử lý sau:
+
+```mermaid
+flowchart TB
+    IN["Yêu cầu HTTPS"] --> TLS["Kết thúc TLS:<br/>tính bí mật và danh tính máy chủ"]
+    TLS --> AUTHN["Xác thực:<br/>lấy ra và xác minh token"]
+    AUTHN -->|"thiếu hoặc không hợp lệ"| E401["401 + WWW-Authenticate"]
+    AUTHN -->|"đã xác lập chủ thể"| SCOPE["Phân quyền thô:<br/>phạm vi / vai trò cho thao tác này"]
+    SCOPE -->|"không đủ"| E403["403 Forbidden"]
+    SCOPE -->|"đủ"| OBJ["Phân quyền mức đối tượng:<br/>chủ thể này có được tác động lên tài nguyên này không?"]
+    OBJ -->|"không"| E404["403, hoặc 404 để giấu sự tồn tại"]
+    OBJ -->|"có"| BIZ["Logic nghiệp vụ và truy cập dữ liệu"]
+    BIZ --> OUT["Phản hồi"]
+```
+
+Phép kiểm tra ở mức đối tượng thuộc về nơi gần dữ liệu, vì chỉ ở đó mới biết được chủ sở hữu của tài nguyên:
+
+```text
+function get_order(request, order_id):
+    principal = authenticate(request)            # Section 6.5
+    require_scope(principal, "orders.read")       # coarse check -> 403
+
+    order = orders.find(order_id)
+    if order is none or not can_view(principal, order):
+        return 404                                # do not reveal other tenants' orders
+
+    audit.log(principal.subject, "read", order_id)
+    return 200, order
+
+function can_view(principal, order):
+    return order.organisation == organisation_of(principal.subject)
+        or has_role(principal.subject, "auditor")
+```
+
+(Chú thích trong mã: `authenticate` là hàm ở Mục 6.5; `require_scope` là phép kiểm tra thô, thất bại thì trả 403; trả 404 để không làm lộ đơn hàng của các tổ chức thuê khác.)
+
+Có hai lỗi thường gặp ở đây. Lỗi thứ nhất là chỉ kiểm tra quyền ở giao diện người dùng: ẩn một nút bấm không ngăn được ai đó gửi yêu cầu trực tiếp. Lỗi thứ hai là chỉ lọc các truy vấn danh sách theo chủ sở hữu trong khi lại lấy từng bản ghi chỉ theo định danh, và đó chính là lỗi phân quyền ở mức đối tượng đã mô tả ở Mục 4.3. Mã thực thi không nên tin các định danh, vai trò hay giá trị tổ chức thuê được cung cấp trong thân yêu cầu hoặc chuỗi truy vấn khi những thông tin đó đã có sẵn từ token đã được xác minh hoặc từ cơ sở dữ liệu.
+
+## 10. Mối đe dọa và biện pháp kiểm soát
+
+| Mối đe dọa | Điều gì xảy ra | Biện pháp kiểm soát chính |
+|---|---|---|
+| Lừa lấy thông tin xác thực (phishing) | Người dùng nhập mật khẩu hoặc mã dùng một lần trên một trang giả mạo | Phương tiện xác thực chống phishing (WebAuthn / passkey) |
+| Nhồi thông tin xác thực (credential stuffing) | Mật khẩu bị lộ ở nơi khác được đem thử ở đây | Xác thực đa yếu tố, giới hạn tần suất, kiểm tra mật khẩu đã bị lộ |
+| Đánh cắp và phát lại token | Một bearer token bị lộ qua nhật ký, bộ nhớ lưu trữ hoặc một script độc hại | Thời hạn ngắn, giữ token ngoài URL và nhật ký, BFF, token ràng buộc bên gửi |
+| Token bị giả mạo hoặc sửa đổi | Chữ ký không được kiểm tra, hoặc thuật toán do token tự chọn | Xác minh nghiêm ngặt với danh sách thuật toán cho phép cố định (Mục 6.5) |
+| Nhầm lẫn token | Một ID token hoặc một token dành cho API khác được chấp nhận | Kiểm tra `aud` và `typ` |
+| Chặn bắt mã ủy quyền | Một mã bị bắt giữ trong quá trình chuyển hướng | Khớp chính xác `redirect_uri`, PKCE, mã dùng một lần có thời hạn ngắn |
+| Giả mạo yêu cầu liên trang | Một yêu cầu xác thực bằng cookie bị kích hoạt từ trang web khác | Cookie `SameSite`, token chống giả mạo, `state` trong các luồng OAuth |
+| Lỗi phân quyền ở mức đối tượng | Người dùng hợp lệ đọc hoặc sửa tài nguyên của người dùng khác | Kiểm tra ở mức đối tượng tại máy chủ tài nguyên, từ chối theo mặc định |
+| Phân quyền lỗi thời | Tài khoản đã bị vô hiệu hóa vẫn hoạt động cho đến khi token hết hạn | Access token thời hạn ngắn, kiểm tra trạng thái token hoặc danh sách chặn cho các thao tác nhạy cảm, thu hồi refresh token |
+| Ủy nhiệm quá rộng | Client nhận được nhiều quyền hơn tác vụ của nó cần | Phạm vi hẹp, giới hạn đối tượng nhận theo từng API, rà soát sự đồng ý |
+
+Hai ngộ nhận đáng được nêu riêng. **CORS (Cross-Origin Resource Sharing, chia sẻ tài nguyên giữa các origin) không phải là kiểm soát truy cập**: nó cho trình duyệt biết những origin nào được đọc phản hồi, nhưng không làm gì để ngăn các yêu cầu từ những client không phải trình duyệt. Và **TLS là cần nhưng chưa đủ**: nó bảo vệ token trên đường truyền và không ở đâu khác.
+
+## 11. Tóm tắt
+
+Kiểm soát truy cập quy về một quyết định duy nhất, do một bộ giám sát tham chiếu đưa ra và bộ giám sát này phải thấy mọi yêu cầu: chủ thể này có được thực hiện hành động này trên đối tượng này không? Mọi thứ khác trong bài là bộ máy để đưa ra quyết định đó một cách đáng tin cậy trong một hệ thống phân tán.
+
+| Tầng | Câu hỏi mà tầng trả lời | Cơ chế |
+|---|---|---|
+| Giao vận | Kênh truyền có bí mật không, và máy chủ có đúng là bên nó tự nhận không? | TLS |
+| Xác thực | *Principal* nào đứng sau yêu cầu này? | Mật khẩu, đa yếu tố, passkey, client credentials, TLS hai chiều |
+| Tính liên tục của phiên | Làm sao một yêu cầu sau chứng tỏ nó thuộc về một lần đăng nhập trước? | Cookie phiên (tham chiếu), token có chữ ký (giá trị) |
+| Liên kết danh tính | Làm sao một nhà cung cấp bảo chứng cho một người dùng với nhiều ứng dụng? | OpenID Connect, SAML 2.0 |
+| Ủy nhiệm | Làm sao người dùng cấp cho một client quyền truy cập giới hạn đến một máy chủ tài nguyên? | Access token và phạm vi của OAuth 2.0 |
+| Xác minh token | Token này có thật, còn hiệu lực và dành cho tôi không? | Chữ ký, `iss`, `aud`, `exp`, `typ`, danh sách thuật toán cho phép, kiểm tra trạng thái token |
+| Phân quyền | Chủ thể này có được làm điều này với tài nguyên này không? | RBAC, ABAC, ReBAC; thực thi ở mức đối tượng |
+| Vòng đời | Quyền truy cập kết thúc như thế nào? | Hết hạn, xoay vòng refresh token, thu hồi, đăng xuất |
+| Truy trách nhiệm | Điều gì đã xảy ra, và ai đã làm? | Nhật ký kiểm toán gắn với các chủ thể đã được xác thực |
+
+Những bài học lặp lại đều ngắn gọn. Giữ xác thực và phân quyền tách biệt, và thực thi phân quyền ở nơi dữ liệu nằm. Đối xử với mọi bearer token như tiền mặt: cho nó một đối tượng nhận hẹp, ít phạm vi và thời hạn ngắn. Xác minh token một cách nghiêm ngặt thay vì chỉ giải mã chúng. Và với mọi thông tin xác thực mà hệ thống cấp ra, phải nói được ai được xuất trình nó, cho ai, để làm gì, và nó bị rút lại như thế nào.
+
+### Các đặc tả
+
+Các chuẩn được nhắc đến ở trên, dành cho người đọc muốn xem văn bản quy phạm:
+
+- HTTP Semantics: RFC 9110. Xác thực HTTP Basic: RFC 7617. Cookie: RFC 6265 và bản sửa đổi đang được IETF soạn thảo, trong đó đặc tả `SameSite`.
+- OAuth 2.0: RFC 6749 (khung), RFC 6750 (bearer token), RFC 7636 (PKCE), RFC 7662 (kiểm tra trạng thái token), RFC 7009 (thu hồi), RFC 8628 (device authorization), RFC 9068 (access token dạng JWT), RFC 9700 (thực hành tốt nhất hiện hành về bảo mật).
+- Token ràng buộc bên gửi: RFC 8705 (TLS hai chiều), RFC 9449 (DPoP).
+- JSON Web Token và các định dạng liên quan: RFC 7519 (JWT), RFC 7515 (JWS), RFC 7516 (JWE), RFC 7517 (JWK).
+- OpenID Connect Core 1.0, do OpenID Foundation công bố.
