@@ -12,8 +12,6 @@ objectives:
   - "Explain sampling, quantization and data conversion, and the noise that limits what can be detected."
   - "State and combine measurement uncertainties, and calibrate and fuse sensors."
 plannedEntries:
-  - title: "Signal Conditioning: Bridges, Amplifiers and Analog Filters"
-    description: "Excitation, Wheatstone bridges, operational and instrumentation amplifiers, and filters that prepare a sensor signal for conversion."
   - title: "Sampling, Quantization and Data Conversion"
     description: "The sampling theorem, aliasing and anti-aliasing filters, quantization error, and how analog-to-digital converters work."
   - title: "Noise, Interference and the Limits of Detection"

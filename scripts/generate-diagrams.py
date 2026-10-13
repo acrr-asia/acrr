@@ -337,3 +337,79 @@ svg('SensorNonlinearity', 620, 270, 'Nonlinearity error of a PT100 sensor betwee
     f'A curve of the difference between the PT100 resistance and the straight line joining its values at 0 and 100 degrees Celsius, '
     f'expressed in degrees Celsius. The error is zero at both ends and rises to a maximum of about {nl(50):.2f} degrees at 50 degrees Celsius.',
     b)
+
+# ---------- 11. Wheatstone bridge ----------
+# Arm names follow "Signal Conditioning: Bridges, Amplifiers and Analog Filters":
+# V_out = V_A - V_B = V_ex (R2 / (R1 + R2) - R4 / (R3 + R4)); R2 is the sensor in a quarter bridge.
+def resistor(p, q, label, lx, ly, anchor, sensor=False):
+    (x1, y1), (x2, y2) = p, q
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    L = math.hypot(x2 - x1, y2 - y1); ux, uy = (x2 - x1) / L, (y2 - y1) / L
+    ang = math.degrees(math.atan2(y2 - y1, x2 - x1))
+    hl, hw = 22, 8
+    o = line([(x1, y1), (cx - ux*hl, cy - uy*hl)]) + line([(cx + ux*hl, cy + uy*hl), (x2, y2)])
+    o += f'  <rect class="box" x="{cx-hl:.1f}" y="{cy-hw:.1f}" width="{2*hl}" height="{2*hw}" transform="rotate({ang:.1f} {cx:.1f} {cy:.1f})" />\n'
+    if sensor:
+        # variable-resistor arrow drawn across the body
+        o += arrow([(cx - 24, cy + 24), (cx + 24, cy - 24)], 'acc')
+    o += text(lx, ly, label, anchor)
+    return o
+T, Lf, Rt, Bt = (230, 50), (130, 150), (330, 150), (230, 250)
+sub = lambda v, s: var(v) + f'<tspan class="sub" dy="3">{s}</tspan><tspan dy="-3"> </tspan>'
+b = ''
+b += resistor(T, Lf, sub('R', '1'), 160, 88, 'end')
+b += resistor(Lf, Bt, sub('R', '2') + ' (sensor)', 142, 214, 'end', sensor=True)
+b += resistor(T, Rt, sub('R', '3'), 300, 88, 'start')
+b += resistor(Rt, Bt, sub('R', '4'), 300, 222, 'start')
+b += line([T, (T[0], 18)]) + text(T[0] + 10, 24, '+' + sub('V', 'ex'))
+b += line([Bt, (Bt[0], 278)]) + line([(Bt[0]-14, 278), (Bt[0]+14, 278)]) + text(Bt[0] + 20, 283, '0 V')
+for (x, y) in (T, Lf, Rt, Bt):
+    b += f'  <circle class="dot" cx="{x}" cy="{y}" r="3.5" />\n'
+b += line([Lf, (60, 150)]) + f'  <circle class="box" cx="56" cy="150" r="4" />\n' + text(56, 136, sub('V', 'A'), 'middle')
+b += line([Rt, (400, 150)]) + f'  <circle class="box" cx="404" cy="150" r="4" />\n' + text(404, 136, sub('V', 'B'), 'middle')
+b += text(230, 155, sub('V', 'out') + '= ' + sub('V', 'A') + '− ' + sub('V', 'B'), 'middle', 'small')
+svg('WheatstoneBridge', 460, 296, 'Wheatstone bridge with a resistive sensor in one arm',
+    'Four resistors form a diamond between the excitation voltage at the top and 0 volts at the bottom. '
+    'R1 and R2 form the left divider, whose midpoint is A; R3 and R4 form the right divider, whose midpoint is B. '
+    'R2 is the sensor. The output is the difference between the voltages at A and B.',
+    b)
+
+# ---------- 12. Butterworth low-pass magnitude responses ----------
+# Values from "Signal Conditioning: Bridges, Amplifiers and Analog Filters":
+# |H(f)| = 1 / sqrt(1 + (f / fc)^(2n)) for n = 1, 2, 4, plotted in dB against f / fc on a log axis;
+# the marked points are the attenuations at f = 5 fc (50 Hz with fc = 10 Hz).
+mag = lambda r, n: 20*math.log10(1/math.sqrt(1 + r**(2*n)))
+P = Plot(60, 30, 520, 210, (-1, 1.5), (-70, 5))
+b = ''
+for v in (0, -20, -40, -60):
+    b += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid')
+    b += text(P.x0-6, P.Y(v)+4, f'{v:g}' if v == 0 else f'−{-v:g}', 'end', 'small')
+for v, lab in ((-1, '0.1'), (0, '1'), (1, '10')):
+    b += line([(P.X(v), P.y0), (P.X(v), P.y0+P.h)], 'grid')
+    b += text(P.X(v), P.y0+P.h+16, lab, 'middle', 'small')
+b += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
+b += text(P.x0+P.w, P.y0+P.h+34, 'frequency relative to cut-off  ' + var('f') + ' / ' + sub('f', 'c'), 'end', 'small')
+b += text(P.x0, P.y0-10, 'magnitude  (dB)', 'start', 'small')
+b += line([(P.X(0), P.Y(-3.01)), (P.X(-1), P.Y(-3.01))], 'mut', ' stroke-dasharray="3 3"')
+b += text(P.X(-1)+6, P.Y(-3.01)+16, '−3 dB', 'start', 'small')
+x5 = math.log10(5)
+b += line([(P.X(x5), P.y0), (P.X(x5), P.y0+P.h)], 'mut', ' stroke-dasharray="4 4"')
+b += text(P.X(x5)+6, P.y0+12, var('f') + ' = 5' + sub('f', 'c'), 'start', 'small')
+for n, cls in ((1, 'ln'), (2, 'ln'), (4, 'acc')):
+    # sample the curve and stop it where it leaves the plotted range
+    pts = [(P.X(u), P.Y(mag(10**u, n))) for u in (-1 + i*2.5/400 for i in range(401)) if mag(10**u, n) >= -70]
+    b += line(pts, cls, ' stroke-dasharray="6 4"' if n == 1 else '')
+    m5 = mag(5, n)
+    b += f'  <circle class="dot" cx="{P.X(x5):.1f}" cy="{P.Y(m5):.1f}" r="3.5" />\n'
+    if n == 1:  # above right of the marker, clear of the falling first-order curve
+        b += text(P.X(x5)+8, P.Y(m5)-8, f'−{-m5:.1f} dB', 'start', 'small')
+    else:
+        b += text(P.X(x5)+8, P.Y(m5)+4, f'−{-m5:.1f} dB', 'start', 'small')
+for n, lx, ly in ((1, 1.5, mag(10**1.5, 1)+3), (2, 1.5, mag(10**1.5, 2)+3)):
+    b += text(P.X(lx), P.Y(ly)+18, f'{["", "first", "second"][n]} order', 'end', 'small')
+b += text(P.X(0.5)-8, P.Y(-40)+4, 'fourth order', 'end', 'small')
+svg('ButterworthResponse', 620, 286, 'Magnitude responses of first-, second- and fourth-order Butterworth low-pass filters',
+    'Magnitude in decibels against frequency relative to the cut-off frequency, on a logarithmic axis from 0.1 to about 30. '
+    'All three curves are flat below the cut-off and pass through minus 3 decibels at the cut-off. Above it they fall at 20, 40 and 80 decibels per decade. '
+    f'At five times the cut-off frequency the attenuations are {-mag(5,1):.1f}, {-mag(5,2):.1f} and {-mag(5,4):.1f} decibels.',
+    b)
