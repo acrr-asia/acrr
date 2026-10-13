@@ -142,3 +142,77 @@ Use these renderings so that terms agree across articles.
 | dither | dither (kept in English) |
 | digital twin, fieldbus | bản sao số, bus trường |
 | verification, validation | kiểm chứng, thẩm định |
+
+### Access control and security
+
+| English | Tiếng Việt |
+|---|---|
+| access control | kiểm soát truy cập (access control) |
+| identification, authentication, authorization, audit | định danh, xác thực, phân quyền, kiểm toán |
+| reference monitor | bộ giám sát tham chiếu (reference monitor) |
+| subject, object, action | chủ thể, đối tượng, hành động |
+| principal | *principal* (kept in English; first use explains it as an entity that can be authenticated) |
+| identifier | định danh |
+| credential, authenticator | thông tin xác thực (credential), phương tiện xác thực (authenticator) |
+| claimant, verifier | bên yêu cầu xác thực (claimant), bên xác minh (verifier) |
+| claim | claim (kept in English; first use: *khẳng định (claim)*) |
+| client, confidential / public client | client (kept), client bảo mật (confidential client) / client công khai (public client) |
+| resource, resource server, resource owner | tài nguyên, máy chủ tài nguyên (resource server), chủ sở hữu tài nguyên (resource owner) |
+| identity provider (IdP) | nhà cung cấp danh tính (identity provider, IdP) |
+| authorization server | máy chủ phân quyền (authorization server) |
+| relying party | bên tin cậy (relying party) |
+| workload | *workload* (kept in English; software acting on its own behalf) |
+| access token, refresh token, ID token | access token, refresh token, ID token (kept in English) |
+| bearer token, sender-constrained token | bearer token (kept), token ràng buộc bên gửi (sender-constrained token) |
+| self-contained token, opaque token | token tự chứa (self-contained token), token mờ (opaque token) |
+| scope, consent | phạm vi (scope), sự đồng ý (consent) |
+| grant, authorization code | luồng cấp quyền (grant), mã ủy quyền (authorization code) |
+| endpoint | điểm cuối (endpoint) |
+| delegation, delegated authorization | ủy nhiệm, phân quyền ủy nhiệm (delegated authorization) |
+| federation, federated authentication, single sign-on | liên kết danh tính (federation), xác thực liên kết (federated authentication), đăng nhập một lần (single sign-on, SSO) |
+| session, session identifier, session record | phiên (session), định danh phiên, bản ghi phiên |
+| multi-factor authentication | xác thực đa yếu tố (multi-factor authentication, MFA) |
+| one-time password, passkey | mật khẩu dùng một lần (one-time password, OTP), passkey (kept) |
+| phishing, phishing resistance | lừa đảo giả mạo (phishing), khả năng chống phishing |
+| cross-site scripting, cross-site request forgery | tấn công chèn mã độc liên trang (cross-site scripting, XSS), giả mạo yêu cầu liên trang (cross-site request forgery, CSRF) |
+| signature, sign, verify | chữ ký, ký, xác minh |
+| symmetric / asymmetric algorithm, key rotation | thuật toán đối xứng / bất đối xứng, xoay vòng khóa (key rotation) |
+| expiry, revocation, introspection | hết hạn, thu hồi (revocation), kiểm tra trạng thái token (introspection) |
+| staleness window | khoảng hiệu lực lỗi thời (staleness window) |
+| allow-list, denylist | danh sách cho phép (allow-list), danh sách chặn (denylist) |
+| clock skew | độ lệch đồng hồ (clock skew) |
+| least privilege, complete mediation, fail-safe defaults | đặc quyền tối thiểu (least privilege), kiểm soát toàn diện (complete mediation), mặc định an toàn (fail-safe defaults) |
+| policy enforcement point / decision point | điểm thực thi chính sách (PEP) / điểm quyết định chính sách (PDP) |
+| access control list, capability | danh sách kiểm soát truy cập (access control list, ACL), năng lực (capability) |
+| role-, attribute-, relationship-based access control | kiểm soát truy cập dựa trên vai trò (RBAC) / thuộc tính (ABAC) / quan hệ (ReBAC) |
+| tenant | tổ chức thuê (tenant) |
+| audit log | nhật ký kiểm toán (audit log) |
+| request, response, header field, status code, body | yêu cầu, phản hồi, trường tiêu đề (header field), mã trạng thái, thân (body) |
+| mutual TLS | TLS hai chiều (mutual TLS, mTLS) |
+| proof of possession | bằng chứng sở hữu (proof of possession) |
+
+HTTP method names, header names, cookie attributes, claim names, parameter names, error codes
+and status phrases (`401 Unauthorized`) are code and stay in English.
+
+### Robotics, control and numerical methods
+
+| English | Tiếng Việt |
+|---|---|
+| link, joint, end effector | khâu, khớp, khâu tác động cuối (end effector) |
+| workspace, singularity | không gian làm việc, điểm kỳ dị (singularity) |
+| rotation matrix, homogeneous transformation | ma trận quay, phép biến đổi thuần nhất (homogeneous transformation) |
+| Euler angles, gimbal lock, quaternion | góc Euler, khóa gimbal (gimbal lock), quaternion |
+| Jacobian | ma trận Jacobi (Jacobian) |
+| open loop, closed loop | vòng hở, vòng kín |
+| gain, disturbance, setpoint / reference | độ lợi, nhiễu loạn (disturbance), giá trị đặt (setpoint) |
+| overshoot, settling time, steady-state error | độ vọt lố (overshoot), thời gian xác lập, sai số xác lập |
+| transfer function, pole, eigenvalue | hàm truyền, điểm cực (pole), trị riêng |
+| state-space model, state vector | mô hình không gian trạng thái (state-space model), vector trạng thái |
+| stability, stable, unstable | ổn định, ổn định, không ổn định |
+| observer, odometry, dead reckoning | bộ quan sát (observer), đo hành trình (odometry), định vị suy đoán (dead reckoning) |
+| sensor fusion, measurement update, prediction | hợp nhất cảm biến (sensor fusion), bước cập nhật đo, bước dự đoán |
+| numerical integration, step size | tích phân số, bước thời gian (step size) |
+| explicit / implicit method, stiff | phương pháp hiển / ẩn, hệ cứng (stiff) |
+| truncation error, round-off error, floating point | sai số cắt cụt, sai số làm tròn, dấu phẩy động (floating point) |
+| simulation, sim-to-real gap | mô phỏng, khoảng cách mô phỏng – thực tế (sim-to-real gap) |
+| compute-bound, memory-bound, arithmetic intensity | bị giới hạn bởi tính toán (compute-bound), bị giới hạn bởi bộ nhớ (memory-bound), cường độ số học (arithmetic intensity) |
