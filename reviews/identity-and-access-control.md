@@ -19,6 +19,14 @@ None of these makes a statement wrong, and all are fixable with short additions.
 
 Findings: 1 blocking, 12 should fix, 1 optional.
 
+## Resolution
+
+All 14 findings (F1–F14) were applied as recommended on 2026-10-13. Afterwards:
+- `SITE_URL=https://acrr.asia npm run build` reported 0 errors and 0 warnings, and `npm run check:links` found every internal link resolved;
+- no text was glued to inline elements, and KaTeX reported no errors.
+
+Entry 1 §3.1 is now "HTTP, the protocol underneath", so its anchor changed from `#31-http-is-stateless` to `#31-http-the-protocol-underneath`. No internal link used the old anchor. Line numbers below refer to the reviewed commit, not to the corrected articles.
+
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
