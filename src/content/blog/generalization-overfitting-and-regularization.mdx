@@ -1,0 +1,336 @@
+---
+title: "Generalization, Overfitting, and Regularization"
+description: "Why a model can fit its training data well and still predict poorly: training error versus generalization error, underfitting and overfitting shown with polynomial regression on synthetic data, the bias–variance decomposition with a simulation, and the standard remedies, namely ridge and lasso penalties, early stopping, more data and simpler models."
+publishedAt: "2026-10-13"
+category: "AI and Machine Learning"
+tags:
+  - machine learning
+  - supervised learning
+  - regularization
+  - overfitting
+series: machine-learning-fundamentals
+seriesOrder: 3
+---
+
+The [first entry](/blog/learning-from-data) defined the **risk** of a predictor, its expected loss on new examples, and showed that the **training error** of a fitted model is an optimistic estimate of it, because the parameters were chosen to make that very error small. The [second entry](/blog/gradient-descent-and-its-variants) showed how to drive the training error to its minimum. This entry asks how far apart the two numbers can drift, why, and what can be done about it.
+
+The short answer is that the gap grows with the flexibility of the model relative to the amount of data. A model flexible enough to follow the noise in its training set will do so, and the result predicts worse than a simpler model would. That failure is **overfitting**, its opposite is **underfitting**, and the techniques that steer between them are grouped under the name **regularization**.
+
+The entry uses the vocabulary of the first two entries (features, labels, linear model, design matrix, squared loss, mean squared error or MSE, risk, empirical risk minimization, learning rate) without redefining it. All examples use synthetic data generated with numpy's `default_rng` and the seeds given beside the code, run with Python 3.13 and numpy 2.5.3. Because the data are synthetic, the true relation and the noise level are known, and the risk of every fitted model can be estimated as precisely as desired from a large fresh sample. That is a luxury real data never offer; the [fourth entry](/blog/evaluating-models-honestly) shows how to estimate the same quantities without it.
+
+## 1. Training Error and Generalization Error
+
+### 1.1 The two quantities
+
+For a model with parameters $\hat{\mathbf{w}}$ fitted on a training set of $n$ examples:
+
+- the **training error** is the empirical risk on those $n$ examples, $\hat{R}_n(\hat{\mathbf{w}})$;
+- the **generalization error** is the risk $R(\hat{\mathbf{w}})$, the expected loss on a new example from the same distribution;
+- the **generalization gap** is the difference $R(\hat{\mathbf{w}}) - \hat{R}_n(\hat{\mathbf{w}})$.
+
+Since $R$ cannot be computed, it is estimated by the average loss on a separate set of examples not used in fitting, the **test error**. With $m$ test examples the test error has a standard deviation of order $1/\sqrt{m}$ around the risk, so in this entry, where data are free, $m = 100\,000$ makes the estimate accurate enough to read as the risk itself. The examples below call it the **fresh-data MSE** to keep in mind how it was obtained.
+
+### 1.2 Capacity
+
+The **capacity** (or complexity, or flexibility) of a model family describes how wide a range of functions it can represent. A straight line has low capacity; a polynomial of degree 15 has much more. Capacity is not one number in general, but within a nested family, such as polynomials of increasing degree, more parameters means more capacity: every degree-3 polynomial is also a degree-5 polynomial with two zero coefficients. Within such a family the minimum training error can only fall, or stay level, as capacity grows. The risk behaves differently, as the next section shows.
+
+## 2. Overfitting Made Visible
+
+### 2.1 The set-up
+
+The data come from a distribution chosen in advance:
+
+$$
+x \sim \text{Uniform}(0, 1), \qquad y = \sin(2\pi x) + \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0,\, 0.3^2).
+$$
+
+The sine function is the conditional mean of $y$ given $x$, which the first entry identified as the best possible predictor under squared loss; its risk, the irreducible error, is the noise variance $0.3^2 = 0.09$. No model can have a fresh-data MSE below 0.09.
+
+The models are polynomials of degree $k$, fitted by least squares. As the first entry noted, a polynomial is a linear model in the features $1, x, x^2, \dots, x^k$, so fitting it is the same least-squares problem as before with a wider design matrix. One numerical detail matters: the powers of a number in $[0, 1]$ become nearly indistinguishable at high degree, which makes $X^\top X$ badly conditioned (the second entry explained why conditioning matters). The code therefore uses powers of $t = 2x - 1$, which lies in $[-1, 1]$, and solves with `np.linalg.lstsq`, which is based on the singular value decomposition and copes with ill-conditioning better than the normal equations. The set of polynomials is the same; only the parametrization changes.
+
+### 2.2 The experiment
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=9)
+n, sigma = 20, 0.3
+
+def draw(m):
+    x = rng.uniform(0.0, 1.0, size=m)
+    return x, np.sin(2 * np.pi * x) + rng.normal(0.0, sigma, size=m)
+
+def features(x, degree):
+    return np.vander(2 * x - 1, degree + 1, increasing=True)  # 1, t, ..., t^degree; t = 2x - 1
+
+x_tr, y_tr = draw(n)                          # training set
+x_te, y_te = draw(100_000)                    # large fresh sample to estimate the risk
+
+for degree in [0, 1, 3, 5, 7, 9, 12, 15, 19]:
+    w, *_ = np.linalg.lstsq(features(x_tr, degree), y_tr, rcond=None)
+    train = np.mean((features(x_tr, degree) @ w - y_tr) ** 2)
+    test = np.mean((features(x_te, degree) @ w - y_te) ** 2)
+    print(f"degree {degree:2d}: training MSE {train:.4f}   fresh-data MSE {test:.4g}")
+```
+
+With seed 9 it prints:
+
+```text
+degree  0: training MSE 0.4766   fresh-data MSE 0.6889
+degree  1: training MSE 0.2709   fresh-data MSE 0.3397
+degree  3: training MSE 0.0825   fresh-data MSE 0.1047
+degree  5: training MSE 0.0595   fresh-data MSE 0.115
+degree  7: training MSE 0.0507   fresh-data MSE 0.1317
+degree  9: training MSE 0.0433   fresh-data MSE 0.3327
+degree 12: training MSE 0.0243   fresh-data MSE 2.375
+degree 15: training MSE 0.0217   fresh-data MSE 51.94
+degree 19: training MSE 0.0000   fresh-data MSE 2.648e+11
+```
+
+### 2.3 Reading the table
+
+The training MSE falls steadily with the degree, as Section 1.2 said it must, and at degree 19 it reaches zero: a polynomial with 20 coefficients can pass exactly through 20 points with distinct $x$ values. The fresh-data MSE tells a different story in three regimes.
+
+- **Underfitting** (degrees 0 and 1). A constant or a straight line cannot follow one period of a sine. Training and fresh-data errors are both far above the floor of 0.09, and close to each other. More data would not help much: the model family simply does not contain a good predictor.
+- **A good fit** (degree 3 to about 7). The fresh-data MSE reaches its lowest value, 0.1047 at degree 3, within 0.015 of the irreducible error. The training error (0.0825) is now below 0.09, the first sign that the model is fitting some noise.
+- **Overfitting** (degree 9 and above). The training error keeps falling, but the fresh-data error rises, slowly at first and then catastrophically. At degree 19 the model has memorized all 20 training points, noise included, and its predictions between them are useless.
+
+The very large errors at high degree come from regions where the training set has no examples. The sorted training inputs have a gap between $x = 0.065$ and $x = 0.287$, and none lie below 0.006 or above 0.983. Nothing in the training data constrains a high-degree polynomial there, and it swings far away from the sine. Fresh examples that fall in those regions are predicted wildly wrong. This is typical: an overfitted model is most dangerous on inputs unlike those it was trained on.
+
+These numbers belong to one training sample, and the details change with the seed. Rerunning the code with seeds 0 to 20 gives the same three regimes every time, but the lowest fresh-data MSE falls at degree 3 for 14 of the 21 seeds, at degree 5 for 6 and at degree 7 for 1, and the first degree whose fresh-data MSE exceeds 1 ranges from 7 to 15. Seed 9 is an ordinary member of that set.
+
+Two morals follow. First, the training error is useless for choosing the degree: it always recommends the most flexible model. Second, the best model is not the one closest to the truth in form (no polynomial is a sine) but the one with the best balance between flexibility and the amount of data. With 2000 examples instead of 20, degree 9 would no longer overfit (Exercise 3 asks why).
+
+## 3. The Bias–Variance Decomposition
+
+### 3.1 Two sources of error
+
+The fitted model depends on the training set, which is random, so the prediction $\hat{f}(x)$ at a fixed input $x$ is a random variable: a different sample of 20 examples would give a different curve. Its error can be split into parts with different causes. The training set can be random in two ways: both its inputs and its noise can be redrawn, as just described, or the inputs can be held fixed and only the noise redrawn, which is called a **fixed design**. The decomposition below holds in both cases; Sections 3.2 and 3.3 use the fixed design because it gives an exact formula.
+
+Fix $x$, write $f^*(x)$ for the true conditional mean and $\sigma^2$ for the noise variance, and let a new label be $y = f^*(x) + \varepsilon$ with noise independent of the training set. Then, averaging over both the training set and the new noise,
+
+$$
+\mathbb{E}\left[\big(\hat{f}(x) - y\big)^2\right]
+= \sigma^2
++ \underbrace{\big(\mathbb{E}[\hat{f}(x)] - f^*(x)\big)^2}_{\text{bias}^2}
++ \underbrace{\operatorname{Var}\big(\hat{f}(x)\big)}_{\text{variance}} .
+$$
+
+The derivation is the same completing-the-square argument as the first entry's: subtract and add $\mathbb{E}[\hat{f}(x)]$ and $f^*(x)$, and the cross terms vanish in expectation. The three terms are:
+
+- the **noise** $\sigma^2$, the irreducible error;
+- the squared **bias**, how far the average fitted model (averaged over many training sets) is from the truth. It measures what the model family cannot express;
+- the **variance**, how much the fitted model fluctuates from one training set to another. It measures sensitivity to the particular sample.
+
+A note on terminology: "bias" here is a property of an estimator, its systematic deviation from the target. It is unrelated to the intercept of a linear model (which some texts also call a bias), and different again from the bias of an evaluation, the systematic optimism or distortion of a reported error that the fourth entry discusses. This series keeps the three apart by always saying which is meant.
+
+### 3.2 Variance grows with the number of parameters
+
+For least squares there is a clean formula for the variance in a fixed design. The fitted values at the training inputs are $X\hat{\mathbf{w}} = P\mathbf{y}$, where $P = X(X^\top X)^{-1}X^\top$ is the projection matrix onto the columns of $X$; it is symmetric ($P^\top = P$) and applying it twice changes nothing ($PP = P$). Two more objects from linear algebra and probability are needed. The **covariance matrix** of a random vector is the matrix whose $(i, j)$ entry is the covariance of its $i$-th and $j$-th components (the expected product of their deviations from their means), so its diagonal holds their variances; multiplying a random vector by a fixed matrix $A$ turns a covariance matrix $C$ into $ACA^\top$. The **trace** of a square matrix is the sum of its diagonal entries. With noise of variance $\sigma^2$ independent across examples, the covariance matrix of $\mathbf{y}$ is $\sigma^2 I$, so that of $P\mathbf{y}$ is $\sigma^2 P P^\top = \sigma^2 P$, and the trace of a projection matrix equals the dimension of the space it projects onto, here the number of parameters $p$. Averaging the variance over the $n$ training inputs therefore gives
+
+$$
+\frac{1}{n}\sum_{i=1}^{n} \operatorname{Var}\big(\hat{f}(x_i)\big) = \frac{\sigma^2 p}{n}.
+$$
+
+Each extra parameter adds $\sigma^2/n$ to the average variance, whatever the data look like, while the bias falls only if the extra parameter lets the model express something it could not before.
+
+### 3.3 A simulation
+
+The code below fixes 20 evenly spaced inputs $x_i = (i + 0.5)/20$, redraws the noise 5000 times, refits each polynomial, and measures the squared bias and the variance of the fitted values at those inputs.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=11)
+n, sigma, trials = 20, 0.3, 5000
+x = (np.arange(n) + 0.5) / n                  # fixed, evenly spaced inputs
+f_true = np.sin(2 * np.pi * x)
+
+def features(x, degree):
+    return np.vander(2 * x - 1, degree + 1, increasing=True)
+
+for degree in [1, 3, 5, 9, 15]:
+    X = features(x, degree)
+    preds = np.empty((trials, n))
+    for k in range(trials):                   # new noise, same inputs, each time
+        y = f_true + rng.normal(0.0, sigma, size=n)
+        w, *_ = np.linalg.lstsq(X, y, rcond=None)
+        preds[k] = X @ w
+    bias2 = np.mean((preds.mean(axis=0) - f_true) ** 2)
+    var = np.mean(preds.var(axis=0))
+    print(f"degree {degree:2d}: bias^2 {bias2:.4f}  variance {var:.4f}  "
+          f"(sigma^2 p/n = {sigma**2 * (degree + 1) / n:.4f})  "
+          f"expected error {sigma**2 + bias2 + var:.4f}")
+```
+
+```text
+degree  1: bias^2 0.1928  variance 0.0091  (sigma^2 p/n = 0.0090)  expected error 0.2919
+degree  3: bias^2 0.0039  variance 0.0176  (sigma^2 p/n = 0.0180)  expected error 0.1115
+degree  5: bias^2 0.0000  variance 0.0269  (sigma^2 p/n = 0.0270)  expected error 0.1169
+degree  9: bias^2 0.0000  variance 0.0446  (sigma^2 p/n = 0.0450)  expected error 0.1346
+degree 15: bias^2 0.0000  variance 0.0715  (sigma^2 p/n = 0.0720)  expected error 0.1615
+```
+
+The simulated variances agree with $\sigma^2 p/n$ to within the simulation's sampling error. The squared bias can also be computed exactly, as the mean square of the part of the sine values that the polynomial columns cannot reproduce; it is 0.1928 for degree 1, 0.0039 for degree 3, and $1.3 \times 10^{-5}$ for degree 5 (shown as 0.0000), and smaller still above that. The expected error is lowest at degree 3, where the last real reduction in bias is bought for a small increase in variance; beyond that, the bias has nothing left to give and every extra parameter costs variance.
+
+This simulation measures the error at the training inputs, with new noise only: the column labelled "expected error" is the expected squared error on a new label at the same 20 inputs, not the risk at random new inputs that Section 2 estimated, so the two sets of numbers are not directly comparable. Predicting at the training inputs is easier than predicting at new inputs, which is why the simulation shows only the gentle growth of $\sigma^2 p/n$ and not the catastrophic errors of Section 2, which arose in gaps between training inputs. The decomposition itself holds at every input; at inputs far from the training data the variance term is what explodes.
+
+### 3.4 The trade-off
+
+The decomposition explains the U-shape of Section 2. Increasing capacity lowers bias and raises variance; the risk is their sum plus the noise, and it is smallest where the two are balanced. Where that balance lies depends on the amount of data, since the variance shrinks with $n$ while the bias does not, and on the noise level. This is the **bias–variance trade-off**.
+
+The trade-off is a guide, not a law about parameter counts. Very large models, such as neural networks with more parameters than training examples, have been observed to predict well in many applications even when they fit their training data almost exactly (Belkin et al., 2019, listed in the references); when and why this happens is an active research question outside the scope of this series. The decomposition still holds for such models, since it is an identity; what fails is the use of the parameter count as a measure of the variance, as in the formula of Section 3.2.
+
+## 4. Regularization
+
+**Regularization** is any change to the learning procedure that is meant to reduce the risk, usually by reducing variance, even if it increases the training error. The common forms are described below.
+
+### 4.1 Ridge regression: penalizing large weights
+
+The overfitted polynomials of Section 2 achieve their small training error with huge coefficients of opposite signs that nearly cancel at the training inputs and do not cancel between them. **Ridge regression** (also called $L_2$ regularization, or **weight decay** in neural-network practice) adds a penalty on the size of the weights to the objective:
+
+$$
+J_\lambda(\mathbf{w}) = \frac{1}{n}\lVert X\mathbf{w} - \mathbf{y}\rVert^2 + \lambda \sum_{j=1}^{p-1} w_j^2 ,
+$$
+
+where $\lambda \ge 0$ is the **regularization strength**, a hyperparameter. The sum runs over the feature weights only, $w_1$ to $w_{p-1}$ with $p$ the number of parameters; the intercept $w_0$ is conventionally left unpenalized, so that adding a constant to every label simply shifts the fit. Setting the gradient to zero gives a closed form like the normal equations:
+
+$$
+\left(X^\top X + n\lambda D\right)\mathbf{w} = X^\top \mathbf{y},
+$$
+
+where $D$ is the identity matrix with its first diagonal entry set to 0. For $\lambda > 0$ the matrix on the left is invertible even when $X^\top X$ is not, which is a numerical benefit in its own right: the penalty adds the matrix $2\lambda D$ to the Hessian, which cannot lower any of its eigenvalues and typically lifts the near-zero ones that make an unpenalized problem ill-conditioned in the sense of the second entry.
+
+The penalty depends on the scale of each feature: the same length recorded in meters instead of millimeters takes values a thousand times smaller, so its weight must be a thousand times larger to give the same predictions, and that weight is penalized a million times more. Features are therefore usually standardized before ridge regression. Here all the features $t^j$ lie in $[-1, 1]$, which is adequate for an illustration.
+
+The code applies ridge regression to the degree-12 polynomial of Section 2, on the same data (seed 9), for a range of $\lambda$:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=9)           # same data as the previous example
+n, sigma, degree = 20, 0.3, 12
+
+def draw(m):
+    x = rng.uniform(0.0, 1.0, size=m)
+    return x, np.sin(2 * np.pi * x) + rng.normal(0.0, sigma, size=m)
+
+def features(x):
+    return np.vander(2 * x - 1, degree + 1, increasing=True)
+
+x_tr, y_tr = draw(n)
+x_te, y_te = draw(100_000)
+X, Xte = features(x_tr), features(x_te)
+
+D = np.eye(degree + 1)
+D[0, 0] = 0.0                                 # do not penalize the intercept
+for lam in [0.0, 1e-6, 1e-4, 1e-3, 1e-2, 1e-1, 1.0]:
+    w = np.linalg.solve(X.T @ X + n * lam * D, X.T @ y_tr)
+    train = np.mean((X @ w - y_tr) ** 2)
+    test = np.mean((Xte @ w - y_te) ** 2)
+    print(f"lambda {lam:7.0e}: training MSE {train:.4f}   fresh-data MSE {test:.4f}   "
+          f"|w| {np.linalg.norm(w[1:]):9.1f}")
+```
+
+```text
+lambda   0e+00: training MSE 0.0243   fresh-data MSE 2.3751   |w|    6097.8
+lambda   1e-06: training MSE 0.0382   fresh-data MSE 0.2533   |w|      41.2
+lambda   1e-04: training MSE 0.0547   fresh-data MSE 0.1134   |w|       7.6
+lambda   1e-03: training MSE 0.0660   fresh-data MSE 0.1165   |w|       3.6
+lambda   1e-02: training MSE 0.0959   fresh-data MSE 0.1405   |w|       2.0
+lambda   1e-01: training MSE 0.2009   fresh-data MSE 0.2894   |w|       0.9
+lambda   1e+00: training MSE 0.3712   fresh-data MSE 0.5453   |w|       0.2
+```
+
+The first line reproduces the unregularized degree-12 fit of Section 2 (fresh-data MSE 2.375), whose feature weights have a Euclidean length of about 6100. A penalty as small as $\lambda = 10^{-6}$ cuts that length to 41 and the fresh-data error by almost a factor of ten. Around $\lambda = 10^{-4}$ the degree-12 model predicts nearly as well (0.1134) as the best unregularized polynomial, degree 3 (0.1047), even though it has thirteen parameters. Beyond about $10^{-3}$ the penalty starts to dominate the fit, the weights are pulled too close to zero, and the model underfits. Throughout, the training error rises monotonically with $\lambda$: regularization deliberately accepts a worse fit to the training data.
+
+The regularization strength thus plays the role the degree played in Section 2, but continuously: small $\lambda$ means high capacity and high variance, large $\lambda$ low capacity and high bias.
+
+### 4.2 The lasso: penalizing absolute values
+
+The **lasso** replaces the squared weights in the penalty with their absolute values, $\lambda \sum_j \lvert w_j \rvert$ (an $L_1$ penalty). The change has a qualitative effect: at the minimizer, many weights are exactly zero rather than merely small, so the lasso performs feature selection as part of fitting. The objective is still convex but no longer differentiable where a weight is zero, so it has no closed-form solution in general and is solved with methods such as coordinate descent or proximal gradient methods, refinements of the iterative methods of the second entry. The lasso is useful when many features are believed irrelevant; ridge is preferable when many features each carry a little information. A weighted sum of both penalties is called the **elastic net**.
+
+### 4.3 Early stopping
+
+Gradient descent started from $\mathbf{w}_0 = \mathbf{0}$ moves first along the directions in which the objective falls fastest, the directions of large Hessian eigenvalues ([Section 3.2 of the second entry](/blog/gradient-descent-and-its-variants#32-many-dimensions-curvature-and-conditioning)), and only later along the flat ones. In a least-squares problem the flat directions are precisely those that the data determine poorly, the ones where fitting means fitting noise. Stopping the iteration before convergence therefore leaves those directions near zero, much as a ridge penalty would.
+
+For least squares the analogy can be made semi-quantitative, as a rule of thumb rather than an exact equivalence. Write $\mu_i$ for an eigenvalue of the Hessian (the second entry called it $\lambda_i$; here $\lambda$ is the ridge strength). Along the corresponding eigenvector, $t$ steps of gradient descent from zero recover the fraction $1 - (1 - \eta\mu_i)^t$ of the least-squares solution's component, while ridge regression with a penalty on every weight recovers the fraction $\mu_i/(\mu_i + 2\lambda)$. Both fractions are close to 1 for steep directions and small for flat ones, and for the flat directions they roughly agree when $2\lambda$ is about $1/(\eta t)$. Heuristically, then, stopping after $t$ steps acts somewhat like a ridge penalty with $\lambda$ of the order of $1/(\eta t)$, a penalty that weakens as training continues; in between the two extremes the two methods shrink differently.
+
+In practice **early stopping** monitors the error on held-out data during training and keeps the parameters from the iteration where that error was lowest. It costs little beyond periodic evaluations of the held-out error, and it is widely used for neural networks, often together with weight decay.
+
+### 4.4 Other remedies
+
+- **More data.** The variance term falls as $1/n$, so more examples from the same distribution reduce overfitting directly. It is often the most effective remedy when available.
+- **A smaller model family.** Fewer parameters or fewer features, chosen by the methods of the fourth entry.
+- **Data augmentation.** Creating extra training examples by transformations that should not change the label, such as small shifts or rotations of an image. This builds known invariances into the training data.
+- **Averaging models.** Fitting several models (for example on resampled training sets) and averaging their predictions reduces variance, because the fluctuations of the individual models partly cancel.
+
+## 5. Choosing the Amount of Regularization
+
+Every remedy above has a knob: the degree, $\lambda$, the stopping iteration, the number of features. This entry chose them by looking at the fresh-data MSE, computed from 100 000 examples drawn from a known distribution. In practice there is no such oracle. The temptation is to use the test set instead, trying several settings and keeping the one with the lowest test error. That reintroduces exactly the problem of the first entry: the test error of the chosen setting has been minimized over the choices, so it is optimistic in the same way that the training error is.
+
+The standard solution is to split the available data three ways, or to use cross-validation, so that the knobs are chosen on one portion and the final model is judged on another that played no part in any choice. The next entry develops these procedures and the ways in which they can still go wrong.
+
+## 6. Exercises
+
+**Exercise 1.** A least-squares model with 8 parameters is fitted to 40 examples, with fixed inputs and noise standard deviation 0.5. What is the average variance of its fitted values at the training inputs? How many parameters could it have before that variance exceeds 0.05?
+
+<details>
+<summary>Answer</summary>
+
+$\sigma^2 p/n = 0.25 \times 8/40 = 0.05$. It is already at 0.05 with 8 parameters, so any more parameters would push it over.
+
+</details>
+
+**Exercise 2.** In the ridge table, why does the training MSE rise steadily with $\lambda$, while the fresh-data MSE first falls and then rises?
+
+<details>
+<summary>Answer</summary>
+
+At $\lambda = 0$ the solution minimizes the training MSE exactly; any $\lambda > 0$ trades training fit for smaller weights, and the larger $\lambda$, the more fit is given up. The fresh-data MSE is bias squared plus variance plus noise: small $\lambda$ removes mostly variance (the wild swings between training points), which helps, while large $\lambda$ also adds bias by shrinking useful weights, which hurts.
+
+</details>
+
+**Exercise 3.** Using the formula $\sigma^2 p/n$, explain why a degree-9 polynomial would not overfit badly with 2000 training examples from the same distribution.
+
+<details>
+<summary>Answer</summary>
+
+With $p = 10$ and $n = 2000$, the average variance is $0.09 \times 10/2000 = 0.00045$, negligible beside the noise of 0.09, and the bias of degree 9 is essentially zero. With 2000 random inputs there are also no wide gaps in $[0, 1]$ for the polynomial to swing in.
+
+</details>
+
+**Exercise 4.** The lasso sets some weights exactly to zero; ridge regression almost never does. Give one situation where each behavior is preferable.
+
+<details>
+<summary>Answer</summary>
+
+The lasso suits problems where most features are believed irrelevant and a short list of the relevant ones is itself useful, for interpretation or to reduce the cost of measuring features. Ridge suits problems where many correlated features each carry some information, since the lasso tends to pick one of a group of correlated features arbitrarily and drop the others.
+
+</details>
+
+## 7. Summary
+
+| Question | Answer |
+|---|---|
+| What is the generalization gap? | The difference between a fitted model's risk (generalization error) and its training error. |
+| What are underfitting and overfitting? | Underfitting: the model family is too restricted, so both errors are high. Overfitting: the model follows noise in the training set, so training error is low and risk is high. |
+| Why can't the training error choose the model? | Within a nested family it always falls as capacity grows, so it always favors the most flexible model. |
+| What is the bias–variance decomposition? | Expected squared error = noise + bias² + variance; capacity trades bias against variance. |
+| How fast does variance grow for least squares? | With fixed inputs, the average variance at the training inputs is $\sigma^2 p/n$. |
+| What does ridge regression do? | Adds $\lambda\sum_j w_j^2$ to the objective, shrinking the weights; it raises training error and can greatly lower risk. |
+| How does the lasso differ? | Its $L_1$ penalty sets some weights exactly to zero, selecting features. |
+| What else regularizes? | Early stopping, more data, smaller models, data augmentation, averaging models. |
+| How should the regularization strength be chosen? | On data not used for fitting and not used for the final evaluation: the subject of the next entry. |
+
+The final entry, [Evaluating Models Honestly](/blog/evaluating-models-honestly), turns from what overfitting is to how to measure it: how to split data into training, validation and test sets, how cross-validation reuses data safely, how information leaks from the evaluation data into the model, and how to report an error with its uncertainty.
+
+### References
+
+- A. E. Hoerl and R. W. Kennard, "Ridge Regression: Biased Estimation for Nonorthogonal Problems," *Technometrics*, 12(1), 1970.
+- R. Tibshirani, "Regression Shrinkage and Selection via the Lasso," *Journal of the Royal Statistical Society, Series B*, 58(1), 1996.
+- S. Geman, E. Bienenstock and R. Doursat, "Neural Networks and the Bias/Variance Dilemma," *Neural Computation*, 4(1), 1992.
+- M. Belkin, D. Hsu, S. Ma and S. Mandal, "Reconciling Modern Machine-Learning Practice and the Classical Bias–Variance Trade-Off," *Proceedings of the National Academy of Sciences*, 116(32), 2019.
+- T. Hastie, R. Tibshirani and J. Friedman, *The Elements of Statistical Learning: Data Mining, Inference, and Prediction*, 2nd edition, Springer, 2009.
+- C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006.
+- I. Goodfellow, Y. Bengio and A. Courville, *Deep Learning*, MIT Press, 2016.
