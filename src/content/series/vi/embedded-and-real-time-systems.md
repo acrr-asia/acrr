@@ -1,24 +1,13 @@
 ---
 title: "Hệ thống nhúng và thời gian thực"
-description: "Loạt bài dự kiến về những chiếc máy tính nằm bên trong máy móc: kiến trúc vi điều khiển (microcontroller), ngắt (interrupt) và DMA, các bus trên bo mạch và trên xe, hệ điều hành thời gian thực (real-time operating system, RTOS) và lập lịch (scheduling), cùng việc đo đặc tính thời gian."
+description: "Loạt bài về những chiếc máy tính nằm bên trong máy móc: kiến trúc vi điều khiển (microcontroller), ngắt (interrupt) và DMA, các bus trên bo mạch và trên xe, hệ điều hành thời gian thực (real-time operating system, RTOS) và lập lịch (scheduling), cùng việc đo đặc tính thời gian."
 category: "Computing Systems"
-status: "planned"
+status: "published"
 objectives:
   - "Mô tả cách CPU, bộ nhớ, bộ định thời (timer), bộ chuyển đổi và ngoại vi (peripheral) của một vi điều khiển phối hợp với nhau."
   - "Lựa chọn giữa thăm dò (polling), ngắt và DMA để truyền dữ liệu cảm biến."
   - "So sánh các bus nối tiếp (serial bus) UART, SPI, I2C và CAN theo topo mạng (topology), tốc độ và cách xử lý lỗi."
   - "Giải thích lập lịch thời gian thực và kiểm chứng bằng phép đo rằng các thời hạn (deadline) đều được đáp ứng."
-plannedEntries:
-  - title: "Bên trong một vi điều khiển"
-    description: "CPU, bản đồ bộ nhớ (memory map), xung nhịp (clock), bộ định thời, bộ chuyển đổi tương tự – số (analog-to-digital converter, ADC) và cổng vào/ra đa dụng (general-purpose I/O), cùng cách phần sụn (firmware) điều khiển chúng."
-  - title: "Ngắt, thăm dò và DMA"
-    description: "Ba cách truyền dữ liệu giữa ngoại vi và bộ nhớ, và ảnh hưởng của mỗi cách đến độ trễ (latency) và tải CPU."
-  - title: "Bus nối tiếp: UART, SPI, I2C và CAN"
-    description: "Cách mỗi bus đóng khung (framing), đánh địa chỉ và kiểm tra dữ liệu, và nơi mỗi bus được dùng, từ bo mạch cảm biến đến xe cộ."
-  - title: "Hệ điều hành thời gian thực và lập lịch"
-    description: "Tác vụ (task), mức ưu tiên, đồng bộ hóa (synchronisation) và lý thuyết lập lịch cho biết các thời hạn có thể được đáp ứng hay không."
-  - title: "Đo đặc tính thời gian, độ trễ và mức sử dụng tài nguyên"
-    description: "Gắn công cụ đo (instrumentation) vào phần mềm nhúng để kiểm chứng thời gian thực thi, độ dao động thời gian (jitter) và mức sử dụng bộ nhớ trên phần cứng thật."
 ---
 
-Loạt bài này đang được lên kế hoạch và chưa bắt đầu xuất bản. Loạt bài giả định người đọc đã biết lập trình C cơ bản và logic số. Đề cương dưới đây mô tả phạm vi dự kiến và có thể thay đổi trước khi bất kỳ bài nào được viết.
+Loạt bài này dành cho người đọc đã biết lập trình C cơ bản (kiểu dữ liệu, con trỏ, cấu trúc và các toán tử thao tác bit) và logic số cơ bản (số nhị phân và thập lục phân, cổng logic, flip-flop và xung nhịp), và muốn hiểu những chiếc máy tính nhỏ điều khiển máy móc. Loạt bài bắt đầu từ các khái niệm cơ bản của hệ thống thời gian thực (thời hạn, độ trễ (latency) và độ dao động thời gian (jitter)) và các thành phần của một vi điều khiển, sau đó theo dòng dữ liệu đi từ ngoại vi vào bộ nhớ bằng thăm dò, ngắt và DMA, và giữa các chip và các bộ điều khiển qua UART, SPI, I2C và CAN. Tiếp theo, loạt bài trình bày cách một hệ điều hành thời gian thực tổ chức phần sụn (firmware) thành các tác vụ (task) có mức ưu tiên, cách phân tích lập lịch dự đoán liệu mọi thời hạn có được đáp ứng hay không, và kết thúc bằng việc đo thời gian thực thi, độ trễ, độ dao động thời gian, tải bộ xử lý và mức sử dụng bộ nhớ trên phần cứng thật để kiểm chứng các dự đoán đó. Các ví dụ được viết bằng C11 cho một vi điều khiển 32 bit tổng quát thuộc lớp Arm Cortex-M, còn các phép tính dùng Python.
