@@ -13,4 +13,4 @@ objectives:
   - "Explain why a robot must estimate its state, and how a Kalman filter combines a motion model with noisy measurements."
 ---
 
-This series is intended for readers who are comfortable with basic linear algebra and trigonometry. It starts from what a robot is and works down to the geometry, kinematics and estimation that every robot depends on.
+This series is intended for readers who are comfortable with basic linear algebra, trigonometry and calculus (derivatives), and who have met torque and inertia in introductory mechanics. The probability it needs is introduced where it is used. It starts from what a robot is and works down to the geometry, kinematics and estimation that every robot depends on.

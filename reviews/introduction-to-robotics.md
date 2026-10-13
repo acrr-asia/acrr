@@ -18,6 +18,14 @@ The series is ready as published once the seven should-fix items are corrected. 
 
 Findings: 0 blocking, 7 should fix, 3 optional.
 
+## Resolution
+
+All 10 findings (F1–F10) were applied as recommended on 2026-10-13. Afterwards:
+- `SITE_URL=https://acrr.asia npm run build` reported 0 errors and 0 warnings, and `npm run check:links` found every internal link resolved;
+- the four articles showed no text glued to inline elements and no KaTeX errors.
+
+Line numbers below refer to the reviewed state, not to the corrected articles.
+
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
