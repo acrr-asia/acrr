@@ -3,6 +3,7 @@
 - Series: `machine-learning-fundamentals` (4 articles, status published, 0 planned entries)
 - Reviewed commit: 0654c71
 - Date: 2026-10-13
+- Content hash: sha256:fa76c5d851e830c40a198b9f2c6c3f6a91a2958a5567e3c8cb9d9d413f4d1e21
 
 ## Summary
 
