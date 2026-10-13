@@ -1,6 +1,6 @@
 ---
 title: "Is the Sim-to-Real Gap Something to Close or to Measure?"
-description: "A short research question on the gap between simulated and real robot behaviour for learned controllers, and why it may be more useful as a measured property than as a defect to remove."
+description: "A short research question on the gap between simulated and real robot behavior for learned controllers, and why it may be more useful as a measured property than as a defect to remove."
 publishedAt: 2026-10-09
 kind: "Research question"
 tags:
@@ -11,11 +11,11 @@ tags:
 
 ## Established
 
-A simulator is a model. To stay computationally tractable, and because the true physics and parameters are only partly known, it simplifies or approximates the physics: contact is usually approximated by a simple model, friction is often described by a few coefficients, actuators are often idealised, and sensors are often noise-free or given only simple noise models. A real robot also has effects such as communication delays, gear backlash and structural flexibility, which a simulator may omit or capture only roughly.
+A simulator is a model. To stay computationally tractable, and because the true physics and parameters are only partly known, it simplifies or approximates the physics: contact is usually approximated by a simple model, friction is often described by a few coefficients, actuators are often idealized, and sensors are often noise-free or given only simple noise models. A real robot also has effects such as communication delays, gear backlash and structural flexibility, which a simulator may omit or capture only roughly.
 
-A policy trained on one such model optimises for that model's behaviour. If the real system differs in details the policy depends on, the policy can perform worse or fail. This discrepancy is commonly called the sim-to-real gap.
+A policy trained on one such model optimizes for that model's behavior. If the real system differs in details the policy depends on, the policy can perform worse or fail. This discrepancy is commonly called the sim-to-real gap.
 
-Two widely used mitigation ideas are domain randomisation, which varies simulator parameters such as masses, friction coefficients or sensor noise during training so that the policy sees a range of plausible dynamics instead of one, and system identification, which fits the simulator's parameters to measurements from the real robot so the model matches it more closely.
+Two widely used mitigation ideas are domain randomization, which varies simulator parameters such as masses, friction coefficients or sensor noise during training so that the policy sees a range of plausible dynamics instead of one, and system identification, which fits the simulator's parameters to measurements from the real robot so the model matches it more closely.
 
 ## Interpretation
 

@@ -1,6 +1,6 @@
 ---
 title: "Compute-Bound or Memory-Bound? The Roofline Idea"
-description: "A short concept explanation of the roofline idea: how arithmetic throughput and memory bandwidth together bound performance, and what that implies for choosing what to optimise."
+description: "A short concept explanation of the roofline idea: how arithmetic throughput and memory bandwidth together bound performance, and what that implies for choosing what to optimize."
 publishedAt: 2026-10-05
 kind: "Concept explanation"
 tags:
@@ -19,12 +19,12 @@ Hypothetical machine: $P_{\mathrm{peak}} = 1000$ GFLOP/s and $B = 100$ GB/s, so 
 
 ## Interpretation
 
-The model works as a triage tool: compute $I$, compare it with $I^*$, then choose where to spend effort. In the example, doubling arithmetic throughput leaves the bound at 8.3 GFLOP/s, while doubling bandwidth doubles it. Vectorization work would probably be wasted; the productive direction is moving fewer bytes, for instance by fusing loops over the same data. Conversely, a kernel with $I$ well above $I^*$ and measured performance far below the roof suggests looking beyond bandwidth, for example at instruction mix or load imbalance, or at memory traffic larger than the idealised byte count.
+The model works as a triage tool: compute $I$, compare it with $I^*$, then choose where to spend effort. In the example, doubling arithmetic throughput leaves the bound at 8.3 GFLOP/s, while doubling bandwidth doubles it. Vectorization work would probably be wasted; the productive direction is moving fewer bytes, for instance by fusing loops over the same data. Conversely, a kernel with $I$ well above $I^*$ and measured performance far below the roof suggests looking beyond bandwidth, for example at instruction mix or load imbalance, or at memory traffic larger than the idealized byte count.
 
 Intensity belongs to the algorithm and its data layout as much as to the machine, and $I^*$ differs between machines, so one program can be memory-bound on one and compute-bound on another.
 
 ## Open questions
 
 - How well do one peak figure and one bandwidth figure describe machines with several cache levels, mixed instruction types, or accelerators?
-- For irregular access, such as sparse or pointer-based structures, can $I$ be defined without running the code, since the bytes moved depend on cache behaviour and the input?
+- For irregular access, such as sparse or pointer-based structures, can $I$ be defined without running the code, since the bytes moved depend on cache behavior and the input?
 - If a kernel is limited by memory latency rather than bandwidth, this triage would mislead. How can that case be told apart cheaply from measurements?

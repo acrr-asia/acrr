@@ -4,7 +4,7 @@ description: "A series on the measurement chain, from a physical quantity to a t
 category: "Engineering"
 status: "published"
 objectives:
-  - "Describe a measurement system as a chain from measurand to number, and characterise a sensor by its static and dynamic properties."
+  - "Describe a measurement system as a chain from measurand to number, and characterize a sensor by its static and dynamic properties."
   - "Explain the main physical principles by which sensors convert a quantity into an electrical signal."
   - "Design the analog front end of a sensor: excitation, bridges, amplification and filtering."
   - "Explain sampling, quantization and data conversion, and the noise that limits what can be detected."
