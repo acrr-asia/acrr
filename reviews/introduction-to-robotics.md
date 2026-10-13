@@ -4,6 +4,7 @@
 - Reviewed commit: a429fd8 (the four articles and the series file have no uncommitted changes)
 - Date: 2026-10-13
 - Previous review: first review (10 findings) applied in 1c95247; this is the second review.
+- Content hash: sha256:4ce50bc21fa857f471fdb7634db7759e22fe429d81786e3da5d16e6624d00cd7
 
 ## Summary
 
