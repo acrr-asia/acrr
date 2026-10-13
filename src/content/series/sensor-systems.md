@@ -12,8 +12,6 @@ objectives:
   - "Explain sampling, quantization and data conversion, and the noise that limits what can be detected."
   - "State and combine measurement uncertainties, and calibrate and fuse sensors."
 plannedEntries:
-  - title: "Sampling, Quantization and Data Conversion"
-    description: "The sampling theorem, aliasing and anti-aliasing filters, quantization error, and how analog-to-digital converters work."
   - title: "Noise, Interference and the Limits of Detection"
     description: "Thermal, shot and flicker noise, interference and grounding, and how noise sets the smallest change a sensor system can detect."
   - title: "Smart Sensors and MEMS"
