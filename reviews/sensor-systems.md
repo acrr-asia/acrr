@@ -3,6 +3,7 @@
 - Series: `sensor-systems` (7 articles, status published, 0 planned entries)
 - Reviewed commit: 6c525b1
 - Date: 2026-10-13
+- Content hash: sha256:d214e5d863d0866055d0238f76455c62ae06192919ece9aad9392ae54fce0343
 
 ## Summary
 
@@ -72,6 +73,8 @@ Applied on 2026-10-13 on branch `review/sensor-systems`, at the owner's request.
     - code 10 for 2.000 V under rounding.
 
 Line numbers in the findings refer to the reviewed commit 6c525b1, not to the corrected articles.
+
+- **Editor's change after the review (F7, entry 4 part):** the Digital Signal Processing for Engineers series was completed and published together with this series, so the entry-4 sentence that called it "planned" would have become false. Like F20, it now links the series page without calling it planned: "The digital half is the subject of the [Digital Signal Processing for Engineers](/series/digital-signal-processing) series." The Vietnamese sentence was changed to match. No other text changed; the build and link check were re-run.
 
 ## Objectives coverage
 
