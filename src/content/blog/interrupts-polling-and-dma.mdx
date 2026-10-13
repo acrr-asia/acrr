@@ -84,7 +84,7 @@ sequenceDiagram
 ```
 
 1. The peripheral sets its flag. If the interrupt for that flag is enabled in the peripheral and in the NVIC, the request becomes **pending**.
-2. If the pending interrupt's priority is higher than that of the code currently running, the core accepts it. On Cortex-M, hardware saves eight registers (R0 to R3, R12, the link register LR, the program counter PC and the status register, 32 bytes) on the stack, and reads the handler's address from the vector table described in [Section 4.1 of the first entry](/blog/inside-a-microcontroller#41-from-reset-to-main).
+2. If the pending interrupt's priority is higher than that of the code currently running, the core accepts it. On Cortex-M, hardware saves eight registers (R0 to R3, R12, the link register LR, the program counter PC and the status register, 32 bytes; on cores with a floating-point unit, more when the interrupted code was using floating-point registers) on the stack, and reads the handler's address from the vector table described in [Section 4.1 of the first entry](/blog/inside-a-microcontroller#41-from-reset-to-main).
 3. The ISR runs. It must read the data and clear the cause of the interrupt; if the flag stays set, the interrupt is taken again as soon as the ISR returns.
 4. On return, hardware restores the saved registers and the interrupted code continues.
 
@@ -329,7 +329,7 @@ The three methods trade latency, processor load and complexity:
 Some typical decisions with the numbers of this entry:
 
 - **A push-button.** Rare, slow and tolerant of tens of milliseconds of latency. Periodic polling from a timer tick, which also debounces it, is simplest.
-- **A command line on a UART at 115 200 bit/s.** Bytes arrive irregularly, every 86.8 µs at most. An interrupt per byte into a ring buffer costs 2.4 % of the processor and never loses a byte if the worst-case latency stays well below 86.8 µs.
+- **A command line on a UART at 115 200 bit/s.** Bytes arrive irregularly, at most one every 86.8 µs. An interrupt per byte into a ring buffer costs 2.4 % of the processor and never loses a byte if the worst-case latency stays well below 86.8 µs.
 - **An audio or vibration stream at 100 kHz.** An interrupt per sample would take about a fifth of the processor; circular DMA with double buffering takes a fraction of a percent and keeps sample timing exact.
 - **Reading 6 bytes from an SPI sensor once per millisecond.** At 8 MHz the transfer takes about 7 µs (the next entry computes such times). Starting it from a timer interrupt and busy-waiting for completion inside a task is often simpler and cheaper than setting up DMA; for many sensors or longer bursts, DMA wins.
 
@@ -360,7 +360,7 @@ Worst-case latency $= 0.25 + 8 + 6 + 15 = 29.25$ µs, which is below 50 µs, so 
 <details>
 <summary>Answer</summary>
 
-If the counter overflows between the read of `ticks_high` and the read of `TIMER->COUNT`, the high half is the old value and the low half is the new, small one, so the result jumps back by $2^{32}$ counts. A standard fix is to read `ticks_high`, then the counter, then `ticks_high` again, and repeat if the two high reads differ. (The fix also assumes the overflow ISR is not delayed past the read, which holds as long as interrupts are enabled.)
+If the counter overflows between the read of `ticks_high` and the read of `TIMER->COUNT`, the high half is the old value and the low half is the new, small one, so the result jumps back by $2^{32}$ counts. A standard fix is to read `ticks_high`, then the counter, then `ticks_high` again, and repeat if the two high reads differ. This assumes that the overflow ISR has run before the second read of `ticks_high`, which is not guaranteed even with interrupts enabled: the interrupt may still be pending, during its entry time or because the reading code runs at the same or a higher priority. Robust code therefore also checks the timer's overflow flag, and adds one to the high half if the flag is set and the counter value is small.
 
 </details>
 
