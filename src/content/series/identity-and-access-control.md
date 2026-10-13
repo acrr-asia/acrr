@@ -11,8 +11,6 @@ objectives:
   - "Explain delegated authorization with OAuth 2.0 and federated authentication with OpenID Connect, including why public clients need PKCE."
   - "Validate an access token correctly and enforce object-level authorization at the resource server."
 plannedEntries:
-  - title: "Sender-Constrained Tokens: DPoP and Mutual TLS"
-    description: "Binding an access token to a key the client holds, so that a stolen token cannot be replayed by another party."
   - title: "Service-to-Service Authentication"
     description: "Workload identity, mutual TLS inside a service mesh, and propagating the end user's identity across internal calls."
 ---
