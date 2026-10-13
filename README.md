@@ -212,7 +212,7 @@ The site is bilingual. English is the original language and lives at the root (`
 - Interface text is in `src/i18n/ui.ts`; page copy of Home, About and Learning sits in `src/views/` next to each view, in both languages. Pages in `src/pages/` and `src/pages/vi/` are thin wrappers around the same views.
 - Search keeps a separate index per language, so a search started on a Vietnamese page searches Vietnamese pages. `/vi/rss.xml` lists translated articles only. Pages with both versions carry `hreflang` links (with `SITE_URL` set), and the sitemap pairs them.
 - The generated SVG diagrams keep English labels; their captions are translated.
-- Vietnamese pages use self-hosted fonts with full Vietnamese coverage (Noto Serif, Inter and JetBrains Mono, from the `@fontsource-variable` packages); English pages keep the system fonts and download no font files.
+- Both languages use the same self-hosted fonts with full Vietnamese coverage (Noto Serif, Inter and JetBrains Mono, from the `@fontsource-variable` packages), so switching language keeps the same typeface, sizes and layout. Each font is split by `unicode-range`, so English pages download only the Latin subsets.
 
 ### Home and About text
 
