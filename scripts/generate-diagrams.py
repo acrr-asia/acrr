@@ -253,3 +253,46 @@ b += line([(x+3, y-5), (x+10, y-17)], 'mut')
 svg('StabilityRegions', 480, 365, 'Stability regions of explicit Euler and classical RK4',
     'In the complex h-lambda plane, explicit Euler is stable inside the disc of radius 1 centred at minus 1. The RK4 region is larger: it reaches about minus 2.79 on the real axis and about plus and minus 2.83 j on the imaginary axis. The point h-lambda equal to minus 2.5, from lambda equal to minus 50 and h equal to 0.05, lies outside the Euler disc but inside the RK4 region.',
     b)
+
+# ---------- 8. Planar two-link arm: workspace and the two inverse-kinematics solutions ----------
+# Values from "Forward and Inverse Kinematics of a Planar Arm": l1 = 1.0, l2 = 0.7, target from
+# forward kinematics at theta1 = 30 deg, theta2 = 45 deg; the second solution is computed by the
+# article's inverse-kinematics formulas.
+l1, l2 = 1.0, 0.7
+fk = lambda t1, t2: (l1*math.cos(t1) + l2*math.cos(t1+t2), l1*math.sin(t1) + l2*math.sin(t1+t2))
+tx, ty = fk(math.radians(30), math.radians(45))
+def ik(x, y, sign):
+    c = (x*x + y*y - l1*l1 - l2*l2) / (2*l1*l2)
+    t2 = math.atan2(sign*math.sqrt(1 - c*c), c)
+    return math.atan2(y, x) - math.atan2(l2*math.sin(t2), l1 + l2*math.cos(t2)), t2
+sc, ox, oy = 150, 280, 300
+X = lambda v: ox + v*sc
+Y = lambda v: oy - v*sc
+b = ''
+ro, ri = (l1+l2)*sc, abs(l1-l2)*sc
+b += (f'  <path class="region" fill-rule="evenodd" d="M{ox-ro:.1f},{oy} a{ro:.1f},{ro:.1f} 0 1,0 {2*ro:.1f},0 a{ro:.1f},{ro:.1f} 0 1,0 {-2*ro:.1f},0 '
+      f'M{ox-ri:.1f},{oy} a{ri:.1f},{ri:.1f} 0 1,0 {2*ri:.1f},0 a{ri:.1f},{ri:.1f} 0 1,0 {-2*ri:.1f},0 z" />\n')
+b += f'  <circle class="mut" cx="{ox}" cy="{oy}" r="{ro:.1f}" stroke-dasharray="4 4" />\n'
+b += f'  <circle class="mut" cx="{ox}" cy="{oy}" r="{ri:.1f}" stroke-dasharray="4 4" />\n'
+b += line([(X(-1.8), oy), (X(1.85), oy)], 'grid')
+b += line([(ox, Y(-0.4)), (ox, Y(1.8))], 'grid')
+b += text(X(1.85), oy-6, var('x'), 'end', 'small')
+b += text(ox+6, Y(1.75), var('y'), 'start', 'small')
+for sign, cls, extra in ((1, 'acc', ''), (-1, 'ln', ' stroke-dasharray="6 4"')):
+    t1, t2 = ik(tx, ty, sign)
+    ex, ey = l1*math.cos(t1), l1*math.sin(t1)
+    b += line([(ox, oy), (X(ex), Y(ey)), (X(tx), Y(ty))], cls, extra)
+    b += f'  <circle class="box" cx="{X(ex):.1f}" cy="{Y(ey):.1f}" r="4" />\n'
+    label = var('θ') + '<tspan class="sub" dy="3">2</tspan><tspan dy="-3"> = ' + ('' if sign > 0 else '−') + f'{abs(math.degrees(t2)):.0f}°</tspan>'
+    b += text(X(ex) + (10 if sign > 0 else -10), Y(ey) + (16 if sign > 0 else -6), label, 'start' if sign > 0 else 'end', 'small')
+b += f'  <circle class="box" cx="{ox}" cy="{oy}" r="5" />\n'
+b += f'  <circle class="dot" cx="{X(tx):.1f}" cy="{Y(ty):.1f}" r="4.5" />\n'
+b += text(X(tx)-8, Y(ty)-12, f'target ({tx:.2f}, {ty:.2f})', 'end', 'small')
+b += text(ox-8, oy+18, 'base', 'end', 'small')
+b += text(X(-0.95), Y(0.8), 'reachable workspace', 'middle', 'small')
+b += text(X(-0.95), Y(0.8)+16, f'{abs(l1-l2):g} ≤ ' + var('r') + f' ≤ {l1+l2:g}', 'middle', 'small')
+svg('PlanarArmIK', 580, 360, 'Workspace of a two-link planar arm and the two joint solutions for one target',
+    f'The shaded ring between radius {abs(l1-l2):g} and radius {l1+l2:g} around the base is the set of points the arm can reach. '
+    f'A target at ({tx:.2f}, {ty:.2f}) is reached in two ways: with theta2 = 45 degrees and the elbow below the line from base to target (solid), '
+    f'or with theta2 = −45 degrees and the elbow above it (dashed).',
+    b)

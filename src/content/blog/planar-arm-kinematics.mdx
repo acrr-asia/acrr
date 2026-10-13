@@ -1,0 +1,248 @@
+---
+title: "Forward and Inverse Kinematics of a Planar Arm"
+description: "From joint angles to gripper position and back: joint space and task space, forward kinematics of a two-link planar arm as a product of transforms, its workspace, closed-form inverse kinematics with its two solutions, the Jacobian and singular configurations, numerical inverse kinematics with Newton's method and damped least squares, redundancy, and what changes for real six-joint arms."
+publishedAt: "2026-10-13"
+category: "Robotics and Control"
+tags:
+  - robotics
+  - kinematics
+  - linear algebra
+series: introduction-to-robotics
+seriesOrder: 3
+---
+
+import Figure from '../../components/Figure.astro';
+import PlanarArmIK from '../../components/diagrams/PlanarArmIK.astro';
+
+A robot arm is controlled through its joints: motors turn, and encoders report angles. The task, however, is stated in terms of the gripper: reach that cup, follow that seam, hold this pose. **Kinematics** is the geometry that connects the two descriptions, without yet asking which forces produce the motion. This entry develops it for the simplest arm that shows every essential difficulty, a two-link arm moving in a plane, using the frames and transformations of the previous entry.
+
+The story has a deliberate asymmetry. Going from joints to gripper, **forward kinematics**, is a direct calculation with exactly one answer. Going from gripper to joints, **inverse kinematics**, may have two answers, infinitely many, or none, and near certain configurations the answers change violently. Most of the entry is about that second direction.
+
+## 1. Two Descriptions of the Same Arm
+
+### 1.1 Joint space and task space
+
+The **joint space** (or configuration space) of an arm is the set of its joint values, collected in a vector $\mathbf q$. For an arm of $n$ revolute joints, $\mathbf q = (\theta_1, \dots, \theta_n)$, and its dimension is the arm's number of degrees of freedom, as counted in the first entry.
+
+The **task space** (or operational space) describes what the task cares about: the position of the gripper, and often its orientation. For a planar arm placing a point, the task space is the plane, with coordinates $\mathbf x = (x, y)$; if the gripper's orientation $\phi$ also matters, $\mathbf x = (x, y, \phi)$.
+
+### 1.2 The two maps
+
+**Forward kinematics** is the function $\mathbf x = f(\mathbf q)$. Given the joint values, it returns the gripper's pose. It is always defined, smooth and unique.
+
+**Inverse kinematics** asks for $\mathbf q$ such that $f(\mathbf q) = \mathbf x$ for a desired $\mathbf x$. It is not a function in the ordinary sense:
+
+- there may be **several** solutions (the same point reached with the elbow on either side);
+- **infinitely many**, if the arm has more joints than the task has dimensions;
+- or **none**, if the target lies outside the arm's reach.
+
+## 2. Forward Kinematics of a Two-Link Arm
+
+### 2.1 The arm
+
+Consider an arm with two revolute joints whose axes are perpendicular to the plane. The first link, of length $l_1$, rotates about the base by angle $\theta_1$, measured from the base frame's $x$ axis. The second link, of length $l_2$, rotates about the end of the first by angle $\theta_2$, measured **relative to the first link**. Relative joint angles are what the encoders measure, which is why this convention is standard.
+
+### 2.2 Forward kinematics as a product of transforms
+
+The previous entry's tools give the answer mechanically. Walking along the arm, each joint rotates and each link translates along its own $x$ axis:
+
+$$
+{}^{0}T_{2} = \mathrm{Rot}(\theta_1)\;\mathrm{Trans}(l_1, 0)\;\mathrm{Rot}(\theta_2)\;\mathrm{Trans}(l_2, 0),
+$$
+
+where $\mathrm{Rot}$ and $\mathrm{Trans}$ are the planar homogeneous rotation and translation. Multiplying out and reading off the translation column gives the gripper position, and the rotation gives its orientation:
+
+$$
+\begin{aligned}
+x &= l_1 \cos\theta_1 + l_2 \cos(\theta_1 + \theta_2),\\
+y &= l_1 \sin\theta_1 + l_2 \sin(\theta_1 + \theta_2),\\
+\phi &= \theta_1 + \theta_2 .
+\end{aligned}
+$$
+
+The geometric reading is direct: the first link contributes a vector of length $l_1$ at angle $\theta_1$; the second, a vector of length $l_2$ at the accumulated angle $\theta_1 + \theta_2$.
+
+**Example.** With $l_1 = 1.0$, $l_2 = 0.7$, $\theta_1 = 30^\circ$ and $\theta_2 = 45^\circ$:
+
+$$
+x = 0.866 + 0.7\cos 75^\circ = 1.047, \qquad y = 0.5 + 0.7\sin 75^\circ = 1.176, \qquad \phi = 75^\circ .
+$$
+
+Lengths are in metres. The same example is carried through the rest of the entry.
+
+### 2.3 More joints, and the general method
+
+A third revolute joint adds a term $l_3\cos(\theta_1+\theta_2+\theta_3)$ to $x$, a corresponding sine term to $y$, and $\theta_3$ to $\phi$. The pattern generalises: for any serial arm, forward kinematics is the product of one transform per joint and one per link.
+
+For arms in three dimensions, a systematic convention for attaching a frame to each link is needed. The best known is the **Denavit–Hartenberg** convention (1955), which describes each link with four parameters. A more recent alternative, the **product of exponentials** formulation, describes each joint by its axis in a single reference frame. Both produce the same forward kinematics; they differ in bookkeeping.
+
+## 3. The Workspace
+
+Before solving for joint angles, it is worth asking which targets can be reached at all. The distance from the base to the gripper is
+
+$$
+r = \sqrt{x^2 + y^2} = \sqrt{l_1^2 + l_2^2 + 2 l_1 l_2 \cos\theta_2},
+$$
+
+which depends only on the elbow angle. As $\theta_2$ ranges over all angles, $r$ ranges from $|l_1 - l_2|$ (arm folded back) to $l_1 + l_2$ (arm stretched out), and $\theta_1$ swings that distance around the base. The **reachable workspace** is therefore a ring: for the example arm, $0.3 \le r \le 1.7$. Joint limits, which every real arm has, cut this ring down further.
+
+The workspace says which positions can be reached, not with which orientation. A third joint lets the gripper reach points inside the ring at any orientation only in a smaller interior region, the **dexterous workspace**; near the boundary, the arm must be stretched, and the gripper's orientation is forced.
+
+## 4. Closed-Form Inverse Kinematics
+
+### 4.1 The elbow angle
+
+The workspace formula already contains the inverse for $\theta_2$. Given a target $(x, y)$, solve for the cosine of the elbow angle:
+
+$$
+c_2 = \cos\theta_2 = \frac{x^2 + y^2 - l_1^2 - l_2^2}{2\,l_1 l_2}.
+$$
+
+If $|c_2| > 1$ the target is out of reach and there is no solution. Otherwise $\sin\theta_2 = \pm\sqrt{1 - c_2^2}$, and
+
+$$
+\theta_2 = \operatorname{atan2}\!\left(\pm\sqrt{1 - c_2^2},\; c_2\right).
+$$
+
+The two signs are the two solutions. When $|c_2| = 1$ the target lies on the boundary of the workspace and they coincide.
+
+Using the two-argument arctangent, rather than $\arccos c_2$, returns the angle in the correct quadrant and stays accurate when $c_2$ is close to $\pm 1$, where $\arccos$ loses precision.
+
+### 4.2 The shoulder angle
+
+With $\theta_2$ fixed, the gripper lies at angle $\operatorname{atan2}(y, x)$ from the base, and the second link deflects the line from base to gripper by a known amount. Subtracting that deflection gives
+
+$$
+\theta_1 = \operatorname{atan2}(y, x) - \operatorname{atan2}\!\big(l_2 \sin\theta_2,\; l_1 + l_2 \cos\theta_2\big).
+$$
+
+### 4.3 The example, inverted
+
+For the target $(1.047, 1.176)$, $c_2 = 0.7071$, so $\theta_2 = \pm 45^\circ$. The positive sign gives $\theta_1 = 30^\circ$, the configuration we started from. The negative sign gives $\theta_1 = 66.6^\circ$, $\theta_2 = -45^\circ$: a second posture, mirrored about the line from base to target, that puts the gripper in exactly the same place. Substituting either pair into the forward kinematics returns $(1.047, 1.176)$.
+
+<Figure caption="The two-link arm with l₁ = 1.0 and l₂ = 0.7. The shaded ring is the reachable workspace. The target at (1.05, 1.18) is reached with θ₂ = 45° and the elbow below the line from base to target (solid), or with θ₂ = −45° and the elbow above it (dashed).">
+  <PlanarArmIK />
+</Figure>
+
+### 4.4 Choosing between solutions
+
+Both solutions are correct geometrically; the choice is made by the application. Typical rules:
+
+- prefer the solution **closest to the current configuration**, so that the arm does not swing its elbow across to the other side on a small move;
+- discard solutions that violate **joint limits** or collide with obstacles;
+- keep a consistent **posture** (always elbow up, for instance) along a path, so that the arm does not flip midway.
+
+Angles from the formulas should be wrapped into the joint's range before they are compared, as the previous entry noted.
+
+## 5. Velocities and the Jacobian
+
+### 5.1 Differential kinematics
+
+Moving along a path means commanding joint **velocities**, not only positions. Differentiating the forward kinematics with respect to time gives a linear relation between joint velocities and gripper velocity:
+
+$$
+\dot{\mathbf x} = J(\mathbf q)\,\dot{\mathbf q},
+\qquad
+J(\mathbf q) = \frac{\partial f}{\partial \mathbf q}.
+$$
+
+The matrix $J$ is the **Jacobian**. For the two-link arm, writing $s_1 = \sin\theta_1$, $c_{12} = \cos(\theta_1 + \theta_2)$ and so on,
+
+$$
+J = \begin{bmatrix}
+-l_1 s_1 - l_2 s_{12} & -l_2 s_{12} \\
+\phantom{-}l_1 c_1 + l_2 c_{12} & \phantom{-}l_2 c_{12}
+\end{bmatrix}.
+$$
+
+Each column is the velocity the gripper would have if only that joint moved at unit speed.
+
+### 5.2 Singular configurations
+
+The determinant of this Jacobian simplifies to
+
+$$
+\det J = l_1 l_2 \sin\theta_2 .
+$$
+
+It vanishes when $\theta_2 = 0$ (arm stretched straight) or $\theta_2 = 180^\circ$ (arm folded back). These are **singular configurations**, and they are where inverse kinematics misbehaves:
+
+- **Lost direction.** At a singularity, the two columns of $J$ are parallel, so the gripper can only move perpendicular to the arm. A stretched arm cannot move its gripper straight outwards; no joint motion produces that velocity.
+- **Exploding joint speeds.** Near a singularity, $J$ is close to singular, and solving $\dot{\mathbf q} = J^{-1}\dot{\mathbf x}$ for a modest gripper velocity can demand very large joint velocities.
+- **Merging solutions.** The two inverse solutions of Section 4 approach each other and coincide exactly at the singularity, where $\sin\theta_2 = 0$.
+
+For the example configuration, $\det J = 1.0 \times 0.7 \times \sin 45^\circ = 0.495$, comfortably away from zero.
+
+Singularities of the workspace boundary are unavoidable: the arm must be stretched to reach its furthest points. Path planners therefore keep paths away from them, or slow the gripper down as they approach.
+
+## 6. Numerical Inverse Kinematics
+
+### 6.1 Why numerical methods are needed
+
+Closed-form solutions exist for the two-link arm and for many industrial arms, but not for every mechanism. Arms with extra joints, unusual geometry, or additional objectives (stay away from joint limits, keep the camera pointed at the target) are solved iteratively instead.
+
+### 6.2 Newton's method
+
+Starting from a guess $\mathbf q_0$, typically the current configuration, linearise the forward kinematics and solve the linear system for a correction:
+
+$$
+\mathbf e_k = \mathbf x_{\text{target}} - f(\mathbf q_k),
+\qquad
+\Delta\mathbf q_k = J(\mathbf q_k)^{-1}\,\mathbf e_k,
+\qquad
+\mathbf q_{k+1} = \mathbf q_k + \Delta\mathbf q_k .
+$$
+
+For the example arm and target, starting from $\mathbf q_0 = (0^\circ, 90^\circ)$, the position error falls from $0.48$ to $0.11$, $1.2 \times 10^{-2}$, $1.8 \times 10^{-4}$ and $6 \times 10^{-8}$ in four iterations, converging to $(30^\circ, 45^\circ)$. Each iteration roughly squares the error once it is small, the characteristic quadratic convergence of Newton's method.
+
+Newton's method has two limitations. It finds **one** solution, the one whose basin the starting guess lies in; starting near the other posture would converge to $(66.6^\circ, -45^\circ)$ instead. And it fails **near singularities** and for **unreachable targets**, where $J$ is nearly singular and the correction becomes enormous.
+
+### 6.3 Damped least squares
+
+The standard remedy replaces the inverse with a damped version:
+
+$$
+\Delta\mathbf q_k = J^{\mathsf T}\left(J J^{\mathsf T} + \lambda^2 I\right)^{-1}\mathbf e_k ,
+$$
+
+with a damping factor $\lambda > 0$. When $J$ is well conditioned, this is close to a Newton step. When $J$ is nearly singular, the $\lambda^2 I$ term keeps the step bounded, at the price of a slower approach. For targets out of reach, the iteration settles at the reachable point nearest the target instead of diverging.
+
+To see the difference, start the example arm almost stretched, at $(0^\circ, 1^\circ)$, and ask for the point $(1.75, 0.05)$, just outside the outer radius $1.7$. The first Newton step asks for joint changes of about $167^\circ$ and $-402^\circ$. The first damped step with $\lambda = 0.1$ asks for about $1.8^\circ$ and $-1.3^\circ$, and after a few steps the gripper rests at the workspace boundary, about $0.05$ from the unreachable target, which is the closest it can get.
+
+## 7. Redundancy
+
+An arm is **redundant** for a task when it has more joints than the task has dimensions, as the first entry defined. A three-link planar arm asked only to place its tip at a point has three joints and two task coordinates, so the solutions form a one-dimensional family: the arm can move its links without moving its tip, much as a person can rotate their elbow while keeping a fingertip on a table.
+
+In velocity terms, the joint velocities that produce no tip motion form the **null space** of the Jacobian. A redundant arm uses this freedom for **secondary objectives**: it follows the primary task with one part of its joint velocity, and adds motion in the null space to keep away from joint limits, avoid an obstacle with its elbow, or stay far from singularities. Seven-joint arms are popular for exactly this reason.
+
+## 8. From the Plane to Real Arms
+
+The two-link arm contains the essential ideas, and the general case adds bookkeeping more than new concepts. Some facts carry over directly, and some do not:
+
+- **Forward kinematics** is always a product of transforms, one per joint and link, however many joints there are.
+- **Closed-form inverse kinematics** exists for many six-joint arms, but not all. Pieper showed in 1968 that a six-joint arm has a closed-form solution when three consecutive joint axes intersect at a point. Many industrial arms are built with such a **spherical wrist** for this reason: the wrist centre's position depends only on the first three joints, and its orientation only on the last three, so the problem splits in two.
+- **Multiple solutions** become more numerous: a typical six-joint arm with a spherical wrist has up to eight solutions for a given pose (shoulder left or right, elbow up or down, wrist flipped or not).
+- **Singularities** appear at the workspace boundary, as here, and also inside it, for example when two wrist axes line up. That is the wrist's counterpart of the gimbal lock described in the previous entry.
+
+## 9. Summary
+
+| Question | Answer |
+|---|---|
+| What does forward kinematics compute? | The gripper pose from the joint values: a product of one transform per joint and link, with exactly one answer. |
+| What is the two-link arm's forward kinematics? | $x = l_1 \cos\theta_1 + l_2 \cos(\theta_1+\theta_2)$, $y = l_1 \sin\theta_1 + l_2 \sin(\theta_1+\theta_2)$. |
+| What is its workspace? | The ring $\lvert l_1 - l_2\rvert \le r \le l_1 + l_2$ around the base, reduced by joint limits. |
+| How many inverse solutions are there? | Two inside the workspace (elbow on either side), one on its boundary, none outside. |
+| How is $\theta_2$ computed robustly? | From $c_2 = (x^2 + y^2 - l_1^2 - l_2^2)/(2 l_1 l_2)$, with $\theta_2 = \operatorname{atan2}(\pm\sqrt{1-c_2^2}, c_2)$. |
+| What does the Jacobian do? | It maps joint velocities to gripper velocity: $\dot{\mathbf x} = J\dot{\mathbf q}$. |
+| Where is the two-link arm singular? | Where $\det J = l_1 l_2 \sin\theta_2 = 0$: stretched or folded. |
+| How is inverse kinematics solved numerically? | By Newton iterations on the Jacobian, made robust near singularities and unreachable targets by damped least squares. |
+| What does redundancy offer? | A family of solutions, and null-space motion for secondary objectives. |
+
+The final entry of this series turns from geometry to uncertainty: why a robot rarely knows its joint angles, its position or its surroundings exactly, and how it combines a model with noisy measurements to estimate them.
+
+### References
+
+- K. M. Lynch and F. C. Park, *Modern Robotics: Mechanics, Planning, and Control*, Cambridge University Press, 2017.
+- B. Siciliano, L. Sciavicco, L. Villani and G. Oriolo, *Robotics: Modelling, Planning and Control*, Springer, 2009.
+- J. Denavit and R. S. Hartenberg, "A Kinematic Notation for Lower-Pair Mechanisms Based on Matrices", *Journal of Applied Mechanics*, 1955.
+- D. L. Pieper, *The Kinematics of Manipulators Under Computer Control*, PhD thesis, Stanford University, 1968.
