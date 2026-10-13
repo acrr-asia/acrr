@@ -3,6 +3,7 @@
 - Series: `foundations-of-control-systems` (5 articles, status published, 0 planned entries)
 - Reviewed commit: 3a5ac0d
 - Date: 2026-10-13
+- Content hash: sha256:72c7ade501e8fbd5aec68768613cafc373494a2b6b4a0ea82a89c811e3a42d9a
 
 ## Summary
 
