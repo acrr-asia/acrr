@@ -257,7 +257,7 @@ General notes (the details depend on your provider; no account or hosting servic
 
 ## Automated series review
 
-When a series is completed, every article in it is reviewed as a whole for technical accuracy, factual consistency, logical flow, terminology, cross-article references, completeness, writing quality and fit with the series objectives and the [content rules](#content-rules). The review produces a report with findings and recommended corrections; it never edits the articles itself.
+When a series is completed, every article in it is reviewed as a whole for technical accuracy, factual consistency, concept introduction, stated versions and defaults, logical flow, terminology, cross-article references, completeness, writing quality and fit with the series objectives and the [content rules](#content-rules). The review produces a report with findings and recommended corrections; it never edits the articles itself.
 
 **What "complete" means.** The series file has `status: "published"` and no `plannedEntries`. The review is triggered by the *transition* to that state, so it runs once per completion, not on every later edit. To review a series again, run it by hand (below).
 
@@ -265,7 +265,7 @@ When a series is completed, every article in it is reviewed as a whole for techn
 
 | Piece | Role |
 | --- | --- |
-| `.claude/skills/series-review/SKILL.md` | The review itself: how to collect the series, the mechanical checks (build, link check, diagram widths, recomputable values), the eight review dimensions, severity levels, and the report format. Both triggers below run this one procedure. |
+| `.claude/skills/series-review/SKILL.md` | The review itself: how to collect the series, the mechanical checks (build, link check, diagram widths, recomputable values), the review dimensions (including whether each concept is introduced before its details and whether examples state the versions and conventions they assume), severity levels, and the report format. Both triggers below run this one procedure. |
 | `scripts/series-review.mjs` | Dependency-free helper. `list <id>` prints the series and its articles in reading order, with warnings (gaps in `seriesOrder`, drafts, incomplete series). `detect <base> [head]` prints the ids of series that became complete between two commits. `hook` is the Claude Code hook entry point. |
 | `.claude/settings.json` | A Claude Code `PostToolUse` hook on `Edit` and `Write`. When an edit leaves a file in `src/content/series/` complete and the committed version (`HEAD`) was not, the hook adds a note to Claude's context naming the series and the skill, so Claude runs the review before the change is committed. Otherwise it does nothing. |
 | `.github/workflows/series-review.yml` | GitHub Actions. On a push to `master` that touches `src/content/series/`, it runs `detect` on the pushed range and, for each series that became complete, runs the skill with the official `anthropics/claude-code-action@v1`, uploads the report as an artifact and opens an issue titled "Series review: <title>". It can also be run by hand for any series. |
