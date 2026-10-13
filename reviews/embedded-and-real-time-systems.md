@@ -3,6 +3,7 @@
 - Series: `embedded-and-real-time-systems` (5 articles, status published, 0 planned entries)
 - Reviewed commit: b27867d
 - Date: 2026-10-13
+- Content hash: sha256:4f41890309ef95608d7bb5bd8694986a83909f4205976da0de107cfc425ef0cc
 
 ## Summary
 
@@ -283,3 +284,4 @@ Line numbers below refer to the reviewed commit, not to the corrected articles.
 - Not verified:
   - the original `wakeup.c` numbers in entry 5 (one session on a different shared machine; not reproducible by nature);
   - the exact text of ISO 11898 and TIA standards, which are paywalled. The values the articles take from them are the widely documented ones listed above.
+  - the I2C sink currents (3/3/20 mA at 0.4 V): the rise times and bus capacitances were confirmed in UM10204 and TI SLVA689, but the sink-current row was not displayed in either source; it is kept from the specification as remembered.
