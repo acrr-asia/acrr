@@ -11,8 +11,6 @@ objectives:
   - "Explain delegated authorization with OAuth 2.0 and federated authentication with OpenID Connect, including why public clients need PKCE."
   - "Validate an access token correctly and enforce object-level authorization at the resource server."
 plannedEntries:
-  - title: "Authenticators: Passwords, One-Time Codes and Passkeys"
-    description: "What each kind of authenticator proves, how it fails, and why origin-bound public-key credentials resist phishing where passwords and one-time codes do not."
   - title: "Sessions and Cookies in Depth"
     description: "Session identifiers, cookie attributes, fixation, CSRF and the browser's same-site rules, treated as one design problem."
   - title: "Authorization Models: RBAC, ABAC and Relationship-Based Access"
