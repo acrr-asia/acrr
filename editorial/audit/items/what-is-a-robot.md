@@ -69,3 +69,15 @@ P1: first entry of the series and the foundation of its vocabulary; carries a re
 - Remaining suggestions: "AAAI", "MIT", "SRI" unexpanded in References (names of publishers/institutions; expanding them in a bibliography is not house practice).
 - Flags for independent review: Gat chapter page numbers not verified (not added); exercises are new content for the technical reviewer to check; ISO 8373:2021 wording paraphrase in Section 1.1 ("rephrases it around locomotion, manipulation and positioning") not checked against the standard text.
 - Vietnamese translation affected: yes. Changed meaning/structure: new opening paragraph 2; new Section 7 Exercises (three exercises with answers) and Summary renumbered to 8; ISO reference split into two editions; Brooks and Gat reference details; "survey" → "chapter"; description. No `updatedAt` added: `publishedAt` is 2026-10-13, which the brief exempts (the assignment's note that publishedAt is earlier did not match the files).
+
+## Independent review (wave 2)
+- Fact-check: fail (F2: Nilsson is the editor, not author, of SRI Technical Note 323). ISO 8373:2012 and 2021 paraphrases and Brooks details verified.
+- Technical: pass (Exercises 1-3 recomputed: M = 1; 20 N·m, 60 rpm, 0.05 kg·m²; 0.0035°).
+- Findings: F2 (should fix), S1 (optional).
+- Not verified: Gat chapter page numbers (not in the text); Brooks journal name "of" vs "on" (Xplore unreachable); Shakey date range not checked against a dated source.
+
+## Revision log (wave 2 resolution)
+- F2: Nilsson cited as editor of Technical Note 323, with the Artificial Intelligence Center named.
+- S1: "control systems series" in the opening now links the series page `/series/foundations-of-control-systems`.
+- Lint: 0 errors, 0 warnings, 3 suggestions (publisher/institution names). Syntax: compiles.
+- Vietnamese translation affected: yes, the Nilsson reference entry (add "Ed." and the Artificial Intelligence Center) and the opening link target.

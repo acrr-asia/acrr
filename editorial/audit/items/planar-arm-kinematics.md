@@ -53,3 +53,13 @@ P2.
 - Remaining warnings: none.
 - Flags for independent review: A1 (Pieper's condition stated only for intersecting axes); exercises; Denavit–Hartenberg details verified against a secondary source only.
 - Vietnamese translation affected: yes: dexterous-workspace sentence (meaning clarified, not changed), new Section 9 Exercises, Summary renumbered 10, Craig added to References, description. No `updatedAt` (published 2026-10-13).
+
+## Independent review (wave 2)
+- Fact-check: pass (Denavit-Hartenberg vol. 22, no. 2, pp. 215-221 confirmed on a second secondary source; Pieper sentence is a correct sufficient condition, wave-1 flag A1 closed without finding).
+- Technical: pass (Exercises 1-3 recomputed: (-9.58°, 81.79°) and (54.82°, -81.79°) map back to (1.2, 0.5); c2 = 1.793; det J = 0.1216, ratio 0.246; Newton and damped iterations re-run).
+- Findings: S2 (optional).
+- Not verified: Craig, Lynch and Park, Siciliano et al., Pieper thesis details not re-fetched.
+
+## Revision log (wave 2 resolution)
+- S2: "outwards" → "outward" (§5.2). Lint: 0/0/0. Syntax: compiles.
+- Vietnamese translation affected: no.

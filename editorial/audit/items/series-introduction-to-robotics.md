@@ -36,3 +36,9 @@ P2: the front door of the series falls short of standards 6.5.
 - Remaining warnings: none.
 - Flags for independent review: series editor to confirm the overview does not promise more than the entries deliver (it describes only what the entries contain).
 - Vietnamese translation affected: yes: body (three new paragraphs and a list) and description.
+
+## Independent review (wave 2)
+- Fact-check: pass (no factual claims needing sources; the overview promises nothing the entries do not deliver).
+- Technical: pass.
+- Findings concerning this item: none (series-level design checks in `reviews/introduction-to-robotics.md`, section "Series design").
+- Not verified: none.

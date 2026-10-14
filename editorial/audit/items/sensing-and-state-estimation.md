@@ -57,3 +57,16 @@ P2 (other items link into its sections).
 - Remaining suggestions: "SPIE", "ASME", "MIT" unexpanded in References (organization names).
 - Flags for independent review (fact-check): Kalman issue number (no. 1 commonly cited) not added because the first page does not print it; Durrant-Whyte and Bailey pages: the article PDF runs 99–108, one bibliography says 99–110; its title is "Simultaneous Localisation and Mapping (SLAM): Part I" on the PDF but "Simultaneous localization and mapping: part I" in IEEE metadata (left as before). Exercises (new content) for technical review.
 - Vietnamese translation affected: yes: opening paragraph 2; the Section 4 fusion sentences; new Section 9 Exercises; Section 10 Summary now includes the former Section 10 series close (rewritten as a paragraph tied to the objectives); heading 7.2 renamed; references; description. No `updatedAt` (published 2026-10-13).
+
+## Independent review (wave 2)
+- Fact-check: fail (F1: the UKF is dated to 1997, but Julier, Uhlmann and Durrant-Whyte published it in 1995). Durrant-Whyte and Bailey pp. 99-108, Julier and Uhlmann pp. 182-193, Kalman vol. 82 pp. 35-45 verified.
+- Technical: fail (T1: Exercise 3 says "two standard deviations from the prediction"; d = 2.06 is in innovation standard deviations). Exercise numbers all recomputed and correct.
+- Findings: T1 (should fix), F1 (should fix), T2 (optional).
+- Not verified: Kalman issue number (not in the text); Bar-Shalom et al. and Thrun et al. details not re-fetched.
+
+## Revision log (wave 2 resolution)
+- T1: Exercise 3 answer states the distance in innovation standard deviations ($\sqrt{4.24} = 2.06$, $\sqrt S = 0.58$ m), from the predicted measurement.
+- F1: UKF dated to the mid-1990s, with the 1997 paper named as the usual reference.
+- T2: Exercise 1 question asks why the estimate moves a smaller fraction of the way toward the measurement.
+- Anchors of Sections 4, 5, 7.1 and 8 unchanged. Lint: 0 errors, 0 warnings, 3 suggestions (organization names in References). Syntax: compiles.
+- Vietnamese translation affected: yes, meaning changes in §6.2 (UKF origin), Exercise 1 question and Exercise 3 answer (not yet present in the translation, which lacks the wave-1 exercises).

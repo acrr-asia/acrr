@@ -51,3 +51,9 @@ P2: metadata and style problems a reader would notice; foundational content corr
 - Remaining warnings: none.
 - Flags for independent review: exercises (new content).
 - Vietnamese translation affected: yes: conventions paragraph replaces the outline sentence; new Section 9 Exercises; Summary renumbered 10; reference order; description. No `updatedAt` (published 2026-10-13).
+
+## Independent review (wave 2)
+- Fact-check: pass.
+- Technical: pass (Exercises 1-3 recomputed: (-1, 1); B_T_A and its check on (3, 0); +20°; gimbal-lock and product examples re-run).
+- Findings: none.
+- Not verified: textbook reference details (Craig, Lynch and Park, Siciliano et al.) not re-fetched.
