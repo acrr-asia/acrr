@@ -40,3 +40,11 @@ P2.
 - Remaining suggestion: `sentence-length` at line 16 (59 words) is a splitter artifact; the paragraph's sentences are 6, 27 and 24 words.
 - Flags for independent review: none new.
 - Vietnamese translation affected: yes: framing paragraph, link sentence on the integration notes, extrapolation clause, new description.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: none
+- Not verified: none.

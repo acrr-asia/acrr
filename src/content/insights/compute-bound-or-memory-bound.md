@@ -5,7 +5,7 @@ publishedAt: 2026-10-05
 kind: "Concept explanation"
 tags:
   - performance
-  - parallel-computing
+  - parallel computing
   - engineering
 ---
 
@@ -13,7 +13,7 @@ Before optimizing a numerical kernel, it helps to know which resource limits it:
 
 ## Established
 
-A kernel's speed is limited either by how fast the processor can do arithmetic or by how fast data can reach it. The **roofline model** of Williams, Waterman and Patterson (*Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009) states this as an upper bound: $P \le \min(P_{\mathrm{peak}},\, B\,I)$. Here $P$ is the attainable performance, $P_{\mathrm{peak}}$ is peak arithmetic throughput, $B$ is sustainable memory bandwidth, and $I$ is the **arithmetic intensity**, the number of operations performed per byte moved between main memory and the processor.
+A kernel's speed is limited either by how fast the processor can do arithmetic or by how fast data can reach it. The **roofline model** of Williams, Waterman and Patterson (*Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009) states this as an upper bound: $P \le \min(P_{\mathrm{peak}},\, B\,I)$. Here $P$ is the attainable performance, $P_{\mathrm{peak}}$ is peak arithmetic throughput, $B$ is sustainable memory bandwidth, and $I$ is the **arithmetic intensity** (the original paper calls it operational intensity), the number of operations performed per byte moved between main memory and the processor.
 
 The two limits meet at the ridge point $I^* = P_{\mathrm{peak}}/B$. Below it a kernel cannot exceed the bandwidth limit; above it the arithmetic limit applies. The bound is not a prediction: latency, poor vectorization or load imbalance can keep real code well below it.
 

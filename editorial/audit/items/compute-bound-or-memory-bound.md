@@ -45,3 +45,17 @@ P2.
 - Remaining suggestion: `acronym-expansion` "ACM" inside the journal title, a proper name.
 - Flags for independent review: (technical) the added clause "for sparse matrices with few operations per stored entry [the data side] is often the one that binds" (Interpretation) is standard knowledge about sparse matrix-vector products but is not derived in the text. (series/editorial) the site has no in-depth article on processor performance; the insight cannot link one.
 - Vietnamese translation affected: yes: framing paragraph, attribution, definition of $P$, expansions, new sentence with the link, new description.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: F1 (optional)
+- Not verified: none (citation verified against Crossref; sparse-matrix clause supported by the cited paper's SpMV results).
+
+## Revision log (wave 2 resolution)
+
+- F1 (optional): line 16: added "(the original paper calls it operational intensity)" after **arithmetic intensity**.
+- Lint: 0 errors, 0 warnings; one suggestion ("ACM" in the journal title). Syntax: compiles.
+- Vietnamese translation affected: yes, the parenthetical on the paper's term.

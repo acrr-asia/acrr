@@ -5,7 +5,7 @@ publishedAt: 2026-10-09
 kind: "Research question"
 tags:
   - robotics
-  - machine-learning
+  - machine learning
   - simulation
 ---
 

@@ -4,9 +4,9 @@ description: "Learn when a Kalman filter is the right estimator, when its nonlin
 publishedAt: 2026-10-11
 kind: "Comparison"
 tags:
-  - control-theory
+  - control theory
   - robotics
-  - state-estimation
+  - state estimation
 ---
 
 A robot or a process seldom measures its state directly, so it estimates it, and the usual starting point is the Kalman filter. This note asks when that filter is enough and when a more expensive estimator is justified, a choice that sets both the computing cost and the kind of failure to expect. The estimators themselves are described and compared in [Sensing and State Estimation](/blog/sensing-and-state-estimation), the last entry of the Introduction to Robotics series.

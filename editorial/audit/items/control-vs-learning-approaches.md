@@ -38,3 +38,17 @@ P2.
 - Remaining warnings: none.
 - Flags for independent review: (technical) "Classical tools such as gain and phase margins describe how much model error certain closed loops can tolerate": correct but vague; margins apply to single-input single-output loops. Left unchanged.
 - Vietnamese translation affected: yes: framing paragraph, link sentences to both series, reworded Interpretation, new description.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: fail
+- Findings: T3 (should fix)
+- Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- T3: line 16: margins sentence replaced. It now says the gain margin is extra loop gain and the phase margin is extra phase lag (such as an unmodeled delay), that both apply to a single-input single-output loop before it becomes unstable, and that each covers one kind of model error at a time. This is consistent with `from-signal-processing-to-digital-control.mdx:232`.
+- Lint 0/0/0; syntax compiles.
+- Vietnamese translation affected: yes, the margins sentence.

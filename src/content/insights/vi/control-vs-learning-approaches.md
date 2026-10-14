@@ -4,8 +4,8 @@ description: "Một so sánh ngắn giữa điều khiển dựa trên mô hình
 publishedAt: 2026-10-11
 kind: "Comparison"
 tags:
-  - control-theory
-  - machine-learning
+  - control theory
+  - machine learning
   - robotics
 ---
 

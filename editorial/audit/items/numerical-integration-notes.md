@@ -81,3 +81,20 @@ The brief suspected overlap with `from-differential-equations-to-discrete-proble
 - Remaining suggestion: `acronym-expansion` "SIAM" in the reference list (publisher name, as in the series' references; not expanded).
 - Flags for independent review: (technical) Section 2 states that the orders carry over to smooth nonlinear $f$ without derivation, citing the textbooks; Section 5 statement on embedded Runge–Kutta pairs; the claim "for smooth problems and moderate accuracy targets, a higher-order method usually wins" (Section 3). (fact-check) the three references' bibliographic details; the Springer page could not be fetched (rate-limited), details are from search-result listings. (consistency, outside scope) `stability-and-eigenvalues.mdx` line 65 writes "Runge-Kutta" with a hyphen.
 - Vietnamese translation affected: yes. The English now has an opening on prerequisites and code version, new Sections 2, 5 and 6 (definitions and derivation of order, limits, summary table, references), the observed-order and equal-work paragraphs, the imaginary-axis and "stability is not accuracy" paragraphs, a new description, and numbered headings.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: fail
+- Findings: T1, T2 (should fix); T4, T5 (optional)
+- Not verified: none (code re-run; all numbers recomputed; three references verified).
+
+## Revision log (wave 2 resolution)
+
+- T1: Section 2 (line 67): the error-accumulation argument now requires errors to be amplified by at most a bounded factor, not "not amplified". It gives the bound $e^{|\lambda|T}$ on the test equation from $|R(z)| \le e^{|z|}$, and separates order (as $h \to 0$) from absolute stability (Section 4).
+- T2: Section 4 (line 127): "slight artificial damping" replaced by the amplitude factor per step, recomputed: 0.99391 at $h\omega = 1$, 0.74536 at $h\omega = 2$.
+- T4 (optional): line 117 now reads "does not grow if and only if $|1 + h\lambda| \le 1$ ...; it decays for $h < 2/|\lambda|$".
+- T5 (optional): line 139: the stiffness example is now a system with a slow mode as well as the fast mode of Section 4.
+- Lint: 0 errors, 0 warnings; one suggestion ("SIAM" is a publisher name). Syntax: compiles. No anchors link into this page.
+- Vietnamese translation affected: yes. The meaning changes are the four sentences above: the order argument and its bound, the RK4 damping figures, the decay condition and the stiffness example. No copied field changed.

@@ -37,3 +37,11 @@ P2.
 - Remaining warnings: none.
 - Flags for independent review: (technical) the revised guide item on EKF vs UKF; (series) `sensing-and-state-estimation` line 168 states optimality without distinguishing "among all estimators" (Gaussian case) from "among linear estimators"; the insight is the more precise of the two.
 - Vietnamese translation affected: yes: framing paragraph, UKF clause, middle guide item, spelling, new description.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: none
+- Not verified: particle count growing quickly with state dimension (qualified with "often"; no source fetched).

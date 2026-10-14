@@ -4,7 +4,7 @@ description: "Learn how finite precision, summation order and accumulated roundi
 publishedAt: 2026-10-07
 kind: "Methodological note"
 tags:
-  - numerical-methods
+  - numerical methods
   - simulation
   - verification
 ---

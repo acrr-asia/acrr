@@ -4,7 +4,7 @@ description: "Một ghi chú phương pháp ngắn về việc độ chính xác
 publishedAt: 2026-10-07
 kind: "Methodological note"
 tags:
-  - numerical-methods
+  - numerical methods
   - simulation
   - verification
 ---

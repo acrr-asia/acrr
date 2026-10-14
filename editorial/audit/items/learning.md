@@ -40,3 +40,11 @@ Entries left unchanged: `control-systems-study-notes`, `mathematical-methods-stu
 - Unchanged: titles, topics, types, statuses (all `planned`), no `url` anywhere, all `vi` fields.
 - Flags for independent review: none.
 - Vietnamese fields affected: yes, `vi.description` of `introduction-to-robotics-learning-path` (add the relation to the series) and of `numerical-methods-external-references` (one sentence, naming the series). Not edited here.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: pass (no technical content)
+- Findings: none
+- Not verified: none.

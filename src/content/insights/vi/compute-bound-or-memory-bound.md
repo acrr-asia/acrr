@@ -5,7 +5,7 @@ publishedAt: 2026-10-05
 kind: "Concept explanation"
 tags:
   - performance
-  - parallel-computing
+  - parallel computing
   - engineering
 ---
 

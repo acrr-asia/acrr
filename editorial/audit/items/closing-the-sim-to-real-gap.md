@@ -52,3 +52,11 @@ P2: required structure missing (framing paragraph, links), description over leng
 - Remaining suggestion: `sentence-length` at line 20 reports 54 words; the paragraph's sentences are 6, 27 and 21 words, so this is a splitter artifact around bold markup.
 - Flags for independent review: none new; technical content unchanged.
 - Vietnamese translation affected: yes: new framing paragraph, new link sentence on validation and the closing link to the comparison insight, new description.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: none
+- Not verified: simulator simplifications, domain randomization and system identification (Established) treated as common knowledge; no primary source checked.

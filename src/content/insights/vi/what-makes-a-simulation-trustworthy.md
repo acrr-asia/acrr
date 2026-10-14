@@ -5,7 +5,7 @@ publishedAt: 2026-10-09
 kind: "Methodological note"
 tags:
   - simulation
-  - numerical-methods
+  - numerical methods
   - verification
 ---
 

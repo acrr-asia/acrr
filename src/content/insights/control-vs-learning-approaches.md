@@ -4,8 +4,8 @@ description: "Learn what model-based control and learned policies each offer, wh
 publishedAt: 2026-10-11
 kind: "Comparison"
 tags:
-  - control-theory
-  - machine-learning
+  - control theory
+  - machine learning
   - robotics
 ---
 
@@ -13,7 +13,7 @@ A controller can be designed from a mathematical model of the system, or a polic
 
 ## Established
 
-**Model-based control** designs a feedback law from a mathematical model of the system. The [Foundations of Control Systems](/series/foundations-of-control-systems) series builds this approach from first principles, ending with [state-feedback design](/blog/state-feedback-controller-design). For a linear model with a quadratic cost, the linear-quadratic regulator (LQR) gives an optimal state-feedback gain. Classical tools such as gain and phase margins describe how much model error certain closed loops can tolerate. Model predictive control (MPC) solves a finite-horizon optimization at every step, using a model, and can represent input and state constraints explicitly.
+**Model-based control** designs a feedback law from a mathematical model of the system. The [Foundations of Control Systems](/series/foundations-of-control-systems) series builds this approach from first principles, ending with [state-feedback design](/blog/state-feedback-controller-design). For a linear model with a quadratic cost, the linear-quadratic regulator (LQR) gives an optimal state-feedback gain. Classical gain and phase margins measure how much extra loop gain, or extra phase lag such as an unmodeled delay, a single-input single-output loop tolerates before it becomes unstable; each covers one kind of model error at a time. Model predictive control (MPC) solves a finite-horizon optimization at every step, using a model, and can represent input and state constraints explicitly.
 
 **Learning-based methods**, such as reinforcement learning, improve a policy using data gathered from interaction, in simulation or on hardware. They do not need a closed-form model of the dynamics, and they can represent nonlinear behavior that is hard to write down by hand. Their typical costs are large amounts of data and weaker formal guarantees: a trained policy usually comes without a stability proof unless extra structure is added. A policy trained in simulation can also perform worse on hardware, because simulated and real dynamics differ; that difference is the [sim-to-real gap](/insights/closing-the-sim-to-real-gap). The [Machine Learning Fundamentals](/series/machine-learning-fundamentals) series covers the underlying ideas of learning from data and of evaluating what a model has learned.
 

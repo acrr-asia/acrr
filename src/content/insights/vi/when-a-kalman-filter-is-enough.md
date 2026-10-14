@@ -4,9 +4,9 @@ description: "Một so sánh ngắn giữa bộ lọc Kalman, các biến thể 
 publishedAt: 2026-10-11
 kind: "Comparison"
 tags:
-  - control-theory
+  - control theory
   - robotics
-  - state-estimation
+  - state estimation
 ---
 
 ## Đã xác lập

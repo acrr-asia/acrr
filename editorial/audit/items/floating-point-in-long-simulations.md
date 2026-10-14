@@ -38,3 +38,11 @@ P2.
 - Remaining suggestion: "SIAM" in the inline citation (publisher name).
 - Flags for independent review: (fact-check) confirm chapter 4 of Higham (2nd ed.) is the summation chapter.
 - Vietnamese translation affected: yes: framing paragraph, attribution, new Established paragraph with two links, reworded checks paragraph with a link, new description.
+
+## Independent review (wave 2)
+
+- Report: `editorial/audit/review/standalone.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: none
+- Not verified: none (Higham chapter 4 "Summation" confirmed from the book's contents).
