@@ -98,3 +98,11 @@ P1: foundational first entry; entries 2-5 and three articles outside the series 
 - Remaining warnings: none (lint 0/0/0).
 - **Flags for independent review:** (technical) Section 4.3 derivation and the $\zeta$ table; Section 3.4 statement "a zero can add overshoot that the formula does not predict" (true for a left-half-plane zero near the poles; deliberately not elaborated); Section 1.1 claim that open loop "cannot become unstable through the controller". (fact-check) the three references support the material (standard textbook content on step-response specifications).
 - **Vietnamese translation affected: yes.** Changes of meaning: new second opening paragraph; Section 1.1 (open/closed loop) is new; negative feedback, disturbances and noise defined in 1.2; Section 2 trade-off now explains mechanisms; Sections 3.1 (LTI), 3.3 (first-order example), 4.3 (derivations and $\zeta$ table), 4.4 (new code and printed output), 5 (limits) are new; 4.1 adds "final value" as a measure and first-order settling $3.9\tau$; 4.2 adds pole formula and damped frequency; the former final section became the Summary (table + closing paragraph) with References; description changed; all headings numbered.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), commit `9232ed9`, 2026-10-13. Report: `reviews/foundations-of-control-systems.md`.
+- Fact-check verdict: pass.
+- Technical verdict: pass.
+- Findings concerning this item: none.
+- Not verified: none (three textbook references verified; chapter/page not checked).

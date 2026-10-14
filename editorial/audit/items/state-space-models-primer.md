@@ -72,3 +72,19 @@ P1: entry that introduces the notation $(A, B, C, D)$ used by entries 4-5 and by
 - **Flags for independent review:** (technical) Section 3 invariance proof; Section 6 statement that a pure time delay has infinitely many states (standard: $e^{-sT}$ is not rational).
 - **Vietnamese translation affected: yes.** Meaning changes: description; opening extended (scope sentence replaced, conventions paragraph added); Section 1 new (motivation, state as memory, first-order plant as one state, $n$ states for $n$-th order); Section 2 adds "displacement from the relaxed position", the meaning of the two rows and of $y$; Section 3 adds the one-state case and the coordinate-change paragraph; 4.1 adds the series check and the eigenvector argument; 4.2 now refers to "Section 5" instead of "the next entry" for why $s$ is used, adds the negative-damping sentence; 4.3 units moved to its own sentence (Python note moved to the opening), "(in 1/s)" added; Sections 5, 6 (limits rewritten from the former last section, which merged benefits and limits) and 7 (Summary, References) new; closing transition rewritten; all headings numbered.
 - **Style (follow-up):** "numpy" in prose changed to "NumPy" (glossary term added by the coordinator); code and code spans unchanged.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), commit `9232ed9`, 2026-10-13. Report: `reviews/foundations-of-control-systems.md`.
+- Fact-check verdict: pass.
+- Technical verdict: fail until T2 is resolved.
+- Findings concerning this item: T2, T3 (optional), T4 (optional).
+- Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- T2: Section 5 bullet "From transfer function to state space" now says coordinate changes give one answer each and realizations with extra hidden states give more (`:138`).
+- T3: Section 4.2 negative-damping sentence now says the response grows, as an oscillation of increasing amplitude while $c^2 < 4mk$ (`:103`).
+- T4: Section 4.1 adds a sentence on complex eigenvectors (the real initial condition $\operatorname{Re} v$ does not decay either) and says "a sum of modes" instead of "a sum of such terms" (`:87`).
+- Lint 0/0/0; syntax passes. No front matter changed.
+- Vietnamese translation affected: yes, for the three points above (4.1, 4.2 and the Section 5 bullet).

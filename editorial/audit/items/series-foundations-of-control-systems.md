@@ -42,3 +42,17 @@ P2: overview page structurally thin against standards 6.5.
 - **Flags:** (series) confirm the overview promises nothing the entries do not deliver (the prerequisites list matches entry openings).
 - **Vietnamese translation affected: yes**, `src/content/series/vi/foundations-of-control-systems.md` body should be retranslated; front matter unaffected.
 - **Style (follow-up):** "numpy" in prose changed to "NumPy" (glossary term added by the coordinator); code and code spans unchanged.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), commit `9232ed9`, 2026-10-13. Report: `reviews/foundations-of-control-systems.md`.
+- Fact-check verdict: pass (no factual claims beyond the entries; references n/a).
+- Technical verdict: fail until S1 is resolved.
+- Findings concerning this item: S1.
+- Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- S1: body paragraph 2 now says "A single first-order equation cannot describe ..." and that state-space models collect several first-order equations into one matrix equation (`:15`); the paragraph is split before the sequence rationale (new `:17`), which clears the paragraph-length suggestion.
+- Lint 0/0/0.
+- Vietnamese translation affected: yes, `src/content/series/vi/foundations-of-control-systems.md` paragraph 2 needs the same change when it is retranslated.

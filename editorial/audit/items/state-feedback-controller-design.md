@@ -57,3 +57,17 @@ P2: final entry; metadata and structural inconsistencies, no critical condition.
 - **Flags:** fragment id `#the-controller-runs-in-continuous-time` is now `#64-the-controller-runs-in-continuous-time`; `src/content/blog/from-signal-processing-to-digital-control.mdx:267` links the old id (outside scope). (fact-check) Ackermann 1972 issue number/DOI.
 - **Vietnamese translation affected:** no translation exists.
 - **Style (follow-up):** "numpy" in prose changed to "NumPy" (glossary term added by the coordinator); code and code spans unchanged.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), commit `9232ed9`, 2026-10-13. Report: `reviews/foundations-of-control-systems.md`.
+- Fact-check verdict: pass (F1 optional).
+- Technical verdict: pass.
+- Findings concerning this item: F1 (optional).
+- Not verified: Ackermann (1972) issue designation and DOI (not cited in the text; doi.org not reachable).
+
+## Revision log (wave 2 resolution)
+
+- F1: Ackermann journal title corrected to "*Regelungstechnik und Prozess-Datenverarbeitung*", the spelling in library catalogues (reviewer's evidence) (`:288`).
+- Lint 0/0/0; syntax passes.
+- Vietnamese translation affected: no translation exists.

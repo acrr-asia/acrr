@@ -55,3 +55,17 @@ P2: no critical condition other than one code-output mismatch, but metadata and 
 - **Flags:** fragment ids changed (e.g. `#stability-in-discrete-time` → `#7-stability-in-discrete-time`); `src/content/blog/from-signal-processing-to-digital-control.mdx:77` links the old id and must be updated by the orchestrator (outside scope).
 - **Vietnamese translation affected:** no translation exists.
 - **Style (follow-up):** "numpy" in prose changed to "NumPy" (glossary term added by the coordinator); code and code spans unchanged.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), commit `9232ed9`, 2026-10-13. Report: `reviews/foundations-of-control-systems.md`.
+- Fact-check verdict: pass.
+- Technical verdict: pass (S2 is a cross-reference/consistency finding: fail on series consistency until resolved).
+- Findings concerning this item: S2.
+- Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- S2: the opening now matches the revised primer: the primer stated the test and proved that an eigenvalue with zero or positive real part prevents decay; this entry proves the other direction (`:15`).
+- Lint 0/0/0; syntax passes. No headings or anchors changed.
+- Vietnamese translation affected: no translation exists.

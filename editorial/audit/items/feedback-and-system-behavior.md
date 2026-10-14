@@ -80,3 +80,17 @@ P1: required sections missing; the entry carries objective 1 of the series and i
 - Remaining warnings: none.
 - **Flags for independent review:** (technical) Section 4.2 sensitivity derivation and its stated condition $a > 0$; Section 2.4 statement that no constant open-loop input can hold an unstable plant at a reference. (series) the sampled-gain figure depends on the DSP series article staying as it is.
 - **Vietnamese translation affected: yes.** Meaning changes: description; new opening paragraph 2; teaser sentence removed and "it can make an unstable plant stable" added to the opening; 1.1 now says the plant is the first entry's example and gives $b/(s+a)$ there (the derivation sentence formerly in the pole paragraph is gone); proportional feedback defined; 2.2 merges the former pole paragraph; 2.4 new (stabilization example); Section 3 adds Euler definition and step-size remark; 4.2 new (loop gain and $1/(1 + L_0)$); the sentence "Removing the offset itself takes more than proportional action" moved to 4.2; Section 5 expanded (delay with sampled-loop limit, saturation, noise); Summary and References new; table header "Time constant (s)" and units "1 s", "0.1 s" added; all headings numbered.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), commit `9232ed9`, 2026-10-13. Report: `reviews/foundations-of-control-systems.md`.
+- Fact-check verdict: pass.
+- Technical verdict: fail until T1 is resolved.
+- Findings concerning this item: T1.
+- Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- T1: Section 5 sentence corrected; a larger gain now reads as improving speed, sensitivity and offset, and the offset never reaches zero (`:167`).
+- Lint 0/0/0; syntax passes. No front matter changed.
+- Vietnamese translation affected: yes. Section 5's opening sentence changed meaning (larger gain improves the offset as well, without removing it).
