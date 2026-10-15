@@ -4,6 +4,7 @@
 - Reviewed commit: 49941d2 (series files unchanged since the wave-1 commit 594bba0)
 - Date: 2026-10-14
 - Reviewer: independent wave-2 reviewer (fact-check, technical review, series review). The reviewer wrote and revised none of this text.
+- Content hash: sha256:01a15c9aae534d6eb943dd64816d169edcafab9c0780a5f1a9a62f388edea221
 
 ## Summary
 
@@ -288,3 +289,19 @@ Optional findings applied: F4 (parenthetical removed from `measurement-systems-a
 Checks: no heading changed, so the fragments other pages link to (`#21-oversampling`, `#32-quantization-error-as-uncertainty`, `#52-evaluating-uncertainty`) and the links into `sensing-and-state-estimation` are unchanged. `eos lint` on the series file and seven articles: 0 errors, 0 warnings, 44 suggestions; `eos syntax`: all files compile. No code output changed. No build was run (per brief). Vietnamese: no copied field changed; the meaning changes in the overview (S1, S3, S6) and entries 5 and 6 (S1) are left for the translation follow-up, together with the nine $f_c$ for the 1/f corner in the Vietnamese entry 5.
 
 Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15. Independent of the author and of the reviewer. Checked against the current text at 3dd5a22 and the build in `/tmp/claude-0/b9`.
+
+- T1: confirmed. `scripts/generate-diagrams.py` uses `f_nc` in the comment and label; regenerating all diagrams to a scratch directory (`python3 -I`) reproduces all 15 committed components byte for byte, and the built entry-5 page (`blog/noise-interference-and-limits-of-detection.html`, also `vi/`) renders "corner f<sub>nc</sub> = 10 Hz".
+- T2: confirmed. Line 145 carries the 1/f-aware wording. Recomputed (python3 -I, entry-5 model, 10-minute span): 1/f part 75.5 nV, white part 7.1 nV, total 75.9 nV, not below the 75 nV budget, so "not necessarily quieter" is correct. (The Resolution compares with 74.8 nV, the amplifier-only figure of §2.3; the full budget of §6.1 is 75.2 nV. The conclusion is unchanged.)
+- S1: confirmed. "in a single package" (overview), "in one package" (entries 5 and 7), "in the same package" (entry 6, lines 77 and 82). Keeping the heading "4. The electronics on the chip" is sound: the ASIC is a chip and the anchor is stable.
+- S2: confirmed. Link text now names the first entry; `what-is-a-robot` §3 describes joint encoders (line 115).
+- S3: confirmed. "Noise voltages and currents are root-mean-square values, computed at 300 K unless stated otherwise."
+- F1: confirmed in the text (line 202) and reference (line 544). Edition status not re-fetched by QA (no network); relies on the reviewer's and author's independent checks of iso.org.
+- F2: confirmed in the reference (line 542); body unchanged and still true per the reviewer's reading of the 2022 edition. Not re-fetched by QA (no network).
+- F3: confirmed in the reference (line 223); body names no edition. Not re-fetched by QA (no network).
+- Optional F4, S4, S5, S6, S7: applied as described; confirmed in the text.
+
+Checks: `eos lint sensor-systems` 0 errors, 0 warnings, 44 suggestions; `eos syntax` all files compile; `check-links /tmp/claude-0/b9` all internal links resolve (314 pages); `eos validate-site` 0 issues for the seven article pages and the series page; KaTeX errors 0 and glued inline text 0 on the seven pages; the five entry-7 listings re-run (Python 3.13.16, NumPy 2.5.3) with output identical to the text. No finding reopened.
