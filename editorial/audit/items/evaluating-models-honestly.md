@@ -66,3 +66,9 @@ Resolves `reviews/machine-learning-fundamentals.md` T3, S1, F3 (entry 4 part).
 - F3: Stone (1974) attached to cross-validation as a sentence after the $k$-fold steps (`:110`); Kaufman et al. (2012) attached at the end of the first leakage paragraph (`:186`).
 - Code and outputs unchanged; no heading changed. Lint: 0 errors, 0 warnings; syntax compiles.
 - Meaning changes for the translation follow-up (no translation exists yet): Sections 3.1, 4.1, 5.1, 6.1.
+
+## Revision log (QA findings)
+
+Resolves `reviews/machine-learning-fundamentals.md` Q1.
+- Prose: serial comma removed at `:30`, `:78`, `:116`, `:239`, `:300`, `:302`, `:306` and in the checklist row at `:333`. Kept: `:17` and `:401` (items contain "and"), `:398` (removal would read as "averages that hide ... label errors"), `:357` (groups "evaluate ... or use nested cross-validation" before "and report"); `:186` is independent clauses around a parenthetical.
+- Lint: 0 errors, 0 warnings. No heading, anchor, code or number changed.

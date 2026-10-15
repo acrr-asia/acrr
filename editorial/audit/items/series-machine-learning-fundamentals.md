@@ -61,3 +61,10 @@ Resolves `reviews/machine-learning-fundamentals.md` S2.
 - Overview: "each number can be reproduced with the stated NumPy version (other versions may produce different random streams)" (`src/content/series/machine-learning-fundamentals.md:17`). No front-matter field changed.
 - Lint: 0 errors, 0 warnings.
 - Meaning change for the translation follow-up: `src/content/series/vi/machine-learning-fundamentals.md` body should carry this qualification (it already lags the wave-1 overview); no copied field affected, so the build is unaffected.
+
+## Revision log (QA findings)
+
+Resolves `reviews/machine-learning-fundamentals.md` Q1.
+- Objective 1: "a model, a loss function and a data set" (`:7`). Body `:15`: entry 3's title without the serial comma, and "bias in the evaluation setup and reporting with uncertainty". Kept: description `:3` and `:13` (items contain "and").
+- Vietnamese: `src/content/series/vi/machine-learning-fundamentals.md:15` quotes entry 3's new title; Vietnamese prose and copied fields unchanged (objectives are translated, not copied; its objective 1 already has no serial comma).
+- Lint: 0 errors, 0 warnings.

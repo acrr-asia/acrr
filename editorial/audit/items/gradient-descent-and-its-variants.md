@@ -60,3 +60,9 @@ Resolves `reviews/machine-learning-fundamentals.md` F1, T1, T4, F2.
 - F2: "The most widely used is Adam" became "A widely used one is Adam" (`:315`).
 - Code and outputs unchanged. Lint: 0 errors, 0 warnings; syntax compiles.
 - Meaning changes for the translation follow-up (no translation exists yet): Sections 3.4 and 5, Exercise 2.
+
+## Revision log (QA findings)
+
+Resolves `reviews/machine-learning-fundamentals.md` Q1 and Q2.
+- Prose: the 54-word sentence at `:186` split in two ("... feature $z = (x - \bar{x})/s_x$. When $s_x$ is the standard deviation computed with divisor $n$ ..., $z$ has mean 0 and standard deviation 1 on the training set."), serial comma removed in it; serial comma removed at `:262`; entry 3's title in the link text at `:376` without the serial comma. Kept: `:322` (list across a display equation, second item ends in a parenthetical of formulas); `:213` is a clause series.
+- Lint: 0 errors, 0 warnings; the `sentence-length` suggestion at `:186` is gone. No heading, anchor, code or number changed.

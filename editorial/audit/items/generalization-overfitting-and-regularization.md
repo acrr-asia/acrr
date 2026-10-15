@@ -66,3 +66,10 @@ Resolves `reviews/machine-learning-fundamentals.md` T2, T5, T6, F3 (entry 3 part
 - F3: Hoerl and Kennard (1970) attached to ridge (`:194`), Tibshirani (1996) to the lasso (`:255`), Geman, Bienenstock and Doursat (1992) to the decomposition (`:108`).
 - Code and outputs unchanged. Lint: 0 errors, 0 warnings; syntax compiles.
 - Meaning changes for the translation follow-up (no translation exists yet): Sections 1.1, 3.1, 3.2, 4.1, 4.2, 4.4.
+
+## Revision log (QA findings)
+
+Resolves `reviews/machine-learning-fundamentals.md` Q1.
+- Metadata: title "Generalization, Overfitting and Regularization" (no serial comma, standards 5.1); slug `generalization-overfitting-and-regularization` unchanged, so every link still resolves.
+- Prose: serial comma removed at `:15` ("why and what can be done about it"). Kept: `:143` (last item "the squared bias and the variance" contains "and"); `:96`, `:108`, `:249` are independent clauses or close a parenthetical.
+- Lint: 0 errors, 0 warnings. No heading, anchor, code or number changed.

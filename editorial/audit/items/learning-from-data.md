@@ -56,3 +56,10 @@ P1: the foundational first entry of the series; every later entry relies on its 
 - Remaining suggestions and why they stay: `acronym-expansion` "QR" at `:237`: QR is the name of the decomposition (the factors Q and R), not an abbreviation with an expansion.
 - Flags for independent review: none beyond the standard fact-check of the five textbook entries.
 - Vietnamese translation affected: no translation exists (`src/content/blog/vi/learning-from-data.mdx` absent). `publishedAt` is 2026-10-13, so no `updatedAt`.
+
+## Revision log (QA findings)
+
+Resolves `reviews/machine-learning-fundamentals.md` Q1.
+- Metadata: title "Learning from Data: Models, Loss Functions and Risk" (no serial comma, standards 5.1); slug unchanged.
+- Prose: serial comma removed at `:15`, `:28`, `:30`, `:56`, `:60`, `:269`; entry 3's title quoted at `:29` without it. Kept: `:21` (items contain "and"), `:317` (removal would attach "a loss function" to "parameters").
+- Lint: 0 errors, 0 warnings. No heading, anchor, code or number changed.
