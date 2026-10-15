@@ -59,3 +59,11 @@ P2.
 - Technical: pass
 - Findings: F3 (optional), S2 (optional), S1 (should fix, Vietnamese translation)
 - Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- F3 (optional): Bell and LaPadula (1973) and Biba (1977) added to References, lines 245–246.
+- S2 (optional): link to Section 4.3 of the first entry, line 210.
+- Meaning changes mirrored in Vietnamese: S2 (as Mục 4.3), References, description.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.

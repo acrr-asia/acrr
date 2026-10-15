@@ -64,3 +64,9 @@ P1: the front door of the series; the missing prerequisites and sequence rationa
 - Technical: pass
 - Findings: S1 (should fix: Vietnamese overview still has four objectives and the old body)
 - Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- No English change. Vietnamese (S1): description, six objectives and three-paragraph body retranslated from the English.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.

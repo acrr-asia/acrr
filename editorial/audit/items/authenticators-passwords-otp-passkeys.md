@@ -68,3 +68,11 @@ P2: should-fix metadata, references and a stale citation; no technical error.
 - Technical: fail
 - Findings: F2 (should fix), T1 (should fix), S1 (should fix, Vietnamese translation)
 - Not verified: graphics-processor hash rate and phishing-kit availability (qualitative, unsourced); FIDO expansion confirmed only in press coverage.
+
+## Revision log (wave 2 resolution)
+
+- F2: revision 4 forbids email for out-of-band authentication, line 133; table row relabeled, line 225.
+- T1: related-origins exception of WebAuthn Level 3, line 192.
+- Meaning changes mirrored in Vietnamese: F2, T1, versions paragraph, SP 800-63B-4 wording in §2.3 and §3.4, References, description.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.

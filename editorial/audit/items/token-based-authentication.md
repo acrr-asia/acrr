@@ -81,3 +81,9 @@ P1: the foundational entry that every later entry refers back to.
 - Technical: pass
 - Findings: S1 (should fix, Vietnamese translation only)
 - Not verified: Saltzer and Schroeder volume, issue and pages not confirmed from a primary page (IEEE Xplore unreachable); consistent with all secondary listings.
+
+## Revision log (wave 2 resolution)
+
+- No English change. Vietnamese (S1): closing paragraph leading to the next entry, References, description.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.

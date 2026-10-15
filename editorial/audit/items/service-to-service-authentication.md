@@ -52,3 +52,9 @@ P2.
 - Technical: pass
 - Findings: S1 (should fix, Vietnamese translation keeps the removed §8)
 - Not verified: Hardy volume and issue (ACM DL unreachable; omitted in the text); exact titles of the SPIFFE standards (GitHub unreachable).
+
+## Revision log (wave 2 resolution)
+
+- No English change. Vietnamese (S1): §8 merged into §7 with the objectives paragraph, References, description.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.

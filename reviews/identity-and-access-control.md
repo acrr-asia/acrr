@@ -4,6 +4,7 @@
 - Reviewed commit: 2e79a4b (series content as revised in wave 1, commit 49941d2)
 - Date: 2026-10-15
 - Review type: independent review (wave 2) of the wave-1 revision (audit logs in `editorial/audit/series/identity-and-access-control.md` and `editorial/audit/items/`), combining fact-check (F), technical review (T) and series review (S). The reviewer did not write or revise any of the text. This report replaces the earlier second-pass report (commit 6e6f2ee) and its Resolution and stamp.
+- Content hash: sha256:5a89087d47b182d7b9a3573f7457dfdfaa54bd75d9a4dd17a8b98d5ce95914a7
 
 ## Summary
 
@@ -190,3 +191,28 @@ The objectives paragraph that wave 1 added to entry 7's Summary (`service-to-ser
   - The exact document titles of the three SPIFFE standards as cited ("The X.509 SPIFFE Verifiable Identity Document" and so on): github.com could not be read from here, and spiffe.io shows short titles ("X509-SVID", "JWT-SVID", "SPIFFE Identity and Verifiable Identity Document").
   - Unsourced but uncontested general statements: "billions of SHA-256 hashes per second" on a graphics processor (entry 2 `:58`); "automated kits for this attack are widely available" (entry 2 `:129`); the browser defaults for an absent `SameSite` (entry 3 `:116`). No source was checked for them; each is stated qualitatively and is consistent with common knowledge in the field.
   - Chrome shipping DBSC in 2026: secondary press source only (not used in the F4 correction).
+
+## Resolution
+
+- F1 (Should fix): fixed - step 3 of the ID-token validation now follows OpenID Connect Core errata set 2 §3.1.3.7 (reject a token that lists an audience the client does not trust; check `azp` when present), `src/content/blog/oauth-grants-and-client-types.mdx:168`; checked against openid.net/specs/openid-connect-core-1_0.html (steps 3 to 5 quoted, fetched 2026-10-15); mirrored in `src/content/blog/vi/oauth-grants-and-client-types.mdx`.
+- F2 (Should fix): fixed - §3.4 now states that revision 4 does not accept email for out-of-band authentication, and the table row reads "SMS code (email codes are weaker still; Section 3.4)", `src/content/blog/authenticators-passwords-otp-passkeys.mdx:133` and `:225`; checked against pages.nist.gov/800-63-4/sp800-63b.html §3.1.3.1 ("Email SHALL NOT be used for out-of-band authentication") and §3.1.3.3; mirrored in the Vietnamese entry 2.
+- T1 (Should fix): fixed - §5.4 now names the Level 3 related-origins exception, `src/content/blog/authenticators-passwords-otp-passkeys.mdx:192`; checked against w3.org/TR/webauthn-3 (Recommendation of 25 August 2026; the [[Create]] algorithm runs the related origins validation procedure when the RP ID is not a registrable suffix) and the `/.well-known/webauthn` description served from the RP ID's domain; mirrored in the Vietnamese entry 2.
+- S1 (Should fix): fixed - Vietnamese series page retranslated from the English (description, six objectives, three-paragraph body); Vietnamese entry 7 §8 merged into §7 with the objectives paragraph; Vietnamese entry 5 §2.3 now cites RFC 10017 as published and gains the versions paragraph; Vietnamese entry 2 gains the versions paragraph and the revision-4 wording (§2.3, §3.4); Vietnamese entry 6 opening names RFC 8705 and RFC 9449 and the choice between them; Vietnamese entry 1 gains the closing paragraph; the References of all seven Vietnamese entries now copy the English lists; every Vietnamese `description` translates the English one (143 to 163 characters; series 153). Copied front-matter fields unchanged.
+
+Optional findings applied: F3 (Bell–LaPadula and Biba added to the References of entry 4, checked against the CERIAS record of ESD-TR-76-372 and the ESD-TR-73-278 bibliographic record), F4 (DBSC described as a W3C Working Draft, w3.org/TR/dbsc fetched: First Public Working Draft, 21 August 2025), T2 ("following OpenID Connect Core" plus the TLS-alternative note after step 1) and S2 (link to Section 4.3 of the first entry); all mirrored in the Vietnamese entries. Optional findings not applied: none.
+
+Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15. Checked against the current text (`git diff 6a68449 -- src/`) and the build at `/tmp/claude-0/b11`.
+
+- F1 (Should fix): confirmed. `oauth-grants-and-client-types.mdx:168` now rejects a token that lists an audience the client does not trust and checks `azp` only when present, as OpenID Connect Core errata set 2 §3.1.3.7 steps 3 to 5 say; the Summary row (line 303) remains true.
+- F2 (Should fix): confirmed. `authenticators-passwords-otp-passkeys.mdx:133` states that revision 4 does not accept email for out-of-band authentication; the table row (line 225) reads "SMS code (email codes are weaker still; Section 3.4)", and Section 3.4 is the right target.
+- T1 (Should fix): confirmed. `authenticators-passwords-otp-passkeys.mdx:192` keeps the base rule ("may use only") and names the Level 3 related-origins exception; the phishing argument still holds as stated.
+- S1 (Should fix): confirmed (spot-check, by instruction). The Vietnamese series file has six objectives; the Vietnamese entry 7 has no separate §8 (headings end at "## 7. Tóm tắt" and "### Tài liệu tham khảo") and carries the objectives paragraph; the Vietnamese entry 5 §2.3 (line 81) and References (line 324) cite RFC 10017 as published; the copied front-matter fields of the series file and all seven entries equal the English ones. Vietnamese prose quality was not reviewed.
+- Optional findings F3, F4, T2 and S2: applied as described; the S2 link target `#43-where-decisions-are-made-and-enforced` resolves (`check-links`, 0 broken).
+
+Checks: `eos lint identity-and-access-control` 8 files, 0 errors, 0 warnings, 46 suggestions (the count rose from 27 because the `serial-comma` suggestion rule was added after the review, commit 4e54f90); `eos syntax` "All files compile"; `check-links /tmp/claude-0/b11` 314 pages, all internal links resolve; `eos validate-site /tmp/claude-0/b11 --json` 0 issues (none on this scope's pages). Recomputed with `python3 -I`: PKCE challenge, DPoP `jkt` and `ath`, Basic credentials, JWT header, the four timestamps (2026-10-12 UTC), the TOTP guessing probability (1.49999e-5) and HOTP against the RFC 4226 and RFC 6238 vectors; all agree with the text.
+
+QA note (not a reopened finding): several of the new `serial-comma` suggestions are genuine lapses from the house style in Section 5.1 of the standards, for example `token-based-authentication.mdx:69` "a person, a device, or a piece of software", `authenticators-passwords-otp-passkeys.mdx:247`, `authorization-models.mdx:167`, `oauth-grants-and-client-types.mdx:227` and `service-to-service-authentication.mdx:109` and `:127`. They do not affect meaning and are reflected in the language scores, not in the decision.

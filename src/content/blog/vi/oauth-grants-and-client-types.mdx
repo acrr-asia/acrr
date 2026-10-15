@@ -1,6 +1,6 @@
 ---
 title: "Các luồng cấp quyền và loại client trong OAuth 2.0"
-description: "Cách một client OAuth 2.0 nhận token: các loại client và việc xác thực client, URI chuyển hướng cho client web, client gốc và client chạy trên trình duyệt, chi tiết luồng mã ủy quyền với PKCE, luồng client credentials, ủy quyền thiết bị, làm mới token, trao đổi token, và cách chọn giữa chúng."
+description: "Cách mỗi loại client OAuth 2.0 nhận token, từ luồng mã ủy quyền với PKCE đến các luồng client credentials, ủy quyền thiết bị và trao đổi token."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -15,6 +15,8 @@ seriesOrder: 5
 Bài thứ nhất của loạt bài này giới thiệu OAuth 2.0 như lời giải cho một bài toán ủy nhiệm (delegation): người dùng muốn một client truy cập một máy chủ tài nguyên (resource server) thay mặt mình mà không phải giao mật khẩu. Bài đó trình bày một luồng, luồng mã ủy quyền (authorization code) với PKCE, và chỉ điểm qua tên các luồng còn lại. Bài này xem xét toàn bộ khung giao thức từ phía client: client là gì, nó chứng minh danh tính của mình ra sao, token đến được với nó bằng cách nào, và **luồng cấp quyền** (grant: giao thức mà qua đó client nhận được access token) nào phù hợp với tình huống nào.
 
 Ý tưởng xuyên suốt là một luồng cấp quyền được chọn bằng cách trả lời ba câu hỏi về tình huống, theo thứ tự: *Có người dùng tham gia không?* *Người dùng có dùng được trình duyệt trên thiết bị đang chạy client không?* *Client có giữ được bí mật không?* Phần lớn các tính chất bảo mật của các luồng cấp quyền suy ra từ những câu trả lời đó.
+
+Bài này theo khung OAuth 2.0 (RFC 6749) như được bổ sung bởi OAuth 2.0 Security Best Current Practice (RFC 9700), và ghi chú những chỗ OAuth 2.1, hiện vẫn là một Internet-Draft, hợp nhất chúng.
 
 ## 1. Client
 
@@ -76,7 +78,7 @@ Thứ hai, lần chuyển hướng phải quay về ứng dụng bằng một tr
 
 ### 2.3 Ứng dụng chạy trên trình duyệt
 
-Một ứng dụng một trang (single-page application) có mã chạy trong trình duyệt có ba lựa chọn kiến trúc, được mô tả trong bản hướng dẫn đang được IETF soạn thảo cho các ứng dụng chạy trên trình duyệt:
+Một ứng dụng một trang (single-page application) có mã chạy trong trình duyệt có ba lựa chọn kiến trúc, được mô tả trong RFC 10017, *OAuth 2.0 for Browser-Based Applications* (2026):
 
 1. **Back end for front end (BFF).** Một thành phần phía máy chủ đóng vai client OAuth (bảo mật), giữ các token, và chỉ trao cho trình duyệt một cookie phiên `HttpOnly`; các lời gọi API của trình duyệt đi qua BFF. Token không bao giờ bị lộ cho JavaScript.
 2. **Back-end trung gian token** (token-mediating back end). Một thành phần phía máy chủ thực hiện việc đổi mã với tư cách client bảo mật nhưng chuyển access token cho trình duyệt, còn refresh token thì tự giữ. Access token bị lộ cho JavaScript; refresh token thì không.
@@ -159,11 +161,11 @@ Mọi giá trị ở đây chỉ mang tính minh họa. `Cache-Control: no-store
 
 ### 3.4 Đăng nhập người dùng: ID token
 
-Khi client đưa phạm vi (scope) `openid` (và một `nonce` mới) vào yêu cầu ủy quyền, phản hồi token còn chứa một ID token (Mục 5.5 của bài thứ nhất). Trước khi coi người dùng là đã đăng nhập, client xác minh ID token theo yêu cầu của OpenID Connect Core:
+Khi client đưa phạm vi (scope) `openid` (và một `nonce` mới) vào yêu cầu ủy quyền, phản hồi token còn chứa một ID token (Mục 5.5 của bài thứ nhất). Trước khi coi người dùng là đã đăng nhập, client xác minh ID token theo OpenID Connect Core:
 
-1. Xác minh chữ ký bằng một khóa trong tập khóa mà nhà cung cấp công bố, dùng thuật toán đã đăng ký cho client.
+1. Xác minh chữ ký bằng một khóa trong tập khóa mà nhà cung cấp công bố, dùng thuật toán đã đăng ký cho client. (Core cũng cho phép một client nhận token trực tiếp từ điểm cuối token qua TLS dựa vào kết nối TLS thay cho việc kiểm tra chữ ký; kiểm tra chữ ký vẫn là thói quen an toàn hơn.)
 2. Kiểm tra rằng `iss` bằng chính xác định danh bên phát hành (issuer identifier) của nhà cung cấp.
-3. Kiểm tra rằng `aud` chứa `client_id` của chính client; nếu nó liệt kê cả những đối tượng nhận khác, kiểm tra rằng `azp` là `client_id` của client.
+3. Kiểm tra rằng `aud` chứa `client_id` của chính client, và từ chối token nếu nó còn liệt kê một đối tượng nhận mà client không tin cậy. Nếu có claim `azp` (authorized party, bên được ủy quyền), kiểm tra rằng nó là `client_id` của client.
 4. Kiểm tra rằng `exp` nằm ở tương lai và `iat` là gần đây.
 5. Kiểm tra rằng `nonce` bằng giá trị mà client đã gửi trong yêu cầu ủy quyền cho lần đăng nhập này.
 
@@ -305,10 +307,22 @@ Lưu đồ trên bao quát việc nhận token đầu tiên. Sau đó, luồng l
 
 Bài tiếp theo giải quyết điểm yếu chung của mọi token trong bài này: chúng đều là bearer token. Bài đó cho thấy DPoP và TLS hai chiều ràng buộc một token với một khóa mà client nắm giữ như thế nào, để một token bị đánh cắp không thể bị phát lại.
 
-### Các đặc tả
+### Tài liệu tham khảo
 
-- Cốt lõi: RFC 6749 (OAuth 2.0), RFC 6750 (bearer token), RFC 7636 (PKCE), RFC 9700 (thực tiễn tốt nhất hiện hành về bảo mật), RFC 9207 (định danh bên phát hành).
-- Client: RFC 7591 (đăng ký client động), RFC 7523 (xác thực client bằng JWT và luồng JWT bearer), RFC 8705 (TLS hai chiều), RFC 8252 (ứng dụng gốc).
-- Các luồng cấp quyền và tham số khác: RFC 8628 (ủy quyền thiết bị), RFC 8693 (trao đổi token), RFC 8707 (chỉ báo tài nguyên), RFC 9126 (yêu cầu ủy quyền đẩy trước), RFC 9101 (yêu cầu ủy quyền được bảo vệ bằng JWT).
-- OpenID Connect: OpenID Connect Core 1.0 (xác minh ID token), do OpenID Foundation công bố.
-- Đang được IETF soạn thảo: OAuth 2.1, và OAuth 2.0 for Browser-Based Applications.
+- B. Campbell, J. Bradley, N. Sakimura and T. Lodderstedt, *OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens*, RFC 8705, IETF, 2020.
+- B. Campbell, J. Bradley and H. Tschofenig, *Resource Indicators for OAuth 2.0*, RFC 8707, IETF, 2020.
+- W. Denniss and J. Bradley, *OAuth 2.0 for Native Apps*, RFC 8252, IETF, 2017.
+- W. Denniss, J. Bradley, M. Jones and H. Tschofenig, *OAuth 2.0 Device Authorization Grant*, RFC 8628, IETF, 2019.
+- D. Hardt, Ed., *The OAuth 2.0 Authorization Framework*, RFC 6749, IETF, 2012.
+- D. Hardt, A. Parecki and T. Lodderstedt, *The OAuth 2.1 Authorization Framework*, draft-ietf-oauth-v2-1-16, IETF, 2026 (Internet-Draft, work in progress).
+- M. Jones, B. Campbell and C. Mortimore, *JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants*, RFC 7523, IETF, 2015.
+- M. Jones and D. Hardt, *The OAuth 2.0 Authorization Framework: Bearer Token Usage*, RFC 6750, IETF, 2012.
+- M. Jones, A. Nadalin, B. Campbell, Ed., J. Bradley and C. Mortimore, *OAuth 2.0 Token Exchange*, RFC 8693, IETF, 2020.
+- T. Lodderstedt, J. Bradley, A. Labunets and D. Fett, *Best Current Practice for OAuth 2.0 Security*, RFC 9700, IETF, 2025.
+- T. Lodderstedt, B. Campbell, N. Sakimura, D. Tonge and F. Skokan, *OAuth 2.0 Pushed Authorization Requests*, RFC 9126, IETF, 2021.
+- K. Meyer zu Selhausen and D. Fett, *OAuth 2.0 Authorization Server Issuer Identification*, RFC 9207, IETF, 2022.
+- A. Parecki, P. De Ryck and D. Waite, *OAuth 2.0 for Browser-Based Applications*, RFC 10017, IETF, 2026.
+- J. Richer, Ed., M. Jones, J. Bradley, M. Machulak and P. Hunt, *OAuth 2.0 Dynamic Client Registration Protocol*, RFC 7591, IETF, 2015.
+- N. Sakimura, Ed., J. Bradley and N. Agarwal, *Proof Key for Code Exchange by OAuth Public Clients*, RFC 7636, IETF, 2015.
+- N. Sakimura, J. Bradley and M. Jones, *The OAuth 2.0 Authorization Framework: JWT-Secured Authorization Request (JAR)*, RFC 9101, IETF, 2021.
+- N. Sakimura, J. Bradley, M. Jones, B. de Medeiros and C. Mortimore, *OpenID Connect Core 1.0 incorporating errata set 2*, OpenID Foundation, 2023.

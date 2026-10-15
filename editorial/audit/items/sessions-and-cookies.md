@@ -63,3 +63,10 @@ P2.
 - Technical: pass
 - Findings: F4 (optional), S1 (should fix, Vietnamese translation)
 - Not verified: browser defaults for an absent SameSite (unsourced, stated qualitatively); Chrome shipping DBSC (secondary source only).
+
+## Revision log (wave 2 resolution)
+
+- F4 (optional): DBSC described as a W3C Working Draft not yet supported by every browser, line 235.
+- Meaning changes mirrored in Vietnamese: F4, References, description.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.

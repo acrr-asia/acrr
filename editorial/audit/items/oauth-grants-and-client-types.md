@@ -57,3 +57,11 @@ P2.
 - Technical: pass
 - Findings: F1 (should fix), T2 (optional), S1 (should fix, Vietnamese translation still calls RFC 10017 a draft)
 - Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- F1: ID-token step 3 follows OIDC Core errata set 2 (untrusted audiences rejected; `azp` checked when present), line 168.
+- T2 (optional): "following OpenID Connect Core" and a note on the TLS alternative after step 1, lines 164–166.
+- Meaning changes mirrored in Vietnamese: F1, T2, RFC 10017 as published (§2.3), versions paragraph, References, description.
+- Lint: `eos lint identity-and-access-control` 0 errors, 0 warnings (suggestions only, none on the changed lines). Syntax: `eos syntax` "All files compile"; Vietnamese MDX compiled with @mdx-js/mdx.
+- Vietnamese translation: updated in this resolution (scope S1); copied front-matter fields unchanged.
