@@ -130,3 +130,22 @@ All references exist and their bibliographic details are correct (verified below
 - Optional findings applied: F1 (the paper's term "operational intensity" noted, `compute-bound-or-memory-bound.md:16`), T4 (the condition now reads "does not grow if and only if", and "decays for $h < 2/|\lambda|$", notes:117), T5 (the stiffness example reworded to a slow-plus-fast system, notes:139). Not applied: none.
 
 Resolved by the wave-1 author on 2026-10-13; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15. Checked against the current working tree and the build in `/tmp/claude-0/b6` (which contains the resolved text: "unmodeled delay", "operational intensity" and "0.745" are present in the rendered pages).
+
+- T1 (Should fix): confirmed. `numerical-integration-notes.mdx:67` now requires bounded amplification, gives the $e^{|\lambda|T}$ bound with its reason ($|R(z)| \le \sum |z|^k/k! \le e^{|z|}$, true for both factors), and separates the $h \to 0$ statement from the fixed-$h$ question of Section 4.
+- T2 (Should fix): confirmed. `numerical-integration-notes.mdx:127`. Recomputed (Python 3.13): $|R(j)| = 0.99391$, $|R(2j)| = 0.74536$, $|R(2\sqrt{2}j)| = 1.0000$; small-$y$ form $1 - y^6/144$ follows from $|R(jy)|^2 = 1 - y^6/72 + y^8/576$.
+- T3 (Should fix): confirmed. `control-vs-learning-approaches.md:16` carries the reviewer's sentence; consistent with `from-signal-processing-to-digital-control.mdx:232`.
+- F1 (Optional): confirmed applied (`compute-bound-or-memory-bound.md:16`).
+- T4 (Optional): confirmed applied (`numerical-integration-notes.mdx:117`; "does not grow if and only if ... decays for $h < 2/|\lambda|$" is correct for real $\lambda < 0$).
+- T5 (Optional): confirmed applied (`numerical-integration-notes.mdx:139`).
+
+Independent spot checks: article code block re-run with `python3 -I` (errors 1.920e-2, 9.394e-3, 4.647e-3; 3.332e-7, 1.998e-8, 1.223e-9, matching the table); RK4 real-axis boundary by bisection −2.78529; $R(-2.5) = 0.6484$, $0.6484^{20} = 1.73\times10^{-4}$; $1.5^{20} = 3325$; $e^{-50} = 1.93\times10^{-22}$; equal-work ratio $1.39\times10^4$; roofline $I = 0.0833$, $B\,I = 8.33$, ratio 120; binary64 $(10^{16}+1)+1 = 10^{16}$ and $10^{16}+2$; float32 counter stall at $2^{24}$; $10^6 u$ = 0.0596 and $1.11\times10^{-10}$. Cross-reference targets read: `state-space-models-primer` (eigenvalues, Section 4), `stability-and-eigenvalues.mdx:244`, `finite-differences-for-heat-and-waves` (Section 1.2 stiffness, Section 4 Crank–Nicolson), `from-differential-equations-to-discrete-problems` Section 5.2, `solving-large-linear-systems` Sections 3.2 and 7, `verifying-and-validating-a-simulation` Sections 3.4 and 4, `state-feedback-controller-design.mdx:228` (LQR), `sensing-and-state-estimation` (`seriesOrder: 4`, last of four). References checked against the verification table: Williams et al. 2009, Higham 2002, Butcher 2016, Hairer–Nørsett–Wanner 1993, LeVeque 2007.
+
+Checks: `eos lint` on the seven files: 0 errors, 0 warnings, 5 suggestions (two sentence-splitter artifacts, ACM/SIAM in citations). `eos syntax`: all files compile. `check-links /tmp/claude-0/b6`: 314 pages, 9693 references, all resolve. `eos validate-site /tmp/claude-0/b6 --json`: no issue on any English page in scope or on `learning.html` (the only scope-related issues are the Vietnamese meta descriptions of `vi/insights/closing-the-sim-to-real-gap` (229 characters) and `vi/insights/compute-bound-or-memory-bound` (179), outside this verdict). `katex-error` count 0 on all seven pages.
+
+Learning (`src/data/learning.json`, English fields; not recorded by eos): pass. Six entries, all `planned`, none with a `url`; the page renders "Coming soon" with no outbound link; descriptions say "planned" and name series that exist. Note for the translation pass: two Vietnamese descriptions do not match the English (`introduction-to-robotics-learning-path` omits "to accompany the Introduction to Robotics series"; `numerical-methods-external-references` adds a sentence about links).
+
+No finding reopened.

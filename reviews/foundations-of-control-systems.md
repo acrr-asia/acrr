@@ -4,6 +4,7 @@
 - Reviewed commit: 9232ed9
 - Date: 2026-10-13
 - Review type: independent review (wave 2), fact-check, technical review and series review of the wave-1 revision (changes since `e21dcc8`)
+- Content hash: sha256:cd15a21f2681dd409d75977b17a7a7374490b68b75a7fd0c3d427cf616ee1e65
 
 ## Summary
 
@@ -157,3 +158,15 @@ Findings: 0 blocking, 4 should fix, 3 optional.
 - Optional applied: T3 (growing oscillation only while $c^2 < 4mk$, primer:103); T4 (added a sentence on complex $v$ and $\operatorname{Re} v$, and changed "a sum of such terms" to "a sum of modes", primer:87); F1 (journal title "Regelungstechnik und Prozess-Datenverarbeitung", state-feedback-controller-design:288). Optional not applied: none.
 
 Resolved by the wave-1 author on 2026-10-14; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the working tree at `0d10069` and the build `/tmp/claude-0/b6` (confirmed current: the resolved sentences of T1, S1 and S2 are present in the built HTML).
+
+- T1: confirmed. `feedback-and-system-behavior.mdx:167` now reads "every increase of the gain an improvement: faster, less sensitive and with a smaller offset, although the offset never reaches zero", consistent with Section 2.3 and the table at lines 77-82 (offset 0.50, 0.20, 0.10).
+- S1: confirmed. `foundations-of-control-systems.md:15` reads "A single first-order equation cannot describe a mass on a spring or a robot joint, ... which collect several first-order equations into one matrix equation"; consistent with `state-space-models-primer.mdx:38` and `feedback-and-system-behavior.mdx:186`. The paragraph split (new line 17) changes no content. The Vietnamese overview is out of scope.
+- T2: confirmed. `state-space-models-primer.mdx:138` now names both sources of non-uniqueness (coordinate changes and added hidden states) and leads into the next bullet.
+- S2: confirmed. `stability-and-eigenvalues.mdx:15` now matches the primer: test stated, one direction proved (primer:87), the other proved here (Section 2 for diagonalizable $A$, Section 4 for repeated eigenvalues via the Jordan form).
+- Optional T3, T4, F1: applied as described (primer:103, primer:87, state-feedback-controller-design:288). T4's added sentence precedes the sentence it qualifies ("does not decay either" comes before "that response does not decay"), so the paragraph reads slightly out of order; polish only, not reopened.
+
+Independent checks: `eos lint foundations-of-control-systems` 6 files, 0 errors, 0 warnings; `eos syntax` "All files compile."; `check-links /tmp/claude-0/b6` 314 pages, all internal links resolve; `eos validate-site /tmp/claude-0/b6` reports no issue on the six English pages of this scope (all 29 issues are `/vi/` pages, out of scope); 0 `katex-error` in the five article pages. Recomputed with `python3 -I` (NumPy 2.5): every Python block in entries 2, 4 and 5 re-run with identical output; entry 1 table (37.2/16.3/4.6/0%, 5.62/4.04/2.99/2.92 s) and minimum settling 1.80 s at $\zeta = 0.78$ with 1.99% overshoot; entry 4 Euler magnitudes 0.995 and 1.323, $e^{\lambda T} = 0.956 \pm 0.192j$, bound 0.125 s; entry 5 open loop 67.3%/14.66 s, reference-gain design 1.49 s and 0.66 s to 0.9 m, integral design peaks 1.015/1.006 m, settles 1.20 s, 1.00 s to 0.9 m, stiffness 5 N/m gives 0.941 m, $\omega_n = 8$ design 0.75 s and 0.90 s with a 10 N limit; observer $L = [19.5, 86.25]^\top$ by hand. Cross-site claims checked against their targets: RK4 in `numerical-integration-notes`, Kalman filter in `sensing-and-state-estimation`, $k_{\max} = 20.02$ at $T = 0.1$ s in `from-signal-processing-to-digital-control`.
