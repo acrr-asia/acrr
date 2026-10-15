@@ -347,6 +347,7 @@ Every published article, insight and series overview passes the same editorial p
 | `plugins/editorial-os/` | Skills (`editorial`, `content-audit`, `editorial-review`, `series-editorial-review`, `style-guide`), role agents (developmental editor, copy editor, fact-checker, technical reviewer, QA editor), a hook, and the `eos` engine. |
 | `editorial/records/<type>/<slug>.json` | One review record per published item: stage results, rubric scores, findings, claims not verified, changes, and the content hash it was written for. |
 | `editorial/audit/` | The site audit: one report per item, per series, and the overall report. |
+| `editorial/tool-evaluation.md`, `editorial/testing-report.md` | Why these tools were chosen, and the evidence that the system and the site pass their checks. |
 
 Commands (`npm run eos -- <command>`; `npm run eos -- help` lists them all):
 
