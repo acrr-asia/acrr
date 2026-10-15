@@ -1,6 +1,6 @@
 ---
 title: "Evaluating Models Honestly"
-description: "How to estimate how well a model will do on new data without fooling oneself: what an evaluation estimates, training, validation and test splits, why a test set is used once, k-fold cross-validation, data leakage through preprocessing, feature selection, duplicates and time, bias in the evaluation setup, and how to report a result with its uncertainty and limitations."
+description: "An honest estimate of a model's error on new data needs untouched test data, careful cross-validation, no leakage, a representative sample and a stated uncertainty."
 publishedAt: "2026-10-13"
 category: "AI and Machine Learning"
 tags:
@@ -14,28 +14,28 @@ seriesOrder: 4
 
 The [first entry](/blog/learning-from-data) ended with a rule: an error measured on data that influenced any choice about a model is an optimistic estimate of its error on new data. The [third entry](/blog/generalization-overfitting-and-regularization) showed how large that optimism can become, and chose its regularization strength by peeking at 100 000 fresh examples from a known distribution, something real data never allow. This final entry treats the practical question that remains: with a finite data set and an unknown distribution, how does one estimate the performance of a model honestly, and what are the common ways of getting it wrong?
 
-The entry assumes the vocabulary of the earlier entries: risk (generalization error), empirical risk, training error, test error, the i.i.d. assumption, hyperparameters, ridge regression and its strength $\lambda$, and the bias–variance decomposition. It uses one new tool from probability, a concentration inequality, which is stated where it is needed. Code uses Python 3.13 and numpy 2.5.3 with the seeds given beside it; classification examples use **accuracy**, the fraction of correct predictions (one minus the average zero-one loss of the first entry).
+The entry assumes the vocabulary of the earlier entries: risk (generalization error), empirical risk, training error, test error, the i.i.d. assumption, hyperparameters, ridge regression and its strength $\lambda$, and the bias–variance decomposition. It uses one new tool from probability, a concentration inequality, which is stated where it is needed. Code uses Python 3.13 and NumPy 2.5.3 with the seeds given beside it; classification examples use **accuracy**, the fraction of correct predictions (one minus the average zero-one loss of the first entry).
 
-## 1. What an Evaluation Estimates
+## 1. What an evaluation estimates
 
 ### 1.1 The target
 
-An evaluation tries to estimate one number: the risk of the model that will actually be used, on the cases it will actually meet. Both halves matter. "The model that will actually be used" means the final fitted model with all its choices made, not a family of models or a training procedure in general. "The cases it will actually meet" means the distribution of future inputs, which the i.i.d. assumption of the first entry equates with the distribution of the available data. Section 5 deals with what happens when that equation fails.
+An evaluation tries to estimate one number: the risk of the model that will be deployed, on the cases it will meet in use. Both halves matter. "The model that will be deployed" means the final fitted model with all its choices made, not a family of models or a training procedure in general. "The cases it will meet in use" means the distribution of future inputs, which the i.i.d. assumption of the first entry equates with the distribution of the available data. Section 5 deals with what happens when that equation fails.
 
 ### 1.2 Two ways to be wrong
 
 Any reported error is computed from a finite sample, so it is a random variable, and like any estimator it can fail in two ways:
 
 - **Variance:** the estimate fluctuates from one sample to another. A test set of 20 examples can, by chance, contain unusually easy or hard cases. This is cured by more evaluation data and is quantified by a confidence interval (Section 6).
-- **Bias:** the estimate is systematically off, usually too optimistic. Using the training set, reusing the test set to make choices, leaking information from the evaluation data into the model, and evaluating on data unlike the deployment data all cause bias. More data of the same kind does not cure it.
+- **Bias:** the estimate is systematically off, usually too optimistic. Using the training set, reusing the test set to make choices, leaking information from the evaluation data into the model and evaluating on data unlike the deployment data all cause bias. More data of the same kind does not cure it.
 
 This **evaluation bias** is a property of the measurement procedure. It is distinct from the bias of the bias–variance decomposition in the third entry, which is a property of the model's predictions, and from the intercept of a linear model. The objective of this entry is to recognize and avoid evaluation bias, and to quantify the variance that remains.
 
-## 2. Held-Out Data
+## 2. Held-out data
 
 ### 2.1 The test set
 
-The simplest honest procedure splits the available examples at random into a **training set**, used to fit the model, and a **test set**, used only to evaluate it. If the test examples are i.i.d. draws from the deployment distribution and played no role in fitting, the fitted model is fixed with respect to them, and the test error is an unbiased estimate of its risk, by the argument of [Section 3.3 of the first entry](/blog/learning-from-data#33-empirical-risk).
+The simplest honest procedure splits the available examples at random into a **training set**, used to fit the model, and a **test set**, used only to evaluate it. If the test examples are i.i.d. draws from the deployment distribution and played no role in fitting, the fitted model is fixed with respect to them. The test error is then an unbiased estimate of its risk, by the argument of [Section 3.3 of the first entry](/blog/learning-from-data#33-empirical-risk).
 
 How large should the test set be? For a loss bounded between 0 and 1 (the zero-one loss, for example), **Hoeffding's inequality** gives a guarantee that does not depend on the distribution. For a fixed model and $m$ i.i.d. test examples,
 
@@ -43,7 +43,7 @@ $$
 P\left(\big\lvert \hat{R}_m - R \big\rvert \ge \varepsilon\right) \le 2\,e^{-2m\varepsilon^2},
 $$
 
-where $\hat{R}_m$ is the test error and $R$ the risk. Setting the right-hand side to a tolerated failure probability $\delta$ and solving gives $\varepsilon = \sqrt{\ln(2/\delta)/(2m)}$, or the test-set size needed for a given accuracy, $m \ge \ln(2/\delta)/(2\varepsilon^2)$. To be 95 % sure ($\delta = 0.05$) that the error rate is within 0.05 of the risk takes $m \ge \ln(40)/0.005 = 738$ examples. The bound is conservative; Section 6 gives the tighter approximate intervals used in practice.
+where $\hat{R}_m$ is the test error and $R$ the risk. Setting the right-hand side to a tolerated failure probability $\delta$ and solving gives $\varepsilon = \sqrt{\ln(2/\delta)/(2m)}$, or the test-set size needed for a given accuracy, $m \ge \ln(2/\delta)/(2\varepsilon^2)$. To be 95% sure ($\delta = 0.05$) that the error rate is within 0.05 of the risk takes $m \ge \ln(40)/0.005 = 738$ examples. The bound is conservative; Section 6 gives the tighter approximate intervals used in practice.
 
 ### 2.2 Why a test set is used only once
 
@@ -71,9 +71,11 @@ best validation accuracy of 50 coin-flip models: 0.62
 the same model on the test set: 0.45
 ```
 
-(A coin-flip model has no parameters, so "the same model on the test set" is simply another round of coin flips on the 100 test labels.) The selected model looks 12 points better than chance on the data used to select it. On data that played no part in the selection it scores 0.45, which is consistent with its true accuracy of 0.5: an accuracy measured on 100 examples has a standard deviation of $\sqrt{0.5 \times 0.5/100} = 0.05$. Seed 5 is not special: over seeds 0 to 199, the best validation accuracy of the 50 candidates averages 0.61. Nothing about this depends on the models being useless: whenever several candidates are compared on one set, the score of the winner on that set is optimistic, by an amount that grows with the number of candidates and shrinks with the size of the set. Hoeffding's inequality combined with the **union bound** (the probability that at least one of $M$ events happens is at most the sum of their probabilities) quantifies it: with $M$ candidates, the deviation that holds simultaneously for all of them with probability $1 - \delta$ grows to $\sqrt{\ln(2M/\delta)/(2m)}$. For $M = 50$, $m = 100$ and $\delta = 0.05$ that is 0.195, compared with 0.136 for a single model.
+(A coin-flip model has no parameters, so "the same model on the test set" is another round of coin flips on the 100 test labels.) The selected model looks 12 points better than chance on the data used to select it. On data that played no part in the selection it scores 0.45, which is consistent with its true accuracy of 0.5: an accuracy measured on 100 examples has a standard deviation of $\sqrt{0.5 \times 0.5/100} = 0.05$. Seed 5 is not special: over seeds 0 to 199, the best validation accuracy of the 50 candidates averages 0.61.
 
-The same mechanism operates, more slowly, when a person looks at test results, adjusts the model, and tests again. Each round is a selection. A test set that has informed decisions has become a validation set, and its score is no longer an unbiased estimate.
+Nothing about this depends on the models being useless: whenever several candidates are compared on one set, the score of the winner on that set is optimistic, by an amount that grows with the number of candidates and shrinks with the size of the set. Hoeffding's inequality combined with the **union bound** (the probability that at least one of $M$ events happens is at most the sum of their probabilities) quantifies it: with $M$ candidates, the deviation that holds simultaneously for all of them with probability $1 - \delta$ grows to $\sqrt{\ln(2M/\delta)/(2m)}$. For $M = 50$, $m = 100$ and $\delta = 0.05$ that is 0.195, compared with 0.136 for a single model.
+
+The same mechanism operates, more slowly, when a person looks at test results, adjusts the model and tests again. Each round is a selection. A test set that has informed decisions has become a validation set, and its score is no longer an unbiased estimate.
 
 ### 2.3 Training, validation and test sets
 
@@ -95,7 +97,7 @@ flowchart LR
 
 After the choice is made, the chosen configuration is usually refitted on the training and validation sets together, since more data gives a better model; the test set still stays out. There is no universal rule for the proportions. The test set must be large enough for the precision needed in the report (Sections 2.1 and 6), the validation set large enough to tell the candidates apart, and the rest goes to training.
 
-## 3. Cross-Validation
+## 3. Cross-validation
 
 ### 3.1 The procedure
 
@@ -105,13 +107,13 @@ With a few hundred examples, setting aside a validation set wastes data that the
 2. For each fold $j$, fit the model on the other $k - 1$ folds and compute its error on fold $j$.
 3. Average the $k$ errors. This is the **cross-validation estimate** for that configuration.
 
-Each example is used for validation exactly once and for training $k - 1$ times. Common choices are $k = 5$ or $k = 10$; $k = n$ is **leave-one-out** CV. A larger $k$ trains each fold's model on more data, so the estimate is less pessimistic about the final model fitted on all the data, at the cost of more fits. For classification, folds are often **stratified**, constructed so that each fold has the same class proportions as the whole.
+Each example is used for validation exactly once and for training $k - 1$ times. Common choices are $k = 5$ or $k = 10$; $k = n$ is **leave-one-out** CV. A larger $k$ trains each fold's model on more data, so the estimate is less pessimistic about the final model fitted on all the data, at the cost of more fits. For classification, folds are often **stratified**, constructed so that each fold has the same class proportions as the whole. Stone (1974) is an early systematic treatment of cross-validation.
 
 Cross-validation estimates the performance of the *procedure* (fit this configuration on about $n(k-1)/k$ examples), not of one particular fitted model, since each fold produces a different one. After the configuration is chosen, the final model is refitted on all the development data.
 
 ### 3.2 Worked example: choosing the ridge strength
 
-The third entry fitted a degree-12 polynomial with ridge regression and chose $\lambda$ by looking at the true risk. The code below does it properly. It draws 100 examples from the same distribution ($y = \sin(2\pi x) + \varepsilon$, noise standard deviation 0.3, irreducible error 0.09), keeps 60 aside as a test set, chooses $\lambda$ by 5-fold CV on the other 40, refits on all 40, and evaluates once on the test set. Because the data are synthetic, it also computes the fresh-data MSE on 100 000 new examples, to show what the test set was trying to estimate.
+The third entry fitted a degree-12 polynomial with ridge regression and chose $\lambda$ by looking at the fresh-data mean squared error (MSE), a near-exact estimate of the true risk. The code below does it properly. It draws 100 examples from the same distribution ($y = \sin(2\pi x) + \varepsilon$, noise standard deviation 0.3, irreducible error 0.09), keeps 60 aside as a test set, chooses $\lambda$ by 5-fold CV on the other 40, refits on all 40 and evaluates once on the test set. Because the data are synthetic, it also computes the fresh-data MSE on 100 000 new examples, to show what the test set was trying to estimate.
 
 ```python
 import numpy as np
@@ -175,13 +177,13 @@ Three observations:
 
 ### 3.3 Nested cross-validation
 
-When there is too little data to set aside a test set, the choice of hyperparameters and the estimate of performance can both be made by CV, but they must not use the same folds. **Nested cross-validation** runs an inner CV, on the training part of each outer fold only, to choose the hyperparameters, and evaluates that choice on the outer fold's held-out part. The average outer score estimates the performance of the whole procedure, hyperparameter search included. Reporting the best inner score instead is the same mistake as reporting the best validation score.
+When there is too little data to set aside a test set, the choice of hyperparameters and the estimate of performance can both be made by CV, but they must not use the same folds. **Nested cross-validation** runs an inner CV, on the training part of each outer fold only, to choose the hyperparameters, and evaluates that choice on the outer fold's held-out part. The average outer score estimates the performance of the whole procedure, hyperparameter search included. Reporting the best inner score instead is the same mistake as reporting the best validation score. Cawley and Talbot (2010) show that the resulting optimism can be as large as the differences between the learning methods being compared.
 
-## 4. Data Leakage
+## 4. Data leakage
 
 ### 4.1 What leakage is
 
-**Data leakage** is any path by which information from the evaluation data, or information that would not be available at prediction time, reaches the model during training or selection. It makes the evaluation optimistic, often dramatically, and the model then fails in use. Leakage rarely looks like cheating; it usually comes from an innocent-seeming preprocessing step or a property of how the data were collected.
+**Data leakage** is any path by which information from the evaluation data, or information that would not be available at prediction time, reaches the model during training or selection. It makes the evaluation optimistic, often dramatically, and the model then fails in use. Leakage rarely looks like cheating; it usually comes from an innocent-seeming preprocessing step or a property of how the data were collected. Kaufman et al. (2012) give a formal definition and methods for detecting and avoiding it.
 
 The guiding rule is: **every step that learns anything from data is part of the model, and must be fitted on the training portion only, inside every fold.** That includes steps that are not usually thought of as learning.
 
@@ -191,7 +193,7 @@ Standardizing features (subtracting the mean and dividing by the standard deviat
 
 ### 4.3 Feature selection outside the cross-validation
 
-Selecting features by their relation to the label is a powerful step, and doing it before cross-validation is one of the best-documented forms of leakage. The code below generates 50 examples with 1000 features of pure noise and labels unrelated to them, so that no classifier can genuinely beat 50 % accuracy. It selects the 20 features most correlated with the label and classifies with a **nearest-centroid** rule (predict the class whose mean feature vector, computed on the training examples, is closer). The selection is done either once on all 50 examples before 5-fold CV, or separately inside each fold.
+Selecting features by their relation to the label is a powerful step, and doing it before cross-validation is one of the best-documented forms of leakage; Ambroise and McLachlan (2002) describe it in the selection of genes from microarray data. The code below generates 50 examples with 1000 features of pure noise and labels unrelated to them, so that no classifier can genuinely beat 50% accuracy. It selects the 20 features most correlated with the label and classifies with a **nearest-centroid** rule (predict the class whose mean feature vector, computed on the training examples, is closer). The selection is done either once on all 50 examples before 5-fold CV, or separately inside each fold.
 
 ```python
 import numpy as np
@@ -230,11 +232,11 @@ selection outside CV: accuracy 0.94
 selection inside CV:  accuracy 0.44
 ```
 
-With 1000 noise features and only 50 examples, some features are correlated with the labels by chance, including with the labels of the examples that will later serve as validation folds. Selecting them on all the data bakes those chance correlations into the model, and CV then reports 94 % accuracy on a problem where nothing can be predicted. Done inside each fold, the selection sees only the training labels, and the estimate falls to chance (0.44 is within the sampling variation of 50 examples around 0.5). Any step that looks at labels (feature selection, choosing interaction terms, encoding a category by its average label) carries the same risk.
+With 1000 noise features and only 50 examples, some features are correlated with the labels by chance, including with the labels of the examples that will later serve as validation folds. Selecting them on all the data bakes those chance correlations into the model, and CV then reports 94% accuracy on a problem where nothing can be predicted. Done inside each fold, the selection sees only the training labels, and the estimate falls to chance (0.44 is within the sampling variation of 50 examples around 0.5). Any step that looks at labels (feature selection, choosing interaction terms, encoding a category by its average label) carries the same risk.
 
 ### 4.4 Duplicates and groups
 
-Random splitting assumes the examples are independent. Often they are not: several images of the same object, several visits by the same patient, several sentences from the same document, or exact duplicates created when data sets are merged. If related examples land on both sides of a split, the model can score well by recognizing the individual rather than by learning anything that transfers to new individuals.
+Random splitting assumes the examples are independent. Often they are not: several images of the same object, several visits by the same patient, several sentences from the same document or exact duplicates created when data sets are merged. If related examples land on both sides of a split, the model can score well by recognizing the individual rather than by learning anything that transfers to new individuals.
 
 The code below simulates this. There are 200 subjects, each with 5 examples that are noisy copies of the subject's own feature vector, and each subject has a label that is unrelated to its features, so that a new subject's label cannot be predicted. The classifier is **1-nearest-neighbor**: predict the label of the closest training example. Each evaluation holds out a quarter of the data, chosen either as random examples or as whole subjects.
 
@@ -289,17 +291,19 @@ A feature that is a consequence of the label, or that is recorded only after the
 | Features recorded after the outcome | One dominant feature, implausibly good score | Check availability at prediction time |
 | Reusing the test set for decisions | Test score drifts upward over many rounds | Use validation or CV for decisions; test once |
 
-## 5. Bias in the Evaluation Setup
+## 5. Bias in the evaluation setup
 
 Leakage makes an estimate optimistic about the distribution the data came from. A second family of problems makes an estimate wrong about the distribution the model will meet, or hides what matters inside an average.
 
 ### 5.1 Unrepresentative data and distribution shift
 
-The evaluation is only as relevant as the evaluation data are representative. **Sampling bias** (or selection bias) occurs when the way examples were collected makes them systematically different from the deployment population: data from one hospital, from volunteers, from the users who chose to give feedback, or from the period before a product changed. **Distribution shift** is the general term for a difference between training and deployment distributions; common special cases are **covariate shift**, where the distribution of the inputs changes but the relation $P(y \mid \mathbf{x})$ does not, and **label shift**, where the class proportions change. Under shift, the i.i.d. assumption fails and a held-out test set drawn from the same source as the training data measures the wrong thing, however carefully it was kept apart. The defenses are to collect evaluation data from the deployment setting where possible, to describe the population the data came from in any report, and to monitor performance after deployment.
+The evaluation is only as relevant as the evaluation data are representative. **Sampling bias** (or selection bias) occurs when the way examples were collected makes them systematically different from the deployment population. Typical cases are data from one hospital, from volunteers, from the users who chose to give feedback or from the period before a product changed.
+
+**Distribution shift** is the general term for a difference between training and deployment distributions (Quiñonero-Candela et al., 2009, collect the main forms). One common special case is **covariate shift**, where the distribution of the inputs changes but the relation $P(y \mid \mathbf{x})$ does not. Another is **label shift**, where the class proportions $P(y)$ change but the distribution of the inputs within each class, $P(\mathbf{x} \mid y)$, does not. Under shift, the i.i.d. assumption fails, and a held-out test set drawn from the same source as the training data measures the wrong thing, however carefully it was kept apart. The defenses are to collect evaluation data from the deployment setting where possible, to describe the population the data came from in any report and to monitor performance after deployment.
 
 ### 5.2 Class imbalance and baselines
 
-When one class is rare, accuracy can be high for a useless model. If 95 % of examples are negative, the classifier that always says "negative" has 95 % accuracy, as the first entry's third exercise showed with a 2 % disease. Every reported score should therefore be compared with a **baseline**: the majority-class predictor for classification, the training-set mean for regression, and the simplest reasonable model for the task. For imbalanced problems it also helps to report errors on each class separately, for example the fraction of positives detected and the fraction of positive predictions that are correct (in the usual terminology, recall and precision), rather than accuracy alone.
+When one class is rare, accuracy can be high for a useless model. If 95% of examples are negative, the classifier that always says "negative" has 95% accuracy, as the first entry's third exercise showed with a 2% disease. Every reported score should therefore be compared with a **baseline**: the majority-class predictor for classification, the training-set mean for regression and the simplest reasonable model for the task. For imbalanced problems it also helps to report errors on each class separately, for example the fraction of positives detected and the fraction of positive predictions that are correct (in the usual terminology, recall and precision), rather than accuracy alone.
 
 ### 5.3 Averages hide subgroups
 
@@ -309,15 +313,15 @@ An overall error is an average over the test population. A model can have a low 
 
 Test labels are assumed to be correct. When they come from human annotators, automated rules or later records, they contain errors of their own, and those errors may be systematic (an annotator who consistently mislabels one class). Measured error then mixes the model's mistakes with the labels' mistakes. Checking a sample of test labels, and stating how labels were obtained, is part of an honest evaluation.
 
-## 6. Reporting Results
+## 6. Reporting results
 
 ### 6.1 Uncertainty of a test score
 
-A test accuracy $\hat{p}$ measured on $m$ independent examples is an average of $m$ zero-one values, so its standard error is approximately $\sqrt{\hat{p}(1 - \hat{p})/m}$, and for large $m$ an approximate 95 % confidence interval is $\hat{p} \pm 1.96\sqrt{\hat{p}(1 - \hat{p})/m}$ (the normal approximation). For $\hat{p} = 0.85$ on $m = 200$ examples the standard error is 0.025 and the interval is $0.85 \pm 0.049$, roughly 0.80 to 0.90. Hoeffding's bound of Section 2.1 gives $\pm 0.096$ for the same $m$; it is wider because it holds for any distribution, while the normal approximation assumes $m$ is large enough and $\hat{p}$ not too close to 0 or 1. Either way, a single test score of "85 %" on 200 examples does not distinguish a model of true accuracy 0.82 from one of 0.88.
+A test accuracy $\hat{p}$ measured on $m$ independent examples is an average of $m$ zero-one values. Its **standard error**, the standard deviation of such an estimate over repeated test sets of the same size (Section 3.3 of the first entry), is approximately $\sqrt{\hat{p}(1 - \hat{p})/m}$. A **95% confidence interval** is an interval computed from the sample by a rule that, over repeated samples, contains the true value 95% of the time. For large $m$ the average is approximately normally distributed, and the rule $\hat{p} \pm 1.96\sqrt{\hat{p}(1 - \hat{p})/m}$ gives such an interval (the normal approximation). For $\hat{p} = 0.85$ on $m = 200$ examples the standard error is 0.025 and the interval is $0.85 \pm 0.049$, roughly 0.80 to 0.90. Hoeffding's bound of Section 2.1 gives $\pm 0.096$ for the same $m$; it is wider because it holds for any distribution, while the normal approximation assumes $m$ is large enough and $\hat{p}$ not too close to 0 or 1. Either way, a single test score of "85%" on 200 examples does not distinguish a model of true accuracy 0.82 from one of 0.88.
 
-When two models are compared on the same test set, their errors are correlated (they tend to fail on the same hard examples), so the right comparison is **paired**: count the examples on which they disagree and test whether one wins those more often than chance, for instance with McNemar's test. Treating the two accuracies as independent overstates the uncertainty of the difference; ignoring uncertainty altogether overstates the difference.
+When two models are compared on the same test set, their errors are correlated (they tend to fail on the same hard examples), so the right comparison is **paired**. It counts the examples on which the two models disagree and tests whether one wins those more often than chance, for instance with McNemar's test, which Dietterich (1998) recommends when each model can be trained only once. Treating the two accuracies as independent overstates the uncertainty of the difference; ignoring uncertainty altogether overstates the difference.
 
-Uncertainty also comes from the training process: a different random split, initialization or shuffling order gives a different model (the second entry showed how much a single SGD run can vary). Where it is affordable, repeating the whole procedure with several seeds and reporting the spread shows how much of a difference between methods is noise.
+Uncertainty also comes from the training process: a different random split, initialization or shuffling order gives a different model; the second entry showed how much a single run of stochastic gradient descent (SGD) can vary. Where it is affordable, repeating the whole procedure with several seeds and reporting the spread shows how much of a difference between methods is noise.
 
 ### 6.2 What a report should contain
 
@@ -326,7 +330,7 @@ Uncertainty also comes from the training process: a different random split, init
 | The data: source, population, time period, size, how labels were obtained | Defines the distribution the estimate refers to (Section 5) |
 | How the data were split, and by what unit (random, group, time) | Lets readers judge leakage (Section 4) |
 | Which data chose the hyperparameters, and which data produced the reported number | Shows the reported number is not a selected minimum (Sections 2 and 3) |
-| The metric, the score, and its uncertainty | A score without an interval cannot be compared (Section 6.1) |
+| The metric, the score and its uncertainty | A score without an interval cannot be compared (Section 6.1) |
 | A baseline on the same split | Shows whether the model learned anything (Section 5.2) |
 | Results per relevant subgroup or class | Reveals what the average hides (Section 5.3) |
 | Software versions, random seeds, number of repeated runs | Makes the result reproducible |
@@ -336,7 +340,7 @@ The last row is not a formality. Every estimate in this series rested on the ass
 
 ## 7. Exercises
 
-**Exercise 1.** How many test examples does Hoeffding's inequality require to be 99 % sure that a measured error rate is within 0.02 of the true error rate?
+**Exercise 1.** How many test examples does Hoeffding's inequality require to be 99% sure that a measured error rate is within 0.02 of the true error rate?
 
 <details>
 <summary>Answer</summary>
@@ -363,7 +367,7 @@ Photographs of the same plant would appear in both training and test sets, so th
 
 </details>
 
-**Exercise 4.** Two classifiers score 0.85 and 0.83 on the same 200 test examples. Is the first clearly better?
+**Exercise 4.** Two classifiers score 0.85 and 0.83 on the same 200 test examples. Does this show that the first is better?
 
 <details>
 <summary>Answer</summary>
@@ -394,15 +398,15 @@ Each CV score is an average over only 40 examples, so it is a noisy estimate. Th
 | What evaluation biases remain without leakage? | Unrepresentative data and distribution shift, class imbalance without baselines, averages that hide subgroups, and label errors. |
 | How should a result be reported? | With its uncertainty, a baseline, the splitting procedure, per-group results, reproducibility details and its limitations. |
 
-This entry completes the series. The [first entry](/blog/learning-from-data) framed learning as minimizing a loss over examples and separated the training error from the risk; the [second](/blog/gradient-descent-and-its-variants) showed how the minimization is carried out and why the learning rate matters; the [third](/blog/generalization-overfitting-and-regularization) showed how flexibility opens a gap between the two errors and how regularization narrows it; and this one showed how to measure the risk without deceiving oneself. The same four ideas, a loss, an optimizer, a control on capacity, and an honest evaluation, underlie every supervised learning method, however large.
+This entry completes the series. The [first entry](/blog/learning-from-data) framed learning as minimizing a loss over examples and separated the training error from the risk. The [second](/blog/gradient-descent-and-its-variants) showed how the minimization is carried out and why the learning rate decides whether it converges. The [third](/blog/generalization-overfitting-and-regularization) showed how flexibility opens a gap between the two errors and how regularization narrows it. This entry showed how to estimate the risk without deceiving oneself, which forms of leakage and evaluation bias to look for, and what a report must contain. Together the four entries meet the objectives set out for the series: formulating a supervised learning problem, minimizing its objective by gradient methods, telling training error from generalization error, and recognizing leakage and bias in an evaluation. Models more flexible than the linear and polynomial ones used here change the model family and make the optimization harder, but they are trained and judged with the same four ingredients: a loss, an optimizer, a control on capacity and an honest evaluation.
 
 ### References
 
-- W. Hoeffding, "Probability Inequalities for Sums of Bounded Random Variables," *Journal of the American Statistical Association*, 58(301), 1963.
-- M. Stone, "Cross-Validatory Choice and Assessment of Statistical Predictions," *Journal of the Royal Statistical Society, Series B*, 36(2), 1974.
-- C. Ambroise and G. J. McLachlan, "Selection Bias in Gene Extraction on the Basis of Microarray Gene-Expression Data," *Proceedings of the National Academy of Sciences*, 99(10), 2002.
-- G. C. Cawley and N. L. C. Talbot, "On Over-fitting in Model Selection and Subsequent Selection Bias in Performance Evaluation," *Journal of Machine Learning Research*, 11, 2010.
-- S. Kaufman, S. Rosset, C. Perlich and O. Stitelman, "Leakage in Data Mining: Formulation, Detection, and Avoidance," *ACM Transactions on Knowledge Discovery from Data*, 6(4), 2012.
-- T. G. Dietterich, "Approximate Statistical Tests for Comparing Supervised Classification Learning Algorithms," *Neural Computation*, 10(7), 1998.
-- J. Quiñonero-Candela, M. Sugiyama, A. Schwaighofer and N. D. Lawrence (editors), *Dataset Shift in Machine Learning*, MIT Press, 2009.
-- T. Hastie, R. Tibshirani and J. Friedman, *The Elements of Statistical Learning: Data Mining, Inference, and Prediction*, 2nd edition, Springer, 2009.
+- C. Ambroise and G. J. McLachlan, "Selection bias in gene extraction on the basis of microarray gene-expression data," *Proceedings of the National Academy of Sciences*, vol. 99, no. 10, pp. 6562–6566, 2002.
+- G. C. Cawley and N. L. C. Talbot, "On Over-fitting in Model Selection and Subsequent Selection Bias in Performance Evaluation," *Journal of Machine Learning Research*, vol. 11, pp. 2079–2107, 2010.
+- T. G. Dietterich, "Approximate Statistical Tests for Comparing Supervised Classification Learning Algorithms," *Neural Computation*, vol. 10, no. 7, pp. 1895–1923, 1998.
+- T. Hastie, R. Tibshirani and J. Friedman, *The Elements of Statistical Learning: Data Mining, Inference, and Prediction*, 2nd ed., Springer, 2009.
+- W. Hoeffding, "Probability Inequalities for Sums of Bounded Random Variables," *Journal of the American Statistical Association*, vol. 58, no. 301, pp. 13–30, 1963.
+- S. Kaufman, S. Rosset, C. Perlich and O. Stitelman, "Leakage in data mining: Formulation, detection, and avoidance," *ACM Transactions on Knowledge Discovery from Data*, vol. 6, no. 4, art. 15, 2012.
+- J. Quiñonero-Candela, M. Sugiyama, A. Schwaighofer and N. D. Lawrence, Eds., *Dataset Shift in Machine Learning*, MIT Press, 2009.
+- M. Stone, "Cross-Validatory Choice and Assessment of Statistical Predictions," *Journal of the Royal Statistical Society, Series B*, vol. 36, no. 2, pp. 111–147, 1974.

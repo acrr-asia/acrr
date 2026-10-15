@@ -1,6 +1,6 @@
 ---
 title: "Sensing and State Estimation: An Overview"
-description: "Why a robot never observes its state directly, and how it estimates that state anyway: state, measurement and motion models, the language of uncertainty, the predict–update cycle, a worked one-dimensional Kalman filter, the general Kalman filter and its nonlinear successors, sensor fusion in practice, localization and mapping, and the engineering details that decide whether an estimator works."
+description: "Learn how a robot estimates its state from a motion model and noisy sensors, from the predict–update cycle and a worked Kalman filter to practical pitfalls."
 publishedAt: "2026-10-13"
 category: "Robotics and Control"
 tags:
@@ -16,22 +16,22 @@ seriesOrder: 4
 import Figure from '../../components/Figure.astro';
 import GaussianFusion from '../../components/diagrams/GaussianFusion.astro';
 
-The previous entries of this series assumed that the robot knows where it is. Forward kinematics turned known joint angles into a gripper position; coordinate transforms turned a lidar reading into world coordinates given the robot's pose. In practice none of these inputs is known exactly. Encoders measure the motor rather than the link, wheels slip, a lidar returns a noisy range, and a camera sees only what is in front of it. The first entry put it plainly: every decision a robot makes is made on an estimate.
+The previous entries of this series assumed that the robot knows where it is. [Forward kinematics](/blog/planar-arm-kinematics) turned known joint angles into a gripper position; [coordinate transforms](/blog/coordinate-frames-and-transformations) turned a lidar reading into world coordinates given the robot's pose. In practice none of these inputs is known exactly. Encoders measure the motor rather than the link, wheels slip, a lidar returns a noisy range, and a camera sees only what is in front of it. The [first entry](/blog/what-is-a-robot) put it plainly: every decision a robot makes is made on an estimate.
 
-This final entry explains what that estimate is and how it is computed. It starts with what the robot is trying to know (its **state**), then introduces the language of uncertainty needed to describe partial knowledge, then the single idea behind almost every estimator in robotics: *predict with a model, correct with a measurement*. A worked one-dimensional example makes the idea concrete before the general Kalman filter and its nonlinear successors are introduced. The entry ends with the engineering details that decide whether an estimator works on a real robot.
+This final entry explains what that estimate is and how it is computed. The single idea behind almost every estimator in robotics is to *predict with a model and correct with a measurement*. The entry develops it from a one-dimensional example, with numbers that can be checked by hand, to the general Kalman filter and the estimators that relax its assumptions. The probability it needs (densities, mean, variance, covariance) is introduced in Section 2; matrix notation follows the second entry, with column vectors.
 
-## 1. What the Robot Needs to Know
+## 1. What the robot needs to know
 
 ### 1.1 State
 
-The **state** of a system is the smallest set of variables that, together with the inputs applied from now on, determines its future behaviour. The [primer on state-space models](/blog/state-space-models-primer) in the control systems series introduced the idea for mechanical systems; robotics uses it in the same sense. Typical states are:
+The **state** of a system is the smallest set of variables that, together with the inputs applied from now on, determines its future behavior. The [primer on state-space models](/blog/state-space-models-primer) in the control systems series introduced the idea for mechanical systems; robotics uses it in the same sense. Typical states are:
 
 - for an arm, the joint angles and joint velocities;
-- for a wheeled robot in the plane, its **pose** $(x, y, \theta)$, the position in metres and heading in radians in a world frame, often together with its velocities;
+- for a wheeled robot in the plane, its **pose** $(x, y, \theta)$, the position in meters and heading in radians in a world frame, often together with its velocities;
 - for a drone, its position, velocity and orientation in three dimensions;
 - for a robot exploring a building, its pose together with the positions of landmarks or walls, the **map**.
 
-Throughout this entry, positions are in metres, angles in radians, and time in seconds unless a quantity says otherwise.
+Throughout this entry, positions are in meters, angles in radians, and time in seconds unless a quantity says otherwise.
 
 ### 1.2 Why the state is not measured directly
 
@@ -45,13 +45,13 @@ Sensors (the proprioceptive and exteroceptive sensors of the first entry) do not
 
 **State estimation** is the problem of computing the best available description of the state from all of this, continuously, as the robot moves.
 
-## 2. The Language of Uncertainty
+## 2. The language of uncertainty
 
-An estimate is useless without a statement of how good it is. A position of 10.4 m known to within a centimetre and one known to within a metre call for different actions. Probability theory supplies the vocabulary; only a few of its ideas are needed here.
+An estimate is useless without a statement of how good it is. A position of 10.4 m known to within a centimeter and one known to within a meter call for different actions. Probability theory supplies the vocabulary; only a few of its ideas are needed here.
 
 - A **random variable** is a quantity whose value is uncertain, such as the robot's true position or the next sensor reading.
 - A **probability density** $p(x)$ describes how that uncertainty is spread over possible values: the probability that the quantity lies in a small interval around $x$ is approximately $p(x)$ times the interval's width, and the density integrates to 1.
-- The **mean** $\mu$ is the density's centre of mass, the single best guess in the sense of smallest average squared error.
+- The **mean** $\mu$ is the density's center of mass, the single best guess in the sense of smallest average squared error.
 - The **variance** $\sigma^2$ is the average squared deviation from the mean, and the **standard deviation** $\sigma$ its square root, in the same units as the quantity itself. A variance of $0.25\ \text{m}^2$ is a standard deviation of $0.5\ \text{m}$.
 - For a state with several components, the **covariance matrix** $P$ collects the variance of each component on its diagonal and, off the diagonal, how errors in pairs of components move together. A robot that is unsure of its heading, for example, becomes unsure of its sideways position as it drives, and the two errors are linked: if the heading is off to the left, the position is too.
 - The **Gaussian** (or normal) density, $\mathcal N(\mu, \sigma^2)$, is the familiar bell curve:
@@ -64,7 +64,7 @@ Gaussians matter here for two reasons. Many noise sources, being sums of many sm
 
 The robot's knowledge of its state at any moment is a probability density over possible states, called its **belief**. State estimation updates the belief as time passes and measurements arrive.
 
-## 3. Two Models and One Cycle
+## 3. Two models and one cycle
 
 ### 3.1 The motion model
 
@@ -100,11 +100,11 @@ flowchart TB
     B1 -.->|"next step"| B0
 ```
 
-The **prediction** moves the belief forward in time and makes it less certain, because the motion model is imperfect. The **update** compares what the sensor actually reported with what the predicted belief says it should have reported, and moves the belief towards consistency with the measurement, making it more certain. Write $\hat x_k^-$ and $P_k^-$ for the mean and covariance of the predicted belief (the minus sign marks "before the measurement"), and $\hat x_k$ and $P_k$ for those of the updated belief; the hat distinguishes an estimate from the true state $x_k$. The difference between the actual and the predicted measurement, $z_k - h(\hat x_k^-)$, is the **innovation**: the part of the measurement that the prediction did not already explain.
+The **prediction** moves the belief forward in time and makes it less certain, because the motion model is imperfect. The **update** compares what the sensor reported with what the predicted belief says it should have reported, and moves the belief toward consistency with the measurement, making it more certain. Write $\hat x_k^-$ and $P_k^-$ for the mean and covariance of the predicted belief (the minus sign marks "before the measurement"), and $\hat x_k$ and $P_k$ for those of the updated belief; the hat distinguishes an estimate from the true state $x_k$. The difference between the actual and the predicted measurement, $z_k - h(\hat x_k^-)$, is the **innovation**: the part of the measurement that the prediction did not already explain.
 
 Formally, the update is **Bayes' rule**, which says how a belief should change in the light of evidence: the updated density is proportional to the predicted density multiplied by the likelihood of the measurement under each possible state. The algorithm that applies prediction and Bayes' rule in turn is called the **Bayes filter**. Every estimator below is a way of carrying it out with a particular representation of the belief.
 
-## 4. A Worked Example in One Dimension
+## 4. A worked example in one dimension
 
 A robot moves along a corridor. Its belief about its position is Gaussian, with mean $\hat x^- = 10.0$ m and variance $P^- = 0.25\ \text{m}^2$ (standard deviation 0.5 m), obtained by dead reckoning. A range sensor, pointed at a wall at a known position, reports a measurement equivalent to $z = 10.6$ m, with measurement-noise variance $R = 0.09\ \text{m}^2$ (standard deviation 0.3 m).
 
@@ -116,7 +116,7 @@ K = \frac{P^-}{P^- + R}, \qquad
 P = (1 - K)\,P^- .
 $$
 
-The **gain** $K$, between 0 and 1, decides how far to move towards the measurement. It is large when the prediction is uncertain compared with the measurement and small when the measurement is the less reliable of the two. Here
+The **gain** $K$, between 0 and 1, decides how far to move toward the measurement. It is large when the prediction is uncertain compared with the measurement and small when the measurement is the less reliable of the two. Here
 
 $$
 K = \frac{0.25}{0.25 + 0.09} = 0.735, \qquad
@@ -124,9 +124,9 @@ K = \frac{0.25}{0.25 + 0.09} = 0.735, \qquad
 P = 0.265 \times 0.25 = 0.066\ \text{m}^2 .
 $$
 
-The fused estimate lies between the two sources, closer to the more precise measurement, and its standard deviation, 0.26 m, is smaller than either source's (0.5 m and 0.3 m). Combining two independent pieces of information always helps, provided their uncertainties are stated honestly. The fused variance is also $P^- R / (P^- + R)$, symmetric in the two sources, which makes the point plainly.
+The fused estimate lies between the two sources, closer to the more precise measurement, and its standard deviation, 0.26 m, is smaller than either source's (0.5 m and 0.3 m). The fused variance can also be written $P^- R / (P^- + R)$, which is symmetric in the two sources and smaller than either of them: combining two independent pieces of information always reduces the variance, provided each uncertainty is stated honestly.
 
-<Figure caption="Fusing a prediction (solid line, 10.0 m, σ = 0.5 m) with a range measurement (dashed, 10.6 m, σ = 0.3 m). The fused estimate (coloured, 10.44 m, σ = 0.26 m) lies between them, nearer the more precise measurement, and is narrower than either.">
+<Figure caption="Fusing a prediction (solid line, 10.0 m, σ = 0.5 m) with a range measurement (dashed, 10.6 m, σ = 0.3 m). The fused estimate (colored, 10.44 m, σ = 0.26 m) lies between them, nearer the more precise measurement, and is narrower than either.">
   <GaussianFusion />
 </Figure>
 
@@ -138,7 +138,7 @@ $$
 
 Uncertainty has grown again, and will keep growing (after ten such moves without a measurement its standard deviation would reach about 0.68 m) until the next measurement pulls it back down. This rise and fall is the rhythm of every estimator.
 
-## 5. The Kalman Filter
+## 5. The Kalman filter
 
 ### 5.1 The equations
 
@@ -173,15 +173,15 @@ Under its assumptions (linear models, Gaussian noise, correctly known $Q$ and $R
 
 The next section deals with the first two; Section 8 with the third.
 
-## 6. Beyond Linear and Gaussian
+## 6. Beyond linear and Gaussian
 
 ### 6.1 The extended Kalman filter
 
-The **extended Kalman filter** (EKF) handles nonlinear $f$ and $h$ by linearising them around the current estimate at every step: it replaces $A$ and $H$ with the Jacobians $\partial f / \partial \mathbf x$ and $\partial h / \partial \mathbf x$, the same derivative matrices that related joint and gripper velocities in the previous entry. It is cheap and widely used. It works well when the models are close to linear over the size of the uncertainty, and can diverge when they are not, for instance when heading uncertainty is large.
+The **extended Kalman filter** (EKF) handles nonlinear $f$ and $h$ by linearizing them around the current estimate at every step: it replaces $A$ and $H$ with the Jacobians $\partial f / \partial \mathbf x$ and $\partial h / \partial \mathbf x$, the same derivative matrices that related joint and gripper velocities in the previous entry. It is cheap and widely used. It works well when the models are close to linear over the size of the uncertainty, and can diverge when they are not, for instance when heading uncertainty is large.
 
 ### 6.2 The unscented Kalman filter
 
-The **unscented Kalman filter** (UKF), introduced by Julier and Uhlmann in 1997, avoids derivatives. It passes a small, deterministic set of sample points (sigma points), chosen to match the current mean and covariance, through the nonlinear models, and fits a Gaussian to the results. It usually captures nonlinear effects better than the EKF at a similar cost, and needs no Jacobians.
+The **unscented Kalman filter** (UKF), developed by Julier and Uhlmann in the mid-1990s (their 1997 paper cited below is the usual reference), avoids derivatives. It passes a small, deterministic set of sample points (sigma points), chosen to match the current mean and covariance, through the nonlinear models, and fits a Gaussian to the results. It usually captures nonlinear effects better than the EKF at a similar cost, and needs no Jacobians.
 
 ### 6.3 The particle filter
 
@@ -191,12 +191,12 @@ When the belief cannot reasonably be described by one Gaussian, for example when
 
 | Estimator | Belief represented as | Handles | Cost | Typical use |
 |---|---|---|---|---|
-| Kalman filter | One Gaussian (mean, covariance) | Linear models, Gaussian noise | Very low | Linear tracking, sensor calibration |
+| Kalman filter | One Gaussian (mean, covariance) | Linear models, Gaussian noise | Lowest | Linear tracking, sensor calibration |
 | Extended Kalman filter | One Gaussian | Mildly nonlinear models | Low | Inertial navigation, vehicle odometry fusion |
 | Unscented Kalman filter | One Gaussian, via sigma points | More strongly nonlinear models | Low to moderate | Attitude and pose estimation |
 | Particle filter | Weighted samples | Any belief shape, including several hypotheses | High; grows with state dimension | Global localization in a known map |
 
-## 7. Estimation on Real Robots
+## 7. Estimation on real robots
 
 ### 7.1 Fusing complementary sensors
 
@@ -207,11 +207,11 @@ Sensors are combined because their weaknesses differ. A classic case is estimati
 
 A filter trusts the gyroscope over short times and the accelerometer over long times, removing drift without the noise. A Kalman filter does this with explicit noise models; a simpler **complementary filter** does it with fixed weights: it keeps the gyroscope's contribution to fast changes and the accelerometer's to slow ones (high-pass and low-pass filtering respectively). The same pattern recurs in mobile robots that fuse wheel odometry (smooth, drifting) with satellite positioning or landmark sightings (absolute, noisy, intermittent).
 
-### 7.2 Localization, mapping and SLAM
+### 7.2 Localization and mapping
 
-**Localization** estimates the robot's pose in a map that is already known. **Mapping** builds a map from known poses. A robot entering an unknown building has neither, and must estimate both at once: **simultaneous localization and mapping** (SLAM). The state then includes the map itself (landmark positions, or an occupancy grid: a grid of cells over the floor plan, each holding the probability that it is occupied), and the correlations between robot and landmark errors become essential. When the robot recognises a place it has seen before (a **loop closure**), the correction propagates through the whole map. SLAM is a field in its own right; the survey by Durrant-Whyte and Bailey cited below is a standard starting point.
+**Localization** estimates the robot's pose in a map that is already known. **Mapping** builds a map from known poses. A robot entering an unknown building has neither, and must estimate both at once: **simultaneous localization and mapping** (SLAM). The state then includes the map itself (landmark positions, or an occupancy grid: a grid of cells over the floor plan, each holding the probability that it is occupied), and the correlations between robot and landmark errors become essential. When the robot recognizes a place it has seen before (a **loop closure**), the correction propagates through the whole map. SLAM is a field in its own right; the survey by Durrant-Whyte and Bailey cited below is a standard starting point.
 
-## 8. Engineering Details That Decide Success
+## 8. Engineering details that decide success
 
 The equations are short; most of the difficulty is in the details around them.
 
@@ -219,37 +219,59 @@ The equations are short; most of the difficulty is in the details around them.
 - **Time.** Measurements arrive late and out of order. An estimator must use each one at the time it was taken, by keeping a short history of states, or by predicting forward from the measurement's time stamp.
 - **Angles.** Innovations in angles must be wrapped into $(-\pi, \pi]$, or a heading error of $+179^\circ$ against $-179^\circ$ is treated as $358^\circ$ instead of $2^\circ$, the mistake described in the second entry.
 - **Outliers.** A single wild measurement can pull a Kalman filter far off. Each innovation $\nu$ can be checked against its expected covariance $S = H P^- H^{\mathsf T} + R$ before use: the squared **Mahalanobis distance** $d^2 = \nu^{\mathsf T} S^{-1} \nu$, which measures the innovation in units of its own expected spread, is distributed as **chi-square** (the distribution of a sum of squared standard Gaussian variables, one per measurement dimension) when the models are right, and a measurement with an implausibly large $d^2$ is rejected (**gating**). In the corridor example, the innovation $0.6$ m gives $d^2 = 0.6^2 / 0.34 = 1.06$, well within the 99% bound of $6.63$ for one dimension; a reading of 12.0 m would give $d^2 = 11.8$ and be rejected.
-- **Tuning.** $Q$ and $R$ encode how much the filter trusts its models and its sensors. Too small a $Q$ makes the filter overconfident and slow to follow real motion; too large makes it noisy. Sensor datasheets and recorded data guide $R$; $Q$ usually needs experiment. A useful check is whether the innovations actually have the covariance $S$ the filter predicts.
-- **Initialisation.** The first belief must honestly reflect the initial uncertainty. Starting with a falsely small covariance makes the filter ignore the first, most informative measurements.
+- **Tuning.** $Q$ and $R$ encode how much the filter trusts its models and its sensors. Too small a $Q$ makes the filter overconfident and slow to follow real motion; too large makes it noisy. Sensor datasheets and recorded data guide $R$; $Q$ usually needs experiment. A useful check is whether the innovations have the covariance $S$ the filter predicts.
+- **Initialization.** The first belief must honestly reflect the initial uncertainty. Starting with a falsely small covariance makes the filter ignore the first, most informative measurements.
 
-## 9. Summary
+## 9. Exercises
+
+**Exercise 1.** A prediction gives $\hat x^- = 5.0$ m with $P^- = 0.04\ \text{m}^2$, and a measurement reads $z = 5.3$ m with $R = 0.09\ \text{m}^2$. Compute the gain, the updated estimate and its standard deviation. Why does the estimate move a smaller fraction of the way toward the measurement than in the corridor example of Section 4?
+
+<details>
+<summary>Answer</summary>
+
+$K = 0.04/0.13 = 0.308$, $\hat x = 5.0 + 0.308 \times 0.3 = 5.09$ m, $P = (1 - 0.308) \times 0.04 = 0.0277\ \text{m}^2$, so $\sigma = 0.17$ m. Here the prediction ($\sigma = 0.2$ m) is more precise than the measurement ($\sigma = 0.3$ m), so the gain is below one half and the estimate stays nearer the prediction.
+
+</details>
+
+**Exercise 2.** Starting from the corridor estimate after its update ($P = 0.066\ \text{m}^2$), the robot keeps moving 1.0 m at a time with $Q = 0.04\ \text{m}^2$ per move and no measurements. After how many moves does the standard deviation first exceed 0.5 m?
+
+<details>
+<summary>Answer</summary>
+
+After $n$ moves $P = 0.066 + 0.04\,n$, which exceeds $0.25\ \text{m}^2$ when $n > 4.6$. After four moves $\sigma = \sqrt{0.226} = 0.48$ m; after the fifth, $\sigma = \sqrt{0.266} = 0.52$ m.
+
+</details>
+
+**Exercise 3.** In the corridor example ($S = 0.34\ \text{m}^2$), a reading produces an innovation of 1.2 m. Is it accepted by the 99% gate of Section 8?
+
+<details>
+<summary>Answer</summary>
+
+$d^2 = 1.2^2/0.34 = 4.24$, below the bound of 6.63, so the reading is accepted, although it lies about two standard deviations of the innovation ($\sqrt{4.24} = 2.06$, with $\sqrt{S} = 0.58$ m) from the predicted measurement.
+
+</details>
+
+## 10. Summary
 
 | Question | Answer |
 |---|---|
-| What is the state? | The smallest set of variables that, with future inputs, determines future behaviour, such as joint angles and velocities, or a pose. |
+| What is the state? | The smallest set of variables that, with future inputs, determines future behavior, such as joint angles and velocities, or a pose. |
 | Why can it not be measured directly? | Sensors report functions of the state, with noise, bias and delay, at different rates, and some quantities are unobservable from a given sensor. |
 | How is uncertainty described? | By a probability density over states, the belief, often a Gaussian described by a mean and a covariance matrix. |
 | What do all estimators do? | Predict with a motion model (uncertainty grows), then update with a measurement model (uncertainty shrinks): the Bayes filter. |
-| How does a measurement update a Gaussian belief? | With gain $K = P^-/(P^- + R)$: the estimate moves towards the measurement by $K$ times the innovation, and the variance shrinks by the factor $1 - K$. |
+| How does a measurement update a Gaussian belief? | With gain $K = P^-/(P^- + R)$: the estimate moves toward the measurement by $K$ times the innovation, and the variance shrinks by the factor $1 - K$. |
 | When is the Kalman filter optimal? | For linear models with Gaussian noise of known covariance. |
 | What handles nonlinear or multi-modal problems? | The extended and unscented Kalman filters for nonlinear models; particle filters for beliefs with several hypotheses. |
-| What usually decides whether an estimator works? | Frames, time stamps, angle wrapping, outlier gating, tuning of $Q$ and $R$, and honest initialisation. |
+| What usually decides whether an estimator works? | Frames, time stamps, angle wrapping, outlier gating, tuning of $Q$ and $R$, and honest initialization. |
 
-## 10. The Series in One Picture
-
-This entry completes the series. The four entries describe a robot from the outside in.
-
-- The **first** entry defined a robot as a closed loop of structure, actuation, sensing and computation, running at several rates, and organised by layered software.
-- The **second** supplied the geometry: frames, rotations and transformations, and the frame tree that relates every part of the robot.
-- The **third** used that geometry to connect joints and gripper, in both directions, and showed where the connection becomes singular.
-- This **fourth** entry explained how the robot knows anything at all: by predicting with models and correcting with noisy sensors, keeping track of how uncertain it is.
+This entry completes the series, which described a robot from the outside in. The [first entry](/blog/what-is-a-robot) defined a robot as a closed loop of structure, actuation, sensing and computation, running at several rates and organized by layered software. The [second](/blog/coordinate-frames-and-transformations) supplied the geometry: frames, rotations, transformations and the frame tree that relates every part of the robot. The [third](/blog/planar-arm-kinematics) used that geometry to connect joints and gripper in both directions and showed where the connection becomes singular. This fourth entry explained how the robot knows anything at all: by predicting with models, correcting with noisy sensors, and keeping track of how uncertain it is. Together they meet the objectives set out on the [series page](/series/introduction-to-robotics), from describing a robot's subsystems to explaining how a Kalman filter combines a motion model with measurements.
 
 Each later topic in robotics (motion planning, control of contact, learning from data) builds on these four: a robot must know its geometry, map between joint and task space, and act on estimates rather than certainties.
 
 ### References
 
-- R. E. Kalman, "A New Approach to Linear Filtering and Prediction Problems", *Journal of Basic Engineering*, 1960.
-- S. J. Julier and J. K. Uhlmann, "A New Extension of the Kalman Filter to Nonlinear Systems", *Proceedings of SPIE*, 1997.
-- S. Thrun, W. Burgard and D. Fox, *Probabilistic Robotics*, MIT Press, 2005.
-- H. Durrant-Whyte and T. Bailey, "Simultaneous Localization and Mapping: Part I", *IEEE Robotics & Automation Magazine*, 2006.
 - Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking and Navigation*, Wiley, 2001.
+- H. Durrant-Whyte and T. Bailey, "Simultaneous Localization and Mapping: Part I," *IEEE Robotics & Automation Magazine*, vol. 13, no. 2, pp. 99–108, 2006.
+- S. J. Julier and J. K. Uhlmann, "A New Extension of the Kalman Filter to Nonlinear Systems," *Proceedings of SPIE*, vol. 3068, pp. 182–193, 1997.
+- R. E. Kalman, "A New Approach to Linear Filtering and Prediction Problems," *Transactions of the ASME, Journal of Basic Engineering*, vol. 82, pp. 35–45, 1960.
+- S. Thrun, W. Burgard and D. Fox, *Probabilistic Robotics*, MIT Press, 2005.

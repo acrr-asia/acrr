@@ -1,299 +1,261 @@
 # Series review: Numerical Simulation for Engineers
 
 - Series: `numerical-simulation` (5 articles, status published, 0 planned entries)
-- Reviewed commit: 4520df1
+- Reviewed commit: 9232ed9
 - Date: 2026-10-13
-- Content hash: sha256:aedec7fcc3d9ce6ec1f338484ff61759cdd93043766fb20a8b8dbeea0620013e
+- Review type: independent review (wave 2) of the wave-1 revision (`dfb4316`, audit logs in `editorial/audit/series/numerical-simulation.md` and `editorial/audit/items/`), combining fact-check (F), technical review (T) and series review (S). The reviewer did not write or revise any of the text.
+- Content hash: sha256:e7297a51aac5170a355c6cbb645c4030088126c0ce2e2ac00b22be0f888c8eb6
 
 ## Summary
 
-The five entries form a coherent, well-ordered course from the model equations to verification and validation. The mathematics is correct, and all 17 Python blocks reproduce their printed output byte for byte (Python 3.13.16, numpy 2.5.3). Every worked number in the prose and the exercises was recomputed and is right, with two exceptions: an amplification factor in entry 2 and a band count in entry 3. The build, the type check and the link check pass, and the rendered pages are clean.
+The series is accurate, well ordered and consistent, and the wave-1 revision left its substance intact. It was mostly copy and metadata work, plus one technical correction: the answer to Exercise 5 of entry 2. All 18 Python blocks reproduce their printed output byte for byte. Every worked number in the prose and the exercises was recomputed and is correct, including the new Exercise 5 wording. Every journal reference that was checked exists, with the stated venue, volume and pages. The build, links and rendering of the five pages are clean, and `eos lint` reports no errors or warnings.
 
-One finding is blocking. Entry 2 says that A-stability and L-stability are "the language of the numerical integration notes", but those notes never use these terms and leave implicit methods out of scope.
+One should-fix finding remains, a notation clash between entries. Entry 2 uses $T$ for $\text{tridiag}(1, -2, 1)$. Entry 3 uses $T$ for its negative, $\text{tridiag}(-1, 2, -1)$, and calls it "the tridiagonal matrix of the first entry", although entry 1 names that matrix $A = T/h^2$. Four optional points of polish follow. Once S1 is resolved, the series is ready.
 
-Seven findings are should-fix:
-- Entry 3 explains the slow optimal-ω SOR iteration count with an inaccurate statement about its eigenvalues.
-- Entry 2 quotes the FTCS factor for ξ = π instead of the shortest grid mode.
-- Entry 5's definitions of verification and validation follow the standard wording too closely to count as paraphrases.
-- Entry 5 uses $T$ for both the true value and the temperature.
-- The series and entry 2 claim that every rate and stability limit is checked by experiment.
-- Entry 3 writes $A = LU$ where it means $L U_{\!f}$.
-- Entry 3 compares the fill-in count with the wrong band size.
-
-The eight bibliographic records the author flagged are correct. The V&V 10/20 and AIAA attributions are accurate (E = S − D, the root-sum-square $u_{\text{val}}$, the GCI with factors of safety 1.25 and 3, and the four-tier hierarchy). The explanation of the leapfrog "fourth order at t = 1" result is exactly right: δ²/2 reproduces the measured errors to three digits. The hypothetical example is clearly labeled. Once the findings are corrected, the series is ready.
-
-Findings: 1 blocking, 7 should fix, 8 optional.
-
-## Resolution
-
-The corrections were applied on 2026-10-13, at the owner's request. Line numbers in the findings below refer to the reviewed commit (4520df1), not to the corrected files.
-
-- **F1 (blocking):** The A-/L-stability sentence in entry 2 §4.3 now reads "In terms of the stability regions of the numerical integration notes, the trapezoidal rule is **A-stable** (its stability region contains the whole left half of the complex $h\lambda$-plane, where the notes' $h$ is the time step $\Delta t$, so no decaying mode can grow) but not **L-stable** ...". The notes are now cited only for the concept they actually present.
-- **F2:** The SOR sentence was replaced as recommended. Every eigenvalue has modulus $\omega - 1$, and $\omega - 1$ itself is a double, defective eigenvalue, so the error decays like $m\rho^m$. This was checked numerically (see F2).
-- **F3:** The text now gives the factor of the shortest grid mode, $1 - 4(0.51)\sin^2(19\pi/40) \approx -1.027$, over 392 steps, with a growth of about $4\times10^4$ from $2.5\times10^{-3}$. This recomputes to the printed amplitude of 102.
-- **F4:** The definitions in entry 5 §1.1 are introduced as "Paraphrased, their definitions are:" and rewritten in original wording, as recommended.
-- **F5:** Entry 5 §4.4 now writes $-k\nabla^2 u = Q$ "for the temperature $u$", so $T$ is used only for the true value.
-- **F6:** Changed as recommended in the series file, in entry 2's description and in entry 2's introduction. The Vietnamese series file was changed to match ("Loạt bài kiểm tra các tốc độ hội tụ và giới hạn ổn định chính của mình bằng các thí nghiệm Python ngắn."). None of the series' articles has a Vietnamese translation, so no other translation needed changes.
-- **F7:** Entry 3 §2.1 now writes $A = LU_{\!f}$ and $PA = LU_{\!f}$.
-- **F8:** Entry 3 §2.4 now says the 29,757 nonzeros fill 98 % of the 30,256 positions in the lower band.
-- **Optional findings applied:** F9 (the parentheticals merged), F10 (the stability limit of explicit Euler for a fast-decaying mode), F11 (a zero or negative number under a square root), F12 (grids $N = 16, 32, \dots, 2048$), F13 ("by a factor of $10^8$"), F14 (George 1973 named at nested dissection; one sentence on Courant 1943 in entry 4 §5.2) and F15 (the note that $f$ is no longer the source term).
-- **Not applied:** F16. The borderline case ν = 1 at ξ = π concerns a mode that a grid with fixed ends does not contain, so the text is not misleading as written.
-- **Second pass.** All five entries were re-read in full after the corrections. Two further should-fix issues were found and corrected:
-  - **F17 (second pass, should fix).** Entry 1 §4.3 wrote the method-of-lines system as $d\mathbf{U}/dt = A\mathbf{U}$. In §6.1 of the same entry, $A$ is the positive definite second-difference matrix, so the two $A$s have opposite signs. The text now reads "$d\mathbf{U}/dt = -\alpha A\mathbf{U}$ (plus boundary terms), where $A$ is the second-difference matrix written out in Section 6.1 (with $h = \Delta x$): a linear system of exactly the form treated in the state-space primer, with system matrix $-\alpha A$." The relation $\alpha\,\delta^2 U = -\alpha A U$ was checked from the definition of $A$.
-  - **F18 (second pass, should fix).** Three more sentences overstated the experimental coverage in the same way as F6:
-    - entry 4 line 17, "Each convergence rate stated is checked by a computation", is now "The main convergence rates are checked by computations";
-    - entry 4 line 444, "Every convergence rate in this series so far was measured against a known exact solution", is now "Every discretization error in this series so far was measured against a known exact solution";
-    - entry 5 line 15, "every claim about accuracy was checked against an exact solution", is now "the main claims about accuracy were checked against exact solutions".
-
-  No defects introduced by the corrections were found. A final check of the changed passages found no blocking or should-fix issue.
-- **Re-run results after all corrections:**
-  - `npm run build:local` exited 0, with 0 errors, 0 warnings and 0 hints from `astro check`, and 81 pages indexed.
-  - `npm run check:links` checked 214 pages and 6,081 internal references, all of which resolve.
-  - On the five pages there are no `katex-error`s, no text glued to inline elements, and the Mermaid min-widths are 500, 315, 579 and 390 px.
-  - All 17 Python blocks were re-run, and every output still matches byte for byte (no code was changed).
+Findings: 0 blocking, 1 should fix, 4 optional.
 
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
 |---|---|---|
-| Turn partial differential equations with boundary conditions into finite-dimensional problems. | Entry 1 §2–6; entry 4 §1–3 | Met. |
-| Analyze explicit and implicit finite-difference schemes for accuracy and stability. | Entry 2 (whole) | Met: truncation error, von Neumann analysis, Lax equivalence and CFL, all measured. |
-| Choose direct or iterative methods for the large linear systems that discretization produces. | Entry 3 (whole), especially §7 | Met. |
-| Explain the finite element method from its variational form, and verify and validate a simulation. | Entry 4 (whole); entry 5 (whole) | Met. |
-
-The English series file was respelled from British to American spelling ("discretising" to "discretizing", "Analyse" to "Analyze", "discretisation" to "discretization"). The meaning of the description and the objectives is unchanged. The Vietnamese objective now says "hiển (explicit)", which matches the glossary entry in `docs/translation-vi.md:215`. The new body sentence "Every convergence rate the series states is checked by a short Python experiment." overstates the coverage (F6).
+| Discretize a partial differential equation with its boundary and initial conditions into a finite algebraic problem, and state the order of accuracy of the result. | Entry 1 §2–7 (model equations, conditions, finite differences, the complete problem in §6, order and its measurement in §4.2, §6.1–6.2) | Met. |
+| Analyze explicit and implicit finite-difference schemes for accuracy and stability, and choose a time step accordingly. | Entry 2 (whole): truncation error §2.1, von Neumann analysis §2.2, §3.2, §4.1, CFL §6.2, the scheme table §7, Exercises 1 and 3 | Met. |
+| Choose a direct or an iterative method for the large sparse linear systems that discretization produces, and predict its cost. | Entry 3 (whole): operation counts §2, iteration counts §4.2, §5.2, measurements §6, decision guide §7, Exercises 1–2 | Met. |
+| Derive the finite element method from the weak form of a boundary value problem, and explain how its error depends on mesh size and element degree. | Entry 4 §1–4 (weak form, Galerkin method, a priori estimates, measured rates for degrees 1 and 2) | Met. |
+| Verify a simulation code and result by measuring the observed order and estimating the numerical error, and validate a model against measurements with stated uncertainties. | Entry 5 §2 (code verification with manufactured solutions), §3 (Richardson extrapolation, GCI, other numerical errors), §4 (validation with $E$ and $u_{\text{val}}$) | Met. This confirms the wave-1 flag on the new objective 5. |
 
 ## Findings
 
 | ID | Severity | Article | Location | Dimension | Finding |
 |---|---|---|---|---|---|
-| F1 | Blocking | `src/content/blog/finite-differences-for-heat-and-waves.mdx` | §4.3 (line 258) | Cross-article references | A-stable and L-stable are attributed to "the language of the numerical integration notes", which never use them. |
-| F2 | Should fix | `src/content/blog/solving-large-linear-systems.mdx` | §6 (line 324) | Technical accuracy | The SOR explanation "its eigenvalues coincide in pairs" is inaccurate. |
-| F3 | Should fix | `src/content/blog/finite-differences-for-heat-and-waves.mdx` | §2.2 (line 133) | Technical accuracy | The shortest grid mode's factor is −1.027, not −1.04, and the run takes 392 steps. |
-| F4 | Should fix | `src/content/blog/verifying-and-validating-a-simulation.mdx` | §1.1 (lines 23–26) | Fit with site rules | The V&V definitions are near-verbatim copies of the guides' wording, presented "in substance". |
-| F5 | Should fix | `src/content/blog/verifying-and-validating-a-simulation.mdx` | §4.2 (line 227) vs §4.4 (line 247) | Terminology | $T$ is the true value in §4.2 and the temperature field in §4.4. |
-| F6 | Should fix | `src/content/series/numerical-simulation.md`; `finite-differences-for-heat-and-waves.mdx` | line 13; lines 3, 17 | Factual consistency | The claims that every rate and every stability limit is checked by experiment are too strong. |
-| F7 | Should fix | `src/content/blog/solving-large-linear-systems.mdx` | §2.1 (lines 61, 65) | Terminology | "$A = LU$" and "$PA = LU$" contradict the factor's own name, $U_{\!f}$. |
-| F8 | Should fix | `src/content/blog/solving-large-linear-systems.mdx` | §2.4 (line 128) | Technical accuracy | The full lower band at $N = 32$ holds 30,256 entries, not $n(N-1) = 29{,}791$. |
-| F9 | Optional | `finite-differences-for-heat-and-waves.mdx` | §2.2 (line 94) | Writing quality | The sentence defining ξ has two parentheticals in a row. |
-| F10 | Optional | `finite-differences-for-heat-and-waves.mdx` | §1.2 (line 58) | Cross-article references | The notes do not discuss "what stiffness does" to Euler; they show the stability limit for a fast mode. |
-| F11 | Optional | `solving-large-linear-systems.mdx` | §2.3 (line 96) | Technical accuracy | Cholesky can also fail on a zero, not only on a negative number. |
-| F12 | Optional | `solving-large-linear-systems.mdx` | Exercise 4 (line 387) | Completeness | The grids behind "smallest error ... at N = 256" are not named. |
-| F13 | Optional | `solving-large-linear-systems.mdx` | §4.2 table (line 204) | Writing quality | "reduce the error by $10^{-8}$" should be "by a factor of $10^8$". |
-| F14 | Optional | `solving-large-linear-systems.mdx` line 423; `finite-element-method.mdx` line 453 | References | Writing quality | George (1973) and Courant (1943) are listed but never cited in the text. |
-| F15 | Optional | `verifying-and-validating-a-simulation.mdx` | §3.1 (line 129) | Terminology | $f$ becomes the quantity of interest, right after serving as the source term in §2.3. |
-| F16 | Optional | `finite-differences-for-heat-and-waves.mdx` | §6.2 (line 291) | Technical accuracy | At $\lvert b\rvert = 1$ the leapfrog quadratic has a double root, so ν = 1 is a borderline case. |
+| S1 | Should fix | `src/content/blog/solving-large-linear-systems.mdx` (and `finite-differences-for-heat-and-waves.mdx`) | §1.1 (line 43), §3.1 (line 138), Exercise 3 (line 377); entry 2 §1.2 (lines 42–49) | Notation and depth / consistency | $T$ is $\text{tridiag}(1,-2,1)$ in entry 2 and $\text{tridiag}(-1,2,-1)$ in entry 3, and entry 3 calls it "the tridiagonal matrix of the first entry", where it is $h^2 A$. |
+| S2 | Optional | `src/content/blog/verifying-and-validating-a-simulation.mdx` | §1.2 (line 50), §5 (line 313) | Terminology | "the insight note" survives twice; wave 1 changed the other mentions to "the insight". |
+| T1 | Optional | `src/content/blog/solving-large-linear-systems.mdx` | §6 (line 329) | Technical accuracy / language | "to reduce the energy-norm error by $10^{-8}$" means a factor of $10^8$; the earlier F13 fix was made only in the §4.2 table. |
+| T2 | Optional | `src/content/blog/solving-large-linear-systems.mdx` | §5.1 (line 230) | Technical accuracy | CG minimizes over $\mathbf{U}^{(0)} + \mathcal{K}_m$, not over the Krylov subspace itself, unless $\mathbf{U}^{(0)} = \mathbf{0}$. |
+| T3 | Optional | `src/content/blog/finite-element-method.mdx` | §5.2 (line 292) | Notation | $\lvert T\rvert$ for a triangle's area adds a further meaning of $T$ in the series. |
 
-### F1. A-stable and L-stable attributed to the numerical integration notes
-- **Where:** `src/content/blog/finite-differences-for-heat-and-waves.mdx:258`, section "4.3 What Crank–Nicolson does not damp"
-- **Text:** "In the language of the [numerical integration notes](/blog/numerical-integration-notes), the trapezoidal rule is A-stable (stable for every decaying mode) but not **L-stable** (its factor does not tend to zero for infinitely fast decay), while backward Euler is both."
-- **Problem:** `src/content/blog/numerical-integration-notes.mdx` treats only explicit Euler and RK4, introduces stability regions, and ends: "Stiff problems ... usually call for implicit methods, which are outside the scope of these notes." It never mentions the trapezoidal rule, backward Euler, A-stability or L-stability. The cross-reference is therefore false.
-- **Recommended correction:** "In terms of the stability regions of the [numerical integration notes](/blog/numerical-integration-notes), the trapezoidal rule is **A-stable** (its stability region contains every decaying mode) but not **L-stable** (its factor does not tend to zero for infinitely fast decay), while backward Euler is both."
+### S1. The symbol $T$ has opposite signs in entries 2 and 3
 
-### F2. SOR at the optimal ω: the eigenvalue explanation
-- **Where:** `src/content/blog/solving-large-linear-systems.mdx:324`, section "6. Measuring the Iteration Counts"
-- **Text:** "at the optimal $\omega$ its iteration matrix is defective (its eigenvalues coincide in pairs without a full set of eigenvectors), so the error decays like $\rho^m$ multiplied by a factor that grows with $m$."
-- **Problem:** The conclusion is right, but the stated mechanism is not. At $\omega_{\text{opt}}$ (Young's theory for consistently ordered matrices; red-black ordering is one), every eigenvalue of the SOR iteration matrix has modulus $\omega - 1$. Most of them are complex-conjugate pairs, which are distinct, not coinciding. Only the eigenvalue $\omega - 1$ itself, which comes from the extreme Jacobi eigenvalues $\pm\rho_J$, is a double eigenvalue with a single eigenvector (a 2×2 Jordan block). A numerical check on the red-black-ordered matrix with $N = 8$ confirms this: all eigenvalue moduli equal $\omega - 1 = 0.44646$; the eigenvalue $\omega - 1$ has algebraic multiplicity 2 and geometric multiplicity 1; and $\|M^k\|_2/\rho^k$ is 43, 87, 173 and 346 for k = 10, 20, 40, 80, that is, it grows linearly.
-- **Recommended correction:** "...at the optimal $\omega$ every eigenvalue of its iteration matrix has the same modulus $\omega - 1$, and the eigenvalue $\omega - 1$ itself is double with only one eigenvector (the matrix is defective), so the error decays like $m\rho^m$ rather than $\rho^m$."
+- **Where:** `src/content/blog/solving-large-linear-systems.mdx:38–43`, section "1.1 The five-point matrix"; also `:138` (§3.1) and `:377` (Exercise 3). It conflicts with `src/content/blog/finite-differences-for-heat-and-waves.mdx:42–49` (§1.2).
+- **Text:** Entry 3: "$T = \begin{bmatrix} 2 & -1 & & \\ -1 & 2 & \ddots & \\ \dots \end{bmatrix}$, where $T$ is the $(N-1)\times(N-1)$ tridiagonal matrix of the first entry"; "For the one-dimensional matrix $T/h^2$, the eigenvalues found in the second entry give $\kappa = \cot^2(\pi h/2)$"; Exercise 3: "Show that the first entry's tridiagonal matrix $T/h^2$". Entry 2: "$\frac{d\mathbf{U}}{dt} = \frac{\alpha}{\Delta x^2}\,T\,\mathbf{U}$, $T = \begin{bmatrix} -2 & 1 & & \\ 1 & -2 & \ddots & \\ \dots \end{bmatrix}$".
+- **Problem:** Two consecutive entries define the same symbol for the same object with opposite signs, and neither says so. The overview promises shared conventions (`src/content/series/numerical-simulation.md:18`). Entry 1 never names a matrix $T$: its matrix is $A = \tfrac{1}{h^2}\,\text{tridiag}(-1, 2, -1)$ (`from-differential-equations-to-discrete-problems.mdx:238`). Entry 3's $T$ is therefore $h^2 A$, and entry 2's $T$ is $-h^2 A$. This matches entry 1 §4.3, $d\mathbf{U}/dt = -\alpha A\mathbf{U}$. In entry 3, "the eigenvalues found in the second entry" are the negative eigenvalues of entry 2's system matrix, so a reader who carries entry 2's $T$ into entry 3 gets the wrong sign for every eigenvalue and for the claim that $A$ is SPD. The magnitudes, and hence $\kappa$, are right.
+- **Recommended correction (entry 3 only; entry 2 can stay as it is):**
+  - Line 43: replace "where $T$ is the $(N-1)\times(N-1)$ tridiagonal matrix of the first entry" with "where $T$ is the $(N-1)\times(N-1)$ matrix $\text{tridiag}(-1, 2, -1)$, so that $T/h^2$ is the matrix $A$ of the first entry (Section 6.1); it is the negative of the matrix called $T$ in the second entry".
+  - Line 138: replace "the eigenvalues found in the second entry give" with "the eigenvalues found in the second entry, with their sign reversed, give".
+  - Line 377: replace "the first entry's tridiagonal matrix $T/h^2$" with "the tridiagonal matrix $T/h^2$ (the first entry's $A$)".
 
-### F3. The FTCS factor of the shortest grid mode
-- **Where:** `src/content/blog/finite-differences-for-heat-and-waves.mdx:133`, section "2.2 Stability by Fourier modes"
-- **Text:** "the shortest mode is multiplied by $1 - 4(0.51) = -1.04$ at each of about 400 steps."
-- **Problem:** With fixed ends and $N = 20$, the shortest grid mode is $k = 19$, $\xi = 19\pi/20$. Its factor is $1 - 4(0.51)\sin^2(19\pi/40) = -1.0274$; −1.04 is the bound at ξ = π, which is not a grid mode. The run takes 392 steps. The corrected figures explain the output exactly: the tent's discrete coefficient for mode 19 is $2.5\times10^{-3}$, and $1.0274^{392} = 4.06\times10^4$, so the amplitude is $2.5\times10^{-3} \times 4.06\times10^4 = 102$, matching the printed $1.022\times10^2$. With −1.04 the same estimate gives about $10^4$.
-- **Recommended correction:** "...the shortest grid mode ($\xi = 19\pi/20$) is multiplied by $1 - 4(0.51)\sin^2(19\pi/40) \approx -1.027$ at each of 392 steps, a growth by a factor of about $4\times10^4$ from its initial amplitude of $2.5\times10^{-3}$."
+### S2. "The insight note"
 
-### F4. The V&V definitions are near-verbatim
-- **Where:** `src/content/blog/verifying-and-validating-a-simulation.mdx:23–26`, section "1.1 Verification and validation"
-- **Text:** "**Verification** determines whether a computational model represents the underlying mathematical model and its solution accurately." / "**Validation** determines to what degree a model represents the real world accurately, from the perspective of its intended uses."
-- **Problem:** Both sentences follow the published definitions in the AIAA guide and ASME V&V 10 almost word for word, with the clauses reordered. They are introduced with "In substance", so they are neither marked as quotations nor genuine paraphrases. The content-integrity rules require original writing, and the author asked for paraphrase. Quoting the exact text from memory would risk misquotation, so a real paraphrase with attribution is the safe fix.
-- **Recommended correction:** Introduce the definitions as "Paraphrased, their definitions are:" and rewrite them as follows. Verification checks that the computational model (the code and the numbers it produces) reproduces the mathematical model it was built from, to a known accuracy. Validation estimates how closely the model reproduces the behavior of the real system, judged against the accuracy that its intended use requires.
+- **Where:** `src/content/blog/verifying-and-validating-a-simulation.mdx:50` and `:313`
+- **Text:** "and the insight note makes the same point"; "The open questions in the insight note on [trustworthy simulations]"
+- **Problem:** Wave 1 replaced "The ACRR note" with "The insight" in all five entries. These two mentions keep "note", so the same kind of page is named in two ways within one entry. This is polish only.
+- **Recommended correction:** "and the insight makes the same point"; "The open questions in the insight on [trustworthy simulations]".
 
-### F5. $T$ means two things in Section 4
-- **Where:** `src/content/blog/verifying-and-validating-a-simulation.mdx:227` and `:247`
-- **Text:** "in terms of the true value $T$" (§4.2); "turns the steady heat equation $-k\nabla^2T = Q$" (§4.4)
-- **Problem:** Two subsections apart, $T$ is first the true value of the compared quantity and then the temperature field. The rest of the series writes temperature as $u$ (entry 1 §2.1).
-- **Recommended correction:** In §4.4, write "$-k\nabla^2 u = Q$ for the temperature $u$". Keep $T_s$ as the surface temperature.
+### T1. "Reduce ... by $10^{-8}$"
 
-### F6. "Every rate checked" overstates the coverage
-- **Where:** `src/content/series/numerical-simulation.md:13`; `src/content/blog/finite-differences-for-heat-and-waves.mdx:3` and `:17`
-- **Text:** "Every convergence rate the series states is checked by a short Python experiment."; "with every rate checked in Python"; "Every claimed order of accuracy and every stability limit is checked by a short experiment."
-- **Problem:** Several stated results are not checked by any experiment: the two-dimensional limits ν ≤ 1/√2 and μ ≤ 1/4 (entry 2 §6.2), the θ-scheme limit μ ≤ 1/(2 − 4θ) (entry 2 §4.1), the $h$-independent multigrid and preconditioned-CG rates (entry 3 §4.3, §5.3), and the nested-dissection costs (entry 3 §2.4). The main rates are checked, but not every one.
-- **Recommended correction:** Series file: "The series checks its main convergence rates and stability limits with short Python experiments." Apply the same change to `src/content/series/vi/numerical-simulation.md`. Entry 2 description: "with the main rates checked in Python". Entry 2 line 17: "The main orders of accuracy and stability limits are checked by short experiments."
+- **Where:** `src/content/blog/solving-large-linear-systems.mdx:329`, section "6. Measuring the iteration counts"
+- **Text:** "Its bound from Section 5.2 promises at most about 97, 194 and 389 iterations to reduce the energy-norm error by $10^{-8}$"
+- **Problem:** Read literally, the error is reduced by a factor of $10^8$, not by $10^{-8}$. The §4.2 table was corrected to "by a factor of $10^8$" in the earlier review (its F13), but this sentence was not. The numbers are right: the smallest $m$ with $2q^m \le 10^{-8}$, where $q = (\sqrt\kappa - 1)/(\sqrt\kappa + 1)$, is 96.7, 194.4 and 389.2 (recomputed).
+- **Recommended correction:** "... iterations to reduce the energy-norm error by a factor of $10^8$; the actual counts, measured with the residual criterion, are about a third of that."
 
-### F7. $A = LU$ against $U_{\!f}$
-- **Where:** `src/content/blog/solving-large-linear-systems.mdx:61`, `:65`
-- **Text:** "turns this into a **factorization** $A = LU$, with $L$ lower triangular ... and $U_{\!f}$ upper triangular; the subscript distinguishes the factor from the solution vector"; "giving $PA = LU$"
-- **Problem:** The sentence introduces $U_{\!f}$ to avoid a clash with the solution vector $\mathbf{U}$, but its own formula still writes $LU$.
-- **Recommended correction:** Write $A = LU_{\!f}$ and $PA = LU_{\!f}$. "LU" as the name of the method can stay.
+### T2. The affine Krylov space
 
-### F8. Comparison with the wrong band size
-- **Where:** `src/content/blog/solving-large-linear-systems.mdx:128`, section "2.4 Fill-in"
-- **Text:** "$29{,}757 \approx n(N - 1) = 29{,}791$: the band is essentially full."
-- **Problem:** With half-bandwidth $b = 31$, the lower band including the diagonal holds $\sum_i (\min(i, b) + 1) = 30{,}256$ positions, not $n(N-1) = 961 \times 31$. The conclusion stands (98 % of the band is filled, and the 499 missing entries fell below the script's $10^{-14}$ relative threshold), but the comparison number is wrong.
-- **Recommended correction:** "...and its 29,757 nonzeros fill 98 % of the 30,256 positions in the lower band: the band is essentially full."
+- **Where:** `src/content/blog/solving-large-linear-systems.mdx:230`, section "5.1 Solving by minimizing"
+- **Text:** "$\mathbf{U}^{(m)}$ minimizes the error in the **energy norm** ... over all vectors in the **Krylov subspace** $\text{span}\{\mathbf{r}^{(0)}, \dots, A^{m-1}\mathbf{r}^{(0)}\}$, the best that any method built from $m$ matrix-vector products and that starting guess can do"
+- **Problem:** With a nonzero starting guess, the iterate lies in $\mathbf{U}^{(0)} + \mathcal{K}_m$ and not in $\mathcal{K}_m$ (the standard statement of the CG optimality property, as in the entry's own references Saad 2003 and Trefethen and Bau 1997). The entry's examples all start from zero, and "that starting guess" hints at the shift, so this is a precision point only.
+- **Recommended correction:** "... over all vectors $\mathbf{U}^{(0)} + \mathbf{w}$ with $\mathbf{w}$ in the **Krylov subspace** $\text{span}\{\dots\}$ ..."
 
-### F9. Two parentheticals in a row
-- **Where:** `finite-differences-for-heat-and-waves.mdx:94`
-- **Text:** "$\xi$ is the mode's phase change per grid interval (for the $k$-th sine mode of Section 1.1, $\xi = k\pi\Delta x/L$) ($0 \le \xi \le \pi$ covers every mode the grid can represent)"
-- **Recommended correction:** Merge them: "(for the $k$-th sine mode of Section 1.1, $\xi = k\pi\Delta x/L$; the range $0 \le \xi \le \pi$ covers every mode the grid can represent)".
+### T3. $\lvert T\rvert$ for the triangle area
 
-### F10. "What stiffness does to explicit Euler"
-- **Where:** `finite-differences-for-heat-and-waves.mdx:58`
-- **Text:** "The [numerical integration notes](/blog/numerical-integration-notes) showed what stiffness does to explicit Euler: it is stable only if ..."
-- **Recommended correction:** "The numerical integration notes showed the stability limit of explicit Euler for a fast-decaying mode: it is stable only if ..." (The notes mention stiffness only in their last sentence.)
-
-### F11. Cholesky breakdown
-- **Where:** `solving-large-linear-systems.mdx:96`
-- **Text:** "(a square root of a negative number appears)"
-- **Recommended correction:** "(a zero or negative number appears under a square root)", which also covers the semidefinite case.
-
-### F12. Exercise 4 grids unspecified
-- **Where:** `solving-large-linear-systems.mdx:387`
-- **Text:** "gives its smallest error, $1.7\times10^{-5}$, at $N = 256$"
-- **Recommended correction:** Name the grids: "on the grids $N = 16, 32, \dots, 2048$". The values were reproduced on those grids: 1.71e-5 at N = 256 and 3.62e-4 at N = 1024.
-
-### F13. "Reduce the error by $10^{-8}$"
-- **Where:** `solving-large-linear-systems.mdx:204`
-- **Recommended correction:** "Iterations to reduce the error by a factor of $10^8$, for small $h$".
-
-### F14. Uncited references
-- **Where:** `solving-large-linear-systems.mdx:130`, `:423`; `finite-element-method.mdx:289`, `:453`
-- **Problem:** The reference lists include George (1973) and Courant (1943), but the text never mentions either.
-- **Recommended correction:** At "**Nested dissection**", add "(introduced by George in 1973 for regular meshes)". In §5.2 of the finite element entry, add one sentence: Courant's 1943 paper used piecewise-linear functions on a triangulation in this way, one of the mathematical precursors of the method.
-
-### F15. $f$ reused
-- **Where:** `verifying-and-validating-a-simulation.mdx:129`
-- **Recommended correction:** "Let $f$ (no longer the source term of Section 2.3) be a scalar **quantity of interest** ...".
-
-### F16. The ν = 1 borderline
-- **Where:** `finite-differences-for-heat-and-waves.mdx:291`
-- **Problem:** When the middle coefficient equals ±1, the two roots coincide, which would mean linear growth. This happens only at ν = 1 and ξ = π, and ξ = π is not a grid mode when both ends are fixed, so the experiments are unaffected.
-- **Recommended correction:** None needed. A footnote-level remark could be added.
+- **Where:** `src/content/blog/finite-element-method.mdx:292–295`
+- **Text:** "$K^{e}_{ij} = k\,|T|\,\nabla N_i\cdot\nabla N_j$, where $|T|$ is the triangle's area."
+- **Problem:** $T$ is already the tridiagonal matrix in entries 2 and 3 (see S1) and the true value in entry 5. The definition is local and correct, so this is optional.
+- **Recommended correction:** Write $|e|$ for the area of element $e$: "$K^{e}_{ij} = k\,|e|\,\nabla N_i\cdot\nabla N_j$, where $|e|$ is the area of triangle $e$".
 
 ## Concept introduction map
 
 | Concept | First used (path:line) | Introduced where | Assessment |
 |---|---|---|---|
-| PDE | from-differential-equations-to-discrete-problems.mdx:15 | same line | Good |
-| Discretization | from-...:17 | same line | Good |
-| Heat, wave and Poisson equations | from-...:56–91 | derived from physics in §2 | Good |
-| Elliptic/parabolic/hyperbolic | from-...:93 | §2.4 with the discriminant | Good |
-| Dirichlet/Neumann/Robin | from-...:115 | §3.1 | Good |
-| Well-posedness (Hadamard) | from-...:129 | §3.3 | Good |
+| PDE, numerical simulation, discretization | from-differential-equations-to-discrete-problems.mdx:15–17 | Same lines, in bold | Good |
+| Model, discretization, round-off and iteration errors | from-...:34–36 | §1.1 with a diagram | Good |
+| Heat, wave and Poisson equations | from-...:56–91 | Derived from physics in §2.1–2.3 | Good |
+| Elliptic, parabolic, hyperbolic | from-...:93–107 | §2.4 with the discriminant | Good |
+| Dirichlet, Neumann, Robin; domain, boundary | from-...:115–119 | §3.1 | Good |
+| Well-posedness | from-...:129 | §3.3 | Good |
+| Grid, mesh, node, degrees of freedom, $h$ | from-...:135–143 | §4.1 | Good |
 | Order of accuracy | from-...:147 | §4.2 | Good |
-| Method of lines | from-...:151 | §4.3 | Good |
-| Truncation error, stencil | from-...:183 | §5.1 | Good |
-| Unit roundoff | from-...:217 | same line, linked to the insight | Good |
-| Consistency, stability, convergence | from-...:346–350 | §7 | Good |
-| Stiffness | finite-differences-...:58 | same line | Good |
+| Method of lines | from-...:151–157 | §4.3 | Good |
+| Truncation error, stencil, $O(\cdot)$ | from-...:177–183 | §5.1 | Good |
+| Unit roundoff $u_r$ | from-...:217 | Same line, linked to the insight | Good |
+| Tridiagonal, symmetric, positive definite | from-...:248 | §6.1 | Good |
+| Observed order | from-...:340 | §6.2 | Good |
+| Consistency, stability, convergence | from-...:346–352 | §7 | Good |
+| Stiffness | finite-differences-for-heat-and-waves.mdx:58 | Same line | Good |
+| FTCS, BTCS, mesh ratio $\mu$ | finite-differences-...:74–81, :139 | At definition | Good |
 | von Neumann analysis, amplification factor | finite-differences-...:94 | §2.2 | Good |
-| Mesh ratio μ, Courant number ν | finite-differences-...:81, :281 | at definition | Good |
+| Maximum principle | finite-differences-...:108 | §2.2 | Good |
+| θ-scheme, Crank–Nicolson | finite-differences-...:165–173 | §4.1 | Good |
+| A- and L-stability | finite-differences-...:258 | Defined inline; notes cited only for the stability regions | Good |
 | Lax equivalence theorem | finite-differences-...:262 | §5 | Good |
-| CFL condition, domain of dependence | finite-differences-...:297 | §6.2 | Good |
-| A-/L-stability | finite-differences-...:258 | defined inline (attribution wrong, F1) | See F1 |
-| Sparse, banded, SPD | solving-...:45–47 | §1.1 | Good |
-| Kronecker product | solving-...:43 | same line | Good |
+| Courant number, CFL condition, domain of dependence | finite-differences-...:281, :297 | §6.1–6.2 (CFL also expanded in the opening, line 17) | Good |
+| Numerical dispersion | finite-differences-...:342–348 | §6.4 | Good |
+| Five-point stencil, Kronecker product | solving-large-linear-systems.mdx:35–43 | §1.1 | Good; the sign of $T$ is S1 |
+| Sparse, banded, half-bandwidth, SPD | solving-...:45–47 | §1.1 | Good |
 | Flops | solving-...:55 | §1.2 | Good |
-| LU, Cholesky, fill-in, nested dissection | solving-...:61–130 | §2 | Good |
-| Condition number | solving-...:136 | §3.1 | Good |
-| Spectral radius, stationary iteration | solving-...:202 | §4.2 | Good |
-| Krylov subspace, energy norm | solving-...:226 | §5.1 | Good |
-| Preconditioner | solving-...:251 | §5.3 | Good |
-| Weak form, Sobolev space $H^1$ | finite-element-method.mdx:47–59 | §1.2 | Good |
-| Essential/natural BCs | finite-element-...:60 | §1.2 | Good |
-| Galerkin method, stiffness matrix | finite-element-...:85–93 | §2.1 | Good |
+| LU, pivoting, Thomas algorithm, Cholesky, fill-in, nested dissection | solving-...:61–130 | §2 | Good |
+| Condition number, backward stability | solving-...:136 | §3.1 | Good |
+| Iterative method, residual, iteration error | solving-...:190–192 | §4.1 | Good |
+| Jacobi, Gauss–Seidel, SOR, red-black ordering, spectral radius | solving-...:196–202 | §4.2 | Good |
+| Smoother, multigrid | solving-...:216–218 | §4.3 | Good |
+| CG, $A$-conjugacy, energy norm, Krylov subspace | solving-...:230 | §5.1 | Good (T2 is precision only) |
+| Preconditioner; GMRES and BiCGSTAB (named and expanded, then declared out of scope) | solving-...:255–257 | §5.3 | Good |
+| Strong form, weak form, test function | finite-element-method.mdx:31–55 | §1.1–1.2 | Good |
+| Sobolev space $H^1$, admissible functions | finite-element-...:59 | §1.2 | Good |
+| Essential and natural conditions | finite-element-...:60 | §1.2 | Good |
+| Energy functional, Rayleigh–Ritz | finite-element-...:67–73 | §1.3 | Good |
+| Galerkin method, stiffness matrix, load vector | finite-element-...:85–93 | §2.1 | Good |
+| Galerkin orthogonality, Céa's lemma | finite-element-...:97–109 | §2.2 | Good |
+| Elements, hat and shape functions, assembly, Gauss–Legendre quadrature | finite-element-...:115–128 | §3.1–3.2 | Good |
 | $L^2$ norm, $H^1$ seminorm | finite-element-...:136–137 | §3.3 | Good |
-| Code/solution verification, validation | verifying-...:25–36 | §1.1 | Good (wording F4) |
-| MMS | from-...:229 (named), verifying-...:66 | §2.2 of entry 5 | Good |
-| Richardson extrapolation, GCI | verifying-...:135–153 | §3.1–3.2 | Good |
-| Standard uncertainty, coverage factor | verifying-...:233–239 | linked to the measurement entry §5.2 | Good |
+| A priori estimates, Aubin–Nitsche | finite-element-...:211–217 | §4.2 | Good |
+| Isoparametric elements, mass matrix | finite-element-...:370 | §5.4 | Good |
+| Verification, validation, code and solution verification | from-...:38 (first mention); verifying-and-validating-a-simulation.mdx:25–36 | Entry 1 §1.1 (one line), entry 5 §1.1 | Good |
+| Calibration, prediction | verifying-...:38 | §1.1 | Good |
+| Observed order, asymptotic range | verifying-...:56–62 | §2.1 | Good |
+| Manufactured solutions | from-...:229 (named); verifying-...:66 | Entry 5 §2.2 | Good |
+| Richardson extrapolation, GCI, factor of safety | verifying-...:129–153 | §3.1–3.2 | Good |
+| Comparison error, validation uncertainty, standard uncertainty, coverage factor | verifying-...:221–239 | §4.2, linked to the measurement entry §5.2 | Good |
 
 ## Versions, defaults and conventions
 
 | Assumption | Where it appears | Stated in the text? | Assessment |
 |---|---|---|---|
-| Python 3.13, numpy 2.5, binary64 | from-...:19; "Python 3 with numpy, double precision" in each entry | Yes | Reproduced with 3.13.16 / 2.5.3 |
-| Sign convention $-\nabla^2 u = f$ | from-...:91 | Yes | Consistent across entries |
-| SI units (m, s, K, W) | from-...:54, :58–61 | Yes | Consistent; °C and K in entry 5 §4.4 |
-| Capital $U$ discrete, lowercase $u$ exact; superscript $n$ is an index | from-...:141 | Yes | Consistent |
-| $h$ = mesh size; $\Delta t$ = the notes' $h$ | from-...:141–143 | Yes | Good |
-| $h_c$, $h_e$, $q_L$, $Q$ | from-...:119; finite-element-...:23–29, :121 | Yes, locally | Good |
-| $r$ = residual (entry 3), refinement ratio (entry 5) | solving-...:192; verifying-...:56, :129 | Yes, locally | Good |
-| Red-black ordering for GS/SOR | solving-...:199, :283 | Yes | Good |
-| GUM coverage factor 2 | verifying-...:239 | Yes | Consistent with the measurement entry §5.2 |
-| Hypothetical validation data | verifying-...:17, :245–262 | Yes (heading, prose, code comment) | Good |
+| Python 3 (run with 3.13), NumPy (run with 2.5), IEEE 754 binary64 | from-...:19; each entry's opening; series file line 18 | Yes | Reproduced with Python 3.13.16 and NumPy 2.5.3 |
+| Sign convention $-\nabla^2 u = f$ | from-...:91; series file line 18 | Yes | Consistent in all entries |
+| Capital $U$ discrete, lowercase $u$ exact; superscript $n$ an index | from-...:141; series file line 18 | Yes | Consistent |
+| $h$ mesh size; $\Delta t$ is the notes' $h$ | from-...:141–143; finite-differences-...:258 | Yes | Consistent with the notes, which use $h$ for the time step |
+| Name and sign of the 1D second-difference matrix | from-...:238 ($A$); finite-differences-...:44 ($T$, negative); solving-...:40 ($T$, positive) | Partly | Inconsistent between entries 2 and 3: S1 |
+| SI units (m, s, K, W); °C in the validation example | from-...:54–61; verifying-...:247 | Yes | Consistent (°C is an SI derived unit; differences are in K) |
+| Unit roundoff $u_r = 2^{-53}$ (binary64), $2^{-24}$ (binary32) | from-...:217; solving-...:136, :386 | Yes | Matches the floating-point insight |
+| Red-black ordering for Gauss–Seidel and SOR | solving-...:199, :285 | Yes | Good |
+| Unknowns numbered row by row; half-bandwidth $N - 1$ | solving-...:35, :46 | Yes | Good |
+| GUM coverage factor 2 (about 95% if normal) | verifying-...:239 | Yes | Consistent with the measurement entry §5.2 |
+| GCI used directly as $u_{\text{num}}$ | verifying-...:253, :268 | Yes, called conservative | Acceptable; see Not verified |
+| Hypothetical validation data | verifying-...:17, :245–262 | Yes (heading, prose, code comment) | Labeled as required |
+
+## Series design
+
+**Purpose, audience and scope.** The overview names its reader: engineers and students who use simulation results. It names the prerequisites (calculus, basic linear algebra, ODEs at the level of the Foundations of Control Systems series), each linked, and points to the numerical integration notes as background. It says what the series covers, from the equations to a defensible result. Entry 1 §1.2 states the one deliberate exclusion, finite volumes ("Not covered in this series"). The five objectives each start with an assessable verb (Discretize, Analyze, Choose, Derive, Verify), and each is met by a named entry (table above). The reader's end state is stated implicitly through the objectives, which is enough.
+
+**Sequence and rationale.** The overview's second paragraph says why the entries come in this order: each supplies what the next needs (equations and error vocabulary, then time stepping, the linear systems both produce, a second route to the same systems, and finally trust in the whole chain). The order is the right one for the stated reader. Entry 4 depends on entry 3 only for the SPD solver and the CG energy link, and entry 5 draws on all four. No move, split or merge would help.
+
+**Prerequisites and dependencies.** Everything an entry relies on is either a stated prerequisite or introduced in an earlier entry that is cited by number and, where useful, by a section fragment. No entry depends on a later one. Forward pointers are promises that are kept: entry 1 points to entry 3 (rounding at $N = 10^6$) and to entry 5 (manufactured solutions), and entry 2 points to entry 5 (the measurement-time trap).
+
+**Notation and depth.** The notation is consistent ($U/u$, $h$, $\Delta t$, $u_r$, $U_{\!f}$, $\xi$, $\mu$, $\nu$), with one exception: the sign and name of the tridiagonal matrix between entries 1–3 (S1). The depth is comparable across the entries: each has derivations, recomputed worked examples, runnable code with real output, five exercises with answers, a summary table and references.
+
+**Overview completeness.** The description (165 characters) and the body match what the entries deliver. The conventions paragraph states the sign convention, the $U/u$ notation, SI units and the Python/NumPy setup once. The claim about experiments was qualified in the earlier review ("the main convergence rates and stability limits") and is accurate. The conventions paragraph could also fix the name of the second-difference matrix, which would resolve S1 at the series level. The entry-level correction proposed in S1 is sufficient.
 
 ## Series-level notes
 
-- **Cross-references.** Every "first/second/.../fifth entry" and "next entry" claim, every section anchor (`#43-the-method-of-lines`, `#22-banded-and-tridiagonal-systems`, `#52-checking-the-orders-and-where-rounding-takes-over`, `#51-solving-by-minimizing`, `#11-the-five-point-matrix`, `#41-why-iterate`, measurement `#52-evaluating-uncertainty`) and every forward promise was checked and is fulfilled. Examples: entry 1's "the third entry solves this problem on grids up to $N = 10^6$"; "the second entry computes the decay rate exactly for one mode"; and "the implicit scheme's 0.88" in entry 5. The one false claim is F1.
-- **Consistency with the linked notes.** Numerical integration notes: $h$ as the time step, the Euler bound $|1 + h\lambda| \le 1$ and the meaning of order agree. The exceptions are F1 and F10. *What Makes a Simulation Trustworthy?*: the verification/validation distinction, the "perfectly solved wrong model" point and the two open questions quoted in entry 5 §5 all match. *Floating-Point Rounding in Long Simulations*: $u = 2^{-53}$, the single-precision $2^{-24}$ and the suggestion to compare runs that differ only in rounding all match.
-- **Points flagged by the author.**
-  - Spelling is American throughout, and the respelled series fields mean the same.
-  - The V&V attributions are correct: $E = S - D$; $u_{\text{val}}$ as the root sum of squares of $u_{\text{num}}$, $u_{\text{input}}$ and $u_D$; the GCI in V&V 20; Roache's $F_s$ of 1.25 (three or more grids) and 3 (two grids); and the AIAA tiers (unit problems, benchmark cases, subsystems, complete system).
-  - The definitions need real paraphrase (F4).
-  - The SOR explanation is fixed in F2.
-  - The leapfrog explanation is correct: the discrete solution is exactly $\cos(\tilde\omega t)\sin\pi x_j$, and $\delta^2/2$ with $\delta = (\tilde\omega - \pi)\cdot 1$ gives $2.94\times10^{-6}$, $1.83\times10^{-7}$ and $1.15\times10^{-8}$, the measured values.
-  - Notation is defined locally (F5 and F15 are the exceptions).
-  - The hypothetical example is labeled.
-- **Structure.** The five entries are uniform: numbered sections, exercises with answers, a summary table and a reference list. The tags reuse existing site tags (`numerical-methods`, `simulation`, `linear algebra`). The frontmatter is consistent: one category, publishedAt 2026-10-13, and seriesOrder 1–5 with no gaps.
+- **Cross-references.** Every "first/second/.../fifth entry" and "next entry" mention matches its target. Every section citation was checked against the target's heading: entry 2 cites entry 1 Sections 5.1 and 6.2; entry 3 cites entry 1 Section 5.2; entry 4 cites entry 3 Sections 1.1 and 5.1; entry 5 cites entry 3 Section 4.1. All of them, and all the fragment links, resolve. They are `#43-the-method-of-lines`, `#22-banded-and-tridiagonal-systems`, `#52-checking-the-orders-and-where-rounding-takes-over`, `#51-solving-by-minimizing`, `#11-the-five-point-matrix`, `#41-why-iterate` and, in the sensor series, `#52-evaluating-uncertainty`.
+- **Links outside the series.** The [numerical integration notes](/blog/numerical-integration-notes) were revised after the series (commit 9232ed9). They still support every claim the series makes about them. §4 shows the explicit Euler limit $|1 + h\lambda| \le 1$ for $\lambda = -50$ (entry 1 §7 and entry 2 §1.2). They present stability regions in the complex $h\lambda$-plane (entry 2 §4.3), and they use $h$ for the time step. They now also link forward to entries 2 and 5, and their description of entry 2 matches it. The insight *What Makes a Simulation Trustworthy?* contains the "perfectly solved wrong model" point and the two open questions that entry 5 §1.2 and §5 attribute to it. *Floating-Point Rounding in Long Simulations* writes the unit roundoff $u$ (as entry 1 says) and suggests comparing runs that differ only in rounding (entry 3 §3.2, entry 5 §3.4).
+- **Terminology.** These terms are used consistently: "entry"; "time step" (open as a noun); "Crank–Nicolson", "Gauss–Seidel" and "Courant–Friedrichs–Lewy" with en dashes; "NumPy" in prose; American spelling; no space before %. The one leftover is "insight note" (S2).
+- **Structure and front matter.** All five entries share the same structure: opening without a heading, numbered sections, numbered Exercises with answers, a numbered Summary with a table and a closing paragraph, and `### References`. The front matter is uniform: category "Mathematical Foundations", `publishedAt` 2026-10-13, `seriesOrder` 1–5 with no gaps, no `draft` or `example` flag. The descriptions are single sentences of 144–165 characters.
+- **Content integrity.** Nothing is fabricated. The validation numbers in entry 5 §4.4 are labeled hypothetical in the heading, the prose and the code. The V&V definitions are paraphrases with attribution. No entry has a Vietnamese translation. The Vietnamese series file needs updating to match the wave-1 English overview, as recorded in the wave-1 audit; that is outside this review.
 
 ## Verification log
 
-- `npm run build:local`: exit 0. `astro check` reported 0 errors, 0 warnings and 0 hints. Pagefind indexed 81 pages in 2 languages. The only warning is the expected localhost warning.
-- `npm run check:links`: 214 pages, 6,081 internal references, all resolve.
-- `dist/blog/<slug>.html` (all five pages): no `katex-error`. Mermaid min-widths are 500px, 315px, 579px and 390px, all ≤ 600px. No letter or punctuation mark is glued to `<a`, `<strong>`, `<code>` or `<em>`.
-- Python blocks: all 17 blocks (3 + 4 + 5, counting the `thomas` definition, + 3 + 3) were re-run with `python3 -I`, Python 3.13.16 and numpy 2.5.3. Every printed output matches byte for byte. The entry 3 rounding block was run after the `thomas` definition, as the text says.
-- Recomputed, all correct unless noted:
+- Build: not run, by instruction (other reviewers run in parallel). The current full-site build in `/tmp/claude-0/b2` (built after wave 1 with `SITE_URL=https://acrr.asia`) was inspected instead. Its pages contain the wave-1 text (for example "Time discretization error" in entry 5 and "about 1.87 on the two finer" in entry 2).
+- `node scripts/check-links.mjs /tmp/claude-0/b2`: checked 314 pages and 9,667 internal references; all internal links resolve.
+- Rendering in `/tmp/claude-0/b2/blog/<slug>.html` and `/tmp/claude-0/b2/series/numerical-simulation.html`:
+  - `katex-error` count is 0 on all six pages.
+  - Mermaid min-widths are 500 px (entry 1), 315 px (entry 3), 579 px (entry 4) and 390 px (entry 5); entry 2 has no diagram. All are ≤ 600 px.
+  - No letter or punctuation mark is glued to `<a `, `<strong>`, `<code>` or `<span class`.
+- `npm run -s eos -- lint numerical-simulation`: 6 files, 0 errors, 0 warnings, 13 suggestions. These are `sentence-length` (46–65 words), `acronym-expansion` for "SIAM" and "JCGM" in reference lists, and `intensifiers` for "actually" at entry 1 line 36. All were justified in the wave-1 logs and are not re-reported.
+- `npm run -s eos -- syntax <the six files>`: "All files compile."
+- Code: all 18 Python blocks (3 + 4 + 5, counting the `thomas` definition, + 3 + 3) were extracted and run with `python3 -I` (Python 3.13.16, NumPy 2.5.3), each file's blocks in order in one namespace. All five outputs are identical to the printed `text` blocks (checked with `diff`).
+- Recomputed (all correct):
   - **Entry 1:**
-    - 0.4207 and 0.09005;
-    - √u_r = 1.05e-8 and u_r^{1/3} = 4.8e-6;
-    - h²π²/12 = 0.00822 (h = 0.1) and 8.22e-7 (h = 10⁻³);
-    - the error ratio of 292 ("about 300");
-    - Exercises 1–5, including the coefficient −h²/3 and 3.21e-5 / 8.23e-7;
-    - the discriminants and the 1000 s and 4000 s diffusion times.
+    - $\tfrac12\sin 1 = 0.42074$ and $\tfrac16\cos 1 = 0.090050$;
+    - $\sqrt{u_r} = 1.05\times10^{-8}$ and $u_r^{1/3} = 4.8\times10^{-6}$;
+    - $h^2\pi^2/12 = 8.2247\times10^{-3}$ ($h = 0.1$) and $8.2247\times10^{-7}$ ($h = 10^{-3}$);
+    - the error ratio $1.69\times10^{-2}/5.78\times10^{-5} = 292$;
+    - Exercise 1 ($-h^2/3$, by hand), Exercise 2 (discriminants 12 and 0), Exercise 3 ($3.214\times10^{-5}$, $8.227\times10^{-7}$), Exercise 4 (4000 s) and Exercise 5 (the flux balance $g - g_0 = -\int f$, re-derived);
+    - the truncation and error relation $|e_j| \approx \tfrac{h^2\pi^2}{12}\sin\pi x_j$, re-derived.
   - **Entry 2:**
-    - cot²(π/200) = 4,052;
-    - the time constant L²/(απ²) = 101.3 s, the 0.05 s explicit limit, 20,000 steps and the eightfold cost;
-    - the first-mode amplitude 2.915e-3;
-    - FTCS shortest grid mode −1.0274 over 392 steps (F3);
-    - CN factor −0.9607, with 0.9607¹⁰ = 0.670, 115 steps and BTCS 0.0099;
-    - the θ-scheme limit;
-    - leapfrog ν = 1.05: |G| = 1.839, 1.868 and 1.875; 48, 95 and 190 steps; the estimates 5.0e-4, 6e9 and 7e35;
-    - the leapfrog t = 1 errors (above);
-    - Exercises 1 and 3 (0.0182 s, 0.0045 s, 1.67e-5 s);
-    - the dispersion relation, re-derived.
+    - $\cot^2(\pi/200) = 4052$; $L^2/(\alpha\pi^2) = 101.3$ s; $\tfrac{4}{\pi^2}e^{-\pi^2/2} = 2.915\times10^{-3}$;
+    - the FTCS shortest-mode factor $-1.02744$ over 392 steps, with growth $4.06\times10^4$; the tent's discrete mode-19 coefficient $2.52\times10^{-3}$ gives an amplitude of 102.2, against the printed $1.022\times10^2$;
+    - the Crank–Nicolson factor $-0.96075$, with tenth power 0.670;
+    - Exercise 1 (0.0182 s, 0.0045 s), Exercise 3 ($1.67\times10^{-5}$ s), Exercise 4 (112.8 and 115.0 steps; BTCS 0.00991);
+    - the θ-scheme limit $\mu \le 1/(2 - 4\theta)$ and the dispersion relation, re-derived;
+    - leapfrog at $t = 1$: $2.936\times10^{-6}$, $1.834\times10^{-7}$, $1.146\times10^{-8}$ (matching the text);
+    - **new wave-1 Exercise 5:** root moduli 1.8391, 1.8678 and 1.8750 for $\xi = (N-1)\pi/N$; 48, 95 and 190 steps; estimates $5.03\times10^{-4}$, $5.98\times10^{9}$ and $7.38\times10^{35}$, whose ratios to the observed values are 13.2 and 9.7. The corrected wording ("1.84 ... about 1.87", "about $6\times10^9$ and $7\times10^{35}$", "within a factor of about 15") is correct.
   - **Entry 3:**
-    - 99³ = 970,299; 7.5 TB; 54 MB;
-    - 2D nb² = 9.6e7 and 7.8 MB; 3D 9.3e13 and 76 GB;
-    - κu_r = 4.5e-5 and u_r^{1/4} = 1.03e-4;
-    - the Jacobi predictions 949, 3,816 and 15,283; SOR 47, 94 and 188; the CG bound 97, 194 and 389;
-    - the table coefficients 3.73, 1.87 and 2.93;
-    - the ratios 128 and 3.7e6 / 1,844;
-    - Exercise 1 (768 MB, 7.8 MB, 0.39 MB) and Exercise 2 (61,152);
-    - Exercise 4 in float32: 1.71e-5 at N = 256 and 3.62e-4 at N = 1024;
-    - the full band of 30,256 positions (F8);
-    - the SOR Jordan structure (F2).
+    - $99^3 = 970{,}299$; 7.53 TB; 54.3 MB;
+    - the lower band of 30,256 positions (98.4% filled); the fill ratio 10.5;
+    - $nb^2 = 9.6\times10^7$ and 7.84 MB in 2D; $9.32\times10^{13}$ and 76.1 GB in 3D;
+    - $u_r^{1/4} = 1.03\times10^{-4}$, $\kappa u_r = 4.50\times10^{-5}$ and $8.22\times10^{-11}$ at $N = 10^5$;
+    - the Jacobi predictions 949, 3,816 and 15,283; SOR 46.6, 93.7 and 187.6 (printed 47, 94, 188); the CG bound 96.7, 194.4 and 389.2; the coefficients 3.73, 1.87 and 2.93;
+    - the ratio 128.2; the extrapolations $3.69\times10^6$ and 1,844;
+    - Exercise 1 (768.5, 7.84 and 0.39 MB), Exercise 2 (61,152; 236) and Exercise 3 (re-derived);
+    - Exercise 4 re-run in `float32` on $N = 16, \dots, 2048$: minimum $1.71\times10^{-5}$ at $N = 256$, and $3.62\times10^{-4}$ at $N = 1024$.
   - **Entry 4:**
-    - the quadratic element matrix [[7,−8,1],[−8,16,−8],[1,−8,7]]/(3h), recomputed with Gauss quadrature;
-    - Exercise 2's element matrix and Exercise 3's numbers (7.9e-3, about 2,500 elements);
-    - the six triangles of total area 3h² per interior node.
+    - the quadratic element matrix $\tfrac{1}{3h}[7, -8, 1; -8, 16, -8; 1, -8, 7]$ by Gauss quadrature;
+    - the Exercise 2 triangle matrix $\tfrac12[2, -1, -1; -1, 1, 0; -1, 0, 1]$;
+    - Exercise 3 ($7.9\times10^{-3}$; $N = 2526$);
+    - six triangles of total area $3h^2$ per node; Exercises 1 and 4, re-derived.
   - **Entry 5:**
-    - the manufactured source f;
-    - Fourier series truncation: the sums to 2,001 and to 4,001 differ by 1.4e-11;
-    - the temperature rise of 39.28 K, with 1.18 K and 0.79 K from the conductivity and the heat generation;
-    - u_input = 1.43 K, u_val = 1.52 K and the interval [−4.75, 1.31] K;
-    - Exercises 1, 2 and 4 (2.00; 5.77e-4 = 0.058 %; 0.90 K, 1.03 K, [−3.78, 0.34] K) and Exercise 3 (ratio −2).
-- References. Crossref could not be queried from this environment (proxy 403). A web search confirmed the title, journal and volume or issue of Roache 1994 (J. Fluids Eng.), George 1973 (SIAM J. Numer. Anal., doi 10.1137/0710032), Lax & Richtmyer 1956 (CPAM) and Courant 1943 (Bull. AMS 49, issue 1). The remaining details agree with the standard bibliographic records known to the reviewer:
-  - Richardson 1911, Phil. Trans. A 210, 307–357;
-  - Roache 1994, 116(3) 405–413;
-  - George 1973, 10(2) 345–363;
-  - Lax & Richtmyer, 9(2) 267–293;
-  - CFL 1928, Math. Ann. 100, 32–74;
-  - Crank & Nicolson 1947, 43(1) 50–67;
-  - Hestenes & Stiefel 1952, J. Res. NBS 49(6) 409–436;
-  - Courant 1943, 49(1) 1–23.
-
-  The books and standards (LeVeque 2007; Morton & Mayers 2nd ed. 2005; Strikwerda 2nd ed. 2004; Strauss 2nd ed. 2008; Higham 2nd ed. 2002; Golub & Van Loan 4th ed. 2013; Trefethen & Bau 1997; Saad 2nd ed. 2003; Davis 2006; Briggs–Henson–McCormick 2nd ed. 2000; Strang & Fix 1973; Brenner & Scott 3rd ed. 2008; Johnson 1987; Hughes 1987/2000; Zienkiewicz–Taylor–Zhu 7th ed. 2013; ASME V&V 10-2006; V&V 20-2009; AIAA G-077-1998; Roache 1998; Oberkampf & Roy 2010; JCGM 100:2008; JCGM 101:2008; IEEE 754-2019) are real, with the titles, editions and publishers given. No reference was judged doubtful.
+    - the manufactured source, checked by numerical differentiation (difference $3\times10^{-9}$);
+    - the Fourier-series sums to 4001 and 2001, which differ by $1.4\times10^{-11}$;
+    - $p$ from the rounded values: 1.991;
+    - the temperature rise 39.284 K; the terms 1.179 K, 0.786 K and 0.0095 K; $u_{\text{input}} = 1.430$ K, $u_{\text{val}} = 1.515$ K and the interval $[-4.75, 1.31]$ K;
+    - Exercise 1 (1.9985), Exercise 2 ($5.77\times10^{-4}$, 0.058% against an actual 0.0193%), Exercise 3 ($-2$) and Exercise 4 (0.393 K, 0.901 K, 1.030 K, $[-3.78, 0.34]$ K).
+- Fact-check (web search, 2026-10-13):
+  - Crank and Nicolson 1947, *Proc. Cambridge Philos. Soc.* 43(1) 50–67, confirmed. The journal was renamed *Mathematical Proceedings* only in 1975, so the cited name is the 1947 one.
+  - Hestenes and Stiefel, *J. Res. NBS* 49(6) 409–436, 1952, confirmed (NIST record jresv49n6p409).
+  - Courant, Friedrichs and Lewy, *Math. Ann.* 100, 32–74, 1928, confirmed (Encyclopedia of Mathematics).
+  - Lax and Richtmyer, *CPAM* 9(2) 267–293, 1956, confirmed, and the stated theorem matches.
+  - George, *SIAM J. Numer. Anal.* 10(2) 345–363, 1973, confirmed (epubs.siam.org, doi 10.1137/0710032).
+  - Courant, *Bull. AMS* 49(1) 1–23, 1943, confirmed (ams.org and projecteuclid listings).
+  - Richardson, *Phil. Trans. R. Soc. A* 210, 307–357: confirmed with year 1911 (Great Russian Encyclopedia bibliographic record); some sources give 1910.
+  - Roache 1994, *J. Fluids Eng.*: title and journal confirmed.
+  - ASME V&V 20-2009 and V&V 10-2006: titles confirmed (ASME and ANSI web store).
+  - Strauss, 2nd ed., Wiley (ISBN 978-0-470-05456-7): confirmed.
+  - Zienkiewicz, Taylor and Zhu, 7th ed., Butterworth-Heinemann, 2013: confirmed (British Library catalogue).
+  - Trefethen and Bau III, SIAM 1997: confirmed in wave 1 by catalogue record.
+  - The attributions match the sources: the V&V 20 comparison error $E = S - D$ and the RSS $u_{\text{val}}$, the GCI and Roache's $F_s$ of 1.25 and 3, the AIAA validation tiers, and GUM Supplement 1 = JCGM 101:2008. These agree with the earlier review's findings, and no contrary evidence was found.
 - Not verified:
-  - The exact wording of the ASME and AIAA definitions. No copy of the guides was available, which is why F4 recommends a genuine paraphrase rather than a quotation.
-  - Whether V&V 20 converts the GCI into $u_{\text{num}}$ with a divisor. The article treats GCI as $u_{\text{num}}$ "conservatively", which is safe under either reading.
+  - The issue number and pages of Roache 1994 (116(3), 405–413). The search confirmed the title and journal only; no record with pages was fetched.
+  - The exact final word of Richardson's title ("stresses" in the article; "stress" in two secondary records). The original title page was not available.
+  - The year printed in the books' imprints for these entries, which were not fetched in this pass (the earlier review recorded them as standard records): LeVeque 2007, Morton and Mayers 2005, Strikwerda 2004, Higham 2002, Golub and Van Loan 2013, Saad 2003, Davis 2006, Briggs–Henson–McCormick 2000, Brenner and Scott 2008, Hughes 1987/2000, Johnson 1987, Strang and Fix 1973, Oberkampf and Roy 2010, Roache 1998, AIAA G-077-1998, JCGM 100/101:2008, IEEE 754-2019. None is doubtful, but each is unverified in this pass.
+  - Whether V&V 20 divides the GCI by a factor to obtain $u_{\text{num}}$. No copy of the standard was available. The text calls its choice conservative, which holds under either reading.
+  - The exact wording of the ASME and AIAA definitions; the entry paraphrases them and does not quote.
+
+## Resolution
+
+- S1 (Should fix): fixed. Entry 3 §1.1 (`solving-large-linear-systems.mdx:43`) now defines $T = \text{tridiag}(-1, 2, -1)$, says that $T/h^2$ is the matrix $A$ of the first entry (linked to its §6.1, `#61-poisson-in-one-dimension`), and says that it is the negative of entry 2's $T$. The sentence was reordered so that the Kronecker product is defined first, and the reference is a link instead of "Section 6.1", which `section-reference` would read as a section of entry 3. §3.1 (`:138`) now reads "the eigenvalues found in the second entry, with their sign reversed, give", and Exercise 3 (`:377`) reads "the tridiagonal matrix $T/h^2$ (the first entry's $A$)". Entry 2 is unchanged, as recommended.
+- Optional findings applied: S2 (`verifying-and-validating-a-simulation.mdx:50, :313`, "insight note" → "insight"), T1 (`solving-large-linear-systems.mdx:329`, "by a factor of $10^8$; the actual counts, measured with the residual criterion, ..."), T2 (`solving-large-linear-systems.mdx:230`, "over all vectors $\mathbf{U}^{(0)} + \mathbf{w}$ with $\mathbf{w}$ in the Krylov subspace") and T3 (`finite-element-method.mdx:292–295`, $|e|$ for the area of triangle $e$). Optional findings not applied: none.
+
+Resolved by the wave-1 author on 2026-10-14; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the working tree at HEAD 0d10069 (the six files of this series have no uncommitted changes) and the build in `/tmp/claude-0/b6`.
+
+- S1 (Should fix): confirmed. `solving-large-linear-systems.mdx:43` defines $T$ as $\text{tridiag}(-1, 2, -1)$, identifies $T/h^2$ with the first entry's $A$ (link to `#61-poisson-in-one-dimension`, which resolves) and says that $T$ is the negative of entry 2's $T$; `:138` reads "with their sign reversed"; `:377` reads "the tridiagonal matrix $T/h^2$ (the first entry's $A$)". Entry 2's $T$ (`finite-differences-for-heat-and-waves.mdx:44-49`) is $\text{tridiag}(1, -2, 1)$, so the statement is correct; entry 1's $A$ (`from-differential-equations-to-discrete-problems.mdx:238`) is $\tfrac{1}{h^2}\text{tridiag}(-1, 2, -1)$. The code of §3.1 and Exercise 3's value 2,593.2 are unchanged and re-run.
+- S2 (Optional): confirmed applied (`verifying-and-validating-a-simulation.mdx:50, :313`).
+- T1 (Optional): confirmed applied (`solving-large-linear-systems.mdx:329`, "by a factor of $10^8$"); the bound counts 96.7, 194.4, 389.2 hold.
+- T2 (Optional): confirmed applied (`solving-large-linear-systems.mdx:230`, "$\mathbf{U}^{(0)} + \mathbf{w}$ with $\mathbf{w}$ in the Krylov subspace").
+- T3 (Optional): confirmed applied (`finite-element-method.mdx:292-295`, $|e|$).
+
+Checks: `eos lint numerical-simulation` 0 errors, 0 warnings, 13 suggestions (each justified in the wave-1 logs); `eos syntax` on the six files: all compile; `check-links /tmp/claude-0/b6`: 314 pages, 9,693 internal references, all resolve; `eos validate-site /tmp/claude-0/b6`: no issue on any English page; `katex-error` count 0 on all six pages; the build contains the S1 and T3 text. Code: all 18 Python blocks re-run independently with `python3 -I` (NumPy 2.5), each file's blocks in one namespace; the output of all five files matches the printed `text` blocks. Spot-checks: entry 2 Exercise 5 (moduli 1.8391, 1.8678, 1.8750; 48, 95, 190 steps; $5.0\times10^{-4}$, $6.0\times10^{9}$, $7.4\times10^{35}$), Exercise 4 (112.8 steps; BTCS 0.0099), the FTCS factor $-1.0274$ over 392 steps; entry 4 Exercise 3 ($N \approx 2{,}526$); entry 5 Exercise 4 ($[-3.78, 0.34]$ K). All agree with the text.
+
+QA observations (optional, not blocking, recorded in the scores):
+
+- Q1 (Optional, language): `solving-large-linear-systems.mdx:377` now has two parentheticals in a row, "$T/h^2$ (the first entry's $A$) (with $N - 1$ unknowns)", a side effect of the S1 fix. Suggest "the tridiagonal matrix $T/h^2$ with $N - 1$ unknowns (the first entry's $A$)".
+- Q2 (Optional, language): `from-differential-equations-to-discrete-problems.mdx:19` "the time-stepping in the second entry" hyphenates the noun; the series uses "time stepping" as a noun (overview line 14).
+- Q3 (Optional, structure): the closing paragraph of `verifying-and-validating-a-simulation.mdx:374` summarizes the chain but does not lead back to the series objectives or link the series page, as standards 6.2 item 6 asks of a last entry.
+
+Verdict: no finding reopened. All six items pass the QA gate.
+
+Build re-check: `/tmp/claude-0/b6` was deleted after the checks above, so they were run again on `/tmp/claude-0/b9`. That build has the same text for this series, plus later commits to other series (HEAD 3dd5a22; this series' files are unchanged). `check-links`: 314 pages, 9,695 internal references, all resolve. `eos validate-site`: no issue on any English page. `katex-error` count is 0 on every page of this series. The corrected text is present.

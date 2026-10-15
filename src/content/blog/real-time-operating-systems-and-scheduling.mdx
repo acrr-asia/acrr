@@ -1,24 +1,24 @@
 ---
 title: "Real-Time Operating Systems and Scheduling"
-description: "How a real-time operating system splits firmware into prioritised tasks, and how to calculate whether they meet their deadlines: task states and context switches, the periodic task model, rate-monotonic and deadline-monotonic priorities, the Liu and Layland utilisation bound, response-time analysis, earliest-deadline-first scheduling, and mutexes, priority inversion and the protocols that bound it."
+description: "How a real-time operating system schedules prioritized tasks, and how the utilization bound and response-time analysis show whether every deadline is met."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
-  - embedded-systems
+  - embedded systems
   - real-time
-  - rtos
+  - RTOS
   - scheduling
 series: embedded-and-real-time-systems
 seriesOrder: 4
 ---
 
-The previous entries built up the hardware side of an embedded system. [The first](/blog/inside-a-microcontroller) defined deadlines, response time and jitter, and showed why a superloop couples the timing of every job to every other. [The second](/blog/interrupts-polling-and-dma) moved urgent data handling into interrupt service routines (ISRs) and direct memory access (DMA), and showed how to pass data safely from an ISR to the rest of the program. [The third](/blog/serial-buses-uart-spi-i2c-and-can) described the buses that carry data in and out, ending with the Controller Area Network (CAN), whose identifier-based arbitration is a priority scheduler for messages.
+The previous entries built up the hardware side of an embedded system. [The first](/blog/inside-a-microcontroller) defined deadlines, response time and jitter, and showed why a superloop couples the timing of every job to every other. [The second](/blog/interrupts-polling-and-dma) moved urgent data handling into interrupt service routines (ISRs) and direct memory access (DMA). It also showed how to pass data safely from an ISR to the rest of the program. [The third](/blog/serial-buses-uart-spi-i2c-and-can) described the buses that carry data in and out, ending with the Controller Area Network (CAN), whose identifier-based arbitration is a priority scheduler for messages.
 
-What remains is the processing itself: a control law computed every 4 ms, messages assembled every 6 ms, a log written every 12 ms, each with its own deadline. This entry shows how a **real-time operating system** organises that work into prioritised tasks, and then develops the scheduling theory that answers the central question of real-time design before the system is built: will every task meet its deadline in the worst case?
+What remains is the processing itself: a control law computed every 4 ms, messages assembled every 6 ms, a log written every 12 ms, each with its own deadline. This entry shows how a real-time operating system (RTOS) organizes that work into prioritized tasks, and then develops the scheduling theory that answers the central question of real-time design before the system is built: will every task meet its deadline in the worst case?
 
-**Conventions.** Times in the task examples are in milliseconds. Code is C11; the periodic-task example uses the real-time interface of POSIX, the Portable Operating System Interface (IEEE Std 1003.1-2017; the interfaces used here are unchanged in the current 2024 edition), so that it can be compiled on a desktop, and other RTOS concepts are described without any particular kernel's API, because names differ between kernels while the concepts do not. Calculations use Python 3 with the standard library. Priorities are described as "higher" and "lower" in meaning; kernels differ in whether a larger number means a higher priority (on the Cortex-M interrupt controller of the second entry it means a lower one).
+**Conventions.** Times in the task examples are in milliseconds. Code is C11. The periodic-task example uses the real-time interface of the Portable Operating System Interface (POSIX), IEEE Std 1003.1-2017, so that it can be compiled on a desktop; the interfaces used here are unchanged in the current 2024 edition. Other RTOS concepts are described without any particular kernel's API, because names differ between kernels while the concepts do not. Calculations use Python 3 with the standard library. Priorities are described as "higher" and "lower" in meaning; kernels differ in whether a larger number means a higher priority (on the Cortex-M interrupt controller of the second entry it means a lower one).
 
-## 1. From Superloop to Tasks
+## 1. From superloop to tasks
 
 ### 1.1 What a real-time operating system provides
 
@@ -28,7 +28,7 @@ An RTOS differs from a general-purpose operating system in its goal. A desktop o
 
 ### 1.2 Tasks and their states
 
-Each task is described to the kernel by a **task control block** (TCB), which holds its priority, its state and its saved stack pointer, and each task has its own stack in static RAM (SRAM). Stacks are the main memory cost of an RTOS: ten tasks with 1 KiB stacks use 10 KiB, about 16 % of the 64 KiB SRAM of [the first entry's example](/blog/inside-a-microcontroller#34-where-the-programs-data-lives), and an overflowing stack silently corrupts whatever lies next to it. The fifth entry shows how to measure how much of each stack is actually used.
+Each task is described to the kernel by a **task control block** (TCB), which holds its priority, its state and its saved stack pointer, and each task has its own stack in static RAM (SRAM). Stacks are the main memory cost of an RTOS: ten tasks with 1 KiB stacks use 10 KiB, about 16% of the 64 KiB SRAM of [the first entry's example](/blog/inside-a-microcontroller#34-where-the-programs-data-lives), and an overflowing stack silently corrupts whatever lies next to it. The fifth entry shows how to measure how much of each stack is used.
 
 At any moment a task is in one of a few states:
 
@@ -65,7 +65,7 @@ clock_gettime(CLOCK_MONOTONIC, &next);          /* first release: now   */
 for (;;) {
     do_periodic_work();                         /* sample, compute, act */
     next.tv_nsec += PERIOD_NS;                  /* next release time    */
-    while (next.tv_nsec >= 1000000000L) {       /* normalise timespec   */
+    while (next.tv_nsec >= 1000000000L) {       /* normalize timespec   */
         next.tv_nsec -= 1000000000L;
         next.tv_sec  += 1;
     }
@@ -73,7 +73,7 @@ for (;;) {
 }
 ```
 
-The releases then stay on the grid $0, T, 2T, \dots$ however long each job takes, as long as it finishes within its period. The fifth entry runs a complete version of this loop and measures how late each wake-up actually is.
+The releases then stay on the grid $0, T, 2T, \dots$ however long each job takes, as long as it finishes within its period. The fifth entry runs a complete version of this loop and measures how late each wake-up is.
 
 ### 1.5 Preemptive fixed-priority scheduling
 
@@ -81,11 +81,11 @@ The scheduling policy of almost every RTOS is **preemptive fixed-priority schedu
 
 This gives the designer one control, the priority order, and a clear guarantee: the timing of a task can be affected only by tasks of higher priority (and by ISRs, and by lower-priority tasks only through shared resources, Section 3). The rest of this entry is about choosing priorities and proving that the result meets every deadline.
 
-## 2. Scheduling Analysis
+## 2. Scheduling analysis
 
 ### 2.1 The periodic task model
 
-Scheduling theory describes the workload as a set of tasks $\tau_1, \dots, \tau_n$, each characterised by three numbers:
+Scheduling theory describes the workload as a set of tasks $\tau_1, \dots, \tau_n$, each characterized by three numbers:
 
 - $C_i$, the **worst-case execution time** (WCET): the longest time a job of the task needs on the processor when it runs without interruption, including its share of kernel overhead;
 - $T_i$, the **period**: the interval between releases (for a **sporadic** task, released by events rather than a clock, the minimum interval between releases);
@@ -93,7 +93,7 @@ Scheduling theory describes the workload as a set of tasks $\tau_1, \dots, \tau_
 
 The classical results also assume that tasks do not suspend themselves in the middle of a job, that a job is released exactly at the start of its period, and, until Section 3, that tasks share no resources. The response time $R_i$ of a task is the longest response time of any of its jobs; the task set is **schedulable** if $R_i \le D_i$ for every task.
 
-The **utilisation** of a task is the fraction of the processor it needs, $C_i/T_i$, and of the set
+The **utilization** of a task is the fraction of the processor it needs, $C_i/T_i$, and of the set
 
 $$
 U = \sum_{i=1}^{n} \frac{C_i}{T_i} .
@@ -109,7 +109,7 @@ The running example of this entry has three tasks, with deadlines equal to perio
 | $\tau_2$ | Assemble and send CAN messages | 2 | 6 | 0.333 |
 | $\tau_3$ | Write log records to flash | 3 | 12 | 0.250 |
 
-Its utilisation is $U = 0.833$.
+Its utilization is $U = 0.833$.
 
 ### 2.2 Choosing priorities
 
@@ -117,7 +117,7 @@ Its utilisation is $U = 0.833$.
 
 The principle matches the advice in [Section 3.3 of the second entry](/blog/interrupts-polling-and-dma#33-priorities-and-nesting) for interrupt priorities, and it often conflicts with intuition. Priority expresses urgency (how soon the work must be done), not importance. A safety-critical task with a 100 ms deadline should normally have lower priority than a routine task with a 5 ms deadline; if both are schedulable, both meet their deadlines, and that is what matters.
 
-### 2.3 The utilisation bound
+### 2.3 The utilization bound
 
 Liu and Layland also gave a simple sufficient test. Under RM priorities, a set of $n$ independent periodic tasks with deadlines equal to periods is schedulable if
 
@@ -153,7 +153,7 @@ The value settles at $R_3 = 10 \le 12$, so $\tau_3$ always meets its deadline, w
 import math
 
 def rm_bound(n):
-    """Liu and Layland utilisation bound for n tasks under rate-monotonic priorities."""
+    """Liu and Layland utilization bound for n tasks under rate-monotonic priorities."""
     return n * (2 ** (1 / n) - 1)
 
 def response_times(tasks):
@@ -209,7 +209,7 @@ Set A with a 0.5 ms critical section in tau3: U = 0.8333, RM bound for n=3: 0.77
   tau3: C=3 T=12 D=12 B=0 -> R = 10
 ```
 
-Set B, at a utilisation of 0.917, is still schedulable, which shows how pessimistic the utilisation bound can be.
+Set B, at a utilization of 0.917, is still schedulable, which shows how pessimistic the utilization bound can be.
 
 The analysis can be checked against a simulation of the schedule. The program below steps through time in 1 ms units, releases every task at time 0 (the critical instant) and at each period, and always runs the ready job with the highest priority. (It treats a job still unfinished at its deadline as a miss and drops it, which is enough to detect misses.) It also supports earliest-deadline-first scheduling, used in Section 2.5.
 
@@ -257,7 +257,7 @@ Set C,  fp: 1122211222112.21122211222112221122. misses: [('tau2', 7)]
 Set C, edf: 1122221122221121122211222211221122. misses: []
 ```
 
-Each character of the timeline is one millisecond and names the task that ran (a dot is idle time). For set A, $\tau_3$ runs in the slots at 3, 5 and 9 ms, so its first job completes at 10 ms, exactly the response time the analysis predicted, and the processor is idle for the last 2 ms of the 12 ms **hyperperiod** (the least common multiple of the periods, after which the pattern repeats).
+Each character of the timeline is one millisecond and names the task that ran (a dot is idle time). For set A, $\tau_3$ runs in the slots at 3, 5 and 9 ms, so its first job completes at 10 ms, exactly the response time the analysis predicted. The processor is idle for the last 2 ms of the 12 ms **hyperperiod** (the least common multiple of the periods, after which the pattern repeats).
 
 ### 2.5 Earliest deadline first
 
@@ -265,9 +265,9 @@ Fixed priorities are not the only option. **Earliest deadline first** (EDF) is a
 
 Set C of the simulation, $\tau_1$ with $C = 2$, $T = 5$ and $\tau_2$ with $C = 4$, $T = 7$, has $U = 0.4 + 0.571 = 0.971$. Under RM, response-time analysis gives for $\tau_2$: $4 \to 4 + 2 = 6 \to 4 + 2 \times 2 = 8 > 7$, a miss, and the simulation shows $\tau_2$'s first job unfinished at 7 ms. Under EDF the same set meets every deadline over its 35 ms hyperperiod.
 
-Despite this advantage, most RTOS kernels schedule by fixed priority. It is simpler to implement with low overhead, it is easier to reason about for designers and certification, and it fails more gracefully: in an overload, fixed priorities protect the highest-priority tasks and let the lowest ones miss, while under EDF an overload can cause a cascade of misses among tasks that would each have been fine. The analysis in the rest of the series uses fixed priorities.
+Despite this advantage, most RTOS kernels schedule by fixed priority. Fixed priorities are simpler to implement with low overhead and easier to reason about for designers and certification. They also fail more gracefully: in an overload, fixed priorities protect the highest-priority tasks and let the lowest ones miss, while under EDF an overload can cause a cascade of misses among tasks that would each have been fine. The analysis in the rest of the series uses fixed priorities.
 
-## 3. Sharing Resources Between Tasks
+## 3. Sharing resources between tasks
 
 ### 3.1 Mutual exclusion with a mutex
 
@@ -277,7 +277,7 @@ Tasks preempt each other at arbitrary points, so data shared between tasks raise
 
 Other kernel objects handle the other ways tasks interact:
 
-- A **semaphore** is a counter that tasks can decrement (waiting while it is zero) and increment. A **binary semaphore** used for signalling lets an ISR wake a task: the ISR does the minimum, as [Section 3.4 of the second entry](/blog/interrupts-polling-and-dma#34-rules-for-writing-an-isr) recommends, and gives the semaphore; a task blocked on it then does the processing at a task priority chosen by the designer. This **deferred interrupt processing** keeps ISRs short while keeping the processing analysable as an ordinary task.
+- A **semaphore** is a counter that tasks can decrement (waiting while it is zero) and increment. A **binary semaphore** used for signaling lets an ISR wake a task: the ISR does the minimum, as [Section 3.4 of the second entry](/blog/interrupts-polling-and-dma#34-rules-for-writing-an-isr) recommends, and gives the semaphore; a task blocked on it then does the processing at a task priority chosen by the designer. This **deferred interrupt processing** keeps ISRs short while keeping the processing analyzable as an ordinary task.
 - A **message queue** passes data items between tasks or from an ISR to a task, with blocking when it is empty (for the receiver) or full (for the sender). It is the kernel's version of the ring buffer of the second entry.
 - **Event flags** let a task wait for one or several conditions.
 
@@ -292,7 +292,7 @@ Mutexes introduce a timing hazard. Suppose $\tau_1$ (high priority) and $\tau_3$
 3. $\tau_2$ is released. It has higher priority than $\tau_3$, so it preempts $\tau_3$ and runs to completion.
 4. Only then does $\tau_3$ continue, finish its critical section and unlock the mutex, and $\tau_1$ runs.
 
-In step 3, a medium-priority task with no connection to the mutex delays the high-priority task, for as long as $\tau_2$ (and any other medium-priority task) keeps running. This is **priority inversion**, and without countermeasures its duration is unbounded. A widely reported case occurred on the Mars Pathfinder lander in 1997, whose computer repeatedly reset itself because a high-priority task was kept waiting this way; the fix was to enable priority inheritance on the mutex concerned.
+In step 3, a medium-priority task with no connection to the mutex delays the high-priority task, for as long as $\tau_2$ (and any other medium-priority task) keeps running. This is **priority inversion**, and without countermeasures its duration is unbounded. A widely cited case occurred on the Mars Pathfinder lander in 1997. According to the account of G. E. Reeves of the Jet Propulsion Laboratory, its computer repeatedly reset itself because a high-priority task was kept waiting this way, and the fix was to enable priority inheritance on the semaphore concerned.
 
 ### 3.4 Priority inheritance and priority ceilings
 
@@ -314,9 +314,9 @@ The theory leads to practical rules:
 - Never lock a mutex in an ISR. An ISR cannot block, and the kernel cannot raise an ISR's priority.
 - When a task must hold several mutexes, always lock them in the same global order, which rules out the circular wait that causes **deadlock** (each of two tasks holding one mutex and waiting for the other's).
 
-## 4. A Worked Design
+## 4. A worked design
 
-The running example can be completed into the kind of check done on a real project. Suppose the three tasks run on the 48 MHz microcontroller of this series, which also receives a 115 200-baud stream on its universal asynchronous receiver-transmitter (UART) through a receive ISR costing 100 cycles per byte, the case analysed in [Section 3.5 of the second entry](/blog/interrupts-polling-and-dma#35-the-processor-cost-of-interrupts). ISRs preempt all tasks, so the ISR enters the analysis as the highest-priority "task", with $C = 100/48\ \text{MHz} = 2.083$ µs and $T = 86.8$ µs (one byte time), a utilisation of 2.4 %. With the 0.5 ms blocking of Section 3.4 and all times in milliseconds held as exact fractions:
+The running example can be completed into the kind of check done on a real project. Suppose the three tasks run on the 48 MHz microcontroller of this series, which also receives a 115 200-baud stream on its universal asynchronous receiver-transmitter (UART) through a receive ISR costing 100 cycles per byte, the case analyzed in [Section 3.5 of the second entry](/blog/interrupts-polling-and-dma#35-the-processor-cost-of-interrupts). ISRs preempt all tasks, so the ISR enters the analysis as the highest-priority "task", with $C = 100/48\ \text{MHz} = 2.083$ µs and $T = 86.8$ µs (one byte time), a utilization of 2.4%. With the 0.5 ms blocking of Section 3.4 and all times in milliseconds held as exact fractions:
 
 ```python
 from fractions import Fraction as F
@@ -357,7 +357,7 @@ U total 0.8573333333333333
 
 The ISR adds about 0.04 ms to $\tau_1$, 0.09 ms to $\tau_2$ and 0.25 ms to $\tau_3$, whose worst-case response time is now 10.25 ms against a 12 ms deadline. Every deadline is met, with margins of 2.46, 2.41 and 1.75 ms.
 
-These numbers are only as good as their inputs. Every $C_i$ is a worst-case execution time, which must come from somewhere; every $T_i$ assumes that events really arrive no faster than stated; the blocking terms assume that critical sections are as short as claimed; and the model leaves out kernel overheads unless they are folded into the $C_i$. The analysis turns those assumptions into a guarantee, but it cannot check them. That is the job of measurement, the subject of the final entry.
+These numbers are only as good as their inputs. Every $C_i$ is a worst-case execution time, which must come from somewhere; every $T_i$ assumes that events arrive no faster than stated; the blocking terms assume that critical sections are as short as claimed; and the model leaves out kernel overheads unless they are folded into the $C_i$. The analysis turns those assumptions into a guarantee, but it cannot check them. That is the job of measurement, the subject of the final entry.
 
 ## 5. Exercises
 
@@ -410,12 +410,12 @@ When deadlines are shorter than periods, the order by period and the order by de
 
 | Question | Answer |
 |---|---|
-| What does an RTOS provide? | Tasks with their own stacks, a scheduler, timing services, and synchronisation and communication objects, with bounded worst-case timing. |
+| What does an RTOS provide? | Tasks with their own stacks, a scheduler, timing services, and synchronization and communication objects, with bounded worst-case timing. |
 | What states can a task be in? | Running, ready or blocked (plus suspended); blocked tasks use no processor time. |
 | How should a periodic task wait? | Until an absolute release time, not for a relative delay, which drifts. |
 | What describes a task for analysis? | Worst-case execution time $C$, period $T$, relative deadline $D$ (and blocking $B$). |
 | Which fixed priority order is optimal? | Rate-monotonic for $D = T$, deadline-monotonic for $D \le T$. |
-| What does the utilisation bound say? | Under RM, $U \le n(2^{1/n} - 1)$ guarantees schedulability; above it the test is inconclusive. |
+| What does the utilization bound say? | Under RM, $U \le n(2^{1/n} - 1)$ guarantees schedulability; above it the test is inconclusive. |
 | How is a response time computed? | Iterate $R_i = C_i + B_i + \sum_{hp(i)} \lceil R_i/T_j \rceil C_j$ until it settles or exceeds $D_i$. |
 | When does EDF meet all deadlines? | For independent periodic tasks with $D = T$, if and only if $U \le 1$. |
 | What is priority inversion, and how is it bounded? | A high-priority task waiting on a mutex is delayed by medium-priority work; priority inheritance or ceilings bound it to a critical section. |
@@ -424,12 +424,13 @@ The final entry, [Measuring Timing, Latency and Resource Use](/blog/measuring-ti
 
 ### References
 
-- C. L. Liu and J. W. Layland, "Scheduling algorithms for multiprogramming in a hard-real-time environment", *Journal of the ACM*, 20(1), 1973.
-- J. Y.-T. Leung and J. Whitehead, "On the complexity of fixed-priority scheduling of periodic, real-time tasks", *Performance Evaluation*, 2(4), 1982.
-- M. Joseph and P. Pandya, "Finding response times in a real-time system", *The Computer Journal*, 29(5), 1986.
-- N. Audsley, A. Burns, M. Richardson, K. Tindell and A. J. Wellings, "Applying new scheduling theory to static priority pre-emptive scheduling", *Software Engineering Journal*, 8(5), 1993.
-- L. Sha, R. Rajkumar and J. P. Lehoczky, "Priority inheritance protocols: An approach to real-time synchronization", *IEEE Transactions on Computers*, 39(9), 1990.
-- G. C. Buttazzo, *Hard Real-Time Computing Systems: Predictable Scheduling Algorithms and Applications*, 3rd edition, Springer, 2011.
-- A. Burns and A. Wellings, *Real-Time Systems and Programming Languages*, 4th edition, Addison-Wesley, 2009.
-- R. I. Davis, A. Burns, R. J. Bril and J. J. Lukkien, "Controller Area Network (CAN) schedulability analysis: Refuted, revisited and revised", *Real-Time Systems*, 35(3), 2007.
+- N. Audsley, A. Burns, M. Richardson, K. Tindell and A. J. Wellings, "Applying new scheduling theory to static priority pre-emptive scheduling," *Software Engineering Journal*, vol. 8, no. 5, pp. 284–292, 1993.
+- A. Burns and A. Wellings, *Real-Time Systems and Programming Languages*, 4th ed., Addison-Wesley, 2009.
+- G. C. Buttazzo, *Hard Real-Time Computing Systems: Predictable Scheduling Algorithms and Applications*, 3rd ed., Springer, 2011.
+- R. I. Davis, A. Burns, R. J. Bril and J. J. Lukkien, "Controller Area Network (CAN) schedulability analysis: Refuted, revisited and revised," *Real-Time Systems*, vol. 35, no. 3, pp. 239–272, 2007.
 - IEEE Std 1003.1-2017, *IEEE Standard for Information Technology: Portable Operating System Interface (POSIX) Base Specifications*, Issue 7, IEEE, 2018.
+- M. Joseph and P. Pandya, "Finding response times in a real-time system," *The Computer Journal*, vol. 29, no. 5, pp. 390–395, 1986.
+- J. Y.-T. Leung and J. Whitehead, "On the complexity of fixed-priority scheduling of periodic, real-time tasks," *Performance Evaluation*, vol. 2, no. 4, pp. 237–250, 1982.
+- C. L. Liu and J. W. Layland, "Scheduling algorithms for multiprogramming in a hard-real-time environment," *Journal of the ACM*, vol. 20, no. 1, pp. 46–61, 1973.
+- G. E. Reeves, account of the Mars Pathfinder resets, email of 15 December 1997, Jet Propulsion Laboratory.
+- L. Sha, R. Rajkumar and J. P. Lehoczky, "Priority inheritance protocols: An approach to real-time synchronization," *IEEE Transactions on Computers*, vol. 39, no. 9, pp. 1175–1185, 1990.

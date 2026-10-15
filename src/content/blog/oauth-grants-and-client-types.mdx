@@ -1,6 +1,6 @@
 ---
 title: "OAuth 2.0 Grants and Client Types"
-description: "How an OAuth 2.0 client obtains tokens: client types and client authentication, redirect URIs for web, native and browser-based clients, the authorization code grant with PKCE in detail, client credentials, device authorization, refresh, token exchange, and how to choose among them."
+description: "Learn how each kind of OAuth 2.0 client obtains its tokens, from the authorization code grant with PKCE to client credentials, device and exchange grants."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -12,18 +12,20 @@ series: identity-and-access-control
 seriesOrder: 5
 ---
 
-The first entry of this series introduced OAuth 2.0 as the answer to a delegation problem: a user wants a client to access a resource server on their behalf without handing over their password. It showed one flow, the authorization code grant with PKCE, and named the others in passing. This entry examines the whole framework from the client's side: what a client is, how it proves who it is, how the tokens reach it, and which **grant** (the protocol by which a client obtains an access token) fits which situation.
+The [first entry](/blog/token-based-authentication#5-delegation-and-federation) of this series introduced OAuth 2.0 as the answer to a delegation problem: a user wants a client to access a resource server on their behalf without handing over their password. It showed one flow, the authorization code grant with Proof Key for Code Exchange (PKCE), and named the others in passing. This entry examines the whole framework from the client's side: what a client is, how it proves who it is, how the tokens reach it, and which **grant** (the protocol by which a client obtains an access token) fits which situation.
 
-The organising idea is that a grant is chosen by answering three questions about the situation, in order: *Is there a user?* *Can the user reach a browser on the device where the client runs?* *Can the client keep a secret?* Most of the security properties of the grants follow from those answers.
+The organizing idea is that a grant is chosen by answering three questions about the situation, in order: *Is there a user?* *Can the user reach a browser on the device where the client runs?* *Can the client keep a secret?* Most of the security properties of the grants follow from those answers.
 
-## 1. The Client
+The entry follows the OAuth 2.0 framework (RFC 6749) as amended by the OAuth 2.0 Security Best Current Practice (RFC 9700), and notes where OAuth 2.1, still an Internet-Draft, consolidates them.
+
+## 1. The client
 
 ### 1.1 Registration
 
 Before a client can request tokens it is **registered** with the authorization server, either by an administrator or, where the server supports it, through Dynamic Client Registration (RFC 7591). Registration records, at least:
 
 - a **client identifier** (`client_id`), which is public and appears in browser URLs;
-- the client's **redirect URIs**, the exact addresses to which the authorization server may send results;
+- the client's **redirect URIs** (uniform resource identifiers), the exact addresses to which the authorization server may send results;
 - the **grant types** the client may use and, for confidential clients, how it will **authenticate**;
 - descriptive metadata shown to users on consent screens, such as a name and logo.
 
@@ -45,12 +47,12 @@ A confidential client authenticates to the authorization server's **token endpoi
 | Method | What the client presents | Notes |
 |---|---|---|
 | `client_secret_basic` / `client_secret_post` | A shared secret, in the `Authorization` header or the request body | Simple; the server stores a secret it must protect, and the secret is sent on every request |
-| `private_key_jwt` | A short-lived JWT signed with the client's private key (RFC 7523, OpenID Connect) | The server stores only the public key; nothing reusable crosses the wire |
+| `private_key_jwt` | A short-lived JSON Web Token (JWT) signed with the client's private key (RFC 7523, OpenID Connect) | The server stores only the public key; nothing reusable crosses the wire |
 | `tls_client_auth` / `self_signed_tls_client_auth` | An X.509 certificate in the TLS handshake (RFC 8705) | Also allows tokens to be bound to the certificate (a later entry) |
 
-Asymmetric methods have the same advantage over secrets that passkeys have over passwords (as the second entry explained): the verifier holds nothing that lets an attacker impersonate the client, and a captured request cannot be replayed indefinitely.
+Asymmetric methods have the same advantage over secrets that passkeys have over passwords (as the [second entry](/blog/authenticators-passwords-otp-passkeys#55-verifier-compromise) explained): the verifier holds nothing that lets an attacker impersonate the client, and a captured request cannot be replayed indefinitely.
 
-## 2. Redirect URIs and Client Platforms
+## 2. Redirect URIs and client platforms
 
 The authorization code reaches the client through a browser redirect. Where that redirect can land differs by platform, and each platform has its own guidance.
 
@@ -76,15 +78,15 @@ Native applications are public clients, and they must use PKCE.
 
 ### 2.3 Browser-based applications
 
-A single-page application whose code runs in the browser has three architectural options, described in the IETF's ongoing guidance for browser-based applications:
+A single-page application whose code runs in the browser has three architectural options, described in RFC 10017, *OAuth 2.0 for Browser-Based Applications* (2026):
 
 1. **Back end for front end (BFF).** A server component is the OAuth client (confidential), keeps the tokens, and gives the browser only an `HttpOnly` session cookie; the browser's API calls go through the BFF. Tokens are never exposed to JavaScript.
 2. **Token-mediating back end.** A server component performs the code exchange as a confidential client but passes the access token to the browser, keeping the refresh token itself. Access tokens are exposed to JavaScript; refresh tokens are not.
 3. **Browser-based public client.** The JavaScript application is itself a public OAuth client using the code grant with PKCE, holding all tokens in the browser.
 
-The options trade convenience against exposure to cross-site scripting. Section 8 of the first entry and Section 6 of the third entry describe the risk; the BFF is the most defensive of the three.
+The options trade convenience against exposure to cross-site scripting. [Section 8 of the first entry](/blog/token-based-authentication#8-where-the-client-keeps-its-tokens) and [Section 6 of the third entry](/blog/sessions-and-cookies#6-cross-site-scripting-and-the-limits-of-httponly) describe the risk; the BFF is the most defensive of the three.
 
-## 3. The Authorization Code Grant with PKCE
+## 3. The authorization code grant with PKCE
 
 ### 3.1 The front channel and the back channel
 
@@ -159,11 +161,11 @@ All values here are illustrative. `Cache-Control: no-store` keeps intermediaries
 
 ### 3.4 Signing the user in: the ID token
 
-When the client includes the `openid` scope (and a fresh `nonce`) in the authorization request, the token response also contains an ID token (Section 5.5 of the first entry). Before treating the user as signed in, the client validates it as OpenID Connect Core requires:
+When the client includes the `openid` scope (and a fresh `nonce`) in the authorization request, the token response also contains an ID token ([Section 5.5 of the first entry](/blog/token-based-authentication#55-openid-connect-authentication-on-top-of-oauth-20)). Before treating the user as signed in, the client validates it following OpenID Connect Core:
 
-1. Verify the signature with a key from the provider's published key set, using the algorithm registered for the client.
+1. Verify the signature with a key from the provider's published key set, using the algorithm registered for the client. (Core also allows a client that received the token directly from the token endpoint over TLS to rely on the TLS connection instead; checking the signature is the safer habit.)
 2. Check that `iss` equals the provider's issuer identifier exactly.
-3. Check that `aud` contains the client's own `client_id`; if it lists other audiences as well, check that `azp` is the client's `client_id`.
+3. Check that `aud` contains the client's own `client_id`, and reject the token if it also lists an audience the client does not trust. If an `azp` (authorized party) claim is present, check that it is the client's `client_id`.
 4. Check that `exp` is in the future and that `iat` is recent.
 5. Check that `nonce` equals the value the client sent in the authorization request for this sign-in.
 
@@ -178,7 +180,7 @@ Two further standards move parameters out of the browser URL, where they can be 
 
 High-assurance profiles, such as those used in open banking, typically require one or both.
 
-## 4. Grants Without a Browser on the Client
+## 4. Grants without a browser on the client
 
 ### 4.1 Client credentials: no user
 
@@ -195,7 +197,7 @@ grant_type=client_credentials
 &client_assertion=eyJhbGciOiJFUzI1NiJ9...
 ```
 
-Here the client authenticates with `private_key_jwt`. The token's subject is the client itself, and its permissions should be those of the job, not those of any user. No refresh token is needed (RFC 6749 says one should not be issued), because the client can simply repeat the request. This grant is for confidential clients only; a public client has no credential with which to identify itself.
+Here the client authenticates with `private_key_jwt`. The token's subject is the client itself, and its permissions should be those of the job, not those of any user. No refresh token is needed (RFC 6749 says one should not be issued), because the client can repeat the request. This grant is for confidential clients only; a public client has no credential with which to identify itself.
 
 ### 4.2 Device authorization: a device without a usable browser
 
@@ -224,15 +226,15 @@ The device polls no more often than the `interval` the server specified, and inc
 
 The grant has a characteristic weakness: the user approves a code without being able to verify which device displayed it. An attacker can start a device flow, send the code to a victim with a plausible message ("enter this code to confirm your account"), and receive tokens when the victim approves. Authorization servers mitigate this by showing the client name and requested scopes prominently on the approval page, warning users, keeping codes short-lived, and restricting the grant to clients that genuinely need it.
 
-## 5. Grants That Build on an Existing Token
+## 5. Grants that build on an existing token
 
 ### 5.1 Refresh
 
-The **refresh token** grant, described in the first entry, renews access without involving the user. The client may request a **narrower** scope than the original grant, never a wider one. RFC 9700 requires that refresh tokens issued to public clients be either sender-constrained or rotated on every use, since a public client cannot authenticate when it presents them.
+The **refresh token** grant, described in the [first entry](/blog/token-based-authentication#72-refresh-tokens), renews access without involving the user. The client may request a **narrower** scope than the original grant, never a wider one. RFC 9700 requires that refresh tokens issued to public clients be either sender-constrained or rotated on every use, since a public client cannot authenticate when it presents them.
 
 ### 5.2 Token exchange: calling onwards
 
-A resource server often needs to call another service to complete a request. Forwarding the access token it received is a poor answer: that token's audience is the first service, and a second service that accepts it would also accept tokens meant for anyone else. **Token exchange** (RFC 8693) lets the first service ask the authorization server for a new token suitable for the next hop:
+A resource server often needs to call another service to complete a request. Forwarding the access token it received is a poor answer. That token's audience is the first service, and a second service that accepted it would also accept tokens meant for anyone else. **Token exchange** (RFC 8693) lets the first service ask the authorization server for a new token suitable for the next hop:
 
 ```http
 POST /token HTTP/1.1
@@ -246,7 +248,7 @@ grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange
 &scope=inventory.read
 ```
 
-The exchanging service authenticates as a client in the usual way. The server can issue a token that represents the user (*impersonation*) or one that records both the user and the acting service, using the `act` claim (*delegation*). Delegation keeps the audit trail honest: the inventory service can see that the orders service acted for alice, rather than that alice called it directly. The final entry of this series returns to identity propagation across services.
+The exchanging service authenticates as a client in the usual way. The server can issue a token that represents the user (*impersonation*) or one that records both the user and the acting service, using the `act` claim (*delegation*). Delegation keeps the audit trail honest: the inventory service can see that the orders service acted for alice, rather than that alice called it directly. The [final entry](/blog/service-to-service-authentication#5-propagating-the-users-identity) of this series returns to identity propagation across services.
 
 ### 5.3 Assertions from another issuer
 
@@ -256,16 +258,16 @@ The **JWT bearer** grant (RFC 7523) lets a client exchange a signed assertion is
 
 A client that calls several resource servers should obtain a separate access token for each, each restricted to one audience. The `resource` parameter (Resource Indicators, RFC 8707) names the intended resource server in authorization and token requests, so the server can set `aud` precisely and choose appropriate scopes and token formats. Audience restriction limits the damage when any one resource server leaks or mishandles a token.
 
-## 6. Deprecated Grants
+## 6. Deprecated grants
 
 Two grants from the original specification are now advised against.
 
 - The **implicit** grant returned the access token directly in the redirect URL fragment, to serve browser applications at a time when cross-origin requests to token endpoints were not possible. The token was then exposed to browser history, referrer leakage and any script on the page, and it could not be sender-constrained or bound to the client. RFC 9700 says it should not be used; the code grant with PKCE replaces it.
-- The **resource owner password credentials** grant had the client collect the user's username and password and send them to the token endpoint. It hands the client the very credential that OAuth exists to protect, trains users to type passwords into third-party applications, and cannot accommodate multi-factor or phishing-resistant authentication. RFC 9700 says it must not be used.
+- The **resource owner password credentials** grant had the client collect the user's username and password and send them to the token endpoint. It hands the client the credential that OAuth exists to protect, trains users to type passwords into third-party applications, and cannot accommodate multi-factor or phishing-resistant authentication. RFC 9700 says it must not be used.
 
 The OAuth 2.1 effort at the IETF consolidates the base specification with these best practices: the code grant requires PKCE, redirect URIs must be compared exactly, and the two deprecated grants are omitted.
 
-## 7. Choosing a Grant
+## 7. Choosing a grant
 
 ```mermaid
 flowchart TB
@@ -303,12 +305,24 @@ The flowchart covers obtaining the first token. After that, refresh renews it, t
 | How should a service call onwards for a user? | By exchanging the token for a new one aimed at the next service, not by forwarding it. |
 | Which grants are deprecated? | Implicit and resource owner password credentials. |
 
-The next entry addresses the weakness common to every token in this entry: they are bearer tokens. It shows how DPoP and mutual TLS bind a token to a key the client holds, so that a stolen token cannot be replayed.
+The [next entry](/blog/sender-constrained-tokens) addresses the weakness common to every token in this entry: they are bearer tokens. It shows how DPoP and mutual TLS bind a token to a key the client holds, so that a stolen token cannot be replayed.
 
-### The specifications
+### References
 
-- Core: RFC 6749 (OAuth 2.0), RFC 6750 (bearer tokens), RFC 7636 (PKCE), RFC 9700 (security best current practice), RFC 9207 (issuer identification).
-- Clients: RFC 7591 (dynamic client registration), RFC 7523 (JWT client authentication and the JWT bearer grant), RFC 8705 (mutual TLS), RFC 8252 (native apps).
-- Further grants and parameters: RFC 8628 (device authorization), RFC 8693 (token exchange), RFC 8707 (resource indicators), RFC 9126 (pushed authorization requests), RFC 9101 (JWT-secured authorization requests).
-- OpenID Connect: OpenID Connect Core 1.0 (ID token validation), published by the OpenID Foundation.
-- In progress at the IETF: OAuth 2.1, and OAuth 2.0 for Browser-Based Applications.
+- B. Campbell, J. Bradley, N. Sakimura and T. Lodderstedt, *OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens*, RFC 8705, IETF, 2020.
+- B. Campbell, J. Bradley and H. Tschofenig, *Resource Indicators for OAuth 2.0*, RFC 8707, IETF, 2020.
+- W. Denniss and J. Bradley, *OAuth 2.0 for Native Apps*, RFC 8252, IETF, 2017.
+- W. Denniss, J. Bradley, M. Jones and H. Tschofenig, *OAuth 2.0 Device Authorization Grant*, RFC 8628, IETF, 2019.
+- D. Hardt, Ed., *The OAuth 2.0 Authorization Framework*, RFC 6749, IETF, 2012.
+- D. Hardt, A. Parecki and T. Lodderstedt, *The OAuth 2.1 Authorization Framework*, draft-ietf-oauth-v2-1-16, IETF, 2026 (Internet-Draft, work in progress).
+- M. Jones, B. Campbell and C. Mortimore, *JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants*, RFC 7523, IETF, 2015.
+- M. Jones and D. Hardt, *The OAuth 2.0 Authorization Framework: Bearer Token Usage*, RFC 6750, IETF, 2012.
+- M. Jones, A. Nadalin, B. Campbell, Ed., J. Bradley and C. Mortimore, *OAuth 2.0 Token Exchange*, RFC 8693, IETF, 2020.
+- T. Lodderstedt, J. Bradley, A. Labunets and D. Fett, *Best Current Practice for OAuth 2.0 Security*, RFC 9700, IETF, 2025.
+- T. Lodderstedt, B. Campbell, N. Sakimura, D. Tonge and F. Skokan, *OAuth 2.0 Pushed Authorization Requests*, RFC 9126, IETF, 2021.
+- K. Meyer zu Selhausen and D. Fett, *OAuth 2.0 Authorization Server Issuer Identification*, RFC 9207, IETF, 2022.
+- A. Parecki, P. De Ryck and D. Waite, *OAuth 2.0 for Browser-Based Applications*, RFC 10017, IETF, 2026.
+- J. Richer, Ed., M. Jones, J. Bradley, M. Machulak and P. Hunt, *OAuth 2.0 Dynamic Client Registration Protocol*, RFC 7591, IETF, 2015.
+- N. Sakimura, Ed., J. Bradley and N. Agarwal, *Proof Key for Code Exchange by OAuth Public Clients*, RFC 7636, IETF, 2015.
+- N. Sakimura, J. Bradley and M. Jones, *The OAuth 2.0 Authorization Framework: JWT-Secured Authorization Request (JAR)*, RFC 9101, IETF, 2021.
+- N. Sakimura, J. Bradley, M. Jones, B. de Medeiros and C. Mortimore, *OpenID Connect Core 1.0 incorporating errata set 2*, OpenID Foundation, 2023.

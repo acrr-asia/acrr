@@ -251,7 +251,7 @@ b += f'  <circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="4" />\n'
 b += text(x+17, y-22, var('hλ') + ' = −2.5', 'middle', 'small')
 b += line([(x+3, y-5), (x+10, y-17)], 'mut')
 svg('StabilityRegions', 480, 365, 'Stability regions of explicit Euler and classical RK4',
-    'In the complex h-lambda plane, explicit Euler is stable inside the disc of radius 1 centred at minus 1. The RK4 region is larger: it reaches about minus 2.79 on the real axis and about plus and minus 2.83 j on the imaginary axis. The point h-lambda equal to minus 2.5, from lambda equal to minus 50 and h equal to 0.05, lies outside the Euler disc but inside the RK4 region.',
+    'In the complex h-lambda plane, explicit Euler is stable inside the disc of radius 1 centered at minus 1. The RK4 region is larger: it reaches about minus 2.79 on the real axis and about plus and minus 2.83 j on the imaginary axis. The point h-lambda equal to minus 2.5, from lambda equal to minus 50 and h equal to 0.05, lies outside the Euler disc but inside the RK4 region.',
     b)
 
 # ---------- 8. Planar two-link arm: workspace and the two inverse-kinematics solutions ----------
@@ -314,9 +314,9 @@ for m, v, label, dx, anchor in ((xp, Pp, 'prediction', -10, 'end'), (zm, Rm, 'me
     b += text(P.X(m) + dx, P.Y(peak) - 8, label, anchor, 'small')
     b += line([(P.X(m), P.Y(0)), (P.X(m), P.Y(peak))], 'grid')
 svg('GaussianFusion', 620, 280, 'Fusing a predicted position with a range measurement',
-    f'Three bell-shaped curves over position. The prediction is centred at {xp:g} metres with standard deviation {math.sqrt(Pp):.2f} metres; '
-    f'the measurement is centred at {zm:g} metres with standard deviation {math.sqrt(Rm):.2f} metres. The fused estimate is centred at {xf:.2f} metres, '
-    f'between the two and closer to the more precise measurement, and is narrower than either, with standard deviation {math.sqrt(Pf):.2f} metres.',
+    f'Three bell-shaped curves over position. The prediction is centered at {xp:g} meters with standard deviation {math.sqrt(Pp):.2f} meters; '
+    f'the measurement is centered at {zm:g} meters with standard deviation {math.sqrt(Rm):.2f} meters. The fused estimate is centered at {xf:.2f} meters, '
+    f'between the two and closer to the more precise measurement, and is narrower than either, with standard deviation {math.sqrt(Pf):.2f} meters.',
     b)
 
 # ---------- 10. Nonlinearity of a platinum resistance sensor (PT100) ----------
@@ -433,8 +433,8 @@ svg('Aliasing', 620, 290, 'A 9 hertz sinusoid sampled at 10 hertz produces the s
     b)
 
 # ---------- 14. Voltage noise density with a 1/f corner ----------
-# Values from "Noise, Interference and the Limits of Detection": e(f) = e_w sqrt(1 + f_c / f) with
-# white density e_w = 10 nV/sqrt(Hz) and corner frequency f_c = 10 Hz, on log-log axes.
+# Values from "Noise, Interference and the Limits of Detection": e(f) = e_w sqrt(1 + f_nc / f) with
+# white density e_w = 10 nV/sqrt(Hz) and corner frequency f_nc = 10 Hz, on log-log axes.
 ew, fcorner = 10.0, 10.0
 dens = lambda f: ew*math.sqrt(1 + fcorner/f)
 P = Plot(70, 30, 510, 200, (-2, 3), (0.5, 2.7))   # log10(f / Hz), log10(e / nV/sqrt(Hz))
@@ -448,12 +448,12 @@ for v, lab in ((-2, '0.01'), (-1, '0.1'), (0, '1'), (1, '10'), (2, '100'), (3, '
 b += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
 b += text(P.x0+P.w, P.y0+P.h+34, 'frequency  ' + var('f') + '  (Hz)', 'end', 'small')
 b += text(P.x0, P.y0-10, 'noise density  (nV/√Hz)', 'start', 'small')
-# asymptotes: white floor and the 1/f line e_w sqrt(f_c / f)
+# asymptotes: white floor and the 1/f line e_w sqrt(f_nc / f)
 b += line([(P.X(-2), P.Y(1)), (P.X(3), P.Y(1))], 'mut', ' stroke-dasharray="4 4"')
 b += line([(P.X(-2), P.Y(math.log10(ew*math.sqrt(fcorner/0.01)))), (P.X(1.6), P.Y(math.log10(ew*math.sqrt(fcorner/10**1.6))))], 'mut', ' stroke-dasharray="4 4"')
 b += P.curve(lambda u: math.log10(dens(10**u)), n=300)
 b += f'  <circle class="dot" cx="{P.X(1):.1f}" cy="{P.Y(math.log10(dens(10))):.1f}" r="3.5" />\n'
-b += text(P.X(1)+8, P.Y(math.log10(dens(10)))-10, 'corner ' + sub('f', 'c') + '= 10 Hz', 'start', 'small')
+b += text(P.X(1)+8, P.Y(math.log10(dens(10)))-10, 'corner ' + sub('f', 'nc') + '= 10 Hz', 'start', 'small')
 b += text(P.X(2.6), P.Y(1)-8, 'white: 10 nV/√Hz', 'middle', 'small')
 b += text(P.X(-1.0)+6, P.Y(math.log10(dens(0.1)))-14, '1/' + var('f') + ' region', 'start', 'small')
 svg('NoiseDensity', 620, 286, 'Voltage noise density of an amplifier with a 1/f corner at 10 hertz',

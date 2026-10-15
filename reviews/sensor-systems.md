@@ -1,426 +1,307 @@
 # Series review: Sensor Systems
 
 - Series: `sensor-systems` (7 articles, status published, 0 planned entries)
-- Reviewed commit: 6c525b1
-- Date: 2026-10-13
-- Content hash: sha256:d214e5d863d0866055d0238f76455c62ae06192919ece9aad9392ae54fce0343
+- Reviewed commit: 49941d2 (series files unchanged since the wave-1 commit 594bba0)
+- Date: 2026-10-14
+- Reviewer: independent wave-2 reviewer (fact-check, technical review, series review). The reviewer wrote and revised none of this text.
+- Content hash: sha256:01a15c9aae534d6eb943dd64816d169edcafab9c0780a5f1a9a62f388edea221
 
 ## Summary
 
-The series is technically strong. It follows the measurement chain in a sensible order (measurement and characteristics, sensing principles, conditioning, conversion, noise, smart sensors, calibration and fusion), each entry builds explicitly on the earlier ones, and the load-cell channel works well as a running example across entries 3 to 7. Every worked number in the seven entries was recomputed, and all four Python listings of entry 7 were run with Python 3.13 and NumPy 2.5. Every printed output matches exactly. The build, the type check and the link check pass.
+The series is technically sound and well sequenced. Every worked number in the seven entries was recomputed with Python 3.13.16 and NumPy 2.5.3, and all five Python listings of entry 7 were re-run. Every printed line matches the text exactly, and no arithmetic, derivation or code error was found. The wave-1 revision (descriptions, sentence-case headings, house references, the new overview body, the $f_\text{nc}$ notation in entry 5 and the new closing of entry 7) kept the technical content intact.
 
-There are two blocking problems:
-- Entry 7 presents its load-cell calibration data as if they were measured, without saying that they were made up for the example, and then treats their agreement with the noise budget as a "useful check". It also compares one-second averages with a figure for a 0.1–10 Hz band.
-- Entry 4 says that a rounding SAR converter *adds* half an LSB to its DAC voltages. It must subtract it.
+There is no blocking finding. The eight should-fix findings fall into four groups:
+- Two consistency defects: the noise-density figure in entry 5 still labels the 1/f corner $f_c$, which wave 1 renamed $f_\text{nc}$ in the text; and four passages say that a smart sensor's chain sits "on one chip", where entry 6 itself says it more commonly sits on two dies in one package.
+- One misleading technical claim, added in the previous review's correction to entry 7: that one-second calibration averages "should be somewhat quieter" than the 0.1–10 Hz noise budget. Under the series' own 1/f noise model, they need not be.
+- Three superseded or withdrawn references: ISO/TS 28037:2010 (withdrawn July 2026), ILAC-G24/OIML D 10:2007 (replaced in 2022) and IEEE Std 1241-2010 (replaced in 2023).
+- Two wording defects: a link labeled "robotics series" that points to a single article, and "noise figures" in the overview, where "noise figure" is a defined quantity with a different meaning.
 
-The should-fix items are as follows:
-- Entry 1 has two imprecise definitions: the active/passive naming, which is the opposite of Fraden's, and threshold confused with dead band. It also has one inaccurate cross-reference.
-- Three links name a series but point to an article.
-- Entry 4 refers to a planned series as if it existed.
-- Entry 5 gives one count slightly wrong.
-- Entry 7 has four problems:
-  - Its tilt sign convention disagrees with a right-handed gyroscope axis.
-  - It uses the Laplace variable and s-domain transfer functions, which no entry introduces and which clash with the first entry's static "transfer function".
-  - It uses the chi-square distribution without saying what it is.
-  - Its exercise section repeats the body of the entry, and no other entry has one.
+The series can be considered final once the should-fix findings are resolved and the report is stamped.
 
-The other author notes were checked and need no change:
-- The British -ise spelling is consistent across all seven entries and the series file. The one exception, "quantization", is used the same way everywhere (F19).
-- ILAC-G24:2007 / OIML D 10:2007 and ISO/TS 28037:2010 are real documents with the titles given, and the text describes what they contain correctly.
-- The Student t factor of 2.78 for four degrees of freedom and the $E_n$ criterion $|E_n| \le 1$ are correct.
-- The VIM paraphrases of calibration, adjustment, verification, calibration hierarchy and metrological traceability match JCGM 200:2012.
-- The claim that a steady-state angle-only Kalman filter takes the complementary-filter form is correct (derivation in the verification log).
-- The double use of $s$ is resolved in the text.
-
-The series is not ready as published until F1 and F2 are corrected.
-
-Findings: 2 blocking, 10 should fix, 7 optional (Phase 1). One further should-fix item (F20) was added during the correction phase at the request of the series editor.
-
-## Resolution
-
-Applied on 2026-10-13 on branch `review/sensor-systems`, at the owner's request. All blocking and should-fix findings and all optional findings except F19 were applied as recommended, with the deviations listed below.
-
-- **F1.** The load-cell table is labelled as constructed rather than measured, and the closing sentences were replaced as recommended. The §6.3 script is now introduced as working on "three illustrative thermometer readings".
-- **F2–F11 and F14–F18.** Applied with the recommended wording, with two deviations:
-  - **F7, entry 6 part.** Superseded by F20.
-  - **F2.** The nested parenthesis was later simplified to commas (second pass).
-- **F12.** §9 (Exercises) was deleted and §10–§11 renumbered §9–§10; no link pointed to their anchors. The one new point from Exercise 1 (0.077 Ω ≈ 0.20 °C, about half the end-point figure) was added to §3.4.
-- **F13.** The bullet list was condensed to one sentence, as recommended.
-- **Entry 7 length.** The prose of entry 7, without code, fell from about 7 180 to about 6 860 words. The cuts (exercises and recap) outweigh the definitions added for F1, F9, F10 and F11.
-- **F19.** Not applied. "Quantization" is a deliberate, consistent term-of-art exception. Changing it would alter the title of entry 4 and the series objectives.
-- **F20 (editor's finding).** Entry 6 now reads "the serial buses that the [Embedded and Real-Time Systems](/series/embedded-and-real-time-systems) series covers". The Vietnamese sentence links `/vi/series/embedded-and-real-time-systems` (the page is built). No individual article of that series is linked.
-- **Second pass (re-read of all seven entries after the corrections):**
-  - **Should fix.** Entry 7 §3.4 said that the load-cell residuals "alternate in sign". The residuals are +5.5, −5.4, +3.8, +12.9, −43.0, +26.2, so they do not. The sentence also said that "their size matches the noise budget", which presented made-up data as agreeing with the budget. It now reads: the residuals "change sign irregularly with no visible bow, and their size is of the order the noise budget leads one to expect".
-  - **Polish.** The F2 replacement sentence had nested parentheses; they were replaced by commas in both languages.
-  - **Third check.** No other blocking or should-fix problem was found. The changed passages were checked again after these two fixes, with the same result.
-- **Vietnamese translations:**
-  - **Entry 1** (`src/content/blog/vi/measurement-systems-and-sensor-characteristics.mdx`): F3, F4, F5, F6 and F17.
-  - **Entry 4** (`vi/sampling-quantization-and-data-conversion.mdx`): F2 and F7. The Vietnamese DSP sentence already used the future tense; "dự kiến" (planned) was added.
-  - **Entry 5** (`vi/noise-interference-and-limits-of-detection.mdx`): F8.
-  - **Entry 6** (`vi/smart-sensors-and-mems.mdx`): F16, F18 and F20.
-  - **Entry 7:** has no translation.
-  - **Series file:** unchanged. Neither the English nor the Vietnamese series file needed a change.
-- **Re-run results:**
-  - **Build.** `npm run build:local` passed with 0 errors and 0 warnings from `astro check`. Pagefind indexed 77 pages in 2 languages; the localhost warning is the expected one for `build:local`.
-  - **Links.** `npm run check:links` reported "Checked 198 pages and 5523 internal references in dist. All internal links resolve."
-  - **Dist checks** (English and Vietnamese pages):
-    - Mermaid `min-width` at most 437 px;
-    - 0 `katex-error`;
-    - no glued inline text.
-  - **Recomputed values.** The entry 7 listings are unchanged, so their verified outputs still hold. Every number added or changed was recomputed:
-    - 13 300;
-    - 0.20 °C;
-    - code 10 for 2.000 V under rounding.
-
-Line numbers in the findings refer to the reviewed commit 6c525b1, not to the corrected articles.
-
-- **Editor's change after the review (F7, entry 4 part):** the Digital Signal Processing for Engineers series was completed and published together with this series, so the entry-4 sentence that called it "planned" would have become false. Like F20, it now links the series page without calling it planned: "The digital half is the subject of the [Digital Signal Processing for Engineers](/series/digital-signal-processing) series." The Vietnamese sentence was changed to match. No other text changed; the build and link check were re-run.
+Findings: 0 blocking, 8 should fix, 5 optional.
 
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
 |---|---|---|
-| Describe a measurement system as a chain from measurand to number, and characterise a sensor by its static and dynamic properties. | Entry 1 §2–4, §7 | Met. Two definitions are imprecise (F3, F4). |
-| Explain the main physical principles by which sensors convert a quantity into an electrical signal. | Entry 2 (whole) | Met. |
-| Design the analog front end of a sensor: excitation, bridges, amplification and filtering. | Entry 3 (whole) | Met, including a complete worked channel. |
-| Explain sampling, quantization and data conversion, and the noise that limits what can be detected. | Entry 4 (whole), entry 5 (whole) | Met. One error in the SAR example (F2). |
-| State and combine measurement uncertainties, and calibrate and fuse sensors. | Entry 1 §5–6, entry 7 (whole) | Met. The calibration example breaches the content-integrity rule on examples (F1). |
+| Describe a measurement system as a chain from measurand to number, and characterize a sensor by its static and dynamic properties. | Entry 1, §2–§4 | Met. The chain diagram, static characteristics (§3) and first- and second-order dynamics (§4) are all present. |
+| Explain the main physical principles by which sensors convert a quantity into an electrical signal. | Entry 2, all sections; entry 6 §1 and §3 (MEMS realizations) | Met. |
+| Design the analog front end of a sensor: excitation, bridges, amplification and filtering. | Entry 3, §1–§7 (complete load-cell channel) | Met. |
+| Explain sampling, quantization and data conversion, and the noise that limits what can be detected. | Entry 4 (sampling, quantization, converters); entry 5 (noise, interference, detection limit) | Met. |
+| State and combine measurement uncertainties, and calibrate and fuse sensors. | Entry 1 §5 (budget); entry 7 §2–§3 (propagation, curve uncertainty), §1 and §3–§5 (calibration), §6–§8 (fusion) | Met. The objective bundles three outcomes (wave-1 note D3), but each is checkable against a named section. No change is needed. |
 
 ## Findings
 
 | ID | Severity | Article | Location | Dimension | Finding |
 |---|---|---|---|---|---|
-| F1 | Blocking | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §3.2 (lines 105, 145) | Fit with site rules / Technical accuracy | Made-up calibration data presented as measured, and their agreement with the noise budget treated as evidence; the bandwidths compared also differ. |
-| F2 | Blocking | `src/content/blog/sampling-quantization-and-data-conversion.mdx` | §5.1 (line 175) | Technical accuracy | A rounding SAR converter subtracts half an LSB from the DAC voltages; the text says it adds it. |
-| F3 | Should fix | `src/content/blog/measurement-systems-and-sensor-characteristics.mdx` | §2.3 (lines 63–68) | Terminology | "Self-generating (or active)" and "modulating (or passive)" are given as the only naming; Fraden, cited by the series, uses the opposite. |
-| F4 | Should fix | `src/content/blog/measurement-systems-and-sensor-characteristics.mdx` | §3.4 (line 109) | Technical accuracy | Threshold is equated with dead band; the VIM defines them differently. |
-| F5 | Should fix | `src/content/blog/measurement-systems-and-sensor-characteristics.mdx` | §2.1 (line 51) | Cross-article references | "Each stage has its own section of this series" is inaccurate: the stages are covered by entries, and the output stage by none. |
-| F6 | Should fix | entries 1 and 7 | entry 1 line 123; entry 7 lines 341, 592 | Cross-article references | The link texts "control systems series" and "robotics series" point to single articles. |
-| F7 | Should fix | `src/content/blog/sampling-quantization-and-data-conversion.mdx` (also `smart-sensors-and-mems.mdx`) | entry 4 §2.1 (line 75); entry 6 §4.4 (line 149) | Cross-article references | The digital signal processing series is planned but is described as one that "treats" the topic. |
-| F8 | Should fix | `src/content/blog/noise-interference-and-limits-of-detection.mdx` | §6.1 (line 188) | Technical accuracy | The noise-free resolution is about 13 300 steps, not 13 400. |
-| F9 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §7.1 (lines 345, 353) | Stated conventions | Positive θ tips x upwards, which is a negative right-hand rotation about y, so a y-axis gyroscope reads −θ̇, not θ̇. |
-| F10 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §7.2 (lines 357–367) | Concept introduction / Terminology | The Laplace variable, s-domain transfer functions and the final-value theorem are used without introduction, and "transfer function" means the static curve in entry 1. |
-| F11 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §6.3 (line 296) | Concept introduction | The chi-square distribution is used without saying what it is. |
-| F12 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §9 (lines 516–561) | Writing quality | The exercises repeat the body (Ex. 1 = §3.4, Ex. 3 ≈ §4.2, Ex. 5 ≈ §6.2), and no other entry has exercises. |
-| F20 | Should fix | `src/content/blog/smart-sensors-and-mems.mdx` | §4.4 (line 149) | Cross-article references | Added by the series editor: the Embedded and Real-Time Systems series is being completed for publication, so calling it "planned" is about to become false; refer to it by name and link its series page. |
-| F13 | Optional | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §11 (lines 580–592) | Writing quality | The entry-by-entry recap repeats the series description and the series navigation. |
-| F14 | Optional | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §8.1 (line 462) | Writing quality | "A large part of the error budget of the best filter": 0.25° is more than the whole 0.14° RMS error. |
-| F15 | Optional | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §7.4 (line 454) | Technical accuracy | The Kalman/complementary equivalence is correct but does not state its noise assumptions. |
-| F16 | Optional | `src/content/blog/smart-sensors-and-mems.mdx` | §3.1 (line 75) | Technical accuracy | The differential capacitor cancels the even-order (quadratic) nonlinearity, not "the first-order" one, and unlike the half bridge it is not exactly linear. |
-| F17 | Optional | `src/content/blog/measurement-systems-and-sensor-characteristics.mdx` | §1.2 (line 32) | Technical accuracy | Uncertainty is described as an interval, whereas the VIM and the entry's own §5.2 treat it as a dispersion parameter. |
-| F18 | Optional | entries 6 and 7 | entry 6 line 57; entry 7 line 20 | Writing quality | "section 4.2" and "section 5" are lower case, while every other section reference is capitalised. |
-| F19 | Optional | series-wide | entry 4 title, all entries | Terminology | "Quantization" uses -z in a series that otherwise uses -ise. It is consistent everywhere and is the IEEE spelling. |
+| T1 | Should fix | `src/content/blog/noise-interference-and-limits-of-detection.mdx` | §2.3, figure (line 92); `scripts/generate-diagrams.py:436–437, 456` | consistency | Figure labels the 1/f corner "$f_c$ = 10 Hz"; the text now calls it $f_\text{nc}$ and reserves $f_c$ for the filter cut-off. |
+| T2 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §3.2 (line 145) | accuracy | The claim that one-second averages "should be somewhat quieter" than the 0.1–10 Hz budget contradicts the series' 1/f model. |
+| S1 | Should fix | Overview and entries 5, 6, 7 | `sensor-systems.md:16`, entry 5 line 213, entry 6 line 82, entry 7 line 535 | consistency | "On one chip" / "on the same chip" contradicts entry 6 §4, which says a MEMS die and an ASIC more commonly share one package. |
+| S2 | Should fix | `src/content/blog/sensing-principles.mdx` | §7.2 (line 166) | consistency | The link text "robotics series" points to one article (`/blog/what-is-a-robot`). |
+| S3 | Should fix | `src/content/series/sensor-systems.md` | line 20 | accuracy | "Noise figures are root-mean-square values": *noise figure* is a defined quantity (a ratio in dB), not an RMS value. |
+| F1 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §3.5 (line 202), References (line 544) | evidence | ISO/TS 28037:2010 was withdrawn on 2026-07-24 and replaced by ISO 28037:2026; the text says it "specifies" these cases. |
+| F2 | Should fix | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §5 (line 236), References (line 542) | evidence | ILAC-G24:2007 / OIML D 10:2007 is superseded by the 2022 edition, which has a changed title. |
+| F3 | Should fix | `src/content/blog/sampling-quantization-and-data-conversion.mdx` | §4 (line 125), References (line 223) | evidence | IEEE Std 1241-2010 is Inactive-Reserved and superseded by IEEE Std 1241-2023. |
+| F4 | Optional | `src/content/blog/measurement-systems-and-sensor-characteristics.mdx` | References (line 243) | evidence | "(The 2008 edition gives the same coefficients.)" could not be verified from public sources. |
+| S4 | Optional | `src/content/blog/signal-conditioning.mdx` | §2.1 (line 80) | language | "$x/2 = 0.1$ %": a space before % remains (standards 5.5). |
+| S5 | Optional | `src/content/blog/measurement-systems-and-sensor-characteristics.mdx` | §3.3 figure caption (line 104) | consistency | "the straight line through the end points" vs the bold house term "endpoint line" two paragraphs earlier. |
+| S6 | Optional | `src/content/series/sensor-systems.md` | line 20 | consistency | "Units are SI throughout", but entries 5–7 quote acceleration in g, mg and µg/√Hz, and entries 3 and 7 use mV/V. |
+| S7 | Optional | `src/content/blog/calibration-and-multisensor-fusion.mdx` | §9 closing (line 535) | consistency | "This entry has stated and combined uncertainties": the first part of objective 5 is first met in entry 1 §5. |
 
-### F1. Made-up calibration data presented as measured
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:105` and `:145`, section "3.2 A worked example: the load cell"
-- **Text:** "The load-cell channel of the signal-conditioning entry … is calibrated with six reference masses from 0 to 10 kg." … "The residual standard deviation, $s = 2.63 \times 10^{-5}$ mV/V, corresponds to $s/b = 0.13$ g, close to the 0.11 g root-mean-square (RMS) noise that the noise budget of the noise entry predicted for this channel. The calibration data and the noise analysis agree, which is itself a useful check."
-- **Problem:** The table of indications was constructed for the example: its residuals are hand-set values, and nothing in the text says so. The CLAUDE.md content-integrity rules require examples to be labelled and forbid presenting results as obtained when they are not. The closing sentence treats agreement between constructed data and the noise budget as evidence, which is circular. The comparison is also not like with like. The 0.11 g figure (entry 5 §6.1) is for the 0.1–10 Hz band, while each indication here is "an average over one second", which has a much narrower noise bandwidth.
-- **Recommended correction:** Label the data as illustrative where they are introduced: "The indications below are illustrative values, constructed for this example rather than measured; each stands for an average over one second, in millivolts per volt of excitation." Replace the last two sentences of the paragraph after the output with: "The illustrative data were given a scatter of this size, comparable to the 0.11 g RMS that the noise budget of the noise entry gives over 0.1–10 Hz. With real data the comparison is a useful check: a one-second average has a narrower band and should be somewhat quieter than that figure, so a residual scatter well above the noise budget points to an effect that neither the model nor the budget includes."
+### T1. The noise-density figure still uses $f_c$ for the 1/f corner
+- **Where:** `src/content/blog/noise-interference-and-limits-of-detection.mdx:92` (the `<NoiseDensity />` figure in §2.3); the label is generated at `scripts/generate-diagrams.py:456`, and the script comment at lines 436–437 also says `f_c`.
+- **Text:** The rendered label reads "corner *f*<sub>c</sub> = 10 Hz" (`src/components/diagrams/NoiseDensity.astro:36`; also present in `/tmp/claude-0/b2/blog/noise-interference-and-limits-of-detection.html`). The prose says "the **noise corner frequency** $f_\text{nc}$" (line 86).
+- **Problem:** Wave 1 renamed the corner $f_\text{nc}$ so that $f_c$ means only the filter cut-off (entry 5 §1.3 and entry 3 §6.1). Its revision log states that "the NoiseDensity diagram uses no symbol, so no regeneration", but the figure does use the symbol, so the clash the revision meant to remove is still on the page.
+- **Recommended correction:** In `scripts/generate-diagrams.py`, change line 456 to `'corner ' + sub('f', 'nc') + '= 10 Hz'`, and the comment at lines 436–437 to `e(f) = e_w sqrt(1 + f_nc / f)` with "corner frequency f_nc = 10 Hz". Then re-run `python3 scripts/generate-diagrams.py src/components/diagrams` and confirm that only `NoiseDensity.astro` changes. The Vietnamese article uses the same component, so it picks up the change automatically.
 
-### F2. Rounding SAR: the half-LSB has the wrong sign
-- **Where:** `src/content/blog/sampling-quantization-and-data-conversion.mdx:175`, section "5.1 Successive approximation"
-- **Text:** "(A converter that rounds to the nearest code, as in Section 3.1, adds half an LSB to the DAC voltages; the search is the same.)"
-- **Problem:** Under the convention of §3.1, the code reaches $k$ when the input reaches $(k - \tfrac12)q$. Each trial must therefore compare the input with $kq - q/2$: half an LSB is *subtracted* from the DAC voltage, or equivalently added to the input. With the 2.000 V example ($2.000/0.206 = 9.70$ LSB), subtracting gives code 10, the nearest code, while adding gives code 9.
-- **Recommended correction:** "(A converter that rounds to the nearest code, as in Section 3.1, compares the input with thresholds half an LSB lower, $kq - q/2$ (equivalently, it adds half an LSB to the input); the search is the same, and for this input it would end at code 10.)"
+### T2. "A one-second average … should be somewhat quieter" than the 0.1–10 Hz budget
+- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:145`, §3.2.
+- **Text:** "With real data the comparison is a useful check: a one-second average has a narrower band and should be somewhat quieter than that figure, so a residual scatter well above the noise budget points to an effect that neither the model nor the budget includes."
+- **Problem:** The budget in entry 5 §6.1 is dominated by 1/f noise: 67.9 of 75 nV RMS. Entry 5 §2.3 shows that 1/f noise depends only on the ratio of the band edges, and entry 5 §4 says that "averaging helps only for white noise". A one-second average cuts the upper edge to roughly 0.5 Hz (equivalent noise bandwidth of a 1 s boxcar). But the scatter between six calibration points taken over several minutes also contains 1/f noise down to about 1/(duration of the calibration).
+  - Recomputed with the entry-5 model ($e_w = 10$ nV/√Hz, $f_\text{nc} = 10$ Hz), for a 10-minute calibration: 1/f part from 1/600 Hz to 0.5 Hz is $10\sqrt{10 \ln 300} = 75.5$ nV, and the white part in 0.5 Hz is 7.1 nV, about 76 nV in total. That is not quieter than the 75 nV budget.
+  - The conclusion of the sentence (a scatter well above the budget signals an unmodeled effect) still holds. The reason given for it does not.
+- **Recommended correction:** "With real data the comparison is a useful check. Because the budget is dominated by 1/f noise, one-second averages taken over a calibration lasting minutes are not necessarily quieter than the 0.1–10 Hz figure: averaging narrows the band at the top, but the span of the calibration extends it at the bottom. A residual scatter well above the noise budget therefore points to an effect that neither the model nor the budget includes."
 
-### F3. Active and passive sensors: the naming varies between texts
-- **Where:** `src/content/blog/measurement-systems-and-sensor-characteristics.mdx:63–68`, section "2.3 Active and passive sensors"
-- **Text:** "A **self-generating** (or active) sensor produces an electrical output from the measurand's own energy … A **modulating** (or passive) sensor changes an electrical property …"
-- **Problem:** This naming is common, but Fraden's *Handbook of Modern Sensors*, cited in entries 1, 2, 3, 6 and 7, uses the opposite convention: a passive sensor needs no external energy, and an active sensor needs excitation. A reader who checks the cited handbook finds the reverse meaning without warning. The series itself uses "self-generating" and "modulating" from then on, so only the parenthetical aliases are at risk.
-- **Recommended correction:** After the two bullets, add: "The words *active* and *passive* are used both ways round in the literature (Fraden's handbook, for one, calls a sensor that needs excitation *active*), so this series uses the unambiguous terms self-generating and modulating."
+### S1. "On one chip" contradicts entry 6
+- **Where:**
+  - `src/content/series/sensor-systems.md:16`: "The sixth entry shows how smart sensors and microelectromechanical systems (MEMS) build that chain on one chip."
+  - `noise-interference-and-limits-of-detection.mdx:213`: "what happens when those components are built together on one chip".
+  - `smart-sensors-and-mems.mdx:82`: "with a charge amplifier (from the signal-conditioning entry) on the same chip".
+  - `calibration-and-multisensor-fusion.mdx:535`: "the [sixth] showed the whole chain integrated on one chip".
+- **Problem:** Entry 6 §4 (line 106) says: "The sensing element and the electronics may share one die (**monolithic** integration), or, more commonly, a MEMS die and an application-specific integrated circuit (ASIC) are made in separate processes … and placed side by side in one package." Its opening (line 17) also says "in one package". The four passages state the less common case as the rule, and the series contradicts itself.
+- **Recommended correction:**
+  - Overview line 16: "… build that chain in a single package."
+  - Entry 5 line 213: "… when those components are built together in one package".
+  - Entry 6 line 82: "… with a charge amplifier (from the signal-conditioning entry) in the same package".
+  - Entry 7 line 535: "… showed the whole chain integrated in one package".
+  - Apply the same changes to the Vietnamese overview and entries 5 and 6. Entry 7 has no translation.
 
-### F4. Threshold and dead band are different quantities
-- **Where:** `src/content/blog/measurement-systems-and-sensor-characteristics.mdx:109`, section "3.4 Resolution, threshold and hysteresis"
-- **Text:** "The **threshold** (or dead band) is the smallest input change, starting from zero, that produces any output at all."
-- **Problem:** The VIM, which this entry says it follows (line 34), defines these separately. The *discrimination threshold* (4.16) is the largest change in the quantity being measured that causes no detectable change in the indication. The *dead band* (4.17) is the maximum interval through which the quantity can be changed *in both directions* without producing a detectable change, typically from backlash or friction, at any operating point. Equating the two is imprecise.
-- **Recommended correction:** "- The **threshold** is the smallest input change, starting from zero, that produces a detectable output. The related **dead band** is the largest interval through which the input can be changed in both directions, at any operating point, without a detectable change in output; it is typically caused by friction or backlash."
+### S2. "Robotics series" links to a single article
+- **Where:** `src/content/blog/sensing-principles.mdx:166`, §7.2.
+- **Text:** "(the joint encoders of the [robotics series](/blog/what-is-a-robot))"
+- **Problem:** The link text names a series, but the target is the first article of that series. The previous review corrected three links of exactly this kind ("Three links name a series but point to an article"); this one was added in wave 1. Elsewhere the series words such links as "the [state-estimation entry](…) of the robotics series" (entry 7) or links the series page (entry 1 line 125, entry 6 line 149).
+- **Recommended correction:** "(the joint encoders described in the [first entry](/blog/what-is-a-robot) of the robotics series)". Alternatively, "(the joint encoders of the [Introduction to Robotics](/series/introduction-to-robotics) series)".
 
-### F5. "Each stage has its own section of this series"
-- **Where:** `src/content/blog/measurement-systems-and-sensor-characteristics.mdx:51`, section "2.1 From measurand to number"
-- **Text:** "Each stage has its own section of this series."
-- **Problem:** The series is divided into entries, not sections, and the sections of entry 1 are numbered §1–§8, so "section" is misleading. Not every stage has an entry either: digital processing is covered only by calibration (entry 7), and the output stage by none.
-- **Recommended correction:** "Later entries take up these stages in turn."
+### S3. "Noise figures" in the overview
+- **Where:** `src/content/series/sensor-systems.md:20`.
+- **Text:** "Noise figures are root-mean-square values at 300 K unless stated otherwise."
+- **Problem:** In electronics, *noise figure* is a defined quantity: the ratio, usually in dB, of input to output signal-to-noise ratio. It is not an RMS voltage or current. The phrase is on the front page of a series whose fifth entry is about noise, so a reader with that background would misread it. Entry 5 line 24 states the convention correctly: "a noise voltage written without qualification is a root-mean-square value".
+- **Recommended correction:** "Noise voltages and currents are root-mean-square values, computed at 300 K unless stated otherwise." Apply the same change to `src/content/series/vi/sensor-systems.md`.
 
-### F6. Link texts that name a series but point to one article
-- **Where:** `src/content/blog/measurement-systems-and-sensor-characteristics.mdx:123`; `src/content/blog/calibration-and-multisensor-fusion.mdx:341` and `:592`
-- **Text:** "using the models of the [control systems series](/blog/introduction-to-control-systems)"; "already outlined in the [robotics series](/blog/sensing-and-state-estimation#71-fusing-complementary-sensors)"; "The [robotics series](/blog/sensing-and-state-estimation) shows the same ideas at work"
-- **Problem:** Each link text names a whole series but leads to a single article, so the text does not match the target. The control-systems models that entry 1 relies on are spread over two articles: second order in `introduction-to-control-systems` and first order in `feedback-and-system-behavior`.
-- **Recommended correction:** Entry 1: "using the models of the [Foundations of Control Systems](/series/foundations-of-control-systems) series". Entry 7 line 341: "already outlined in the [state-estimation entry](/blog/sensing-and-state-estimation#71-fusing-complementary-sensors) of the robotics series". Entry 7 line 592: "The [state-estimation entry](/blog/sensing-and-state-estimation) of the robotics series shows …".
+### F1. ISO/TS 28037:2010 has been withdrawn
+- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:202` and References line 544.
+- **Text:** "ISO/TS 28037:2010 specifies these cases for straight-line calibration functions." / "ISO/TS 28037:2010, *Determination and use of straight-line calibration functions*, International Organization for Standardization, 2010."
+- **Problem:** The ISO catalogue (iso.org/standard/44473) lists ISO/TS 28037:2010 as Withdrawn (stage 95.99, 2026-07-24), replaced by ISO 28037:2026. The new edition has the same title, was published 2026-07, and is at stage 60.60 (iso.org/standard/84405). Its abstract covers uncertainties in both variables and general covariance matrices, so it supports the sentence. The present tense "specifies" now describes a withdrawn document.
+- **Recommended correction:** Text: "ISO 28037:2026, which replaced the technical specification ISO/TS 28037:2010, specifies these cases for straight-line calibration functions." Reference: "ISO 28037:2026, *Determination and use of straight-line calibration functions*, International Organization for Standardization, 2026."
 
-### F7. A planned series described as existing
-- **Where:** `src/content/blog/sampling-quantization-and-data-conversion.mdx:75`, section "2.1 Oversampling"; `src/content/blog/smart-sensors-and-mems.mdx:149`, section "4.4 Digital interfaces"
-- **Text:** "The digital signal processing series treats the digital half." / "the serial buses that the planned embedded-systems series covers"
-- **Problem:** `src/content/series/digital-signal-processing.md` and `embedded-and-real-time-systems.md` both have `status: "planned"`. The first sentence presents the DSP series as existing. The second calls the embedded series planned but uses the present tense.
-- **Recommended correction:** "The planned digital signal processing series is to treat the digital half." / "the serial buses that the planned embedded-systems series is to cover".
+### F2. ILAC-G24 / OIML D 10 superseded by the 2022 edition
+- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:236` and References line 542.
+- **Text:** "ILAC-G24:2007 / OIML D 10:2007, *Guidelines for the determination of calibration intervals of measuring instruments*, … 2007."
+- **Problem:** The OIML publishes ILAC-G24:2022 / OIML D 10:2022, *Guidelines for the determination of recalibration intervals of measuring equipment* (oiml.org/en/files/pdf_d/d010-e22.pdf). It states that it supersedes the 2007 edition. The 2022 edition still describes the two methods the text names, "automatic adjustment or 'staircase'" and "control chart", so the body text remains true. Only the reference is out of date. The wave-1 log confirmed the 2007 title but did not notice the newer edition.
+- **Recommended correction:** "ILAC-G24:2022 / OIML D 10:2022, *Guidelines for the determination of recalibration intervals of measuring equipment*, International Laboratory Accreditation Cooperation and International Organization of Legal Metrology, 2022." The text at line 236 ("ILAC-G24 / OIML D 10") needs no change.
 
-### F8. Noise-free resolution: 13 300, not 13 400
-- **Where:** `src/content/blog/noise-interference-and-limits-of-detection.mdx:188`, section "6.1 A noise budget for the load-cell channel"
-- **Text:** "The **noise-free resolution** is the full scale divided by the peak-to-peak noise: about 13 400 steps, or 13.7 bits."
-- **Problem:** The total in the table is 75.2 nV RMS, so the peak-to-peak noise is 6.6 × 75.2 = 496 nV, and 6.6 mV / 496 nV = 13 300. With the rounded 0.5 µV the result is 13 200. Neither gives 13 400. The 13.7 bits figure is correct ($\log_2 13\,300 = 13.70$).
-- **Recommended correction:** "about 13 300 steps, or 13.7 bits".
+### F3. IEEE Std 1241-2010 superseded by IEEE Std 1241-2023
+- **Where:** `src/content/blog/sampling-quantization-and-data-conversion.mdx:125` ("defined in IEEE Std 1241") and References line 223.
+- **Text:** "IEEE Std 1241-2010, *IEEE Standard for Terminology and Test Methods for Analog-to-Digital Converters*, IEEE, 2011."
+- **Problem:** standards.ieee.org lists IEEE 1241-2010 as Inactive-Reserved, superseded by IEEE 1241-2023. The 2023 edition has the same title, is Active, and was published 2023-10-06. The 2010 details in the reference are correct (board approval 2010-06-17, published 2011-01-14), but they point the reader to an inactive edition. The wave-1 log flagged this point and left it.
+- **Recommended correction:** "IEEE Std 1241-2023, *IEEE Standard for Terminology and Test Methods for Analog-to-Digital Converters*, IEEE, 2023." The body text, which names no edition, can stay. If the author prefers to keep the edition that was actually consulted, append "(superseded by IEEE Std 1241-2023)" to the existing entry instead.
 
-### F9. Tilt sign convention and the gyroscope axis
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:345` and `:353`, section "7.1 What each sensor offers"
-- **Text:** "Take a sensor that rotates about its y axis by a tilt angle $\theta$, with its z axis pointing up when $\theta = 0$, and positive $\theta$ tipping the x axis upwards." … "The gyroscope measures the rotation rate $\omega = \dot\theta$".
-- **Problem:** In a right-handed sensor frame, a positive (right-hand) rotation about +y takes the x axis towards −z. The x axis maps to $(\cos\theta, 0, -\sin\theta)$, so it tips *down*. The angle defined in the text is therefore a negative rotation about y, and a y-axis gyroscope reads $-\dot\theta$. The accelerometer formulas $a_x = g\sin\theta$, $a_z = g\cos\theta$ are right for the stated θ. As written, a reader who implements the equations with a real right-handed IMU gets the gyroscope term with the wrong sign, and the filter diverges.
-- **Recommended correction:** Add after the first sentence: "With right-handed sensor axes, this tilt is a rotation about the *negative* y axis, so a y-axis gyroscope reports $-\dot\theta$; below, $\omega$ denotes the rate of $\theta$, that is, the gyroscope's y reading with its sign reversed." Change "The gyroscope measures the rotation rate $\omega = \dot\theta$" to "The gyroscope measures the rotation rate, here $\omega = \dot\theta$".
+### F4. Coefficients of the 2008 and 2022 editions of IEC 60751
+- **Where:** `measurement-systems-and-sensor-characteristics.mdx:243`.
+- **Text:** "(The 2008 edition gives the same coefficients.)"
+- **Problem:** Public sources available here did not settle it. The IEC 60751:2022 foreword (preview) lists among its changes "formula of resistance versus temperature relationship become the standard specification" and gives α = 3.851 × 10⁻³ °C⁻¹. That α equals $A + 100B$ with the stated coefficients (recomputed: 3.85055 × 10⁻³), which is consistent with unchanged A and B but does not prove it.
+- **Recommended correction:** Optional. Either drop the parenthetical, or qualify it as "(The 2008 edition gives the same $\alpha = 3.851 \times 10^{-3}$ °C⁻¹.)".
 
-### F10. Laplace variable and s-domain transfer functions not introduced
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:357–367`, section "7.2 The complementary filter"
-- **Text:** "With $s$ the Laplace variable (not the residual standard deviation of Section 3), …" / "their transfer functions sum to exactly one" / "$\lim_{s \to 0} s \cdot \ldots = b_\omega \tau$"
-- **Problem:** The series lists its prerequisites as circuit analysis, calculus and elementary statistics (series file, line 14). The Laplace transform appears nowhere in this series or in the linked control-systems articles, yet §7.2 uses it, with integration written as $1/s$ and the final-value theorem, without saying what any of these are. The term "transfer function" is also defined in entry 1 §3.1 as the *static* characteristic curve, and entries 1 and 4 use it in that sense; here it silently changes meaning. The disambiguation of $s$ itself is already present and adequate.
-- **Recommended correction:** Before the equation: "The filter is easiest to describe in the Laplace domain, the standard tool for linear dynamic systems: a signal $x(t)$ is represented by its Laplace transform $x(s)$, a function of the complex frequency $s$; integration becomes division by $s$; and a linear filter is described by its *transfer function*, the ratio of output to input transforms (the dynamic counterpart of the static transfer function of the first entry). With $s$ the Laplace variable (not the residual standard deviation of Section 3), …". Before the limit, write: "by the final-value theorem (the steady value of a signal is the limit of $s$ times its transform as $s \to 0$)".
+### S4. Space before %
+- **Where:** `signal-conditioning.mdx:80`, "a relative error of about $x/2 = 0.1$ %".
+- **Recommended correction:** "$x/2 = 0.1\%$".
 
-### F11. The chi-square distribution used without saying what it is
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:296`, section "6.3 Consistency checks"
-- **Text:** "follows a **chi-square** distribution with $n - 1$ degrees of freedom when the readings are consistent"
-- **Problem:** The series assumes only elementary statistics. Nothing in this series says what the distribution is; only the robotics series does, in a parenthesis. The thresholds 5.99 and 9.21 depend on it.
-- **Recommended correction:** "follows a **chi-square** distribution (the distribution of a sum of squares of independent standard Gaussian variables) with $n - 1$ degrees of freedom, one fewer than the number of readings because $\hat x$ was estimated from them, when the readings are consistent".
+### S5. "End points" in the figure caption
+- **Where:** `measurement-systems-and-sensor-characteristics.mdx:104`, "relative to the straight line through the end points".
+- **Recommended correction:** "relative to the endpoint line". Wave 1 made "endpoint line" the defined house term at line 100.
 
-### F12. Exercises that repeat the entry
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:516–561`, section "9. Exercises"
-- **Text:** Exercise 1 asks for the least-squares residuals of the PT100 line, and its answer repeats "−0.077, +0.015, +0.062, +0.062, +0.015 and −0.077 Ω", given verbatim in §3.4 (line 190). Exercise 3 repeats the readings $+9.893$ / $-9.744$ m/s² of §4.2 (line 222) and its 0.27 % gravity error. Exercise 5 recomputes the shared-reference example of §6.2 with one number changed.
-- **Problem:** Three of the five exercises repeat worked material from the same entry. The author asked for redundancy to be trimmed in this long entry (about 6,750 words of prose). No other entry of the series has an exercise section, so the structure is also inconsistent. The one new point, that the least-squares line halves the end-point nonlinearity (0.20 °C against 0.375 °C), belongs in §3.4.
-- **Recommended correction:** Delete §9 and renumber §10–§11 as §9–§10. Nothing links to these anchors. Add to §3.4 after the residuals: "The largest, 0.077 Ω or about 0.20 °C, is about half of the 0.375 °C found against the end-point line in the first entry, because the least-squares line splits the bow between positive and negative errors."
+### S6. "Units are SI throughout"
+- **Where:** `sensor-systems.md:20`.
+- **Problem:** Entries 5–7 quote accelerations in g, mg and µg/√Hz, and entry 6 explicitly defines g as the acceleration of gravity. Entries 3 and 7 use mV/V. These are deliberate and conventional, but "throughout" overstates the convention.
+- **Recommended correction:** "Units are SI, with accelerations also given in multiples of the standard gravity *g* and bridge outputs in millivolts per volt."
 
-### F20. The embedded-systems series is about to be published (editor's finding)
-- **Where:** `src/content/blog/smart-sensors-and-mems.mdx:149`, section "4.4 Digital interfaces"
-- **Text:** "the serial buses that the planned embedded-systems series covers"
-- **Problem:** Raised by the series editor during the correction phase. The Embedded and Real-Time Systems series is being completed and will be published, so "planned" is about to become false. This supersedes the entry-6 half of F7. Its series page `/series/embedded-and-real-time-systems` already exists. Its articles are not yet on master, so they must not be linked.
-- **Recommended correction:** "the serial buses that the [Embedded and Real-Time Systems](/series/embedded-and-real-time-systems) series covers"; in Vietnamese, link `/vi/series/embedded-and-real-time-systems`, which is built.
-
-### F13. The series recap repeats the series description
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:580–592`, section "11. The Series as a Whole"
-- **Text:** Seven bullets that summarise each entry ("The first entry defined measurement, …").
-- **Problem:** The list restates the series description and the entries' own summaries, and the series navigation block already links every entry. Only the closing paragraph adds anything.
-- **Recommended correction:** Replace the bullets with one sentence: "Together, the seven entries have followed a measurement from the physical world to a number that can be trusted: from what a measurement is, through sensing, conditioning, conversion and noise, to integrated sensors and, here, calibration and fusion." Keep the closing paragraph.
-
-### F14. "A large part of the error budget"
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:462`, section "8.1 How large the error is"
-- **Text:** "an offset of only 10 ms between gyroscope and accelerometer creates disagreements of up to 0.25°, a large part of the error budget of the best filter."
-- **Problem:** The best filter in §7.3 has a 0.14° RMS error, so 0.25° exceeds the whole of it. "A large part" understates the point.
-- **Recommended correction:** "… disagreements of up to 0.25°, more than the 0.14° RMS error of the best filter in Section 7.3."
-
-### F15. Kalman/complementary equivalence: state the assumptions
-- **Where:** `src/content/blog/calibration-and-multisensor-fusion.mdx:454`, section "7.4 From the complementary filter to the Kalman filter"
-- **Text:** "A Kalman filter whose state is the angle alone, with the gyroscope rate as its input and the accelerometer tilt as its measurement, settles to a fixed gain when the noise levels are constant, and its update then has exactly the form of the discrete complementary filter, with $1 - \alpha$ as the gain."
-- **Problem:** The claim is correct (derivation in the verification log), but it holds for a particular model: the gyroscope's noise enters as white process noise, and the accelerometer's as white measurement noise. The resulting gain then fixes τ. Saying so also explains why the hand-tuned τ of §7.3, which must cope with a bias and a 2 Hz disturbance that are not white, differs from what such a Kalman filter would choose.
-- **Recommended correction:** After "as its measurement", insert "(the gyroscope's noise entering as white process noise and the accelerometer's as white measurement noise)", and append to the sentence: "; the noise variances then determine $\alpha$, and so $\tau$, instead of the designer".
-
-### F16. Differential capacitor: which nonlinearity cancels
-- **Where:** `src/content/blog/smart-sensors-and-mems.mdx:75`, section "3.1 The accelerometer"
-- **Text:** "Like the half bridge of the signal-conditioning entry, the differential arrangement doubles the signal, cancels the first-order nonlinearity, and rejects changes that affect both sides equally."
-- **Problem:** $2\varepsilon_0 A x/(d^2 - x^2) = (2C_0 x/d)\,(1 + x^2/d^2 + \dots)$. The even-order (quadratic) term cancels and a cubic term remains, so the arrangement is not exactly linear, unlike the half bridge of entry 3, which is. "First-order nonlinearity" is ambiguous, because the first-order term is the signal itself.
-- **Recommended correction:** "… the differential arrangement doubles the signal, cancels the even-order (quadratic) part of the nonlinearity, leaving only a small cubic term of relative size $x^2/d^2$, and rejects changes that affect both sides equally."
-
-### F17. What uncertainty is
-- **Where:** `src/content/blog/measurement-systems-and-sensor-characteristics.mdx:32`, section "1.2 Every measurement is uncertain"
-- **Text:** "a statement of its **uncertainty**: a quantified range within which the true value is believed to lie with stated confidence."
-- **Problem:** VIM 2.26 defines measurement uncertainty as a non-negative parameter that characterises the dispersion of the values attributed to the measurand. A "range … with stated confidence" is the coverage interval of an *expanded* uncertainty. §5.2 of the same entry then defines standard uncertainty as a standard deviation, which matches the VIM but not this sentence.
-- **Recommended correction:** "a statement of its **uncertainty**: a quantified measure of the doubt about the result, such as a standard deviation or the half-width of an interval within which the true value is believed to lie with stated probability."
-
-### F18. Capitalisation of cross-entry section references
-- **Where:** `src/content/blog/smart-sensors-and-mems.mdx:57`; `src/content/blog/calibration-and-multisensor-fusion.mdx:20`
-- **Text:** "the second-order sensor of the first entry (section 4.2)"; "([section 5](/blog/measurement-systems-and-sensor-characteristics#5-errors-and-uncertainty))"
-- **Problem:** Every other numbered section reference in the series is capitalised ("Section 3.3", "Section 6").
-- **Recommended correction:** "Section 4.2", "Section 5".
-
-### F19. "Quantization" in an -ise series
-- **Where:** all entries; title of entry 4 ("Sampling, Quantization and Data Conversion")
-- **Text:** "**Quantization** discretises amplitude."
-- **Problem:** The series uses British -ise forms (characterise, discretises, normalised, realisation, optimised). "Quantization" (with "quantizer" and "quantizes") is the only -ize family. It is consistent in all seven entries and the series file, and it is the spelling of IEEE Std 1241 and of most British technical writing on converters.
-- **Recommended correction:** Leave as is, as a deliberate term-of-art exception. Switching would change the title of entry 4 and the series objectives for no gain in clarity.
+### S7. Closing paragraph attributes the uncertainty objective to entry 7 only
+- **Where:** `calibration-and-multisensor-fusion.mdx:535`.
+- **Text:** "This entry has stated and combined uncertainties, calibrated sensors and fused them."
+- **Recommended correction:** "Building on the uncertainty budget of the first entry, this entry has propagated and combined uncertainties, calibrated sensors and fused them."
 
 ## Concept introduction map
 
-| Concept | First used (path:line) | Introduced where (path:line, or "not introduced") | Assessment |
+| Concept | First used (path:line) | Introduced where | Assessment |
 |---|---|---|---|
-| Measurand, measurement, unit, SI | entry 1:26 | entry 1:26–28 | Good. |
-| Measurement uncertainty | entry 1:32 | entry 1:32, 162 | Introduced; wording imprecise (F17). |
-| VIM, GUM | entry 1:34 | entry 1:34 | Good. |
-| Self-generating / modulating sensor | entry 1:67 | entry 1:65–70 | Good; aliases conflict with Fraden (F3). |
-| Static transfer function | entry 1:78 | entry 1:78 | Good; meaning later changed in entry 7 (F10). |
-| Time constant, natural frequency, damping ratio | entry 1:131, 137 | entry 1:127–137, with a link to the control series | Adequate. |
-| Standard, combined and expanded uncertainty, Type A/B | entry 1:162 | entry 1:162–175 | Good. |
-| Energy domain | entry 2:20 | entry 2:20 | Good. |
-| Gauge factor, strain | entry 2:67 | entry 2:67–73 | Good. |
-| ADC | entry 3:18 | entry 3:18; entry 4:17 | Good. |
-| Decibel | entry 3:28 | entry 3:28 | Good. |
-| Operational amplifier, virtual ground | entry 3:104 | entry 3:104–121 | Good. |
-| CMRR, common mode | entry 3:138 | entry 3:136–145 | Good. |
-| Sampling, aliasing, Nyquist frequency | entry 4:19 | entry 4:19–42 | Good. |
-| LSB, quantization step | entry 4:81 | entry 4:81–84 | Good. |
-| SINAD, ENOB | entry 4:138 | entry 4:138 | Good. |
-| Noise spectral density, white noise, ENBW | entry 5:36 | entry 5:36–56 | Good. |
-| Allan deviation | entry 5:126 | entry 5:126 | Briefly, adequate. |
-| MEMS, smart sensor | entry 2:192 (as "microfabricated"); entry 6:21 | entry 6:21–22 (and series body) | Good. |
-| Coriolis effect | entry 6:94 | entry 6:94 | Good. |
-| Covariance, correlation coefficient | entry 7:60 | entry 7:60 | Good. |
-| Least squares, design matrix | entry 7:79, 111 | entry 7:79–111 | Good. |
-| Student t distribution | entry 7:182 | not introduced (named only) | Acceptable at this level: used only for a coverage factor. |
-| Chi-square distribution | entry 7:296 | not introduced in this series | F11. |
-| Laplace variable, s-domain transfer function, final-value theorem | entry 7:357 | not introduced in this series or the linked articles | F10. |
-| Kalman filter | entry 7:268 | robotics entry `sensing-and-state-estimation` §4–5, linked | Good. |
-| Specific force | entry 7:216 | entry 7:216 | Good. |
+| Measurand, measurement, unit | entry 1:26 | entry 1:26 (bold definitions) | Good |
+| Uncertainty; Type A/B; expanded uncertainty | entry 1:32 | entry 1:32, 164–177 | Good |
+| Transfer function (static) | entry 1:80 | entry 1:80; dynamic sense distinguished at entry 7:357 | Good |
+| Second-order system, natural frequency, damping | entry 1:139 | entry 1:139, referring to the Foundations of Control Systems series (linked at 1:125) | Adequate |
+| Decibel | entry 1:145 ("3 dB, a factor of about 0.71") | entry 3:28 | Adequate: entry 1 gives the factor in words |
+| Analog-to-digital converter | entry 1:46 | entry 3:18, entry 4:17 | Good |
+| Excitation, ratiometric measurement | entry 1:68 | entry 1:68, entry 3:32–39 | Good |
+| Operational amplifier, virtual ground | entry 3:104 | entry 3:104–121 | Good |
+| Magnitude response, cut-off frequency | entry 3:213 | entry 3:213–219 | Good |
+| Sampling, aliasing, Nyquist frequency | entry 3:209 (mention) | entry 4:19–52 | Good |
+| RMS, Gaussian distribution | entry 1:177 (Gaussian), entry 4:111 (RMS) | entry 4:111 (RMS expanded); entry 5:30–32 | Adequate: elementary statistics is a stated prerequisite |
+| Noise spectral density, white noise, ENBW | entry 3:208 (forward reference) | entry 5:36–56 | Good |
+| Allan deviation | entry 5:126 | entry 5:126 (one-line definition) | Adequate |
+| MEMS | overview:16, entry 5:213 | expanded at both; defined at entry 6:21 | Good |
+| Coriolis effect | entry 6:94 | entry 6:94 | Good |
+| I2C, SPI, FIFO | entry 6:115 (diagram), 149 | entry 6:149, linked to the Embedded series | Good |
+| Covariance, correlation coefficient | entry 7:60 | entry 7:60 | Good |
+| Laplace transform, s-domain transfer function | entry 7:357 | entry 7:357 | Good (previous review's correction holds) |
+| Chi-square distribution | entry 7:296 | entry 7:296 | Good |
+| Kalman filter | entry 7:268 | robotics state-estimation entry, linked at 7:268 and 7:454 | Good |
+
+No concept is used before it is introduced or referred to.
 
 ## Versions, defaults and conventions
 
 | Assumption | Where it appears | Stated in the text? | Assessment |
 |---|---|---|---|
-| SI as revised in 2019 | entry 1:28 | Yes | Correct. |
-| IEC 60751 coefficients, range 0–850 °C | entry 1:78–84, 241 | Yes (2008 and 2022 editions) | Correct. |
-| VIM JCGM 200:2012, GUM JCGM 100:2008 | entry 1:34; entry 7:20, 26 | Yes | Correct. |
-| Decibels as voltage ratios ($20\log_{10}$) | entry 3:28 | Yes | Good. |
-| Ideal op-amp model, then real departures | entry 3:106 | Yes | Good. |
-| Unipolar converter, 0 to $V_\text{ref}$ | entry 4:24 | Yes | Good. |
-| $q = \text{FSR}/2^N$ and the mid-tread (rounding) convention | entry 4:84–95 | Yes | Good; SAR parenthetical wrong (F2). |
-| IEEE Std 1241-2010 | entry 4:125, 225 | Yes | Real edition; whether a later revision supersedes it was not checked. |
-| Noise temperature 300 K; unqualified noise is RMS | entry 5:24 | Yes | Good. |
-| Peak-to-peak as 6.6σ (99.9 %) | entry 5:32 | Yes | Good. |
-| Mains 50 or 60 Hz | entry 3:206; entry 5:133 | Yes | Good. |
-| g as acceleration of gravity, not gram | entry 6:90 | Yes | Good. |
-| Python 3.13, NumPy 2.5 | entry 7:20 | Yes | Verified: Python 3.13.16 and NumPy 2.5.3 reproduce every output. |
-| Degrees in text, radians in code | entry 7:20 | Yes | Good. |
-| Tilt sign and axis convention | entry 7:345 | Partly | Disagrees with right-handed gyroscope sign (F9). |
-| $g_n = 9.80665$ m/s² against local gravity | entry 7:222 | Yes | Good. |
-| ISO/IEC 17025:2017, ISO/TS 28037:2010, ILAC-G24:2007 / OIML D 10:2007 | entry 7:52, 202, 236 | Yes | Titles correct; see verification log. |
+| SI units; VIM/GUM vocabulary | all entries | overview:20; entry 1:20, 34 | Stated (see S6 on "throughout") |
+| Temperature for noise: 300 K | entries 5, 6 | overview:20; entry 5:24 | Stated (see S3 on wording) |
+| RMS for unqualified noise | entry 5 | entry 5:24 | Stated |
+| Converter unipolar, 0 to $V_\text{ref}$, $q = \text{FSR}/2^N$, mid-tread rounding | entry 4 | entry 4:24, 87, 95 | Stated |
+| Python 3.13, NumPy 2.5 | entry 7 code | entry 7:20; overview says "Python 3 with NumPy" | Stated |
+| Angles: degrees in prose, radians in code | entry 7 | entry 7:20 | Stated |
+| Tilt sign convention (rotation about −y; gyro y reading negated) | entry 7 §7.1 | entry 7:345 | Stated |
+| Tensile strain positive | entry 3 §2.2 | entry 3:86 | Stated |
+| Mains 50 or 60 Hz | entries 3, 4, 5 | entry 3:206, entry 5:133 | Stated |
+| Standard gravity $g_n$ vs local g | entry 7 §4.2 | entry 7:222 | Stated |
+| Edition of IEC 60751 coefficients | entry 1 §3.1 | entry 1:86, ref 243 | Stated (F4 on the parenthetical) |
+| Callendar–Van Dusen range 0–850 °C (quadratic form) | entry 1:80 | yes | Stated |
+
+## Series design
+
+**Purpose, audience and scope.** The rewritten overview states the reader (basic circuit analysis, calculus, elementary statistics), what the series follows (a measurand to a trustworthy number) and the objectives. Entries also rely on basic linear algebra (entry 7) and complex frequency (entry 3 §6, entry 7 §7.2). Linear algebra is in the site-wide default reader of standards 2.2, and entry 7 introduces the Laplace domain where it uses it, so no finding. Scope limits are implicit in the chain; the "output" stage of entry 1's chain is not treated by any entry. Entry 1 already words this neutrally ("Later entries take up these stages in turn"), as the earlier review noted.
+
+**Sequence and rationale.** The order is the order of the measurement chain, and the overview now says so. Entry 1 supplies the vocabulary, entries 2–5 follow the signal stage by stage, entry 6 shows the integrated chain and entry 7 closes with calibration and fusion. This is the right order for the stated reader. Entry 7 is long (about 5,800 words of prose) because it carries two outcomes, but each section serves objective 5. Splitting it is not needed.
+
+**Prerequisites and dependencies.** Every backward dependency is explicit and linked: entry 3 reuses entry 2's strain gauge, photodiode and quartz numbers; entry 4 reuses entry 3's channel; entry 5 reuses entries 3 and 4; entry 7 reuses entries 1, 3, 5 and 6. Outward links depend on the Foundations of Control Systems series (entry 1 §4) and on the robotics state-estimation entry, whose fragments `#4-…`, `#5-the-kalman-filter`, `#71-…` and `#8-…` were checked against the current working tree of that file. Nothing depends on a later entry.
+
+**Notation and depth.** Notation is consistent apart from T1, the figure label. $s$ has several meanings, each disambiguated where used (entry 7:357). $f_c$ means only the filter cut-off once T1 is fixed. $q$ is used for both the quantization step (entry 4) and the elementary charge (entries 2, 5, 6), but each use is defined in its own entry and they never meet in one formula. Depth is comparable: every entry has worked numbers and a summary table, and only entry 7 has code, which the overview states.
+
+**Overview completeness.** The page now has the parts that standards 6.5 requires: sequence rationale, how entries connect, the two running examples and the shared conventions. Every statement about the running examples was checked against the entries: PT100 in entry 1 §3, entry 3 §1 and §1.1, and entry 7 §3.4; load cell in entry 3 §7, entry 4 §3.4, entry 5 §6.1 and entry 7 §3.2. The page has three wording defects (S1, S3, S6) and makes no promise that the entries do not keep.
 
 ## Series-level notes
 
-- **Cross-reference map.** Every "previous entry", "next entry", "first entry", "the signal-conditioning entry", "the noise entry" and similar reference was checked against its target, and all are true. Two exceptions are covered by findings: F5 ("section of this series") and F7 (a planned series in the present tense). The promises in entries 1–6 that a later entry would treat a topic are all fulfilled:
-  - entry 1 promises quantization and calibration in practice;
-  - entry 3 promises anti-aliasing and the noise bandwidth;
-  - entry 4 promises dither;
-  - entry 6 promises fusion and time alignment.
-  Every internal link resolves (`check:links`) and every fragment exists.
-- **Robotics references.** The robotics-series claims in entries 6 and 7 hold against `sensing-and-state-estimation.mdx`:
-  - the Kalman update in §4 matches inverse-variance weighting;
-  - §7.1 outlines the complementary filter;
-  - §8 covers late measurements and chi-square gating.
-- **Terminology.** "Self-generating/modulating", "excitation", "ratiometric", "quarter/half/full bridge", "LSB", "ENBW" and "noise-free resolution" are used consistently. The letter $s$ has several meanings, each defined where it is used:
-  - entry 1: sample standard deviation;
-  - entry 6 §2: a scale factor;
-  - entry 6 §4.2: $s(T)$, a sensitivity;
-  - entry 7 §3: residual standard deviation;
-  - entry 7 §7: the Laplace variable, explicitly disambiguated at line 357.
-  Entry 7 §4.2 deliberately writes $s_f$ for the scale factor to avoid a clash. This is acceptable.
-- **Spelling.** British -ise and "behaviour", "centre", "metre", "fibre", "modelled" and "aluminium" are used throughout. "Analog" is American, but it is used consistently (29 occurrences, no "analogue"). The only -ize family is "quantization" (F19).
-- **VIM paraphrases.** These were checked against JCGM 200:2012 as recalled:
-  - calibration (2.39, two steps) and adjustment (3.11, with its note on recalibration);
-  - verification (2.44) and calibration hierarchy (2.40, uncertainty increasing along it);
-  - metrological traceability (2.41), resolution (4.14), drift (4.21) and influence quantity (2.52);
-  - repeatability, precision and trueness (2.21, 2.15, 2.14).
+- **Cross-reference map.**
+  - Every "previous", "next", "first", "fourth" and "last" entry reference resolves to the right article.
+  - Section references were checked against the target headings: entry 5 → entry 3 §6, entry 2 §7.1; entry 6 → entry 2 §2.2, entry 3 §2.2, entry 5 §2.1, entry 4 §5.2; entry 7 → entry 1 §3.4, §5, §5.3, §6, entry 3 §7, entry 5 §4, §6.1, entry 6 §3.2, §4.2, §4.3, entry 4 §5.2.
+  - Promises are fulfilled: quantization in entry 4, calibration in practice in entry 7, anti-aliasing in entry 4, noise bandwidth in entry 5 §1.3, dither in entry 5 §4, fusion and time alignment in entry 7.
+  - Entry 5's quotation of entry 1 ("but noise usually limits it first") matches entry 1:110 exactly.
+- **Consistency of shared values.** The values that recur across entries agree everywhere:
 
-  All are faithful except threshold/dead band (F4) and the description of uncertainty (F17). "Accuracy combines both" (entry 1:158) is the ISO 5725-1 reading rather than VIM 2.13's wording, but it is consistent with the VIM's definition and was left.
-- **Structure.** Every entry has an introduction, numbered sections, a summary table, a forward pointer and a reference list. Entry 7 alone had an exercise section (F12) and a full recap (F13).
-- **Illustrative data.** The load-cell calibration table is unlabelled (F1). The other numerical examples in entry 7 are visibly hypothetical ("Suppose", "If the z axis reads", simulated data with stated parameters):
-  - the thermometer readings of §6.3;
-  - the six-position readings of §4.2;
-  - the interval model of §5.
-  The resolution adds an explicit "illustrative" label to §6.3 as well.
-- **Frontmatter.** All seven entries have category "Engineering", `publishedAt` 2026-10-13, `series: sensor-systems` and `seriesOrder` 1–7 with no gaps, and they share the tags "sensors" and "measurement".
+  | Value | Uses |
+  |---|---|
+  | PT100 slope 0.385 Ω/°C | entries 1, 3 |
+  | Self-heating 0.14 mW | entries 1, 3 |
+  | Strain-gauge numbers (K = 2, 1000 µε, 350 Ω, 0.7 Ω) | entries 2, 3, 5 |
+  | Photodiode 0.55 µA | entries 2, 3, 5 |
+  | Quartz 23 pC → 0.23 V | entries 2, 3 |
+  | Type K 41 µV/K | entries 2, 3 |
+  | Load cell 6.6 mV full scale, 0.9 of range | entries 3, 4, 5 |
+  | Noise 0.11 g RMS | entries 5, 7 |
+  | Thermometer budget 0.016 / 0.050 / 0.003 °C | entries 1, 7 |
+- **Structure and tone.** All seven entries now have numbered sentence-case sections, a question/answer Summary table with a forward transition (entry 7 closes against the objectives), and `### References` in house format. Descriptions follow the noun-clause pattern ("What …", "How …") used across the site. This is not reported, because it is a site-wide pattern.
+- **Vietnamese translations.** Not reviewed, per the skill. Note for resolution: the wave-1 English changes have not yet reached `src/content/blog/vi/` or `src/content/series/vi/sensor-systems.md` (last changed in f1ca0e4, before wave 1). For example, the Vietnamese entry 5 still writes the 1/f corner as $f_c$ in nine places.
 
 ## Verification log
 
-- `npm run build:local`: passed (type check, build, Mermaid and KaTeX rendering, Pagefind; localhost-URL warning only, as expected for `build:local`).
-- `npm run check:links`: passed ("Checked 198 pages and 5524 internal references in dist. All internal links resolve.").
-- dist checks (`dist/blog/<slug>.html` for the seven entries):
-  - Mermaid `min-width`: entry 1: 142 px; entry 6: 437 px; entry 7: 142 px and 323 px. All are under 600 px.
-  - `katex-error`: 0 in every entry.
-  - No text glued to inline elements. The only pattern hits are KaTeX-internal `lo<span>g` spans.
-- Recomputed (Python 3.13.16, NumPy 2.5.3), all correct unless a finding says otherwise:
-  - **Entry 1:**
-    - PT100: $R(100) = 138.51$ Ω; local slopes 0.391 and 0.379 Ω/°C; end-point nonlinearity 0.1444 Ω = 0.375 °C.
-    - First-order response: 63.2 / 95.0 / 99.3 %, and the 1 % settling time $4.6\tau = 18.4$ s.
-    - Uncertainty budget: 0.0158, 0.050 and 0.0029 °C → $u_c = 0.0525$, $U = 0.105 \to 0.11$ °C.
-    - Two-point gain 1.01317, giving 50.25 °C.
-    - Self-heating 0.1385 mW.
-  - **Entry 2:**
-    - NTC: 33.62 / 3.588 / 0.698 kΩ; −4.44 %/K.
-    - Capacitor: 8.854 pF, +0.089 pF.
-    - Piezoelectric leakage: $e^{-10} = 0.0045$ %.
-    - Responsivity 0.548 A/W.
-    - Nernst slope 59.16 and 61.54 mV.
-  - **Entry 3:**
-    - Quarter bridge 2.4975 mV.
-    - Difference-amplifier CMRR 54.0 dB.
-    - $R_G = 50.05$ Ω.
-    - Transimpedance bandwidth 159 kHz; charge-amplifier cut-off 0.159 Hz; RC cut-off 9.95 Hz.
-    - Butterworth at 50 Hz: 14.15 / 27.97 / 55.92 dB.
-    - Butterworth at 3 Hz: 0.958 / 0.996 / 0.99997.
-  - **Entry 4:**
-    - Anti-aliasing attenuation 76.34 dB against 72.25 dB for 12 bits.
-    - $q$ = 0.806 mV / 50.4 µV / 0.197 µV; $u_q = 0.233$ mV.
-    - SQNR 74.01 / 98.09 dB; ENOB 13.99.
-    - Jitter limits 38.9 ns and 0.121 ns.
-    - Load cell: 3686 and 58 982 codes; 2.71 g and 0.170 g per code.
-    - SAR DAC voltages 1.650 / 2.475 / 2.0625 / 1.856 V. The input is 9.70 LSB, so rounding gives code 10 (F2).
-  - **Entry 5:**
-    - 99.90 % within ±3.29σ; one in 741 beyond 3σ.
-    - Thermal noise 4.07 and 2.41 nV/√Hz; kT/C noise 64.4 µV.
-    - Photodiode: shot noise 0.420 pA/√Hz, resistor noise 0.129 pA/√Hz, total 0.220 nA; SNR 2505 (68.0 dB).
-    - Amplifier noise: 1/f part 67.9 nV, white part 31.5 nV, total 74.8 nV.
-    - Total density 10.29 nV/√Hz.
-    - Load-cell budget: bridge 7.58 nV; total 75.2 nV = 0.114 g; 87 800 counts = 16.42 bits = 98.9 dB.
-    - Noise-free resolution 13 300 (F8).
-    - Capacitive coupling 72.3 nA, 3.18 GΩ, 25.3 µV. Magnetic coupling 3.14 µV.
-    - Dither: exact expected-code bias max 0.093 q at σ = 0.25 q and 0.0023 q at σ = 0.5 q; 0.577 q / 16 = q/27.7; 3.9 readings per second.
-    - ENBW by numerical integration: 1.571 / 1.111 / 1.026.
-  - **Entry 6:**
-    - Accelerometer: 9.94 nm per g, 0.994 fF per g.
-    - Thermomechanical noise $7.21 \times 10^{-4}$ m/s²/√Hz = 73.5 µg/√Hz; 0.735 mg in 100 Hz; 7.3 pm; 0.73 aF.
-    - Gyroscope: drive velocity 1.257 m/s, Coriolis acceleration 0.0439 m/s² = 4.47 mg.
-    - $\Delta V_\text{BE}$ 53.76 mV and 0.179 mV/K.
-  - **Entry 7:**
-    - Reference-ratio penalty 3.08 / 11.8 / 0.50 %.
-    - All four listings were run as published. The outputs are identical to the quoted text, digit for digit:
-      - least-squares fit and use of the curve;
-      - fusion and consistency;
-      - complementary-filter simulation;
-      - time alignment.
-    - Load cell: offset 10.56 g; sensitivity −0.066 %; $s/b = 0.132$ g; curve minimum $s/(b\sqrt6) = 0.054$ g; covariance ratio 1.27.
-    - Student t: $t_{0.95}(4) = 2.776$ by numerical integration of the t density; $P(|t_4| < 2) = 0.884$; $U = 0.142 \times 2.78 = 0.39$ g.
-    - PT100 least-squares residuals −0.077 / +0.015 / +0.062 Ω; slope 0.385055; the quadratic fit is exact.
-    - Six-position test: offset 0.0745 m/s² = 7.6 mg; scale factor 1.00121; gravity error 0.27 %; tilt error $\phi^2/2$ at 1° = 0.015 %.
-    - Gyroscope: 0.0032 °/s; Earth rate 15.04 °/h = 0.00418 °/s.
-    - Calibration interval 2.67 years.
-    - Shared-reference mean 0.0513 °C; independence figure 0.037 °C.
-    - Chi-square(2) quantiles 5.991 and 9.210.
-    - Consistency example: $z_{12} = -0.707$; shift 3.2u.
-    - Exercises: 10.252 m, 0.24 m, 0.64, 1.4; 1.0039; 0.990; 0.054 / 0.058 / 0.041 °C.
-    - Tilt rate 25.13 °/s; 0.25°; clock drift 0.18 s per hour.
-- Steady-state Kalman filter versus complementary filter:
-  - **Model.** State θ; prediction $\theta^-_k = \hat\theta_{k-1} + \omega_k\Delta t$ with variance $P^-_k = P_{k-1} + Q$, where $Q$ is the gyroscope noise integrated over $\Delta t$. Measurement $z_k = \theta_{a,k}$ with variance $R$.
-  - **Update.** $\hat\theta_k = \theta^-_k + K_k(z_k - \theta^-_k) = (1 - K_k)(\hat\theta_{k-1} + \omega_k\Delta t) + K_k\,\theta_{a,k}$.
-  - **Steady state.** With $Q$ and $R$ constant, the Riccati recursion $P^- \leftarrow P^- R/(P^- + R) + Q$ converges to $P^-_\infty = \tfrac12\bigl(Q + \sqrt{Q^2 + 4QR}\bigr)$, so $K_\infty = P^-_\infty/(P^-_\infty + R)$ is constant. The update is then exactly the complementary filter with $\alpha = 1 - K_\infty$, and for $Q \ll R$, $K_\infty \approx \sqrt{Q/R}$ and $\tau \approx \Delta t\sqrt{R/Q}$.
-  - **Numerical check.** The recursion converges to the closed form, giving $K = 0.001000$ and $0.000250$ for two noise settings. Claim confirmed.
-- References checked:
-  - Fraden, 5th ed., Springer 2016.
-  - Regtien and Dertien, 2nd ed., Elsevier 2018.
-  - Bentley, 4th ed., Pearson 2005.
-  - Webster and Eren, 2nd ed., CRC 2014.
-  - Pallàs-Areny and Webster, 2nd ed., Wiley 2001.
-  - Horowitz and Hill, 3rd ed., CUP 2015.
-  - Franco, 4th ed., McGraw-Hill 2015.
-  - Oppenheim and Schafer, 3rd ed., Pearson 2010.
-  - Kester, Newnes 2005.
-  - IEEE Std 1241-2010 (title correct).
-  - Motchenbacher and Connelly, Wiley 1993.
-  - Ott, Wiley 2009.
-  - Senturia, Kluwer 2001.
-  - Kaajakari, Small Gear 2009.
-  - Gabrielson, IEEE Trans. Electron Devices 40(5):903–909, 1993.
-  - Taylor, 2nd ed., University Science Books 1997.
-  - Thrun, Burgard and Fox, MIT Press 2005.
-  - JCGM 200:2012 and JCGM 100:2008 (titles correct).
-  - ISO/IEC 17025:2017 (title correct).
-  - ISO/TS 28037:2010, *Determination and use of straight-line calibration functions*. Its scope covers straight-line calibration with uncertainty in the response only, in both variables, and with correlation, as the text says.
-  - ILAC-G24:2007 / OIML D 10:2007, *Guidelines for the determination of calibration intervals of measuring instruments*. It describes the staircase (automatic adjustment) method and the control-chart method, among others, as the text says.
-  - $E_n = (x_1 - x_2)/\sqrt{U_1^2 + U_2^2}$ with $|E_n| \le 1$ satisfactory is the standard proficiency-testing criterion (ISO/IEC 17043, ISO 13528).
-  - GUM Annex G gives the t-distribution coverage factor ($t_{95}(4) = 2.78$).
+- **Build:** `npm run build` was not run, per the brief, because other reviewers build in parallel. The current full build in `/tmp/claude-0/b2` (SITE_URL=https://acrr.asia, built after wave 1) was inspected; it contains the wave-1 text, for example "noise corner frequency" in entry 5, the new closing of entry 7 and the new overview.
+  - KaTeX: `grep -c katex-error` gives 0 for all seven article pages.
+  - Mermaid min-width: entry 1 142px, entry 6 437px, entry 7 142px and 323px. All are below 600px.
+  - Glued inline text: grep for a letter or punctuation mark immediately before `<strong>`, `<code>`, `<a ` or `<span class="badge` finds 0 cases in the seven pages and the series page.
+- **Link check:** `node scripts/check-links.mjs /tmp/claude-0/b2`: "Checked 314 pages and 9667 internal references … All internal links resolve."
+- **Lint:** `npm run -s eos -- lint sensor-systems`: 0 errors, 0 warnings, 44 suggestions. The suggestions are sentence length, acronym-expansion false positives (PT100, CMRR, FIFO, RMS, FSR, JCGM, ILAC/OIML expanded in the same sentence, TS, CRC, MIT) and three kept "very". None is re-reported.
+- **Syntax:** `npm run -s eos -- syntax` on the series file and the seven articles: "All files compile."
+- **Code:** all five Python blocks of entry 7 were extracted and run with Python 3.13.16 and NumPy 2.5.3 (`python3 -I`). Listings 1 and 2 were run together, as the text continues the script. All printed lines are identical to the text: calibration fit; curve inversion (m0 = 4.9927 kg, 0.054 / 0.142 / 0.181 g); fusion and chi-square (weights 0.581/0.163/0.255, 20.123 °C, χ² 1.61 and 19.3, z = −3.51/−0.44/+4.34); complementary-filter simulation (all nine lines); cross-correlation delay (30 ms, 0.536, 0.070).
+- **Recomputed (python3 -I).** All values agree with the text.
+  - Entry 1: R(100) = 138.506 Ω; slopes 0.3908 and 0.3793 Ω/°C; endpoint deviation 0.144 Ω at 50 °C, which is 0.375 °C; 1 − e^{−1,−3,−5} = 63.2/95.0/99.3%; settling within 1% after 4.6τ = 18.4 s ("about 20 s"); u_c = 0.0525 °C, U = 0.105 → 0.11 °C; g = 1.01317, corrected reading 50.25 °C; I²R = 0.1385 mW.
+  - Entry 2: NTC 33.62 / 3.588 / 0.698 kΩ; −β/T² = −4.44%/K (11× platinum); 8.854 pF, +0.089 pF for 1 µm; 0.7 Ω and 0.2%; 23 pC → 0.23 V; e^{−10} = 0.0045%; responsivity 0.548 A/W; Nernst slope 59.16 and 61.54 mV.
+  - Entry 3:
+    - Quarter bridge 2.4975 mV, relative error x/2 = 0.1%; half and full bridge outputs re-derived from the bridge equation; balance condition R1R4 = R2R3 re-derived.
+    - Op-amp numbers: 40% offset error; GBW 10 kHz; CMRR 250 µV / 25 µV; 0.1% resistors → (1+G)/(4ε) = 500 = 54.0 dB.
+    - Amplifier and converter interface: R_G = 50.05 Ω; ±2.5 mV × 600 around 1.65 V → 0.15–3.15 V; transimpedance cut-off 159 kHz; charge amplifier 1 s and 0.159 Hz.
+    - Filters: RC cut-off 9.947 Hz; Butterworth at 50 Hz: 0.196/0.0400/0.0016, i.e. 14.15/27.97/55.92 dB; at 3 Hz: 0.958/0.996/0.99997.
+    - Load-cell channel: 6.6 mV × 450 = 2.97 V; ratiometric fraction 0.9.
+  - Entry 4: 76.34 dB vs 72.25 dB; q = 0.806 mV / 50.35 µV / 0.197 µV; u_q = 0.233 mV; SQNR 74.0 / 98.1 dB; ENOB 13.99; jitter limits 38.9 ns and 0.121 ns; 3686 / 58 982 codes → 2.71 / 0.170 g; SAR trace: truncating code 9, rounding (thresholds kq − q/2) code 10.
+  - Entry 5:
+    - Gaussian bounds: P(|Z| < 3.3) = 99.90%; P(Z > 3) = 1/741.
+    - Combination and filters: a source one third of the largest adds 5.4%; ENBW π/2, 1.111, 1.026.
+    - Fundamental sources: thermal 4.07 / 2.41 nV/√Hz; kT/C 64.4 µV; shot 0.420 pA/√Hz, resistor 0.129 pA/√Hz, total 0.220 nA in 251 kHz, SNR 2499 (68.0 dB).
+    - 1/f example: 67.86 + 31.46 → 74.8 nV.
+    - Amplifier noise: 10.29 nV/√Hz; 1 µV/√Hz for 10 MΩ.
+    - Dither: the bias of Gaussian dither was computed exactly (sum over codes): maximum 0.093 q for σ = 0.25 q and 0.0023 q for σ = 0.5 q, which confirms "about 0.09 q" and "below 0.01 q". Per-sample error 0.577 q, /16 → q/27.7.
+    - Interference: 72.3 nA, 3.18 GΩ, 72 mV, 25.3 µV; 3.14 µV peak, 2.2 µV RMS.
+    - Noise budget: total 75.2 nV → 0.114 g; 0.75 g peak-to-peak; 87 785 = 16.42 bits = 98.9 dB; noise-free 13 300 = 13.70 bits.
+  - Entry 6: x = 9.94 nm/g; ΔC = 0.994 fF/g; a_n = 7.21 × 10⁻⁴ m/s²/√Hz = 73.6 µg/√Hz, 0.736 mg in 100 Hz, 7.3 pm, 0.73 aF; Coriolis 1.257 m/s → 0.0439 m/s² = 4.47 mg; ΔV_BE 53.8 mV and 0.179 mV/K; scaling k ∝ s, ω₀ ∝ 1/s re-derived; differential-capacitor cubic residual x²/d² re-derived.
+  - Entry 7:
+    - Uncertainty: reference-ratio penalties 3.08 / 11.8 / 0.50%; t(4 dof, 95%) = 2.78 → U = 0.39 g.
+    - Calibration fit: offset 10.56 g; sensitivity −0.066%; s/b = 0.132 g; PT100 least-squares residuals −0.077, +0.015, +0.062, +0.062, +0.015, −0.077 Ω (0.200 °C).
+    - Six-position test: 0.0745 m/s² = 7.60 mg; scale factor 1.00121; gravity error 0.26–0.27%; 1 − cos 1° = 0.015%.
+    - Gyroscope bias: 0.1/√1000 = 0.0032 °/s; Earth rotation 15.04 °/h = 0.0042 °/s.
+    - Calibration interval and correlated sensors: 2.67 years; correlated mean 0.0513 °C vs 0.0375 °C.
+    - Complementary filter: discrete form re-derived from τθ̂′ = τω + θ_a − θ̂ by backward difference (α = τ/(τ+Δt) = 0.990); final value b_ω τ re-derived; steady-state angle-only Kalman update re-derived as α = 1 − K.
+    - Time alignment: 25.1 °/s → 0.25° per 10 ms; 50 ppm → 0.18 s per hour.
+    - T2: 1/f noise of one-second averages over a 10-minute span is 75.5 nV (see T2).
+- **Fact-check:**
 
-  All these are real and correctly cited as far as can be checked offline.
-- Not verified:
-  - The exact wording of the VIM and of the ILAC/OIML and ISO/TS documents. These were checked from knowledge of the documents, not against copies, because there is no network access to the standards.
-  - Whether ILAC-G24 / OIML D 10 and IEEE Std 1241 have later editions that supersede the cited ones. The cited editions are real; the articles do not claim that they are current.
-  - Material constants quoted as typical: the quartz coefficient of 2.3 pC/N, silicon's Young's modulus range, the type K Seebeck coefficient and the piezoresistive gauge factor of about 100. These were checked only for plausibility against standard values.
+  | Claim | Location | Status | Source |
+  |---|---|---|---|
+  | Gabrielson 1993, IEEE Trans. Electron Devices 40(5):903–909 | entry 6 ref | Verified | Penn State research portal record (May 1993) |
+  | IEEE 1241-2010 dates; superseded by 1241-2023 | entry 4 ref | Verified; superseded (F3) | standards.ieee.org pages for 1241-2010 and 1241-2023 |
+  | IEC 60751:2022 title, edition 3.0, 2022-01-27 | entry 1 ref | Verified | IEC webstore publication 63753 |
+  | 2008 and 2022 coefficients identical | entry 1 ref | Not verified (F4) | IEC 60751:2022 preview (α only) |
+  | JCGM 100:2008, JCGM 200:2012 titles; both current | entries 1, 7 refs | Verified | BIPM JCGM publications page. JCGM uses a hyphen in the titles; the en dash follows the house example in standards 7.3. |
+  | ISO/IEC 17025:2017 current | entry 7 ref | Verified | iso.org/standard/66912 (confirmed 2023) |
+  | ISO/TS 28037:2010 withdrawn | entry 7 | Corrected (F1) | iso.org/standard/44473 and 84405 |
+  | ILAC-G24/OIML D 10 edition; staircase and control-chart methods | entry 7 | Superseded (F2); methods verified | OIML D 10:2022 PDF |
+  | Johnson–Nyquist noise, 1928 | entry 5:62 | Verified | Johnson, Phys. Rev. 32, 97 (1928), DOI 10.1103/PhysRev.32.97; Nyquist, Phys. Rev. 32, 110 (1928), DOI 10.1103/PhysRev.32.110 |
+  | Type K ≈ 41 µV/K; 100 K → 4.1 mV | entries 2, 3 | Verified | ITS-90 type K table (Minco): 4.096 mV at 100 °C; slope 40.5 µV/K at 20–30 °C |
+  | Quartz ≈ 2.3 pC/N; PZT one to two orders larger | entry 2:126 | Consistent | Wiley-VCH sample chapter (ISBN 3527351892), Table 1.1: α-quartz ~2 pC/N, PZT 200–400 pC/N |
+  | Silicon Young's modulus 130–190 GPa | entry 6:30 | Partly verified | Boyd and Uttamchandani, J. MEMS 21(1):243–249, 2012: 131–170 GPa in the (100) plane |
+  | Books: Bentley 4th ed. Pearson 2005; Regtien and Dertien 2nd ed. Elsevier 2018; Webster and Eren 2nd ed. CRC 2014; Pallàs-Areny and Webster 2nd ed. Wiley 2001; Franco 4th ed. McGraw-Hill 2015; Kester Newnes 2005; Motchenbacher and Connelly Wiley 1993; Ott Wiley 2009; Kaajakari Small Gear 2009; Senturia Kluwer 2001; Fraden 5th ed. Springer 2016; Taylor 2nd ed. University Science Books 1997 | refs | Existence and edition verified | Publisher and library catalogue listings found by search |
+  | Horowitz and Hill 3rd ed. CUP 2015; Oppenheim and Schafer 3rd ed. Pearson 2010; Thrun, Burgard and Fox, MIT Press 2005 | refs | Not looked up in this session | Standard editions |
+- **Not verified:**
+  - IEC 60751:2008 and :2022 giving identical A and B (F4). The 2022 standard is paywalled; only its α = 3.851 × 10⁻³ °C⁻¹ was seen, and it is consistent.
+  - Fraden's use of "active" for sensors that need excitation (entry 1:70). The book was not accessible here; this point was established by the previous review and was not re-verified.
+  - KOH (100)/(111) etch-rate ratio "of orders of magnitude" (entry 6:38). This is consistent with the commonly reported ratios of the order of 100:1 or more, but no primary source was fetched.
+  - The upper end (≈188 GPa, ⟨111⟩) of the silicon modulus range and the piezoresistive gauge factor "of the order of 100" (entry 6:30, 32). These typical values are uncited; no source was fetched.
+  - The bibliographic details of Horowitz and Hill, Oppenheim and Schafer, and Thrun et al. were not looked up online in this session.
+
+## Resolution
+
+- T1 (Should fix): fixed - `scripts/generate-diagrams.py:436-437, 451, 456` now use `f_nc` (comment and label `'corner ' + sub('f', 'nc')`); regenerated to a scratch directory, only `NoiseDensity.astro` differed, installed as `src/components/diagrams/NoiseDensity.astro:36` ("corner f_nc = 10 Hz"). The Vietnamese entry 5 uses the same component.
+- T2 (Should fix): fixed - `calibration-and-multisensor-fusion.mdx:145` takes the reviewer's wording, split into two sentences for length. Recomputed (python3 -I, entry-5 model): 1/f part over 1/600 to 0.5 Hz = 75.5 nV, white part 7.1 nV, total 75.9 nV vs the 74.8 nV budget.
+- S1 (Should fix): fixed - "in a single package" at `sensor-systems.md:16`; "in one package" at `noise-interference-and-limits-of-detection.mdx:213` and `calibration-and-multisensor-fusion.mdx:535`; "in the same package" at `smart-sensors-and-mems.mdx:82` and also at line 77 ("needs its electronics in the same package"), which preceded it with "on the chip". The heading "4. The electronics on the chip" and the other "on-chip" uses in entry 6 were kept (they describe the ASIC's own circuitry, and the heading anchor is stable).
+- S2 (Should fix): fixed - `sensing-principles.mdx:166` now reads "the joint encoders described in the [first entry](/blog/what-is-a-robot) of the robotics series"; that article describes joint encoders (§ on proprioceptive sensors).
+- S3 (Should fix): fixed - `sensor-systems.md:20`: "Noise voltages and currents are root-mean-square values, computed at 300 K unless stated otherwise."
+- F1 (Should fix): fixed - `calibration-and-multisensor-fusion.mdx:202` and reference line 544 now cite ISO 28037:2026 (verified on iso.org/standard/84405: published 2026-07, stage 60.60, replaces the withdrawn ISO/TS 28037:2010, abstract covers non-negligible errors in both variables and general covariance).
+- F2 (Should fix): fixed - reference at `calibration-and-multisensor-fusion.mdx:542` is now ILAC-G24:2022 / OIML D 10:2022, *Guidelines for the determination of recalibration intervals of measuring equipment* (verified in oiml.org d010-e22.pdf: foreword says it supersedes the 2007 edition; methods 6.2 "staircase" and 6.3 "control chart" present). Body text unchanged.
+- F3 (Should fix): fixed - reference at `sampling-quantization-and-data-conversion.mdx:223` is now IEEE Std 1241-2023, same title, IEEE, 2023 (verified on standards.ieee.org/ieee/1241/6797: Active, published 2023-10-06). Body text names no edition and is unchanged.
+
+Optional findings applied: F4 (parenthetical removed from `measurement-systems-and-sensor-characteristics.mdx:243`; the identity of the 2008 coefficients could not be verified from an edition-specific primary source, so the claim was dropped rather than qualified), S4 (`signal-conditioning.mdx:80`, `$x/2 = 0.1\%$`), S5 (`measurement-systems-and-sensor-characteristics.mdx:104`, "relative to the endpoint line"), S6 (`sensor-systems.md:20`, units sentence as recommended, split from the VIM/GUM sentence), S7 (`calibration-and-multisensor-fusion.mdx:535`, as recommended). Optional findings not applied: none.
+
+Checks: no heading changed, so the fragments other pages link to (`#21-oversampling`, `#32-quantization-error-as-uncertainty`, `#52-evaluating-uncertainty`) and the links into `sensing-and-state-estimation` are unchanged. `eos lint` on the series file and seven articles: 0 errors, 0 warnings, 44 suggestions; `eos syntax`: all files compile. No code output changed. No build was run (per brief). Vietnamese: no copied field changed; the meaning changes in the overview (S1, S3, S6) and entries 5 and 6 (S1) are left for the translation follow-up, together with the nine $f_c$ for the 1/f corner in the Vietnamese entry 5.
+
+Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15. Independent of the author and of the reviewer. Checked against the current text at 3dd5a22 and the build in `/tmp/claude-0/b9`.
+
+- T1: confirmed. `scripts/generate-diagrams.py` uses `f_nc` in the comment and label; regenerating all diagrams to a scratch directory (`python3 -I`) reproduces all 15 committed components byte for byte, and the built entry-5 page (`blog/noise-interference-and-limits-of-detection.html`, also `vi/`) renders "corner f<sub>nc</sub> = 10 Hz".
+- T2: confirmed. Line 145 carries the 1/f-aware wording. Recomputed (python3 -I, entry-5 model, 10-minute span): 1/f part 75.5 nV, white part 7.1 nV, total 75.9 nV, not below the 75 nV budget, so "not necessarily quieter" is correct. (The Resolution compares with 74.8 nV, the amplifier-only figure of §2.3; the full budget of §6.1 is 75.2 nV. The conclusion is unchanged.)
+- S1: confirmed. "in a single package" (overview), "in one package" (entries 5 and 7), "in the same package" (entry 6, lines 77 and 82). Keeping the heading "4. The electronics on the chip" is sound: the ASIC is a chip and the anchor is stable.
+- S2: confirmed. Link text now names the first entry; `what-is-a-robot` §3 describes joint encoders (line 115).
+- S3: confirmed. "Noise voltages and currents are root-mean-square values, computed at 300 K unless stated otherwise."
+- F1: confirmed in the text (line 202) and reference (line 544). Edition status not re-fetched by QA (no network); relies on the reviewer's and author's independent checks of iso.org.
+- F2: confirmed in the reference (line 542); body unchanged and still true per the reviewer's reading of the 2022 edition. Not re-fetched by QA (no network).
+- F3: confirmed in the reference (line 223); body names no edition. Not re-fetched by QA (no network).
+- Optional F4, S4, S5, S6, S7: applied as described; confirmed in the text.
+
+Checks: `eos lint sensor-systems` 0 errors, 0 warnings, 44 suggestions; `eos syntax` all files compile; `check-links /tmp/claude-0/b9` all internal links resolve (314 pages); `eos validate-site` 0 issues for the seven article pages and the series page; KaTeX errors 0 and glued inline text 0 on the seven pages; the five entry-7 listings re-run (Python 3.13.16, NumPy 2.5.3) with output identical to the text. No finding reopened.

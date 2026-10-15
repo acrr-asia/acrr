@@ -336,13 +336,40 @@ The review reads every article in full, so it takes several minutes per series. 
 
 The available review plugins in the Anthropic plugin directory were assessed for this task. The official **code-review** plugin reviews code changes in pull requests, not long-form technical prose. The community **Proofread** plugin is limited to conservative proofreading, so it does not check technical accuracy, cross-article consistency or objectives. Other directory entries either review code, depend on other model providers, or connect to external services. None covers a series-level technical and editorial review, and adding a third-party plugin would add an unpinned dependency to the build path. The workflow is therefore built from first-party Claude Code features (a project skill, a hook, and the official GitHub Action) plus one script in the style of the existing `scripts/`. It adds no npm dependency, and the review criteria live in the repository next to the content rules they enforce.
 
+## Editorial system
+
+Every published article, insight and series overview passes the same editorial process before it is published. The standards are in [`editorial/standards.md`](editorial/standards.md) (voice and language, structure, research integrity, site-wide consistency, publication readiness, the scoring rubric and the critical conditions that block publication). The process is run by the **editorial-os** Claude Code plugin in [`plugins/editorial-os/`](plugins/editorial-os/README.md).
+
+| Piece | Role |
+| --- | --- |
+| `editorial/standards.md` | The Editorial Standards Manual: the criteria every stage applies. Change it first when the house style changes. |
+| `editorial/eos.config.json`, `editorial/glossary.json` | The site's profile for the engine: content types, routes, language settings (American English, no serial comma, sentence-case headings), thresholds, rule severities, house terms and phrases. |
+| `plugins/editorial-os/` | Skills (`editorial`, `content-audit`, `editorial-review`, `series-editorial-review`, `style-guide`), role agents (developmental editor, copy editor, fact-checker, technical reviewer, QA editor), a hook, and the `eos` engine. |
+| `editorial/records/<type>/<slug>.json` | One review record per published item: stage results, rubric scores, findings, claims not verified, changes, and the content hash it was written for. |
+| `editorial/audit/` | The site audit: one report per item, per series, and the overall report. |
+| `editorial/tool-evaluation.md`, `editorial/testing-report.md` | Why these tools were chosen, and the evidence that the system and the site pass their checks. |
+
+Commands (`npm run eos -- <command>`; `npm run eos -- help` lists them all):
+
+```sh
+npm run eos -- status           # stage of every item: needs-review, review-stale, ready, ...
+npm run eos -- lint <file>      # house style, structure, links and cross-references
+npm run eos -- fix <file>       # mechanical spelling and terminology fixes, prose only
+npm run eos -- validate-site    # rendering and accessibility checks on dist/ (run after the build)
+npm run eos -- gate             # exit 1 unless every published item has a current, passing record
+```
+
+**How it is enforced.** In Claude Code the plugin is enabled by `.claude/settings.json` (the repository is its own plugin marketplace, `acrr`), and its hook shows lint findings after every edit of a content file. In CI, `publication-gate.yml` (pull requests) and `deploy.yml` (before deploying) run `eos lint --quiet`, `eos validate-site` and `eos gate` after the build, link check and series gate; any failure blocks the merge or the deployment. A review record is tied to the file's content hash, so editing a reviewed item sends it back to `review-stale` until it is reviewed again. `editorial-review.yml` adds an advisory AI review of changed articles on pull requests when the `ANTHROPIC_API_KEY` secret is set, and skips without failing when it is not.
+
+**Using it in another project.** In Claude Code: `/plugin marketplace add acrr-asia/acrr`, then `/plugin install editorial-os@acrr`, then `node <plugin-root>/scripts/eos.mjs init`. See the plugin's [README](plugins/editorial-os/README.md), [workflow](plugins/editorial-os/docs/workflow.md) and [maintenance](plugins/editorial-os/docs/maintenance.md) guides.
+
 ## Content rules
 
 These are acceptance criteria for this project, not suggestions:
 
 - Written in English first; Vietnamese pages are translations of English originals and follow `docs/translation-vi.md`. No other languages.
 - Never fabricate a founder biography, credentials, affiliations, publications, collaborators, contact details, statistics, readership or citation figures, research results, project counts, or external URLs. Missing data stays missing.
-- Sample content, if any is added, is labelled (`example: true`); unfinished content is `draft: true`; planned content is labelled "Planned" or "Coming soon".
+- Sample content, if any is added, is labeled (`example: true`); unfinished content is `draft: true`; planned content is labeled "Planned" or "Coming soon".
 - Research areas are interests, not active projects. Do not overstate ACRR's size, activity or achievements.
 - Any statistic shown on the site must be computed from real content (the home page counts, for example, are computed from the content collections).
 - Technical writing must be original and technically correct.

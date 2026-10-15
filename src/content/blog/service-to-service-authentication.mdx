@@ -1,6 +1,6 @@
 ---
 title: "Service-to-Service Authentication"
-description: "How services inside a system authenticate to each other and carry the end user's identity: why the network is not an identity, workload identity and its bootstrapping, short-lived credentials, mutual TLS between services, authorizing service calls, and propagating user identity across hops without creating confused deputies."
+description: "Learn how services authenticate to each other and carry a user's identity across calls, with workload identities, short-lived credentials and token exchange."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
@@ -13,27 +13,27 @@ series: identity-and-access-control
 seriesOrder: 7
 ---
 
-The earlier entries of this series followed a request from a user's browser or app to the first service that received it. In most real systems that is where the request's journey begins rather than ends. The first service calls an inventory service, which calls a pricing service, which publishes a message that a fulfilment worker consumes an hour later. Each of those hops is itself an access-control decision: *who is calling, and may they do this?*
+The earlier entries of this series, from the [first](/blog/token-based-authentication) to the [sixth](/blog/sender-constrained-tokens), followed a request from a user's browser or app to the first service that received it. In most real systems that is where the request's journey begins rather than ends. The first service calls an inventory service, which calls a pricing service, which publishes a message that a fulfillment worker consumes an hour later. Each of those hops is itself an access-control decision: *who is calling, and may they do this?*
 
-Inside a system, those questions have two parts. One concerns the **workload**: which piece of software is making the call. The other concerns the **user**, if any, on whose behalf the call is made. This final entry treats both. It begins with why network location is not an answer, then shows how workloads obtain identities, how they prove them to each other, how calls between them are authorized, and how the user's identity can travel through a chain of services without being forged or misused.
+Inside a system, those questions have two parts. One concerns the **workload**: which piece of software is making the call. The other concerns the **user**, if any, on whose behalf the call is made. This final entry treats both. It begins with why network location is not an answer and shows how workloads obtain identities and prove them to each other. It then turns to how calls between services are authorized, and how the user's identity can travel through a chain of services without being forged or misused.
 
-## 1. The Network Is Not an Identity
+## 1. The network is not an identity
 
 ### 1.1 The perimeter model and its failure
 
 The traditional design trusts the internal network. A firewall separates outside from inside; once a request is inside, services accept it because of where it came from. The model fails in three ways that compound:
 
-- **One compromise reaches everything.** An attacker who gains a foothold in any internal machine (a vulnerable dependency, a stolen laptop on the VPN, a misconfigured debug endpoint) can call every internal service as if it were legitimate.
+- **One compromise reaches everything.** An attacker who gains a foothold in any internal machine (a vulnerable dependency, a stolen laptop on the virtual private network (VPN), a misconfigured debug endpoint) can call every internal service as if it were legitimate.
 - **Addresses are not identities.** In container platforms, addresses are reused within minutes; in shared networks, many workloads share an egress address; and address-based rules say nothing about *which* software is calling.
 - **There is no inside any more.** Services run across several clouds, regions and providers, and call each other over networks that no single party controls.
 
-NIST's *Zero Trust Architecture* (SP 800-207, 2020) summarises the alternative: no implicit trust is granted on the basis of network location, and every access is authenticated and authorized for the specific subject and resource. For calls between services, that means every workload needs an identity it can prove, and every service must check it.
+The *Zero Trust Architecture* of the United States National Institute of Standards and Technology (NIST Special Publication 800-207, 2020) summarizes the alternative: no implicit trust is granted on the basis of network location, and every access is authenticated and authorized for the specific subject and resource. For calls between services, that means every workload needs an identity it can prove, and every service must check it.
 
 ### 1.2 Applying the access-control model inside
 
-The reference monitor from the first entry applies unchanged. For an internal call, the subject is the calling workload (and possibly the user it acts for), the object is the called service's resource, and complete mediation requires that the called service check every call, not only those that arrive from outside.
+The reference monitor from the [first entry](/blog/token-based-authentication#11-subjects-objects-and-the-reference-monitor) applies unchanged. For an internal call, the subject is the calling workload (and possibly the user it acts for), the object is the called service's resource, and complete mediation requires that the called service check every call, not only those that arrive from outside.
 
-## 2. Workload Identity
+## 2. Workload identity
 
 ### 2.1 What a workload identity names
 
@@ -43,7 +43,7 @@ A workload identity names a piece of software by **what it is and where it is au
 spiffe://example.org/prod/payments/api
 ```
 
-This is the form defined by SPIFFE (the Secure Production Identity Framework for Everyone), an open specification hosted by the Cloud Native Computing Foundation: a URI whose authority is a **trust domain** (an administrative boundary with its own signing keys) and whose path identifies the workload within it. Whatever naming scheme is used, the properties that matter are that names are assigned by a central authority, are meaningful to the people writing policy, and do not change when the workload moves.
+This is the form defined by SPIFFE (the Secure Production Identity Framework for Everyone), an open specification hosted by the Cloud Native Computing Foundation. A SPIFFE ID is a uniform resource identifier (URI) whose authority is a **trust domain**, an administrative boundary with its own signing keys, and whose path identifies the workload within it. Whatever naming scheme is used, the properties that matter are that names are assigned by a central authority, are meaningful to the people writing policy, and do not change when the workload moves.
 
 ### 2.2 The bootstrapping problem
 
@@ -77,18 +77,18 @@ The platform's own evidence (the identity document a cloud provider signs for ea
 
 Whatever the bootstrap, the credentials a workload receives should be **short-lived**: hours rather than months, renewed automatically. The reasoning is the same as for access tokens in the first entry. A credential that expires soon is worth little to a thief, and revocation becomes a matter of declining to renew. Two credential forms are common:
 
-- an **X.509 certificate** and private key, carrying the identity in the certificate (SPIFFE calls this an X.509-SVID, with the SPIFFE ID in the subject alternative name), used for mutual TLS;
-- a **signed token** (a JWT-SVID in SPIFFE terms) carrying the identity as its subject and restricted to an audience, used where TLS cannot carry the identity end to end.
+- an **X.509 certificate** and private key, carrying the identity in the certificate (SPIFFE calls this an X.509-SVID, for SPIFFE Verifiable Identity Document, and carries the SPIFFE ID in the certificate's subject alternative name), used for mutual TLS;
+- a **signed token**, a JSON Web Token (JWT) called a JWT-SVID in SPIFFE terms, carrying the identity as its subject and restricted to an audience, used where TLS cannot carry the identity end to end.
 
 ### 2.4 Federation with external authorization servers
 
-Workloads often need to call APIs that belong to someone else: a cloud provider's storage, a partner's service, an organisation's central authorization server. Rather than storing a long-lived key for each, a workload can present its platform-issued token to that party's token endpoint and receive an access token in return, using the JWT bearer grant or token exchange from the fifth entry. The receiving party is configured to trust the issuer of the workload's token and to map particular subjects to particular permissions. Continuous-integration pipelines commonly deploy to cloud environments this way, with no stored deployment keys.
+Workloads often need to call APIs that belong to someone else: a cloud provider's storage, a partner's service, an organization's central authorization server. Rather than storing a long-lived key for each, a workload can present its platform-issued token to that party's token endpoint and receive an access token in return, using the JWT bearer grant or token exchange from the [fifth entry](/blog/oauth-grants-and-client-types#5-grants-that-build-on-an-existing-token). The receiving party is configured to trust the issuer of the workload's token and to map particular subjects to particular permissions. Continuous-integration pipelines commonly deploy to cloud environments this way, with no stored deployment keys.
 
-## 3. Proving Identity Between Services
+## 3. Proving identity between services
 
 ### 3.1 Mutual TLS
 
-With certificates in hand, two services can authenticate each other with mutual TLS, as described in the previous entry: each presents its certificate, proves possession of its key in the handshake, and validates the other's certificate against the trust domain's authorities. The caller knows it reached the genuine payments service, and the payments service knows which workload is calling. The connection is encrypted as a side effect.
+With certificates in hand, two services can authenticate each other with mutual TLS, as described in the [previous entry](/blog/sender-constrained-tokens#2-mutual-tls): each presents its certificate, proves possession of its key in the handshake, and validates the other's certificate against the trust domain's authorities. The caller knows it reached the genuine payments service, and the payments service knows which workload is calling. The connection is encrypted as a side effect.
 
 Doing this in every service's own code means handling certificate renewal, trust bundles and TLS configuration in every language the system uses. A **service mesh** moves it out of the application: a proxy beside each workload terminates and originates mutual TLS on its behalf, obtains and rotates its certificates, and exposes the authenticated peer identity to policy and, where needed, to the application. The application speaks plain HTTP to its local proxy.
 
@@ -96,11 +96,11 @@ The convenience comes with a precise limit. A mesh establishes **which workload*
 
 ### 3.2 Tokens between services
 
-Where mutual TLS cannot reach end to end (across an organisational boundary, through intermediaries that terminate TLS, or over a message queue), a workload proves its identity with a signed token instead: a JWT-SVID, or an access token from an authorization server obtained with the client credentials grant. The receiving service validates it exactly as the first entry describes, with particular attention to the **audience**: a token a workload obtained for calling service A must not be accepted by service B. Tokens used this way are bearer tokens unless they are sender-constrained (the sixth entry); short lifetimes and narrow audiences matter all the more.
+Mutual TLS cannot always reach end to end: across an organizational boundary, through intermediaries that terminate TLS, or over a message queue. There a workload proves its identity with a signed token instead, either a JWT-SVID or an access token obtained from an authorization server with the client credentials grant. The receiving service validates it exactly as the [first entry](/blog/token-based-authentication#65-validating-an-access-token) describes, with particular attention to the **audience**: a token a workload obtained for calling service A must not be accepted by service B. Tokens used this way are bearer tokens unless they are sender-constrained (the sixth entry); short lifetimes and narrow audiences matter all the more.
 
-## 4. Authorizing Service Calls
+## 4. Authorizing service calls
 
-Authentication tells the payments service that the caller is `spiffe://example.org/prod/orders/api`. Authorization decides whether that caller may make this call. The models from the fourth entry apply, usually in a simple form:
+Authentication tells the payments service that the caller is `spiffe://example.org/prod/orders/api`. Authorization decides whether that caller may make this call. The models from the [fourth entry](/blog/authorization-models) apply, usually in a simple form:
 
 - an **allow-list per endpoint or operation**: the orders service may call `POST /payments`; the reporting service may call `GET /payments` but not `POST`; nothing else may call either;
 - **deny by default**, so that a new service has no access until a policy grants it;
@@ -108,7 +108,7 @@ Authentication tells the payments service that the caller is `spiffe://example.o
 
 These policies can be enforced at the mesh proxy, in the application, or both. Proxy enforcement is uniform and cheap; application enforcement can see the parsed request and the user context. As with gateways in the first entry, coarse checks can live at the edge of each service, and object-level checks must live with the data.
 
-## 5. Propagating the User's Identity
+## 5. Propagating the user's identity
 
 ### 5.1 The confused deputy
 
@@ -167,7 +167,7 @@ Messages on a queue and scheduled jobs break the assumptions of request-scoped t
 - For work triggered by a user, the message should record **who requested it and what was authorized at that time**, signed by the producing service, and the consumer should re-check current permissions before acting where the stakes justify it. Placing a user's long-lived refresh token in a queue to keep it usable is an anti-pattern: it turns the queue into a store of the most valuable credentials in the system.
 - For work with no user (reconciliation, reporting, clean-up), the job acts under **its own workload identity** with permissions designed for that job. It should not borrow a privileged human account or a shared administrative credential.
 
-## 6. Operational Practice
+## 6. Operational practice
 
 A few practices separate designs that remain secure from those that decay:
 
@@ -190,24 +190,28 @@ A few practices separate designs that remain secure from those that decay:
 | How should user identity travel between services? | By exchanging tokens per hop with narrowing scopes and an `act` chain, or by an internal transaction token, not by trusted headers or forwarded tokens. |
 | What about queued and scheduled work? | Record who requested it and re-check at execution; jobs without a user act under their own workload identity. |
 
-## 8. The Series in One Picture
-
 This entry completes the series. Taken together, the seven entries describe one decision, made repeatedly at every boundary of a system: *may this subject perform this action on this object?*
 
-- The **first entry** set out the model: a reference monitor that mediates every request, and the separation of authentication, authorization and audit.
-- The **second** showed how a principal proves who it is, and why only origin-bound public-key credentials resist phishing.
-- The **third** showed how that proof is carried between requests in a browser, and the attacks aimed at the carrier.
-- The **fourth** examined how permissions are represented and decided.
-- The **fifth** showed how clients obtain delegated, scoped tokens under OAuth 2.0.
-- The **sixth** bound those tokens to keys so that a copy is not enough.
-- This **seventh** applied the same principles inside the system, between services and across chains of calls.
+- The [first entry](/blog/token-based-authentication) set out the model: a reference monitor that mediates every request, and the separation of authentication, authorization and audit.
+- The [second](/blog/authenticators-passwords-otp-passkeys) showed how a principal proves who it is, and why only origin-bound public-key credentials resist phishing.
+- The [third](/blog/sessions-and-cookies) showed how that proof is carried between requests in a browser, and the attacks aimed at the carrier.
+- The [fourth](/blog/authorization-models) examined how permissions are represented and decided.
+- The [fifth](/blog/oauth-grants-and-client-types) showed how clients obtain delegated, scoped tokens under OAuth 2.0.
+- The [sixth](/blog/sender-constrained-tokens) bound those tokens to keys so that a copy is not enough.
+- This seventh entry applied the same principles inside the system, between services and across chains of calls.
+
+Each objective of the [series](/series/identity-and-access-control) has been met along the way. Identification, authentication, authorization and audit were separated in Section 1 of the first entry. Authenticators were evaluated against guessing, verifier compromise, replay and phishing in the second. Sessions and self-contained tokens were compared in the first and third entries, and OAuth 2.0, OpenID Connect and Proof Key for Code Exchange (PKCE) were explained in the first and fifth. Access-token validation and object-level enforcement were set out in the first entry and refined in the fourth and sixth, and authentication between services was designed in this entry.
 
 The recurring lessons are few. Authenticate every request at every boundary. Authorize against the specific object, as close to the data as possible. Prefer credentials that are short-lived, narrowly scoped, bound to a key and impossible to phish. And for every credential in the system, be able to say who holds it, where it may be used, and how it stops working.
 
 ### References
 
-- NIST Special Publication 800-207, *Zero Trust Architecture*, 2020.
-- N. Hardy, "The Confused Deputy (or why capabilities might have been invented)", *ACM SIGOPS Operating Systems Review*, 1988.
-- SPIFFE specifications (SPIFFE ID, X.509-SVID, JWT-SVID, Workload API), Cloud Native Computing Foundation.
-- RFC 8693 (OAuth 2.0 token exchange), RFC 7523 (JWT bearer grant and client authentication), RFC 8705 (OAuth 2.0 mutual TLS).
-- In progress at the IETF: OAuth Transaction Tokens.
+- B. Campbell, J. Bradley, N. Sakimura and T. Lodderstedt, *OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens*, RFC 8705, IETF, 2020.
+- N. Hardy, "The Confused Deputy (or why capabilities might have been invented)," *ACM SIGOPS Operating Systems Review*, pp. 36–38, 1988.
+- M. Jones, B. Campbell and C. Mortimore, *JSON Web Token (JWT) Profile for OAuth 2.0 Client Authentication and Authorization Grants*, RFC 7523, IETF, 2015.
+- M. Jones, A. Nadalin, B. Campbell, Ed., J. Bradley and C. Mortimore, *OAuth 2.0 Token Exchange*, RFC 8693, IETF, 2020.
+- S. Rose, O. Borchert, S. Mitchell and S. Connelly, *Zero Trust Architecture*, NIST SP 800-207, National Institute of Standards and Technology, 2020.
+- SPIFFE Project, *The JWT SPIFFE Verifiable Identity Document*, SPIFFE standard, Cloud Native Computing Foundation, consulted October 2026.
+- SPIFFE Project, *The SPIFFE Identity and Verifiable Identity Document*, SPIFFE standard, Cloud Native Computing Foundation, consulted October 2026.
+- SPIFFE Project, *The X.509 SPIFFE Verifiable Identity Document*, SPIFFE standard, Cloud Native Computing Foundation, consulted October 2026.
+- A. Tulshibagwale, G. Fletcher and P. Kasselman, *Transaction Tokens*, draft-ietf-oauth-transaction-tokens-11, IETF, 2026 (Internet-Draft, work in progress).

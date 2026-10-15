@@ -1,12 +1,12 @@
 ---
 title: "Fieldbuses and Industrial Ethernet"
-description: "Why control networks must be deterministic, and how they achieve it: timing vocabulary, media access methods, Modbus RTU and CAN with worked timing and checksum calculations, process fieldbuses and IO-Link, why standard Ethernet is not deterministic, the main industrial Ethernet approaches, clock synchronization with IEEE 1588, and Time-Sensitive Networking."
+description: "Why control networks must be deterministic, and how Modbus RTU, CAN, industrial Ethernet, IEEE 1588 clock synchronization and TSN bound their timing."
 publishedAt: "2026-10-13"
 category: "Engineering"
 tags:
   - automation
   - fieldbus
-  - industrial ethernet
+  - industrial Ethernet
   - networking
 series: industrial-automation
 seriesOrder: 3
@@ -14,9 +14,9 @@ seriesOrder: 3
 
 The [second entry](/blog/programmable-logic-controllers) followed a signal from a sensor terminal through the input image, one scan of the program and the output image to an actuator, and found a response time that varies by one scan. That analysis assumed each field device had its own pair of wires to the controller's cabinet. In a plant with hundreds of sensors and actuators spread over a building, that wiring becomes expensive, slow to install and hard to change. The alternative is to connect devices through a shared network: a **fieldbus**, or its modern successor, **industrial Ethernet**. A network adds its own delay to the response time, and the central requirement of a control network is that this delay is bounded and predictable.
 
-This entry defines the timing vocabulary, then the ways a shared medium can be divided among devices, and works through two classic fieldbuses, Modbus RTU and CAN, with numbers. It then surveys the process fieldbuses and IO-Link, explains why ordinary Ethernet is not deterministic, and describes how industrial Ethernet systems, clock synchronization and Time-Sensitive Networking address that. Bit rates, frame formats and standard numbers are given only where they are fixed by the cited specifications; protocol-specific parameters that depend on a product are labeled as such. Python examples use Python 3 and its standard library.
+This entry defines the timing vocabulary, then the ways a shared medium can be divided among devices, and works through two classic fieldbuses with numbers: Modbus RTU (the remote terminal unit mode of Modbus) and the Controller Area Network (CAN). It then surveys the process fieldbuses and IO-Link, explains why ordinary Ethernet is not deterministic, and describes how industrial Ethernet systems, clock synchronization and Time-Sensitive Networking address that. Bit rates, frame formats and standard numbers are given only where they are fixed by the cited specifications; protocol-specific parameters that depend on a product are labeled as such. Python examples use Python 3 and its standard library.
 
-## 1. What a Control Network Must Guarantee
+## 1. What a control network must guarantee
 
 ### 1.1 Timing vocabulary
 
@@ -40,10 +40,10 @@ Network protocols are described with the layer model of the Open Systems Interco
 | Layer | Function | Examples in this entry |
 |---|---|---|
 | Physical (1) | Signals on the medium: voltage levels, bit rate, cable, connectors | RS-485, the CAN physical layer, Ethernet 100BASE-TX |
-| Data link (2) | Frames, addressing, error detection, **media access**: who may transmit when | Modbus RTU framing and CRC, CAN arbitration, Ethernet medium access control (MAC) |
+| Data link (2) | Frames, addressing, error detection, **media access**: who may transmit when | Modbus RTU framing and cyclic redundancy check (CRC), CAN arbitration, Ethernet medium access control (MAC) |
 | Application (7) | Meaning of the data: read a register, write an output, report a diagnostic | Modbus function codes, CANopen objects |
 
-## 2. Sharing a Medium
+## 2. Sharing a medium
 
 ### 2.1 Media access methods
 
@@ -68,7 +68,7 @@ A **line** or **bus** topology connects devices along one cable; a **star** conn
 
 Many serial fieldbuses, including Modbus RTU and PROFIBUS DP, use the physical layer standardized as **TIA/EIA-485** (RS-485). It transmits each bit as the voltage *difference* between two twisted wires, so interference that affects both wires equally (common-mode noise) cancels. A segment of shielded twisted pair, terminated at both ends with a resistor matching the cable's characteristic impedance (typically 120 Ω), connects up to 32 standard unit loads (devices) and can be over a kilometer long at low bit rates. Higher bit rates shorten the permitted length: for PROFIBUS DP, the PROFIBUS specifications allow 1200 m per segment at 93.75 kbit/s and below, and 100 m at its maximum of 12 Mbit/s.
 
-## 3. Modbus RTU: Polling on a Serial Line
+## 3. Modbus RTU: polling on a serial line
 
 ### 3.1 The protocol
 
@@ -87,7 +87,7 @@ Frames have no start or end markers. Instead, a frame ends when the line has bee
 
 ### 3.2 The CRC
 
-The **cyclic redundancy check** (CRC) detects transmission errors. The sender treats the frame as a long binary number, divides it by a fixed generator polynomial in modulo-2 arithmetic and appends the 16-bit remainder; the receiver repeats the calculation and discards the frame if the remainders differ. Modbus uses the CRC-16 polynomial $x^{16} + x^{15} + x^2 + 1$ (hexadecimal 8005), processed least significant bit first, which in the bit-reversed form used by the algorithm below is A001; the register starts at FFFF, and the CRC is sent low byte first. The program also computes the time one poll takes at 19 200 bit/s, with an assumed 5 ms for the server to prepare its response:
+The **cyclic redundancy check** detects transmission errors. The sender treats the frame as a long binary number, divides it by a fixed generator polynomial in modulo-2 arithmetic and appends the 16-bit remainder; the receiver repeats the calculation and discards the frame if the remainders differ. Modbus uses the CRC-16 polynomial $x^{16} + x^{15} + x^2 + 1$ (hexadecimal 8005), processed least significant bit first, which in the bit-reversed form used by the algorithm below is A001; the register starts at FFFF, and the CRC is sent low byte first. The program also computes the time one poll takes at 19 200 bit/s, with an assumed 5 ms for the server to prepare its response:
 
 ```python
 def crc16_modbus(frame: bytes) -> int:
@@ -126,7 +126,7 @@ Polling ten devices for ten registers each takes about 0.28 s, so each value is 
 
 **Modbus TCP** carries the same function codes over Ethernet using the Transmission Control Protocol and Internet Protocol (TCP/IP), on TCP port 502. The address and CRC are replaced by a 7-byte header (transaction identifier, protocol identifier, length and unit identifier), since TCP and Ethernet provide their own addressing and error checking. It inherits Ethernet's speed, and also its timing behavior, discussed in Section 6.
 
-## 4. CAN: Priority Arbitration
+## 4. CAN: priority arbitration
 
 ### 4.1 Dominant and recessive bits
 
@@ -152,7 +152,7 @@ Arbitration requires that every node sees each bit at the same time, within a fr
 
 ### 4.2 Frame length and timing
 
-A classical CAN data frame with an 11-bit identifier carries 0 to 8 data bytes. Besides its $n$ data bytes it has 44 bits of fixed fields (start of frame, identifier, control bits, a 15-bit CRC, acknowledgement and end of frame), and frames are separated by a 3-bit interframe space, giving $8n + 47$ bits. In addition, after five identical consecutive bits the transmitter inserts one opposite **stuff bit**, so that receivers can keep their clocks synchronized to the signal edges. Stuffing applies to the first $34 + 8n$ bits of the frame, and in the worst case adds $\lfloor (34 + 8n - 1)/4 \rfloor$ bits, a bound derived in the schedulability analysis of Davis and colleagues (see References):
+A classical CAN data frame with an 11-bit identifier carries 0 to 8 data bytes. Besides its $n$ data bytes it has 44 bits of fixed fields (start of frame, identifier, control bits, a 15-bit CRC, acknowledgment and end of frame), and frames are separated by a 3-bit interframe space, giving $8n + 47$ bits. In addition, after five identical consecutive bits the transmitter inserts one opposite **stuff bit**, so that receivers can keep their clocks synchronized to the signal edges. Stuffing applies to the first $34 + 8n$ bits of the frame, and in the worst case adds $\lfloor (34 + 8n - 1)/4 \rfloor$ bits, a bound derived in the schedulability analysis of Davis and colleagues (see References):
 
 $$
 C_\text{max} = 8n + 47 + \left\lfloor \frac{34 + 8n - 1}{4} \right\rfloor \ \text{bit times}.
@@ -186,7 +186,7 @@ Only 64 of the 135 worst-case bits are data, an efficiency below 50 %, which is 
 
 **CAN FD** (flexible data rate), also standardized in ISO 11898-1, raises the payload to 64 bytes and allows the data phase of a frame to be sent at a higher bit rate than the arbitration phase. Higher-layer protocols built on CAN, such as **CANopen** (maintained by CAN in Automation as CiA 301), define how devices describe their data and how process data are mapped into frames.
 
-## 5. Process Fieldbuses and Device-Level Links
+## 5. Process fieldbuses and device-level links
 
 ### 5.1 PROFIBUS
 
@@ -205,15 +205,15 @@ The low bit rates are deliberate: they tolerate long cables and the electrical c
 
 At the other end of the scale, **IO-Link** (IEC 61131-9) is not a bus but a point-to-point serial link between one sensor or actuator and an IO-Link master port, over the standard unshielded three-wire sensor cable of up to 20 m. It runs at 4.8, 38.4 or 230.4 kbit/s. Its purpose is to give simple devices a digital channel for measured values, parameters and diagnostics, so that a replaced sensor can receive its parameters automatically from the master. The master in turn connects to the controller over a fieldbus or industrial Ethernet.
 
-## 6. Why Standard Ethernet Is Not Deterministic
+## 6. Why standard Ethernet is not deterministic
 
 ### 6.1 Frames and switches
 
-Ethernet (IEEE 802.3) dominates office and data-center networking, and it is cheap, fast and well understood, so it is the obvious candidate for automation. An Ethernet frame consists of a 14-byte header (destination and source addresses, and an **EtherType** that identifies the protocol carried), a payload of 46 to 1500 bytes and a 4-byte frame check sequence, so frames are 64 to 1518 bytes long (1522 with an IEEE 802.1Q virtual local area network, or VLAN, tag). On the wire each frame is preceded by an 8-byte preamble and start delimiter and followed by a minimum 12-byte interframe gap, so it occupies 20 bytes more.
+Ethernet (IEEE 802.3) dominates office and data-center networking, and it is cheap, fast and well understood, so it is the obvious candidate for automation. An Ethernet frame consists of a 14-byte header, a payload of 46 to 1500 bytes and a 4-byte frame check sequence. The header holds the destination and source addresses and an **EtherType** that identifies the protocol carried. Frames are therefore 64 to 1518 bytes long, or 1522 bytes with an IEEE 802.1Q virtual local area network (VLAN) tag. On the wire each frame is preceded by an 8-byte preamble and start delimiter and followed by a minimum 12-byte interframe gap, so it occupies 20 bytes more.
 
 At 100 Mbit/s each byte takes 80 ns. A minimum frame therefore occupies the wire for $(64 + 20) \times 80\ \text{ns} = 6.72\ \mu\text{s}$ and a maximum frame for $(1518 + 20) \times 80\ \text{ns} = 123.04\ \mu\text{s}$.
 
-Early Ethernet shared one cable among all stations and resolved collisions with random back-off, which is plainly not deterministic. Modern Ethernet is **switched** and **full duplex**: every device has its own link to a switch port, and there are no collisions. Nondeterminism remains, however, because of **queuing** inside switches.
+Early Ethernet shared one cable among all stations and resolved collisions with random back-off, which is not deterministic. Modern Ethernet is **switched** and **full duplex**: every device has its own link to a switch port, and there are no collisions. Nondeterminism remains, however, because of **queuing** inside switches.
 
 ### 6.2 Queuing in switches
 
@@ -227,7 +227,7 @@ Industrial Ethernet systems are standardized as profiles in **IEC 61784-2**, wit
 
 ### 7.1 Standard TCP/IP and UDP/IP
 
-The simplest approach runs an automation protocol over ordinary TCP or the User Datagram Protocol (UDP) on standard switches. **Modbus TCP** (Section 3.3) is one example. **EtherNet/IP**, which carries the Common Industrial Protocol (CIP) and is managed by ODVA, is another: it uses TCP (port 44818) for explicit, request–response messages and UDP (port 2222) for **implicit** cyclic I/O data, which producers send at a configured requested packet interval. Timing depends on the network's load and design; with switches, priorities and a network kept free of heavy office traffic, cycle times of a few milliseconds are achievable, but the bound comes from network engineering rather than from the protocol.
+The simplest approach runs an automation protocol over ordinary TCP or the User Datagram Protocol (UDP) on standard switches. **Modbus TCP** (Section 3.3) is one example. **EtherNet/IP**, which carries the Common Industrial Protocol (CIP) and is managed by ODVA, is another. It uses TCP (port 44818) for explicit, request–response messages and UDP (port 2222) for **implicit** cyclic I/O data, which producers send at a configured requested packet interval. Timing depends on the network's load and design. With switches, priorities and a network kept free of heavy office traffic, cycle times of a few milliseconds are achievable, but the bound comes from network engineering rather than from the protocol.
 
 ### 7.2 Prioritized real-time on standard hardware
 
@@ -254,7 +254,7 @@ For motion control and other cycles at or below a millisecond with tight jitter,
 
 The choice in practice is often set by the controller and drive manufacturers already in a plant, since most controllers support one or two of these systems natively.
 
-## 8. Synchronized Time
+## 8. Synchronized time
 
 ### 8.1 Why clocks matter
 
@@ -297,11 +297,11 @@ For example, with $t_1 = 0$, $t_2 = 0.850\ \mu\text{s}$, $t_3 = 10.000\ \mu\text
 - **Frame preemption** (IEEE 802.1Qbu with IEEE 802.3br): a time-critical frame may interrupt a long frame in transmission, which is later resumed, shortening the guard band needed.
 - **Redundancy** (IEEE 802.1CB): frames are duplicated over disjoint paths and duplicates eliminated at the receiver, so a single link failure loses nothing.
 
-TSN is a set of tools rather than a complete automation protocol. Protocols such as PROFINET and EtherNet/IP, and the publish–subscribe mode of the OPC Unified Architecture (OPC UA) discussed in the [fifth entry](/blog/networked-automation-and-digital-twins), are being adapted to run over it, and the joint IEC/IEEE 60802 project defines a TSN profile for industrial automation that selects among the options.
+TSN is a set of tools rather than a complete automation protocol. Protocols such as PROFINET and EtherNet/IP, and the publish–subscribe mode of the OPC Unified Architecture (OPC UA) discussed in the [fifth entry](/blog/networked-automation-and-digital-twins), are being adapted to run over it. The joint standard IEC/IEEE 60802, published in 2026, defines a TSN profile for industrial automation that selects among the options.
 
 ## 10. Exercises
 
-**Exercise 1.** Repeat the Modbus RTU calculation of Section 3.2 at 115 200 bit/s, keeping 11 bits per character and 5 ms of server processing. How much faster is the 10-device poll cycle, and why not six times faster? (At bit rates above 19 200 bit/s the Modbus serial-line specification fixes the silent interval at 1.75 ms instead of 3.5 characters.)
+**Exercise 1.** Repeat the Modbus RTU calculation of Section 3.2 at 115 200 bit/s, keeping 11 bits per character and 5 ms of server processing. How much faster is the 10-device poll cycle, and why not six times faster? (At bit rates above 19 200 bit/s the Modbus serial-line specification recommends a fixed silent interval of 1.75 ms instead of 3.5 characters.)
 
 <details>
 <summary>Answer</summary>
@@ -364,11 +364,16 @@ With timing understood, the networks can carry the measurements and actuator com
 
 ### References
 
-- IEC 61158 (series), *Industrial Communication Networks – Fieldbus Specifications*, International Electrotechnical Commission.
-- IEC 61784-1 and IEC 61784-2, *Industrial Communication Networks – Profiles*, International Electrotechnical Commission.
-- ISO 11898-1, *Road Vehicles – Controller Area Network (CAN) – Part 1: Data Link Layer and Physical Signalling*, International Organization for Standardization.
-- IEEE 802.3, *IEEE Standard for Ethernet*; IEEE 802.1Q, *Bridges and Bridged Networks*; IEEE 802.1AS, *Timing and Synchronization for Time-Sensitive Applications*, IEEE.
+- R. I. Davis, A. Burns, R. J. Bril and J. J. Lukkien, "Controller Area Network (CAN) schedulability analysis: Refuted, revisited and revised," *Real-Time Systems*, vol. 35, no. 3, pp. 239–272, 2007.
+- IEC 61131-9, *Programmable controllers – Part 9: Single-drop digital communication interface for small sensors and actuators (SDCI)*, International Electrotechnical Commission.
+- IEC 61158 (series), *Industrial communication networks – Fieldbus specifications*, International Electrotechnical Commission.
+- IEC 61784-1-0:2023, *Industrial networks – Profiles – Part 1-0: Fieldbus profiles – General concepts and terminology*, International Electrotechnical Commission, 2023.
+- IEC 61784-2-0:2023, *Industrial networks – Profiles – Part 2-0: Additional real-time fieldbus profiles based on ISO/IEC/IEEE 8802-3 – General concepts and terminology*, International Electrotechnical Commission, 2023.
+- IEC/IEEE 60802:2026, *Time-sensitive networking profile for industrial automation*, International Electrotechnical Commission and IEEE, 2026.
 - IEEE 1588, *IEEE Standard for a Precision Clock Synchronization Protocol for Networked Measurement and Control Systems*, IEEE.
-- IEC 61131-9, *Programmable Controllers – Part 9: Single-Drop Digital Communication Interface for Small Sensors and Actuators (SDCI)*, International Electrotechnical Commission.
-- R. I. Davis, A. Burns, R. J. Bril and J. J. Lukkien, "Controller Area Network (CAN) Schedulability Analysis: Refuted, Revisited and Revised", *Real-Time Systems*, 35(3), 2007.
-- *MODBUS Application Protocol Specification* and *MODBUS over Serial Line Specification and Implementation Guide*, Modbus Organization.
+- IEEE 802.1AS, *IEEE Standard for Local and Metropolitan Area Networks – Timing and Synchronization for Time-Sensitive Applications*, IEEE.
+- IEEE 802.1Q, *IEEE Standard for Local and Metropolitan Area Networks – Bridges and Bridged Networks*, IEEE.
+- IEEE 802.3, *IEEE Standard for Ethernet*, IEEE.
+- ISO 11898-1:2024, *Road vehicles – Controller area network (CAN) – Part 1: Data link layer and physical coding sublayer*, International Organization for Standardization, 2024.
+- Modbus Organization, *MODBUS Application Protocol Specification*, V1.1b3, 2012.
+- Modbus Organization, *MODBUS over Serial Line Specification and Implementation Guide*, V1.02, 2006.

@@ -1,22 +1,22 @@
 ---
 title: "Solving Large Linear Systems"
-description: "The sparse, structured systems that discretization produces and how to solve them: Gaussian elimination, LU and Cholesky factorization, band structure and fill-in, conditioning and rounding error, the Jacobi, Gauss–Seidel and SOR iterations, conjugate gradients and preconditioning, with measured costs and iteration counts and a guide to choosing between direct and iterative solvers."
+description: "How the sparse systems produced by discretization are solved, by direct factorization or by iteration, and how problem size decides which approach is cheaper."
 publishedAt: "2026-10-13"
 category: "Mathematical Foundations"
 tags:
-  - numerical-methods
+  - numerical methods
   - linear algebra
-  - sparse-matrices
-  - iterative-methods
+  - sparse matrices
+  - iterative methods
 series: numerical-simulation
 seriesOrder: 3
 ---
 
 Every method in this series ends in a system of linear equations $A\mathbf{U} = \mathbf{b}$. [The first entry](/blog/from-differential-equations-to-discrete-problems) produced one from the one-dimensional Poisson equation and solved it with a single library call; [the second](/blog/finite-differences-for-heat-and-waves) needed one at every step of an implicit time-stepping scheme. In one dimension these systems are small and tridiagonal. In two and three dimensions they have from thousands to many millions of unknowns, and the library call that took a millisecond becomes impossible: a dense solver for a million unknowns would need 8 terabytes of memory just to store the matrix. Simulation at realistic resolution depends on exploiting the structure of these matrices.
 
-This entry first describes that structure, then the two families of solvers. **Direct methods** factor the matrix and give the answer, up to rounding, in a predictable number of operations. **Iterative methods** improve an approximate solution step by step and stop when it is good enough. The comparison rests on operation counts and on measured iteration counts. The code uses Python 3 with numpy in double precision; small matrices are formed densely for clarity, and the larger experiments apply the matrix without storing it.
+This entry first describes that structure, then the two families of solvers. **Direct methods** factor the matrix and give the answer, up to rounding, in a predictable number of operations. **Iterative methods** improve an approximate solution step by step and stop when it is good enough. The comparison rests on operation counts and on measured iteration counts. The code uses Python 3 with NumPy in double precision. Small matrices are formed densely for clarity, and the larger experiments apply the matrix without storing it.
 
-## 1. The Systems Discretization Produces
+## 1. The systems discretization produces
 
 ### 1.1 The five-point matrix
 
@@ -40,7 +40,7 @@ A = \frac{1}{h^2}\left(I \otimes T + T \otimes I\right),
 T = \begin{bmatrix} 2 & -1 & & \\ -1 & 2 & \ddots & \\ & \ddots & \ddots & -1 \\ & & -1 & 2 \end{bmatrix},
 $$
 
-where $T$ is the $(N-1)\times(N-1)$ tridiagonal matrix of the first entry and $\otimes$ is the **Kronecker product** ($P \otimes Q$ is the block matrix whose block $(i,j)$ is $p_{ij}Q$). Three properties of $A$ shape everything that follows.
+where $\otimes$ is the **Kronecker product** ($P \otimes Q$ is the block matrix whose block $(i,j)$ is $p_{ij}Q$) and $T$ is the $(N-1)\times(N-1)$ matrix $\text{tridiag}(-1, 2, -1)$. Thus $T/h^2$ is the matrix $A$ of the [first entry](/blog/from-differential-equations-to-discrete-problems#61-poisson-in-one-dimension), and $T$ is the negative of the matrix called $T$ in the second entry. Three properties of $A$ shape everything that follows.
 
 - **Sparse.** Each row has at most five nonzero entries, out of $n$. A matrix in which almost all entries are zero, and whose zeros are worth exploiting, is called sparse. Only the nonzeros need to be stored.
 - **Banded.** The nonzeros lie within a distance $N - 1$ of the diagonal (the neighbor in the next row of the grid is $N - 1$ positions away in the numbering). This distance is the **half-bandwidth** $b$.
@@ -54,7 +54,7 @@ A modest three-dimensional grid with $N = 100$ has $99^3 \approx 970{,}000$ unkn
 
 Operation counts are given in **flops** (floating-point operations: one addition, subtraction, multiplication or division each), counting only the leading term for large $n$.
 
-## 2. Direct Methods
+## 2. Direct methods
 
 ### 2.1 Gaussian elimination as a factorization
 
@@ -97,7 +97,7 @@ An SPD matrix has a unique factorization $A = LL^{\mathsf T}$ with $L$ lower tri
 
 ### 2.4 Fill-in
 
-The band is not empty, however, and elimination fills it. The script below forms the five-point matrix for three grid sizes, checks that it is SPD, computes its Cholesky factor with numpy, and counts nonzeros.
+The band is not empty, however, and elimination fills it. The script below forms the five-point matrix for three grid sizes, checks that it is SPD, computes its Cholesky factor with NumPy, and counts nonzeros.
 
 ```python
 import numpy as np
@@ -125,17 +125,17 @@ N = 16: n =  225, nonzeros in lower(A) =   645, in L =   3389, symmetric: True, 
 N = 32: n =  961, nonzeros in lower(A) =  2821, in L =  29757, symmetric: True, min eigenvalue = 19.723
 ```
 
-The smallest eigenvalue approaches $2\pi^2 \approx 19.74$, the smallest eigenvalue of the continuous operator, so the matrix is safely positive definite. But the factor $L$ has ten times as many nonzeros as the lower triangle of $A$ at $N = 32$, and its 29,757 nonzeros fill 98 % of the 30,256 positions in the lower band: the band is essentially full. This **fill-in** grows with the grid. For the two-dimensional problem with $N = 100$ ($n = 9{,}801$, $b = 99$), banded Cholesky needs about $nb^2 \approx 10^8$ flops and 8 megabytes, which is easy. For the three-dimensional problem with $N = 100$ ($n \approx 970{,}000$, $b = 9{,}801$) it needs about $9\times10^{13}$ flops and 76 gigabytes, which is not.
+The smallest eigenvalue approaches $2\pi^2 \approx 19.74$, the smallest eigenvalue of the continuous operator, so the matrix is safely positive definite. But the factor $L$ has ten times as many nonzeros as the lower triangle of $A$ at $N = 32$, and its 29,757 nonzeros fill 98% of the 30,256 positions in the lower band: the band is almost full. This **fill-in** grows with the grid. For the two-dimensional problem with $N = 100$ ($n = 9{,}801$, $b = 99$), banded Cholesky needs about $nb^2 \approx 10^8$ flops and 8 megabytes, which is easy. For the three-dimensional problem with $N = 100$ ($n \approx 970{,}000$, $b = 9{,}801$) it needs about $9\times10^{13}$ flops and 76 gigabytes, which is not.
 
-**Reordering** the unknowns can reduce fill-in greatly. **Nested dissection**, introduced by George in 1973 for regular meshes, repeatedly splits the grid by separator lines (or planes) and numbers the separators last; for the two-dimensional model problem it reduces the factorization cost to $O(n^{3/2})$ flops and the storage to $O(n\log n)$, and in three dimensions to $O(n^2)$ flops and $O(n^{4/3})$ storage. Sparse direct solvers combine such orderings with efficient dense kernels and are the method of choice for two-dimensional problems and moderate three-dimensional ones.
+**Reordering** the unknowns can reduce fill-in greatly. **Nested dissection**, introduced by George in 1973 for regular meshes, repeatedly splits the grid by separator lines (or planes) and numbers the separators last. For the two-dimensional model problem it reduces the factorization cost to $O(n^{3/2})$ flops and the storage to $O(n\log n)$, and in three dimensions to $O(n^2)$ flops and $O(n^{4/3})$ storage. Sparse direct solvers combine such orderings with efficient dense kernels and are the method of choice for two-dimensional problems and moderate three-dimensional ones.
 
-## 3. Conditioning and Rounding
+## 3. Conditioning and rounding
 
 ### 3.1 The condition number
 
 A direct solver is exact apart from rounding, but rounding errors in the data and in the arithmetic are amplified by the matrix itself. The **condition number** $\kappa(A) = \|A\|\,\|A^{-1}\|$ measures that amplification: a relative perturbation $\epsilon$ of $\mathbf{b}$ can change $\mathbf{U}$ by a relative amount up to $\kappa(A)\,\epsilon$. For an SPD matrix in the 2-norm, $\kappa(A) = \lambda_{\max}/\lambda_{\min}$. A good (backward stable) solver computes the exact solution of a slightly perturbed system, so its relative error is at most of the order of $\kappa(A)\,u_r$, with $u_r \approx 1.1\times10^{-16}$ the unit roundoff of the [first entry](/blog/from-differential-equations-to-discrete-problems#52-checking-the-orders-and-where-rounding-takes-over).
 
-For the one-dimensional matrix $T/h^2$, the eigenvalues found in the second entry give $\kappa = \cot^2(\pi h/2) \approx 4/(\pi^2h^2)$, and the same value holds for the two-dimensional five-point matrix, since its extreme eigenvalues are twice those of $T/h^2$.
+For the one-dimensional matrix $T/h^2$, the eigenvalues found in the second entry, with their sign reversed, give $\kappa = \cot^2(\pi h/2) \approx 4/(\pi^2h^2)$, and the same value holds for the two-dimensional five-point matrix, since its extreme eigenvalues are twice those of $T/h^2$.
 
 ```python
 import numpy as np
@@ -181,9 +181,9 @@ N =  100000: max error = 3.31e-10
 N = 1000000: max error = 6.35e-07
 ```
 
-Up to $N = 10^4$ the error falls by 100 per tenfold refinement, exactly second order, and agrees with the prediction $h^2\pi^2/12$. At $N = 10^5$ it should be $8.2\times10^{-11}$ but is four times larger, and at $N = 10^6$ it is back to the level of $N = 10^3$: rounding, in forming the right-hand side and in solving, now dominates. The observed $6.35\times10^{-7}$ is well below the worst-case bound $\kappa u_r \approx 4.5\times10^{-5}$, as is typical, but the trend is unmistakable. Refining a grid improves a result only while discretization error dominates. The ACRR note on [floating-point rounding in long simulations](/insights/floating-point-in-long-simulations) suggests comparing runs that differ only in rounding to check this; a refinement study that stops converging, as here, is another warning sign.
+Up to $N = 10^4$ the error falls by 100 per tenfold refinement, exactly second order, and agrees with the prediction $h^2\pi^2/12$. At $N = 10^5$ it should be $8.2\times10^{-11}$ but is four times larger, and at $N = 10^6$ it is back to the level of $N = 10^3$: rounding, in forming the right-hand side and in solving, now dominates. The observed $6.35\times10^{-7}$ is well below the worst-case bound $\kappa u_r \approx 4.5\times10^{-5}$, as is typical, but the trend is unmistakable. Refining a grid improves a result only while discretization error dominates. The insight on [floating-point rounding in long simulations](/insights/floating-point-in-long-simulations) suggests comparing runs that differ only in rounding to check this; a refinement study that stops converging, as here, is another warning sign.
 
-## 4. Stationary Iterative Methods
+## 4. Stationary iterative methods
 
 ### 4.1 Why iterate
 
@@ -191,7 +191,7 @@ An **iterative method** starts from a guess $\mathbf{U}^{(0)}$ (often zero) and 
 
 The quality of an iterate is judged by its **residual** $\mathbf{r}^{(m)} = \mathbf{b} - A\mathbf{U}^{(m)}$, which can be computed, unlike the error. A common stopping test is $\|\mathbf{r}^{(m)}\| \le \text{tol}\cdot\|\mathbf{b}\|$. A small residual does not guarantee a small error: the relative error can be up to $\kappa(A)$ times the relative residual. The difference between the iterate where the solver stops and the exact solution of the discrete system is the **iteration error** of the first entry's error taxonomy, and the tolerance should make it negligible compared with the discretization error.
 
-### 4.2 Jacobi, Gauss–Seidel and SOR
+### 4.2 Jacobi, Gauss–Seidel and successive over-relaxation
 
 Write $A = D - E - F$, with $D$ the diagonal of $A$, $-E$ its strictly lower and $-F$ its strictly upper triangular part.
 
@@ -211,9 +211,13 @@ The iteration counts are $\ln(10^8)/(-\ln\rho)$. Each Jacobi iteration costs $O(
 
 ### 4.3 Smoothing and the idea of multigrid
 
-The slow convergence has a clear cause. The Jacobi iteration matrix has the same sine eigenvectors as $A$, and its eigenvalue for the mode with phase angle $\xi$ per grid interval (the $\xi$ of the second entry's von Neumann analysis) is $\cos\xi$ in one dimension. Components with $\xi$ near $\pi/2$ are removed almost at once, but the smoothest component, $\xi = \pi h$, and the most oscillatory one, $\xi$ near $\pi$, are reduced by only about $\cos\pi h$ in magnitude per iteration. **Weighted Jacobi** moves only a fraction $\omega_J$ of the way to the Jacobi update; its eigenvalues are $1 - \omega_J(1 - \cos\xi)$, and with $\omega_J = 2/3$ every component with $\xi \ge \pi/2$ is reduced by at least a factor of 3 per iteration, while the smooth components are left almost untouched. After a few such iterations the error is smooth, and a smooth error can be represented accurately on a coarser grid, where it is no longer smooth relative to the grid and is reduced quickly again. **Multigrid** methods apply this recursively over a hierarchy of grids. For the model problem, a well-designed multigrid cycle reduces the error by a factor independent of $h$, so the total cost is $O(n)$, the best possible. Multigrid is a large subject of its own; the tutorial by Briggs, Henson and McCormick listed below is a standard introduction.
+The slow convergence has a clear cause. The Jacobi iteration matrix has the same sine eigenvectors as $A$, and its eigenvalue for the mode with phase angle $\xi$ per grid interval (the $\xi$ of the second entry's von Neumann analysis) is $\cos\xi$ in one dimension. Components with $\xi$ near $\pi/2$ are removed almost at once, but the smoothest component, $\xi = \pi h$, and the most oscillatory one, $\xi$ near $\pi$, are reduced by only about $\cos\pi h$ in magnitude per iteration.
 
-## 5. Conjugate Gradients
+**Weighted Jacobi** moves only a fraction $\omega_J$ of the way to the Jacobi update, and its eigenvalues are $1 - \omega_J(1 - \cos\xi)$. With $\omega_J = 2/3$, every component with $\xi \ge \pi/2$ is reduced by at least a factor of 3 per iteration, while the smooth components are left almost untouched: weighted Jacobi is a poor solver but a good **smoother**.
+
+After a few such iterations the error is smooth. A smooth error can be represented accurately on a coarser grid, where it is no longer smooth relative to the grid and is reduced quickly again. **Multigrid** methods apply this recursively over a hierarchy of grids. For the model problem, a well-designed multigrid cycle reduces the error by a factor independent of $h$, so the total cost is $O(n)$, the best possible. Multigrid is a large subject of its own; the tutorial by Briggs, Henson and McCormick listed below is a standard introduction.
+
+## 5. Conjugate gradients
 
 ### 5.1 Solving by minimizing
 
@@ -223,7 +227,7 @@ $$
 \phi(\mathbf{V}) = \tfrac{1}{2}\mathbf{V}^{\mathsf T}A\mathbf{V} - \mathbf{b}^{\mathsf T}\mathbf{V},
 $$
 
-whose gradient is $A\mathbf{V} - \mathbf{b} = -\mathbf{r}$. (For the Poisson problem $\phi$ is a discrete energy, a connection [the fourth entry](/blog/finite-element-method) makes central.) Following the negative gradient (steepest descent) converges slowly when the level sets of $\phi$ are elongated, which is what a large $\kappa$ means. The **conjugate gradient** (CG) method of Hestenes and Stiefel instead chooses search directions $\mathbf{p}^{(m)}$ that are mutually **$A$-conjugate**, $\mathbf{p}^{(i)\mathsf T}A\,\mathbf{p}^{(j)} = 0$ for $i \ne j$, so that minimizing along a new direction never spoils the minimization along earlier ones. The result is that $\mathbf{U}^{(m)}$ minimizes the error in the **energy norm** $\|\mathbf{e}\|_A = \sqrt{\mathbf{e}^{\mathsf T}A\mathbf{e}}$ over all vectors in the **Krylov subspace** $\text{span}\{\mathbf{r}^{(0)}, A\mathbf{r}^{(0)}, \dots, A^{m-1}\mathbf{r}^{(0)}\}$, the best that any method built from $m$ matrix-vector products and that starting guess can do in this sense.
+whose gradient is $A\mathbf{V} - \mathbf{b} = -\mathbf{r}$. (For the Poisson problem $\phi$ is a discrete energy, a connection [the fourth entry](/blog/finite-element-method) makes central.) Following the negative gradient (steepest descent) converges slowly when the level sets of $\phi$ are elongated, which is what a large $\kappa$ means. The **conjugate gradient** (CG) method of Hestenes and Stiefel instead chooses search directions $\mathbf{p}^{(m)}$ that are mutually **$A$-conjugate**, $\mathbf{p}^{(i)\mathsf T}A\,\mathbf{p}^{(j)} = 0$ for $i \ne j$, so that minimizing along a new direction never spoils the minimization along earlier ones. The result is that $\mathbf{U}^{(m)}$ minimizes the error in the **energy norm** $\|\mathbf{e}\|_A = \sqrt{\mathbf{e}^{\mathsf T}A\mathbf{e}}$ over all vectors $\mathbf{U}^{(0)} + \mathbf{w}$ with $\mathbf{w}$ in the **Krylov subspace** $\text{span}\{\mathbf{r}^{(0)}, A\mathbf{r}^{(0)}, \dots, A^{m-1}\mathbf{r}^{(0)}\}$, the best that any method built from $m$ matrix-vector products and that starting guess can do in this sense.
 
 Each iteration costs one product with $A$, two inner products and three vector updates:
 
@@ -248,11 +252,11 @@ so the number of iterations for a fixed reduction grows like $\sqrt{\kappa}$, no
 
 ### 5.3 Preconditioning
 
-A **preconditioner** is a matrix $M \approx A$ whose systems $M\mathbf{z} = \mathbf{r}$ are cheap to solve. Preconditioned CG applies CG, in effect, to $M^{-1}A$, and its convergence depends on $\kappa(M^{-1}A)$ instead of $\kappa(A)$. Common choices are the diagonal of $A$ (Jacobi preconditioning, useful when the diagonal varies strongly; for the model problem it is a constant multiple of the identity and changes nothing), **incomplete Cholesky** factorization (a Cholesky factorization that discards fill-in outside a chosen pattern), and one multigrid cycle, which for the model problem makes the iteration count independent of $h$. Preconditioning is where most of the engineering of an iterative solver lies.
+A **preconditioner** is a matrix $M \approx A$ whose systems $M\mathbf{z} = \mathbf{r}$ are cheap to solve. Preconditioned CG applies CG, in effect, to $M^{-1}A$, and its convergence depends on $\kappa(M^{-1}A)$ instead of $\kappa(A)$. Common choices are the diagonal of $A$ (Jacobi preconditioning), **incomplete Cholesky** factorization (a Cholesky factorization that discards fill-in outside a chosen pattern), and one multigrid cycle. Jacobi preconditioning helps when the diagonal varies strongly; for the model problem the diagonal is a constant multiple of the identity and changes nothing. One multigrid cycle makes the iteration count for the model problem independent of $h$. Preconditioning is where most of the engineering of an iterative solver lies.
 
 CG requires an SPD matrix. For nonsymmetric systems, such as those from convection-dominated flow, Krylov methods such as GMRES (generalized minimal residual) and BiCGSTAB (biconjugate gradient stabilized) play the same role; they are outside the scope of this entry.
 
-## 6. Measuring the Iteration Counts
+## 6. Measuring the iteration counts
 
 The script below solves the five-point problem with $f = 1$ by each method on three grids, applying $A$ matrix-free on an array that includes the zero boundary values, and counts iterations until the relative residual falls below $10^{-8}$.
 
@@ -322,11 +326,11 @@ for N in (16, 32, 64):
 - **Jacobi** needs 942, 3,779 and 15,122 iterations: a factor of 4.0 per halving of $h$, against the predictions $\ln(10^8)/(-\ln\cos\pi h) = 949$, 3,816 and 15,283.
 - **Gauss–Seidel** needs about half as many, as $\rho_{\text{GS}} = \rho_{\text{J}}^2$ predicts, and grows by the same factor of 4.
 - **SOR** with the optimal $\omega$ grows by a factor of 2 per refinement, $O(N)$, though it needs more iterations than the prediction from its spectral radius (47, 94, 188): at the optimal $\omega$ every eigenvalue of its iteration matrix has the same modulus $\omega - 1$, and the eigenvalue $\omega - 1$ itself is double with only one eigenvector (the matrix is defective), so the error decays like $m\rho^m$ rather than $\rho^m$.
-- **CG** needs 27, 58 and 118 iterations, also doubling per refinement, as $\sqrt{\kappa} \propto N$ predicts. Its bound from Section 5.2 promises at most about 97, 194 and 389 iterations to reduce the energy-norm error by $10^{-8}$; the actual counts are about a third of that.
+- **CG** needs 27, 58 and 118 iterations, also doubling per refinement, as $\sqrt{\kappa} \propto N$ predicts. Its bound from Section 5.2 promises at most about 97, 194 and 389 iterations to reduce the energy-norm error by a factor of $10^8$; the actual counts, measured with the residual criterion, are about a third of that.
 
 On the finest grid, CG needs 128 times fewer iterations than Jacobi, at a comparable cost per iteration (one product with $A$ plus a few vector operations). Extrapolating the measured growth, a grid with $N = 1000$ would need about $4\times10^6$ Jacobi iterations and about 1,800 CG iterations.
 
-## 7. Direct or Iterative?
+## 7. Direct or iterative?
 
 With $n$ unknowns on the two-dimensional model problem, the counts above give the following total costs, to leading order:
 
@@ -357,7 +361,7 @@ The threshold in the first box is a rough guide, not a rule: memory, the number 
 <details>
 <summary>Answer</summary>
 
-$n = 99^2 = 9{,}801$. Dense: $8n^2 \approx 768$ MB. Band (half-bandwidth 99, about $n(b+1)$ numbers for the lower half including the diagonal): $8 \times 9{,}801 \times 100 \approx 7.8$ MB. Nonzeros: fewer than $5n = 49{,}005$ numbers, about 0.4 MB (plus index arrays in a sparse format).
+$n = 99^2 = 9{,}801$. Dense: $8n^2 \approx 768$ megabytes. Band (half-bandwidth 99, about $n(b+1)$ numbers for the lower half including the diagonal): $8 \times 9{,}801 \times 100 \approx 7.8$ megabytes. Nonzeros: fewer than $5n = 49{,}005$ numbers, about 0.4 megabytes (plus index arrays in a sparse format).
 
 </details>
 
@@ -370,7 +374,7 @@ Jacobi grows by a factor of 4 per halving of $h$: about $4 \times 15{,}122 \appr
 
 </details>
 
-**Exercise 3.** Show that the first entry's tridiagonal matrix $T/h^2$ (with $N - 1$ unknowns) has condition number $\cot^2(\pi h/2)$, given that its eigenvalues are $\tfrac{4}{h^2}\sin^2(k\pi h/2)$, $k = 1, \dots, N-1$.
+**Exercise 3.** Show that the tridiagonal matrix $T/h^2$ (the first entry's $A$) (with $N - 1$ unknowns) has condition number $\cot^2(\pi h/2)$, given that its eigenvalues are $\tfrac{4}{h^2}\sin^2(k\pi h/2)$, $k = 1, \dots, N-1$.
 
 <details>
 <summary>Answer</summary>
@@ -384,7 +388,7 @@ The matrix is SPD, so $\kappa = \lambda_{\max}/\lambda_{\min} = \sin^2\bigl((N-1
 <details>
 <summary>Answer</summary>
 
-The crossover estimate $h \approx u_r^{1/4} \approx 0.016$ suggests $N$ of the order of 100. Running the `thomas` function above in numpy `float32` (all arrays and arithmetic in single precision) on this problem, on the grids $N = 16, 32, \dots, 2048$, gives its smallest error, $1.7\times10^{-5}$, at $N = 256$; at $N = 1024$ the error has grown to $3.6\times10^{-4}$. In single precision, refinement stops paying off on grids that double precision handles with ease.
+The crossover estimate $h \approx u_r^{1/4} \approx 0.016$ suggests $N$ of the order of 100. Running the `thomas` function above in NumPy `float32` (all arrays and arithmetic in single precision) on this problem, on the grids $N = 16, 32, \dots, 2048$, gives its smallest error, $1.7\times10^{-5}$, at $N = 256$; at $N = 1024$ the error has grown to $3.6\times10^{-4}$. In single precision, refinement stops paying off on grids that double precision handles with ease.
 
 </details>
 
@@ -414,11 +418,11 @@ The matrices in this entry came from finite differences on a square grid. The ne
 
 ### References
 
-- G. H. Golub and C. F. Van Loan, *Matrix Computations*, 4th edition, Johns Hopkins University Press, 2013.
-- L. N. Trefethen and D. Bau, *Numerical Linear Algebra*, SIAM, 1997.
-- Y. Saad, *Iterative Methods for Sparse Linear Systems*, 2nd edition, SIAM, 2003.
+- W. L. Briggs, V. E. Henson and S. F. McCormick, *A Multigrid Tutorial*, 2nd ed., SIAM, 2000.
 - T. A. Davis, *Direct Methods for Sparse Linear Systems*, SIAM, 2006.
-- W. L. Briggs, V. E. Henson and S. F. McCormick, *A Multigrid Tutorial*, 2nd edition, SIAM, 2000.
-- M. R. Hestenes and E. Stiefel, "Methods of conjugate gradients for solving linear systems", *Journal of Research of the National Bureau of Standards*, vol. 49, no. 6, pp. 409–436, 1952.
-- A. George, "Nested dissection of a regular finite element mesh", *SIAM Journal on Numerical Analysis*, vol. 10, no. 2, pp. 345–363, 1973.
-- N. J. Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd edition, SIAM, 2002.
+- A. George, "Nested dissection of a regular finite element mesh," *SIAM Journal on Numerical Analysis*, vol. 10, no. 2, pp. 345–363, 1973.
+- G. H. Golub and C. F. Van Loan, *Matrix Computations*, 4th ed., Johns Hopkins University Press, 2013.
+- M. R. Hestenes and E. Stiefel, "Methods of conjugate gradients for solving linear systems," *Journal of Research of the National Bureau of Standards*, vol. 49, no. 6, pp. 409–436, 1952.
+- N. J. Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM, 2002.
+- Y. Saad, *Iterative Methods for Sparse Linear Systems*, 2nd ed., SIAM, 2003.
+- L. N. Trefethen and D. Bau III, *Numerical Linear Algebra*, SIAM, 1997.

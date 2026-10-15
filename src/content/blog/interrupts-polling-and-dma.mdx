@@ -1,10 +1,10 @@
 ---
 title: "Interrupts, Polling and DMA"
-description: "Three ways to move data between peripherals and memory: polling, interrupts and direct memory access. How each works, what it costs in latency and processor time with worked numbers, how to share data safely between interrupt handlers and the main program, and how to choose among them."
+description: "How polling, interrupts and DMA move data from peripherals to memory, what each costs in latency and processor time, and how to share data safely with an ISR."
 publishedAt: "2026-10-13"
 category: "Computing Systems"
 tags:
-  - embedded-systems
+  - embedded systems
   - microcontrollers
   - real-time
   - interrupts
@@ -18,15 +18,15 @@ seriesOrder: 2
 - **Interrupts**: the peripheral signals the processor, which suspends the current program and runs a handler.
 - **Direct memory access** (DMA): a separate hardware unit copies data between the peripheral and memory without the processor, and tells the program when a whole block is done.
 
-The entry explains each mechanism, quantifies its latency and its cost in processor time with the timing vocabulary of [Section 1.2 of the first entry](/blog/inside-a-microcontroller#12-real-time-events-deadlines-latency-and-jitter) (event, latency, jitter, deadline), treats the problem that interrupts create (data shared between code that can interrupt itself), and ends with a way to choose.
+The entry explains each mechanism and quantifies its latency and its cost in processor time, using the timing vocabulary of [Section 1.2 of the first entry](/blog/inside-a-microcontroller#12-real-time-events-deadlines-latency-and-jitter) (event, latency, jitter, deadline). It then treats the problem that interrupts create, data shared between the main program and the interrupt handlers that preempt it, and ends with a way to choose.
 
 **Conventions.** As in the first entry: C11, a generic 32-bit Arm Cortex-M class microcontroller at 48 MHz, invented register names, and Python 3 with the standard library for calculations. Statements that depend on the Arm architecture (the interrupt controller, exception entry, the instruction that masks interrupts) are marked as such; other cores have equivalents with different details. CPU (central processing unit) and processor are used interchangeably.
 
-## 1. Getting Data Out of a Peripheral
+## 1. Getting data out of a peripheral
 
 ### 1.1 Flags, data registers and overruns
 
-A peripheral that produces data, such as an analog-to-digital converter (ADC) finishing a conversion or a serial receiver assembling a byte, typically places the value in a **data register** and sets a **status flag** that says "new data". Reading the data register usually clears the flag. The data register holds one value (or a few, if the peripheral has a small first-in, first-out hardware buffer, a FIFO). If the next value arrives before the software has read the current one, either the new value is lost or it overwrites the old one, and the peripheral sets an **overrun** flag.
+A peripheral that produces data, such as an analog-to-digital converter (ADC) finishing a conversion or a serial receiver assembling a byte, typically places the value in a **data register** and sets a **status flag** that says "new data". Reading the data register usually clears the flag. The data register holds one value (or a few, if the peripheral has a small first-in, first-out (FIFO) hardware buffer). If the next value arrives before the software has read the current one, either the new value is lost or it overwrites the old one, and the peripheral sets an **overrun** flag.
 
 That gives every peripheral input a hard deadline, set by the data rate. A universal asynchronous receiver-transmitter (UART, the serial port of the next entry) at 115 200 bit/s with ten bits per byte on the wire delivers $115\,200 / 10 = 11\,520$ bytes per second, one every 86.8 µs. With a one-byte data register, each byte must be read within 86.8 µs of its arrival, every time, or data is lost.
 
@@ -84,7 +84,7 @@ sequenceDiagram
 ```
 
 1. The peripheral sets its flag. If the interrupt for that flag is enabled in the peripheral and in the NVIC, the request becomes **pending**.
-2. If the pending interrupt's priority is higher than that of the code currently running, the core accepts it. On Cortex-M, hardware saves eight registers (R0 to R3, R12, the link register LR, the program counter PC and the status register, 32 bytes; on cores with a floating-point unit, more when the interrupted code was using floating-point registers) on the stack, and reads the handler's address from the vector table described in [Section 4.1 of the first entry](/blog/inside-a-microcontroller#41-from-reset-to-main).
+2. If the pending interrupt's priority is higher than that of the code currently running, the core accepts it. On Cortex-M, hardware saves eight registers (R0 to R3, R12, the link register, the program counter and the status register, 32 bytes; on cores with a floating-point unit, more when the interrupted code was using floating-point registers) on the stack, and reads the handler's address from the vector table described in [Section 4.1 of the first entry](/blog/inside-a-microcontroller#41-from-reset-to-main).
 3. The ISR runs. It must read the data and clear the cause of the interrupt; if the flag stays set, the interrupt is taken again as soon as the ISR returns.
 4. On return, hardware restores the saved registers and the interrupted code continues.
 
@@ -104,7 +104,7 @@ $$
 0.25\ \mu\text{s} + 10\ \mu\text{s} + 5\ \mu\text{s} = 15.25\ \mu\text{s},
 $$
 
-about sixty times the hardware entry time. This is the usual picture: the hardware is fast and deterministic, and software decides the worst case. (The bound assumes the higher-priority interrupt occurs at most once during the wait; if it can recur, each recurrence adds its execution time, the same reasoning that the fourth entry formalises as response-time analysis.) The best-case latency is the hardware entry time alone, so the jitter of the ISR's start can be as large as 15 µs.
+about sixty times the hardware entry time. This is the usual picture: the hardware is fast and deterministic, and software decides the worst case. (The bound assumes the higher-priority interrupt occurs at most once during the wait. If it can recur, each recurrence adds its execution time, the reasoning that the fourth entry formalizes as response-time analysis.) The best-case latency is the hardware entry time alone, so the jitter of the ISR's start can be as large as 15 µs.
 
 ### 3.3 Priorities and nesting
 
@@ -116,7 +116,7 @@ Priorities are a design decision. A reasonable rule is to give higher priority t
 
 An ISR delays everything of lower priority, including the whole main program, for as long as it runs. That leads to a set of rules:
 
-- **Keep it short and bounded.** Do the minimum that must happen at interrupt time, typically reading the data into a buffer, clearing the flag, and setting a variable or signalling a task. Move processing elsewhere.
+- **Keep it short and bounded.** Do the minimum that must happen at interrupt time, typically reading the data into a buffer, clearing the flag, and setting a variable or signaling a task (a unit of an operating system's schedule, fourth entry). Move processing elsewhere.
 - **Never wait.** No busy-waiting on another flag, no delays, and no calls that could block, such as taking a lock that the interrupted code may hold.
 - **Avoid functions that are not reentrant.** Library functions such as `printf` and `malloc` may use internal state that the interrupted code was in the middle of changing.
 - **Clear the cause.** Read the data register or write the flag-clearing bit, as the reference manual specifies, before returning.
@@ -129,9 +129,9 @@ $$
 U_\text{ISR} = \frac{r\,c}{f_\text{CPU}} .
 $$
 
-With $c = 100$ cycles (an assumed, typical size for a short receive handler, entry and exit included) at 48 MHz, a UART at 115 200 bit/s (11 520 bytes/s) costs 2.4 % of the processor. The same handler for 100 000 items per second, a 1 Mbit/s UART or a 100 kHz ADC, costs 20.8 %, and at 480 000 items per second it would consume the whole processor. Interrupt-per-item handling therefore stops scaling well before the hardware's limits; that is the problem DMA solves (Section 5).
+With $c = 100$ cycles (an assumed, typical size for a short receive handler, entry and exit included) at 48 MHz, a UART at 115 200 bit/s (11 520 bytes/s) costs 2.4% of the processor. The same handler for 100 000 items per second, a 1 Mbit/s UART or a 100 kHz ADC, costs 20.8%, and at 480 000 items per second it would consume the whole processor. Interrupt-per-item handling therefore stops scaling well before the hardware's limits; that is the problem DMA solves (Section 5).
 
-## 4. Sharing Data Between Interrupts and the Main Program
+## 4. Sharing data between interrupts and the main program
 
 ### 4.1 Race conditions
 
@@ -161,7 +161,7 @@ Every critical section adds its length to the worst-case latency of every interr
 
 ### 4.4 A lock-free ring buffer
 
-The common case, an ISR producing data items and the main program consuming them, needs no critical section at all if the data passes through a **single-producer, single-consumer ring buffer**: an array used as a queue, with a **head** index written only by the producer and a **tail** index written only by the consumer. Because each index has exactly one writer, there is no read-modify-write conflict, provided that each index is read and written in a single access and that the data is written before the index that publishes it.
+The common case, an ISR producing data items and the main program consuming them, needs no critical section at all if the data passes through a **single-producer, single-consumer ring buffer**. This is an array used as a queue, with a **head** index written only by the producer and a **tail** index written only by the consumer. Because each index has exactly one writer, there is no read-modify-write conflict, provided that each index is read and written in a single access and that the data is written before the index that publishes it.
 
 C11 expresses both requirements portably with `<stdatomic.h>`. An atomic load or store of an `atomic_uint` is indivisible, and the memory orders `memory_order_release` (on the store that publishes an index) and `memory_order_acquire` (on the load that reads it) guarantee that the buffer contents written before the release are visible to the code after the acquire. On a single-core microcontroller, plain aligned 32-bit loads and stores are already indivisible, and these orders mainly stop the compiler from reordering the buffer write after the index update; on a multi-core processor they also insert the necessary hardware barriers.
 
@@ -236,7 +236,7 @@ int main(void) {
 }
 ```
 
-The indices run freely and wrap at $2^{32}$; because unsigned arithmetic in C is modulo $2^{32}$ for a 32-bit `unsigned`, `h - t` is the number of stored items even after a wrap, and `h & RB_MASK` selects the slot, which is why the size must be a power of two that divides $2^{32}$. On a microcontroller, `rb_put` would be called from the receive ISR and `rb_get` from the main loop. To test the logic on a desktop, the program uses a thread of the Portable Operating System Interface (POSIX) as the producer, a harder test than an ISR because the two run truly in parallel on different cores. Compiled with `gcc -std=c11 -O2 -pthread` on a four-core x86-64 Linux host, three runs each printed:
+The indices run freely and wrap at $2^{32}$; because unsigned arithmetic in C is modulo $2^{32}$ for a 32-bit `unsigned`, `h - t` is the number of stored items even after a wrap, and `h & RB_MASK` selects the slot, which is why the size must be a power of two that divides $2^{32}$. On a microcontroller, `rb_put` would be called from the receive ISR and `rb_get` from the main loop. To test the logic on a desktop, the program uses a thread of the Portable Operating System Interface (POSIX) as the producer, a harder test than an ISR because the two run in parallel on different cores. Compiled with `gcc -std=c11 -O2 -pthread` on a four-core x86-64 Linux host, three runs each printed:
 
 ```text
 received 1000000 items, 0 out of order
@@ -245,13 +245,13 @@ buffer was full at least once
 
 Every item arrived exactly once and in order, although the buffer filled many times. (A passing test does not prove the absence of races; the argument that each index has one writer and that publication follows the data does. The test checks that the code implements that argument.) In the ISR, a full buffer is an overrun: the producer cannot wait, so it drops the item and counts the event, and the buffer must be sized so that this never happens in normal operation. The required size is the number of items that arrive during the longest time the consumer can be kept away, which is again a worst-case timing question.
 
-## 5. Direct Memory Access
+## 5. Direct memory access
 
 ### 5.1 What a DMA controller does
 
 A **DMA controller** is a peripheral that can itself read and write memory and peripheral registers over the on-chip bus, which makes it a **bus master** like the CPU. Software configures a **channel** with:
 
-- a source address and a destination address, for example the ADC's data register and an array in SRAM;
+- a source address and a destination address, for example the ADC's data register and an array in static RAM (SRAM);
 - the size of each item (8, 16 or 32 bits) and whether each address increments after each item (the array address does; the peripheral register address does not);
 - the number of items in the block;
 - the **request** that triggers each item's transfer, usually the peripheral's "data ready" signal.
@@ -311,10 +311,10 @@ DMA is not free, and it brings its own failure modes:
 - **Setup and bookkeeping.** Configuring a channel takes several register writes. For a transfer of a few bytes, polling or a single interrupt is cheaper.
 - **Bus contention.** The DMA controller and the CPU share the bus. When both want the same memory or bus at once, one waits, so heavy DMA traffic can slow the CPU and make its execution times vary, which matters for the timing measurements of the fifth entry.
 - **Cache coherence.** Larger cores such as the Cortex-M7 have a data cache. The DMA controller writes to memory, not to the cache, so the CPU may read stale cached data from a DMA receive buffer, and DMA may transmit stale memory that the CPU has written only to its cache. Software must invalidate or clean the cache lines of DMA buffers at the right moments, or place the buffers in memory that is not cached.
-- **Ownership.** A buffer that the DMA controller is filling must not be read or modified by software until the controller has signalled that it is finished with it. Double buffering is a protocol for exactly this hand-over.
+- **Ownership.** A buffer that the DMA controller is filling must not be read or modified by software until the controller has signaled that it is finished with it. Double buffering is a protocol for exactly this hand-over.
 - **Unknown lengths.** DMA needs a count in advance. Data of unknown length, such as text lines on a serial port, needs extra hardware support (for example an idle-line detection interrupt) or a combination of DMA into a circular buffer with periodic checks of how far the DMA has written.
 
-## 6. Choosing a Method
+## 6. Choosing a method
 
 The three methods trade latency, processor load and complexity:
 
@@ -329,11 +329,11 @@ The three methods trade latency, processor load and complexity:
 Some typical decisions with the numbers of this entry:
 
 - **A push-button.** Rare, slow and tolerant of tens of milliseconds of latency. Periodic polling from a timer tick, which also debounces it, is simplest.
-- **A command line on a UART at 115 200 bit/s.** Bytes arrive irregularly, at most one every 86.8 µs. An interrupt per byte into a ring buffer costs 2.4 % of the processor and never loses a byte if the worst-case latency stays well below 86.8 µs.
+- **A command line on a UART at 115 200 bit/s.** Bytes arrive irregularly, at most one every 86.8 µs. An interrupt per byte into a ring buffer costs 2.4% of the processor and never loses a byte if the worst-case latency stays well below 86.8 µs.
 - **An audio or vibration stream at 100 kHz.** An interrupt per sample would take about a fifth of the processor; circular DMA with double buffering takes a fraction of a percent and keeps sample timing exact.
-- **Reading 6 bytes from an SPI sensor once per millisecond.** At 8 MHz the transfer takes about 7 µs (the next entry computes such times). Starting it from a timer interrupt and busy-waiting for completion inside a task is often simpler and cheaper than setting up DMA; for many sensors or longer bursts, DMA wins.
+- **Reading 6 bytes from an SPI sensor once per millisecond.** At 8 MHz the transfer takes about 7 µs (the next entry computes such times). Starting it from a timer interrupt and busy-waiting for completion in the main program (or, under an operating system, in a task of the fourth entry) is often simpler and cheaper than setting up DMA; for many sensors or longer bursts, DMA wins.
 
-Real designs mix all three: DMA for the streams, interrupts for sporadic and urgent events, and polling for the rest. Interrupts and DMA solve the problem of getting data to memory on time, but they leave the processing work in a single main loop, where long and short jobs still delay each other. Splitting that work into prioritised tasks is the job of the real-time operating system in the fourth entry.
+Real designs mix all three: DMA for the streams, interrupts for sporadic and urgent events, and polling for the rest. Interrupts and DMA solve the problem of getting data to memory on time, but they leave the processing work in a single main loop, where long and short jobs still delay each other. Splitting that work into prioritized tasks is the job of the real-time operating system in the fourth entry.
 
 ## 7. Exercises
 
@@ -390,9 +390,9 @@ The next entry, [Serial Buses: UART, SPI, I2C and CAN](/blog/serial-buses-uart-s
 
 ### References
 
-- Arm Limited, *Armv7-M Architecture Reference Manual*, document ARM DDI 0403.
-- J. Yiu, *The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors*, 3rd edition, Newnes, 2014.
-- ISO/IEC 9899:2011, *Information Technology: Programming Languages: C*, International Organization for Standardization (atomics: clause 7.17).
+- Arm Limited, *Armv7-M Architecture Reference Manual*, ARM DDI 0403E.e, 2021.
+- J. Ganssle, *The Art of Designing Embedded Systems*, 2nd ed., Newnes, 2008.
+- ISO/IEC 9899:2011, *Information technology – Programming languages – C*, International Organization for Standardization, 2011 (atomics: clause 7.17).
+- E. A. Lee and S. A. Seshia, *Introduction to Embedded Systems: A Cyber-Physical Systems Approach*, 2nd ed., MIT Press, 2017.
 - E. White, *Making Embedded Systems: Design Patterns for Great Software*, O'Reilly Media, 2011.
-- J. Ganssle, *The Art of Designing Embedded Systems*, 2nd edition, Newnes, 2008.
-- E. A. Lee and S. A. Seshia, *Introduction to Embedded Systems: A Cyber-Physical Systems Approach*, 2nd edition, MIT Press, 2017.
+- J. Yiu, *The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors*, 3rd ed., Newnes, 2014.

@@ -1,220 +1,167 @@
 # Series review: Introduction to Robotics
 
 - Series: `introduction-to-robotics` (4 articles, status published, 0 planned entries)
-- Reviewed commit: a429fd8 (the four articles and the series file have no uncommitted changes)
+- Reviewed commit: 9232ed9 (the four articles and the series file are unchanged since the wave-1 revision 530f71c and have no uncommitted changes)
 - Date: 2026-10-13
-- Previous review: first review (10 findings) applied in 1c95247; this is the second review.
-- Content hash: sha256:4ce50bc21fa857f471fdb7634db7759e22fe429d81786e3da5d16e6624d00cd7
+- Review: independent review (wave 2) of the wave-1 revision; fact-check (F), technical review (T) and series review (S) combined in one report. Previous reviews (two passes, all findings applied) are superseded by this report.
+- Content hash: sha256:cf8d7d63d3ff5098ea6eafb825d2ca73b7d4bcf98f7d87fd6813282fc5e5f73f
 
 ## Summary
 
-All ten corrections from the first review are in the text: the series prerequisites, torque, inertia and backlash, the ISO 8373 edition, quaternions, `atan2`, the two Denavit–Hartenberg variants, the statistics terms, the Kálmán spelling, the covariance sentence and the occupancy grid. Every worked number in the four entries was recomputed and is correct. The build, the type check and the link check pass.
-
-This stricter second pass found four should-fix problems, mostly about conventions:
-- Entry 1 says accelerometers measure the body's acceleration, while entry 4 relies on an accelerometer at rest measuring gravity.
-- Entry 2 gives one body-frame axis convention as if it were the only one.
-- Entry 3 never says that its Jacobian and Newton formulas need angles in radians, although its examples are in degrees.
-- Entry 4 reuses the letters $A$ and $B$ for a discrete-time model, without saying so, right after linking to a primer where they mean the continuous-time matrices.
-
-The four optional items are notation and wording. There are no blocking findings, and the series is ready as published once the should-fix items are corrected.
-
-Findings: 0 blocking, 4 should fix, 4 optional.
-
-## Resolution
-
-All 8 findings (F1–F8) were applied as recommended on 2026-10-13, with one change of placement: the F4 paragraph on discrete-time models follows the Kalman filter equations rather than sitting between the model equations and the sentence that continues them. Afterwards:
-- `SITE_URL=https://acrr.asia npm run build` reported 0 errors and 0 warnings, and `npm run check:links` found every internal link resolved;
-- no text was glued to inline elements, and KaTeX reported no errors.
-
-Line numbers below refer to the reviewed commit, not to the corrected articles.
+The wave-1 revision kept every earlier correction and added an Exercises section to each entry (nine exercises in all), a sequence rationale and shared conventions to the overview, and completed references. Every exercise answer and every worked number in the four entries was recomputed with Python and is correct; the build has no KaTeX errors, no Mermaid diagram wider than the column, no glued inline text, and all internal links resolve. The problems found are small: one answer describes a Mahalanobis distance in the wrong units ("two standard deviations from the prediction"), one reference lists an editor as author (Nilsson, *Shakey the Robot*), and one dated attribution gives the unscented Kalman filter a 1997 origin although Julier, Uhlmann and Durrant-Whyte published the method in 1995. There are no blocking findings; the series is ready as published once the three should-fix items are corrected.
+Findings: 0 blocking, 3 should fix, 3 optional.
 
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
 |---|---|---|
-| Describe a robot as mechanical structure, actuators, sensors, and computation connected by a control loop. | Entry 1 §1–4 | Met. |
-| Represent the position and orientation of rigid bodies using coordinate frames and rotation matrices. | Entry 2 (whole) | Met. Quaternions are now introduced (§3.3). |
-| Explain forward and inverse kinematics for a simple planar arm. | Entry 3 §2–6 | Met. |
-| Outline the sense, plan, and act structure used in many robot software architectures. | Entry 1 §5 | Met. |
-| Explain why a robot must estimate its state, and how a Kalman filter combines a motion model with noisy measurements. | Entry 4 §1–5 | Met. The discrete-time convention of the model is not stated (F4). |
+| Describe a robot as mechanical structure, actuators, sensors, and computation connected by a control loop. | Entry 1, Sections 1–4, Exercises 1–3 | Met. |
+| Represent the position and orientation of rigid bodies using coordinate frames and rotation matrices. | Entry 2, Sections 1–7, Exercises 1–3 | Met. |
+| Explain forward and inverse kinematics for a simple planar arm. | Entry 3, Sections 2–6, Exercises 1–3 | Met. |
+| Outline the sense, plan, and act structure used in many robot software architectures. | Entry 1, Section 5 | Met (brief but adequate; no exercise, which is reasonable for a descriptive objective). |
+| Explain why a robot must estimate its state, and how a Kalman filter combines a motion model with noisy measurements. | Entry 4, Sections 1–5, Exercises 1–3 | Met. |
 
 ## Findings
 
 | ID | Severity | Article | Location | Dimension | Finding |
 |---|---|---|---|---|---|
-| F1 | Should fix | `src/content/blog/what-is-a-robot.mdx` | §2.4 (line 115) | Technical accuracy / Factual consistency | Accelerometers are said to measure "the acceleration … of the body"; at rest they measure gravity, which entry 4 (line 204) relies on |
-| F2 | Should fix | `src/content/blog/coordinate-frames-and-transformations.mdx` | §8 (line 247) | Stated versions and defaults | The body frame is given as "$x$ forward, $z$ up", although $x$ forward, $z$ down is equally common (aircraft, underwater vehicles) |
-| F3 | Should fix | `src/content/blog/planar-arm-kinematics.mdx` | §5.1 (lines 139–156), §6.2–6.3 (lines 184–208) | Stated versions and defaults | The Jacobian and the Newton and damped least-squares steps require angles in radians, but this is never stated and every example is in degrees |
-| F4 | Should fix | `src/content/blog/sensing-and-state-estimation.mdx` | §1.1 (line 27), §5.1 (lines 145–152) | Stated versions and defaults / Cross-article references | The Kalman model's $A$, $B$ (and $H$) are discrete-time, while the linked state-space primer defines $A$, $B$ (and $C$) for the continuous-time form |
-| F5 | Optional | `src/content/blog/what-is-a-robot.mdx` | §2.2 (line 85), §2.3 (lines 103, 109) | Terminology | $N$ is the number of bodies and then the gear ratio; $J$ is the number of joints and then (as $J_m$) an inertia, a few paragraphs apart |
-| F6 | Optional | `src/content/blog/coordinate-frames-and-transformations.mdx` | §5 (lines 176, 192) | Stated versions and defaults | The worked example treats the lidar reading as if the lidar sat at the robot frame's origin, without saying so |
-| F7 | Optional | `src/content/blog/planar-arm-kinematics.mdx` | §2.3 (line 77) | Writing quality | "Both produce the same forward kinematics" now follows three formulations (two DH variants and product of exponentials) |
-| F8 | Optional | `src/content/blog/sensing-and-state-estimation.mdx` | §3.3 (line 103), §4 (line 109) | Concept introduction | The notation $\hat x$ (estimate) and the superscript $-$ (prediction, before the measurement) is used without being explained |
+| T1 | Should fix | `src/content/blog/sensing-and-state-estimation.mdx` | Section 9, Exercise 3 answer (line 250) | accuracy | "about two standard deviations from the prediction": $d = 2.06$ is in innovation standard deviations ($\sqrt S = 0.58$ m), not prediction standard deviations (1.2/0.5 = 2.4). |
+| F1 | Should fix | `src/content/blog/sensing-and-state-estimation.mdx` | Section 6.2 (line 184) | evidence | UKF "introduced by Julier and Uhlmann in 1997": the method was published in 1995 (Julier, Uhlmann and Durrant-Whyte, ACC). |
+| F2 | Should fix | `src/content/blog/what-is-a-robot.mdx` | References (line 245) | evidence | Nilsson is the editor of SRI Technical Note 323, not its author. |
+| T2 | Optional | `src/content/blog/sensing-and-state-estimation.mdx` | Section 9, Exercise 1 (lines 227, 232) | accuracy | "Why does the estimate move less": the move is smaller also because the innovation is half as large; the answer explains only the gain. |
+| S1 | Optional | `src/content/blog/what-is-a-robot.mdx` | Opening (line 18) | consistency | Link text "control systems series" points to the first article of that series, not the series page. |
+| S2 | Optional | `src/content/blog/planar-arm-kinematics.mdx` | Section 5.2 (line 168) | language | "outwards" (British form; house variant is American). |
 
-### F1. What an accelerometer measures
-- **Where:** `src/content/blog/what-is-a-robot.mdx:115`, section "2.4 Sensing"
-- **Text:** "**inertial measurement units** (accelerometers and gyroscopes) measure the acceleration and rotation rate of the body"
-- **Problem:** An accelerometer measures specific force: the body's acceleration minus the acceleration due to gravity. At rest it reads 1 g upwards, although the body's acceleration is zero. Entry 4 depends on exactly that: "the **accelerometer**, at rest, measures the direction of gravity, which gives an absolute but noisy and motion-disturbed reference for tilt" (`src/content/blog/sensing-and-state-estimation.mdx:204`). As written, entry 1 contradicts entry 4: a reader who takes "measure the acceleration" literally would expect a reading of zero at rest.
-- **Recommended correction:** "**inertial measurement units** measure the motion of the body: gyroscopes its rotation rate, and accelerometers its acceleration combined with gravity (an accelerometer at rest reads the pull of gravity, which is what later lets it serve as a tilt reference)".
+### T1. Units of the gating distance in Exercise 3
+- **Where:** `src/content/blog/sensing-and-state-estimation.mdx:250`, section "9. Exercises", Exercise 3 answer
+- **Text:** "$d^2 = 1.2^2/0.34 = 4.24$, below the bound of 6.63, so the reading is accepted, although it lies about two standard deviations from the prediction."
+- **Problem:** Section 8 (line 221) defines $d^2$ as measuring "the innovation in units of its own expected spread", i.e. in standard deviations of the innovation, $\sqrt{S} = \sqrt{0.34} = 0.583$ m. Recomputed (python3): $\sqrt{4.24} = 2.06$ innovation standard deviations; measured against the prediction's standard deviation (0.5 m) the same innovation is 1.2/0.5 = 2.4. "Two standard deviations from the prediction" invites the second reading, and a reader checking it gets 2.4, in the one answer that is meant to teach what the Mahalanobis distance measures.
+- **Recommended correction:** replace the clause with: "although it lies about two standard deviations of the innovation ($\sqrt{4.24} = 2.06$, with $\sqrt{S} = 0.58$ m) from the predicted measurement."
 
-### F2. One body-frame convention presented as the only one
-- **Where:** `src/content/blog/coordinate-frames-and-transformations.mdx:247`, section "8. Common Mistakes"
-- **Text:** "A camera's optical frame (often $z$ forward, $x$ right, $y$ down) treated as a body frame ($x$ forward, $z$ up)"
-- **Problem:** The camera convention is qualified with "often", but the body frame is not qualified at all. Ground robots commonly use $x$ forward, $y$ left, $z$ up. Aircraft, many drones and underwater vehicles, which entry 1 uses as examples (lines 16, 40), commonly use $x$ forward, $y$ right, $z$ down, with a world frame of north, east, down. Both are right-handed. Mixing these two body conventions is itself one of the mistakes this table is meant to prevent.
-- **Recommended correction:** "A camera's optical frame (often $z$ forward, $x$ right, $y$ down) treated as a body frame (for ground robots usually $x$ forward, $y$ left, $z$ up; for aircraft and many drones $x$ forward, $y$ right, $z$ down)".
+### F1. Origin of the unscented Kalman filter
+- **Where:** `src/content/blog/sensing-and-state-estimation.mdx:184`, section "6.2 The unscented Kalman filter"
+- **Text:** "The **unscented Kalman filter** (UKF), introduced by Julier and Uhlmann in 1997, avoids derivatives."
+- **Problem:** The filter was presented in S. J. Julier, J. K. Uhlmann and H. F. Durrant-Whyte, "A new approach for filtering nonlinear systems," Proceedings of the 1995 American Control Conference (IEEE document 529783; checked in the BVB library catalogue record, whose abstract describes the sigma-point parameterization of mean and covariance and the comparison with the EKF). The 1997 SPIE paper cited in the References is the usual reference and is correctly cited, but "introduced ... in 1997" dates the method two years late and drops a co-author of the first paper.
+- **Recommended correction:** "The **unscented Kalman filter** (UKF), developed by Julier and Uhlmann in the mid-1990s (their 1997 paper cited below is the usual reference), avoids derivatives." No new reference is needed.
 
-### F3. Radians are required but not stated
-- **Where:** `src/content/blog/planar-arm-kinematics.mdx:139-156` (§5.1), `:184-194` (§6.2), `:208` (§6.3)
-- **Text:** "$J(\mathbf q) = \frac{\partial f}{\partial \mathbf q}$"; "starting from $\mathbf q_0 = (0^\circ, 90^\circ)$ … converging to $(30^\circ, 45^\circ)$"; "The first Newton step asks for joint changes of about $167^\circ$ and $-402^\circ$."
-- **Problem:** The Jacobian entries, such as $-l_1\sin\theta_1 - l_2\sin(\theta_1+\theta_2)$, are derivatives with respect to angles in radians, in metres per radian. So $\Delta\mathbf q = J^{-1}\mathbf e$ comes out in radians. A reader who follows the examples and works in degrees gets steps 57.3 times too large. The entry states its length unit ("Lengths are in metres", line 71) but not its angle unit. Recomputed with angles in radians, the printed numbers are correct: the step is $(166.6^\circ, -401.6^\circ)$ after conversion, and the damped step is $(1.80^\circ, -1.33^\circ)$. Entry 2 (line 243) and entry 4 (line 34) both state their angle convention.
-- **Recommended correction:** After "Lengths are in metres." (line 71), add: "Angles are shown in degrees for readability, but every formula that differentiates with respect to an angle (the Jacobian of Section 5 and the iterations of Section 6) assumes radians, so convert before computing, as the previous entry recommends."
+### F2. Nilsson is the editor of *Shakey the Robot*
+- **Where:** `src/content/blog/what-is-a-robot.mdx:245`, References
+- **Text:** "N. J. Nilsson, *Shakey the Robot*, Technical Note 323, SRI International, 1984."
+- **Problem:** The title page of the note (Stanford copy, ai.stanford.edu/~nilsson/OnlinePubs-Nils/shakey-the-robot.pdf) reads "Edited by: Nils J. Nilsson, Director, Artificial Intelligence Center", Technical Note 323, April 1984; SRI's publication page also lists "N. J. Nilsson (Ed.)". The note collects reports by several authors, so listing Nilsson as author misstates the work (standards 7.3).
+- **Recommended correction:** "N. J. Nilsson, Ed., *Shakey the Robot*, Technical Note 323, Artificial Intelligence Center, SRI International, 1984." (The Vietnamese translation's reference list needs the same change.)
 
-### F4. Discrete-time $A$ and $B$ after a link to the continuous-time primer
-- **Where:** `src/content/blog/sensing-and-state-estimation.mdx:27` and `:145-152`, sections "1.1 State" and "5.1 The equations"
-- **Text:** "The [primer on state-space models](/blog/state-space-models-primer) in the control systems series introduced the idea"; "$\mathbf x_k = A\,\mathbf x_{k-1} + B\,\mathbf u_k + \mathbf w_k, \qquad \mathbf z_k = H\,\mathbf x_k + \mathbf v_k$"
-- **Problem:** The linked primer defines the model in continuous time, "$\dot{x} = Ax + Bu, \qquad y = Cx + Du$" (`src/content/blog/state-space-models-primer.mdx:45`). There, $A$ is the matrix of "how the state evolves on its own" per unit time. Entry 4 uses the same letters for a discrete-time step model, in which $A$ maps one sample to the next (for a linear time-invariant system sampled every $\Delta t$, $A_{\text{d}} = e^{A\Delta t}$), and it names the output matrix $H$ instead of $C$. The entry never says "discrete-time"; the closest it comes is "from one time step to the next" (line 71). A reader coming from the primer can take the primer's $A$ for the Kalman filter's and get a wrong filter. For example, the primer's mass–spring–damper $A$ has a zero diagonal entry, while the discrete transition matrix of a stationary system is close to the identity.
-- **Recommended correction:** After the model equations (line 150), add: "These are **discrete-time** models, written for the instants $k = 0, 1, 2, \dots$ at which the filter runs. The matrix $A$ maps the state at one step to the next, so it is not the $A$ of the continuous-time form $\dot{\mathbf x} = A\mathbf x + B\mathbf u$ in the state-space primer: for a linear time-invariant system sampled every $\Delta t$ seconds, the discrete matrix is $e^{A\Delta t}$. The measurement matrix $H$ plays the role of the primer's output matrix $C$."
+### T2. "Why does the estimate move less"
+- **Where:** `src/content/blog/sensing-and-state-estimation.mdx:227` (question) and `:232` (answer)
+- **Text:** "Why does the estimate move less than in the corridor example of Section 4?" / "... so the gain is below one half and the estimate stays nearer the prediction."
+- **Problem:** The estimate moves 0.09 m against 0.44 m in Section 4 (recomputed), for two reasons: the gain is smaller (0.308 against 0.735) and the innovation is half as large (0.3 m against 0.6 m). The answer explains only the first, which is what the question means to ask.
+- **Recommended correction:** question: "Why does the estimate move a smaller fraction of the way toward the measurement than in the corridor example of Section 4?" (answer unchanged).
 
-### F5. $N$ and $J$ each used for two quantities in entry 1
-- **Where:** `src/content/blog/what-is-a-robot.mdx:85`, `:103`, `:109`
-- **Text:** "For a spatial mechanism with $N$ bodies including the fixed ground and $J$ joints"; "A reduction of ratio $N$ trades speed for torque."; "A motor rotor of inertia $J_m$"
-- **Problem:** Within 25 lines, $N$ changes from a count of bodies to a gear ratio, and $J$ from a count of joints to an inertia. Entry 3 then uses $J$ for the Jacobian. Each use is conventional on its own, but the clash is avoidable in the article that sets the series' vocabulary.
-- **Recommended correction:** In §2.2, write the mobility formula with $n_b$ bodies and $n_j$ joints: "$M = 6\,(n_b - 1 - n_j) + \sum_{i=1}^{n_j} f_i$". Update the check that follows it to "$n_b = n + 1$ bodies and $n_j = n$ joints". Keep $N$ for the gear ratio and $J_m$ for the motor inertia.
+### S1. Link text in the opening of entry 1
+- **Where:** `src/content/blog/what-is-a-robot.mdx:18`
+- **Text:** "The entry uses the idea of feedback from the [control systems series](/blog/introduction-to-control-systems)"
+- **Problem:** The link text names a series, the target is that series' first article (line 32 links the same article correctly as "first entry of the control systems series"; the overview links `/series/foundations-of-control-systems`).
+- **Recommended correction:** change the target to `/series/foundations-of-control-systems`, or the text to "the [first entry of the control systems series](/blog/introduction-to-control-systems)" and shorten line 32's repeat.
 
-### F6. The lidar is assumed to sit at the robot frame's origin
-- **Where:** `src/content/blog/coordinate-frames-and-transformations.mdx:176` and `:192`, section "5. A Worked Example in the Plane"
-- **Text:** "Its lidar reports an obstacle at ${}^{R}\mathbf{p} = (3, 0)$: 3 metres straight ahead *of the robot*."; "which recovers the lidar's measurement, as it must."
-- **Problem:** The entry's introduction says a lidar reports an obstacle "3 metres ahead *of the lidar*" (line 17). Section 7.1 gives the lidar its own frame in the tree (line 226), and entry 4 stresses that "A lidar range is predicted from the sensor's pose, not the robot base's" (`sensing-and-state-estimation.mdx:216`). The example quietly makes the lidar frame and the robot frame the same. That assumption is reasonable, but the example should say so, especially since the camera in the same section is given an explicit offset.
-- **Recommended correction:** "Its lidar, mounted at the origin of the robot frame and facing forward (so that the lidar frame and the robot frame coincide), reports an obstacle at ${}^{R}\mathbf{p} = (3, 0)$: 3 metres straight ahead of the robot."
-
-### F7. "Both" after three formulations
-- **Where:** `src/content/blog/planar-arm-kinematics.mdx:77`, section "2.3 More joints, and the general method"
-- **Text:** "It is used in two variants, the original and the "modified" form … A more recent alternative, the **product of exponentials** formulation, describes each joint by its axis in a single reference frame. Both produce the same forward kinematics; they differ in bookkeeping."
-- **Problem:** The sentence that the first review added introduces two Denavit–Hartenberg variants, so "Both" can now be read as referring to them rather than to DH and the product of exponentials.
-- **Recommended correction:** "All of these produce the same forward kinematics; they differ in bookkeeping."
-
-### F8. The notation $\hat x$ and $\hat x^-$ is not explained
-- **Where:** `src/content/blog/sensing-and-state-estimation.mdx:103` (first use) and `:109`
-- **Text:** "The difference between the actual and the predicted measurement, $z_k - h(\hat x_k^-)$, is the **innovation**"; "with mean $\hat x^- = 10.0$ m and variance $P^- = 0.25\ \text{m}^2$"
-- **Problem:** The hat (an estimate, as opposed to the true state $x_k$ in §3.1) and the superscript minus (the prediction, before the measurement is used) appear for the first time inside a formula, and neither is explained anywhere. The reader has to infer them from the example and from the predict/update equations in §5.1.
-- **Recommended correction:** Before "The difference between …" at line 103, add: "Write $\hat x_k^-$ and $P_k^-$ for the mean and covariance of the predicted belief (the minus sign marks 'before the measurement'), and $\hat x_k$ and $P_k$ for those of the updated belief; the hat distinguishes an estimate from the true state $x_k$."
+### S2. "outwards"
+- **Where:** `src/content/blog/planar-arm-kinematics.mdx:168`, section "5.2 Singular configurations"
+- **Text:** "A stretched arm cannot move its gripper straight outwards"
+- **Recommended correction:** "straight outward".
 
 ## Concept introduction map
 
 | Concept | First used (path:line) | Introduced where | Assessment |
 |---|---|---|---|
-| Feedback, closed loop | `what-is-a-robot.mdx:32` | Same place, with a link to the control series' introduction | Introduced |
-| Degree of freedom, mobility | `what-is-a-robot.mdx:79` | `what-is-a-robot.mdx:79-91` | Introduced |
-| Torque, moment of inertia | `what-is-a-robot.mdx:101`, `:109` | Same places (first-review F2), and in the series prerequisites | Introduced |
-| Backlash | `what-is-a-robot.mdx:124` | Same place | Introduced |
-| Encoder, IMU, lidar | `what-is-a-robot.mdx:115-116` | Same place | Introduced; what an accelerometer measures is imprecise (F1) |
-| Matrix, vector, determinant, transpose | `coordinate-frames-and-transformations.mdx:40` | Prerequisite (linear algebra) | Acceptable |
-| Rotation matrix, SO(3), SE(3) | `coordinate-frames-and-transformations.mdx:40` | `coordinate-frames-and-transformations.mdx:59-79`, `:156` | Introduced |
-| Quaternion | `coordinate-frames-and-transformations.mdx:110` (summary table) | `coordinate-frames-and-transformations.mdx:124` | Introduced in the paragraph that follows the table; acceptable |
-| `atan2` | `coordinate-frames-and-transformations.mdx:245` | Same place | Introduced |
-| Spherical linear interpolation | `coordinate-frames-and-transformations.mdx:235` | Named only | Acceptable: the context explains its purpose |
-| Derivative, partial derivative | `planar-arm-kinematics.mdx:139-144` | Series prerequisites (calculus) | Acceptable |
-| Jacobian, singular configuration, null space | `planar-arm-kinematics.mdx:147`, `:166`, `:214` | Same places | Introduced |
-| Denavit–Hartenberg, product of exponentials | `planar-arm-kinematics.mdx:77` | Same place, by role | Acceptable for an outlook paragraph |
-| Newton's method, damped least squares | `planar-arm-kinematics.mdx:184`, `:200` | Same sections | Introduced |
-| State | `sensing-and-state-estimation.mdx:27` | Same place, with a link to the state-space primer | Introduced |
-| Random variable, density, mean, variance, covariance, Gaussian | `sensing-and-state-estimation.mdx:52` | `sensing-and-state-estimation.mdx:52-63` | Introduced |
-| Innovation | `sensing-and-state-estimation.mdx:103` | Same place | Introduced; its notation is not (F8) |
-| Estimate $\hat x$, predicted $\hat x^-$, $P^-$ | `sensing-and-state-estimation.mdx:103` | Not explained | F8 |
-| Bayes' rule, Bayes filter | `sensing-and-state-estimation.mdx:105` | Same place | Introduced |
-| Discrete-time linear model ($A$, $B$, $H$) | `sensing-and-state-estimation.mdx:148-149` | Not distinguished from the primer's continuous-time model | F4 |
-| Sigma points, particles, resampling | `sensing-and-state-estimation.mdx:182`, `:186` | Same places | Introduced |
-| Complementary filter, high-/low-pass | `sensing-and-state-estimation.mdx:206` | Same place | Introduced |
-| Occupancy grid, loop closure | `sensing-and-state-estimation.mdx:210` | Same place | Introduced |
-| Mahalanobis distance, chi-square | `sensing-and-state-estimation.mdx:219` | Same place | Introduced |
+| Feedback / closed loop | `what-is-a-robot.mdx:32` | Same line, with link to the control series | Adequate. |
+| Degree of freedom, mobility formula | `what-is-a-robot.mdx:79, 85` | Same place; Exercise 1 applies the planar form | Adequate. |
+| Torque, inertia, transmission | `what-is-a-robot.mdx:101–109` | Same place; prerequisite in the overview | Adequate; Exercise 2 uses only these formulas. |
+| Encoder resolution, backlash | `what-is-a-robot.mdx:118–124` | Same place | Adequate; Exercise 3 reuses Section 2.4. |
+| Rotation matrix, $SO(3)$, homogeneous transform | `coordinate-frames-and-transformations.mdx:42, 81, 148` | Same places | Adequate. |
+| atan2 and angle wrapping | `coordinate-frames-and-transformations.mdx:247` | Same row (defined) | Adequate; used in Exercise 3 and in entries 3 and 4 with back-references. |
+| Joint/task space, Jacobian, singularity | `planar-arm-kinematics.mdx:25, 147, 166` | Same places | Adequate. |
+| Random variable, density, variance, covariance, Gaussian | `sensing-and-state-estimation.mdx:52–63` | Section 2, as the overview promises | Adequate. |
+| Innovation, gain, Bayes filter | `sensing-and-state-estimation.mdx:103–119` | Same places | Adequate. |
+| Mahalanobis distance, chi-square, gating | `sensing-and-state-estimation.mdx:221` | Same line | Adequate; Exercise 3 relies on it (see T1). |
 
 ## Versions, defaults and conventions
 
 | Assumption | Where it appears | Stated in the text? | Assessment |
 |---|---|---|---|
-| ISO 8373 edition | Entry 1 line 30, reference line 212 | Yes (2012, revised 2021) | Good |
-| Right-handed frames | Entry 2 line 23 | Yes | Good |
-| Positive angle direction (counter-clockwise) | Entry 2 line 59 | Yes | Good |
-| Euler-angle convention (ZYX, intrinsic) | Entry 2 lines 112, 211 | Yes | Good |
-| Quaternion component order and multiplication rule | Entry 2 lines 124, 244 | Yes: $(w, x, y, z)$ and Hamilton's $ijk = -1$; both storage orders named | Good |
-| Body-frame axis convention | Entry 2 line 247 | Only one convention given | F2 |
-| Camera optical-frame convention | Entry 2 line 247 | Yes ("often") | Good |
-| Lidar mounting in the worked example | Entry 2 line 176 | No | F6 (optional) |
-| Angle units | Entry 2: examples in degrees, radians advised internally (line 243); entry 3: degrees only, no statement; entry 4: radians (line 34) | Entries 2 and 4 yes, entry 3 no | F3 |
-| `atan2` argument order and range | Entry 2 line 245 ($(y, x)$ order implied by "the angle of the point $(\cos\Delta, \sin\Delta)$"; range $(-180^\circ, 180^\circ]$); entry 4 line 218 ($(-\pi, \pi]$) | Yes | Consistent |
-| Length units | Entry 2 line 176, entry 3 line 71, entry 4 line 34 | Yes (metres) | Good |
-| Relative (not absolute) joint angles | Entry 3 line 43 | Yes | Good |
-| Denavit–Hartenberg variant | Entry 3 line 77 | Yes (original and modified) | Good |
-| Discrete-time vs continuous-time model | Entry 4 lines 71–74, 148–149 | No | F4 |
-| Kalman filter assumptions (linear, Gaussian, known $Q$, $R$) | Entry 4 §5.2 | Yes | Good |
-| Loop rates | Entry 1 §4 | Yes, labelled as typical orders of magnitude | Good |
+| SI units | All entries; exercises give N·m, kg·m², m, m² | Overview; entry 1 line 18; entry 4 line 34 | Consistent. |
+| Radians in computation, degrees in examples | Entries 2–4 and their exercises | Overview; entry 2 line 19; entry 3 line 71; entry 4 line 34 | Consistent; exercises quote degrees and compute correctly. |
+| Right-handed frames, column vectors, left multiplication | Entry 2 and later | Overview; entry 2 lines 19, 25 | Consistent. |
+| Heading measured counter-clockwise from world $x$ | Entry 2 Section 5, Exercise 1 and 3 ("turn to the left") | Implied by Section 2.1 and the worked example ("heading 90°: its x axis points along the world's y axis") | Adequate. |
+| Euler angle order $R_z R_y R_x$ | Entry 2 line 114 | Yes | Adequate. |
+| Quaternion order $(w, x, y, z)$ | Entry 2 lines 126–132, 246 | Yes, and the alternative named | Adequate. |
+| Relative joint angle $\theta_2$ | Entry 3 line 43 | Yes | Adequate. |
+| Discrete-time $A$, $B$ vs continuous primer | Entry 4 line 162 | Yes | Adequate. |
+| 99% one-dimensional chi-square gate 6.63 | Entry 4 line 221, Exercise 3 | Yes | Correct ($\chi^2_{1,0.99} = 6.635$). |
+
+## Series design
+
+**Purpose, audience and scope.** The overview names the reader (basic linear algebra, trigonometry, derivatives, introductory mechanics), says that probability is introduced in entry 4 and that the control series is useful but not required, and states the shared conventions. The five objectives each start with an assessable verb and are met (table above). The overview promises nothing the entries do not deliver: the per-entry descriptions match the section contents, and "the worked examples are small enough to check by hand" holds for every worked example and exercise.
+
+**Sequence and rationale.** The overview's numbered list explains the order (machine, then geometry, then kinematics using that geometry, then estimation of the quantities entries 2 and 3 assumed known). The order is right for the stated reader; no entry needs moving, splitting or merging.
+
+**Prerequisites and dependencies.** Nothing depends on a later entry. Entry 4 uses the Jacobian from entry 3 and wrapping from entry 2 with back-references. The new exercises use only material of their own entry (entry 3's exercises reuse its example arm; entry 4's reuse the corridor example).
+
+**Notation and depth.** Symbols agree across entries ($n_b$, $n_j$, $f_i$; ${}^{A}T_{B}$; $\mathbf q$, $\mathbf x$, $J$; $P$, $Q$, $R$, $K$, $S$). With wave 1 every entry has three exercises with answers, so depth is now comparable; entry 1's exercises are proportionately lighter, which fits its descriptive role.
+
+**Overview completeness.** Meets standards 6.5: coverage and order, reader and prerequisites, per-entry contribution, shared conventions, objectives.
 
 ## Series-level notes
 
-**Fixes from the first review.** Each was checked against the current text:
-- F1: series file line 16.
-- F2: entry 1 lines 101, 109 and 124.
-- F3: entry 1 lines 30 and 212.
-- F4: entry 2 line 124.
-- F5: entry 2 line 245, and entry 3 line 101 (now before the formula).
-- F6: entry 3 line 77.
-- F7: entry 4 lines 206 and 219.
-- F8: entry 4 line 145.
-- F9: entry 4 line 56.
-- F10: entry 4 line 210.
-
-All are present and technically correct. The one side effect is F7 of this review, an ambiguous "Both" left by the inserted DH sentence.
-
-**Cross-references.** All were re-checked and resolve to sections that say what is claimed:
-- entry 1 → the control series' introduction (seriesOrder 1 of `foundations-of-control-systems`), Section 4, and "the last entry";
-- entry 2 → entry 1 (geometry, rigid-body freedoms), "the next entry" and "the last entry";
-- entry 3 → entry 1 (degrees of freedom, redundancy) and entry 2 (transforms, `atan2`, angle wrapping, gimbal lock);
-- entry 4 → entries 1, 2 and 3, and the control series' state-space primer (see F4 for the notation mismatch with that primer).
-
-Every "next entry" sentence names the actual next article, and entry 4 §10 summarises all four entries accurately.
-
-**Terminology.** Pose, frame tree, joint and task space, redundant, underactuated and nonholonomic, Jacobian, innovation and belief are each defined once and reused with the same meaning. Spelling is British throughout (organised, linearising, initialisation, manoeuvring). The exception is "localization", kept as the established technical term. Abbreviations (DOF, IMU, EKF, UKF, SLAM) are expanded on first use.
-
-**Structure and tone.** Consistent: numbered sections, a worked example carried through each entry, a summary table and references. The generated figures of entries 3 and 4 use the articles' own values: `scripts/generate-diagrams.py` sections 8 and 9 compute them from $l_1 = 1.0$, $l_2 = 0.7$, the target at $(30^\circ, 45^\circ)$, and $P^- = 0.25$, $R = 0.09$. The captions agree: the elbow is below the base–target line, which is at $48.3^\circ$, for $\theta_1 = 30^\circ$, and above it for $66.6^\circ$.
-
-**Content rules.** No fabricated figures, results or URLs. All numbers are worked examples or labelled as typical orders of magnitude. The references are real works with plausible details (Brooks 1986; Gat 1998; Nilsson 1984, SRI TN 323; Denavit and Hartenberg 1955; Pieper 1968; Kalman 1960; Julier and Uhlmann 1997; Thrun, Burgard and Fox 2005; Durrant-Whyte and Bailey 2006). The text is in English only, and nothing is presented as ACRR research.
+- Structure is now uniform: unheaded opening (builds on, assumes, conventions), numbered sections, Exercises, Summary table with closing paragraph, References under the Summary. Entry 4's Summary ties back to the objectives and links the series page.
+- Cross-references: all ordinal mentions ("first", "previous", "next", "last", "final", "second") name the right entry; the links added in wave 1 point to the right targets (S1 is a link-text mismatch only). "Section 2.2", "Section 2.4", "Section 3", "Section 4.3", "Section 5.2", "Section 8" in the exercises all resolve and say what is claimed. Inbound fragment links from `calibration-and-multisensor-fusion.mdx` to entry 4 still resolve (link check).
+- Exercise answers use `<details>`/`<summary>`; they render (the build contains each "Exercise 1–3" and no KaTeX error).
+- Wave-1 flag A1 (Pieper's condition stated only for intersecting axes): the sentence states a correct sufficient condition and does not claim it is the only one; no finding.
 
 ## Verification log
 
-- `npx astro check`: 0 errors, 0 warnings, 0 hints (60 files). `npm run build` and `npm run build:local` were not run, because another agent was building in the same working tree.
-- `npx astro build --outDir /tmp/claude-0/-home-user-acrr/33f2b4d6-bdb7-522e-a1ea-9c38c4478b92/scratchpad/review-dist`: completed, 95 pages built. This build included uncommitted files of the concurrent Sensor Systems work, which did not affect it. Pagefind was not run on the scratch build.
-- `node scripts/check-links.mjs /tmp/claude-0/-home-user-acrr/33f2b4d6-bdb7-522e-a1ea-9c38c4478b92/scratchpad/review-dist`: 95 pages and 2225 internal references checked; all resolve.
-- Mermaid widths in the scratch build, all under 600px:
-  - entry 1: 257px and 313px;
-  - entry 2: 215px;
-  - entry 3: none;
-  - entry 4: 309px.
-- KaTeX errors: none in the four pages. Text glued to `<strong>`, `<a>`, `<code>` or `<em>`: none.
-- Recomputed with python3 (numpy):
-  - entry 1:
-    - $360^\circ/(4096 \times 100) = 0.000879^\circ$;
-    - the serial-arm mobility check $M = n$.
-  - entry 2:
-    - $R_x(90^\circ)R_z(90^\circ)$ and $R_z(90^\circ)R_x(90^\circ)$ as printed, and their action on $\hat x$;
-    - the gimbal-lock example: $(\psi, \phi) = (30^\circ, 10^\circ)$ and $(50^\circ, 30^\circ)$ give equal matrices at $\theta = 90^\circ$, and equal sums give equal matrices at $-90^\circ$;
-    - Rodrigues' formula with $\hat{\mathbf u} = \hat z$ reproduces $R_z$;
-    - the quarter-turn quaternion $(0.7071, 0, 0, 0.7071)$;
-    - the obstacle at $(2, 4)$, the inverse ${}^{R}T_{W}$ and its result $(3, 0)$, and the camera chain result $(1.8, 2.5)$.
-  - entry 3:
-    - forward kinematics $(1.0472, 1.1761)$;
-    - $c_2 = 0.7071$;
-    - inverse solutions $(30^\circ, 45^\circ)$ and $(66.64^\circ, -45^\circ)$;
-    - $\det J = 0.4950$, and $\det J$ simplifies symbolically to $l_1 l_2 \sin\theta_2$;
-    - the Newton errors from $(0^\circ, 90^\circ)$: $0.478, 0.113, 0.0116, 1.8 \times 10^{-4}, 6.3 \times 10^{-8}$, converging to $(30^\circ, 45^\circ)$;
-    - the first Newton step from $(0^\circ, 1^\circ)$ towards $(1.75, 0.05)$: $(166.6^\circ, -401.6^\circ)$;
-    - the first damped step, with $\lambda = 0.1$: $(1.80^\circ, -1.33^\circ)$;
-    - the damped iteration settles at radius $1.7000$, $0.0507$ from the target;
-    - all of these with angles in radians internally (see F3).
-  - entry 4:
-    - $K = 0.7353$, $\hat x = 10.441$ m, $P = 0.0662$ m², $\sigma = 0.257$ m, and $P^-R/(P^-+R) = 0.0662$;
-    - the prediction $P^- = 0.106$ m², and $\sigma = 0.683$ m after ten moves;
-    - $d^2 = 0.36/0.34 = 1.06$ and $4/0.34 = 11.8$;
-    - the chi-square 99% point for one degree of freedom, $z_{0.995}^2 = 6.635$.
+- Build: not run (instruction for this wave); the current site build at `/tmp/claude-0/b2` (SITE_URL=https://acrr.asia), made after commit 530f71c, contains the wave-1 text (checked: "AAAI Press/MIT Press", the Exercises sections, the Exercise 3 wording of entry 4). The four articles and the series file are unchanged between 530f71c and HEAD 9232ed9.
+- `node scripts/check-links.mjs /tmp/claude-0/b2`: 314 pages, 9667 internal references, all resolve.
+- Rendering: `grep -c katex-error` = 0 in all four pages; Mermaid min-widths 257 px and 313 px (entry 1), 215 px (entry 2), 309 px (entry 4), all under 600 px; no letter or punctuation glued to `<span`, `<strong>`, `<a ` or `<code` outside markup.
+- `npm run -s eos -- lint introduction-to-robotics`: 0 errors, 0 warnings, 6 suggestions (acronym expansion of AAAI, MIT, SRI, SPIE, ASME in reference lists; not re-reported).
+- `npm run -s eos -- syntax` on the five files: all compile.
+- Recomputed (python3 -I, NumPy), new exercises:
+  - Entry 1: Ex. 1 $M = 3(4-1-4)+4 = 1$; Ex. 2 $\tau_j = 20$ N·m, $\omega_j = 60$ rpm, $N^2 J_m = 0.05$ kg·m²; Ex. 3 $360/(2048 \cdot 50) = 0.003516^\circ$ (text 0.0035°). All correct.
+  - Entry 2: Ex. 1 $(-1, 1)$; Ex. 2 ${}^{B}T_{A}$ with rows $(0, 1, 0)$, $(-1, 0, 3)$ and ${}^{B}T_{A}(3, 0, 1) = (0, 0, 1)$; Ex. 3 atan2 gives $+20.0^\circ$. All correct.
+  - Entry 3: Ex. 1 $c_2 = 0.142857$, $\theta_2 = \pm 81.79^\circ$, atan2 terms $22.62^\circ$ and $32.20^\circ$, $\theta_1 = -9.58^\circ$ / $54.82^\circ$, both solutions map back to $(1.2, 0.5)$, printed partial terms 0.986, 0.214, −0.167, 0.667 correct; Ex. 2 $c_2 = 1.793$; Ex. 3 $\det J = 0.1216$ m², ratio to 0.495 = 0.246 ("about a quarter"); the joint speed needed for unit radial gripper speed is 15.1 rad/s at $\theta_2 = 10^\circ$ against 3.4 rad/s at $45^\circ$ (with $\theta_1 = 30^\circ$), confirming "correspondingly larger". All correct.
+  - Entry 4: Ex. 1 $K = 0.3077$, $\hat x = 5.092$ m, $P = 0.02769$ m², $\sigma = 0.166$ m; Ex. 2 $n > 4.6$, $\sigma_4 = 0.475$ m, $\sigma_5 = 0.516$ m (same with unrounded $P = 0.06618$); Ex. 3 $d^2 = 4.235$, $d = 2.06$, $\sqrt S = 0.583$ m, $1.2/0.5 = 2.4$ (T1). Numbers correct; wording of Ex. 3 is T1.
+- Recomputed, existing worked numbers: encoder $0.000879^\circ$; $R_x(90^\circ)R_z(90^\circ)$ and $R_z(90^\circ)R_x(90^\circ)$ as printed; gimbal lock pairs equal at $\theta = 90^\circ$ (difference) and at $-90^\circ$ (sum); planar FK $(1.0472, 1.1761)$; Newton errors 0.478, 0.113, 0.0116, $1.8\times10^{-4}$, $6.4\times10^{-8}$ ending at $(30^\circ, 45^\circ)$; first Newton step $(166.6^\circ, -401.6^\circ)$; first damped step $(1.80^\circ, -1.33^\circ)$; damped iteration ends at radius 1.700, 0.0507 from target; Kalman $K = 0.735$, $\hat x = 10.44$, $P = 0.066$, $\sigma = 0.257$; ten moves $\sigma = 0.683$; $d^2 = 1.06$ and $11.8$. All correct.
+- References checked: Durrant-Whyte and Bailey vol. 13, no. 2, pp. 99–108, 2006 (BibBase record, DOI 10.1109/MRA.2006.1638022; matches wave-1 check of the article PDF); Julier and Uhlmann pp. 182–193, 1997 (SFB/TR 8 bibliography) and SPIE vol. 3068 (ModelDB citation); Kalman vol. 82, Series D, pp. 35–45, 1960 (UNC Welch–Bishop page); Brooks vol. 2, no. 1, pp. 14–23, March 1986 (J. M. Vidal library entry; Wikipedia "Allen (robot)"); Denavit and Hartenberg vol. 22, no. 2, pp. 215–221 (Wikipedia "Jacques Denavit"; DOI 10.1115/1.4011045 via CiteDrive, no volume data there); Nilsson TN 323, April 1984, edited (F2); ISO 8373:2021 robot definition "programmed actuated mechanism with a degree of autonomy to perform locomotion, manipulation or positioning" (IFR standardisation page), supporting the paraphrase in entry 1 line 30; ISO 8373 earlier definition "actuated mechanism programmable in two or more axes with a degree of autonomy" (AKIT glossary, edition not stated), consistent with the 2012 paraphrase.
 - Not verified:
-  - The exact ISO 8373:2012 and 2021 wordings, and the publication details of the cited works. These were checked against the reviewer's knowledge, not against the sources.
-  - The scratch build was not screenshotted, so rendering at 360px and in dark mode was not re-checked in this pass. None of the four articles changed its figures since the first review, which did check them.
+  - Gat, "On Three-Layer Architectures": page numbers (no catalogue reached); the text gives none, so nothing to correct.
+  - Brooks journal name: Xplore did not render; some catalogues use "IEEE Journal on Robotics and Automation", the sources reached use "of". Left as is.
+  - Kalman issue number (no. 1 commonly cited; the UNC page gives only "Series D"); not in the text.
+  - Craig 3rd ed. (2005), Lynch and Park (2017), Siciliano et al. (2009), Bar-Shalom et al. (2001), Thrun et al. (2005), Pieper thesis (1968): standard textbooks and thesis, details not re-fetched this pass (wave-1 audit accepted them).
+  - Shakey "built at the Stanford Research Institute from the late 1960s": consistent with the Technical Note's date range, not checked against a dated source this pass.
+
+## Resolution
+
+- T1 (Should fix): fixed - Exercise 3 answer now reads "about two standard deviations of the innovation ($\sqrt{4.24} = 2.06$, with $\sqrt{S} = 0.58$ m) from the predicted measurement", `src/content/blog/sensing-and-state-estimation.mdx:250`.
+- F1 (Should fix): fixed - "developed by Julier and Uhlmann in the mid-1990s (their 1997 paper cited below is the usual reference)", `src/content/blog/sensing-and-state-estimation.mdx:184`; no reference added.
+- F2 (Should fix): fixed - "N. J. Nilsson, Ed., *Shakey the Robot*, Technical Note 323, Artificial Intelligence Center, SRI International, 1984.", `src/content/blog/what-is-a-robot.mdx:245`.
+- Optional applied: T2 (Exercise 1 question reworded, `sensing-and-state-estimation.mdx:227`), S1 (link target changed to `/series/foundations-of-control-systems`, `what-is-a-robot.mdx:18`), S2 ("outward", `planar-arm-kinematics.mdx:168`). Optional not applied: none.
+
+Resolved by the wave-1 author on 2026-10-14; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the working tree at HEAD 0d10069 (the five files of this series have no uncommitted changes) and the build in `/tmp/claude-0/b6`.
+
+- T1 (Should fix): confirmed. `sensing-and-state-estimation.mdx:250` reads "about two standard deviations of the innovation ($\sqrt{4.24} = 2.06$, with $\sqrt{S} = 0.58$ m) from the predicted measurement". Recomputed (python3 -I, NumPy): $d^2 = 1.44/0.34 = 4.235$, $d = 2.058$, $\sqrt{0.34} = 0.583$ m.
+- F1 (Should fix): confirmed. `sensing-and-state-estimation.mdx:184` reads "developed by Julier and Uhlmann in the mid-1990s (their 1997 paper cited below is the usual reference)"; no reference added, the 1997 SPIE entry is unchanged.
+- F2 (Should fix): confirmed. `what-is-a-robot.mdx:245` reads "N. J. Nilsson, Ed., *Shakey the Robot*, Technical Note 323, Artificial Intelligence Center, SRI International, 1984."
+- T2 (Optional): confirmed applied (`sensing-and-state-estimation.mdx:227`).
+- S1 (Optional): confirmed applied (`what-is-a-robot.mdx:18` links `/series/foundations-of-control-systems`).
+- S2 (Optional): confirmed applied (`planar-arm-kinematics.mdx:168`, "straight outward").
+
+Checks: `eos lint introduction-to-robotics` 0 errors, 0 warnings, 6 suggestions (organization names in reference lists); `eos syntax` on the five files: all compile; `check-links /tmp/claude-0/b6`: 314 pages, 9,693 internal references, all resolve; `eos validate-site /tmp/claude-0/b6`: no issue on any English page (issues reported only on `/vi/` pages, outside this verdict); `katex-error` count 0 on all five pages; the build contains the three should-fix corrections. Independent spot-checks (python3 -I, NumPy 2.5): planar FK $(1.0472, 1.1761)$, the Newton error sequence 0.478, 0.113, 0.0116, $1.8\times10^{-4}$, $6.4\times10^{-8}$ ending at $(30^\circ, 45^\circ)$, the second inverse solution $(66.64^\circ, -45^\circ)$, the first Newton and damped steps $(166.6^\circ, -401.6^\circ)$ and $(1.80^\circ, -1.33^\circ)$, the damped iteration ending at radius 1.700, 0.0507 from target; the camera example $(1.8, 2.5)$; gimbal-lock pairs; Kalman $P = 0.0662$, ten-move $\sigma = 0.683$ m, $d^2 = 11.8$ for a 12.0 m reading. All agree with the text.
+
+QA observations (optional, not blocking, recorded in the scores):
+
+- Q1 (Optional, language): the overview's objectives 1 and 4 and its conventions sentence use the serial comma ("actuators, sensors, and computation"; "sense, plan, and act"; "column vectors, and angles"), against standards 5.1. Same in the Summary table of `what-is-a-robot.mdx:228, 235`. Remove the final comma when the files are next edited.
+
+Verdict: no finding reopened. All five items pass the QA gate.
+
+Build re-check: `/tmp/claude-0/b6` was deleted after the checks above, so they were run again on `/tmp/claude-0/b9`. That build has the same text for this series, plus later commits to other series (HEAD 3dd5a22; this series' files are unchanged). `check-links`: 314 pages, 9,695 internal references, all resolve. `eos validate-site`: no issue on any English page. `katex-error` count is 0 on every page of this series. The corrected text is present.
