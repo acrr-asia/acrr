@@ -75,3 +75,15 @@ Ran the CAN frame script (identical output). Recomputed: 0.5/9.5 = 5.26%; (0.5 �
 - Flags for independent review: none new. The Di Natale et al. book subtitle ("Theory and Practice"?) was not verified; the title is left as it was.
 - Out-of-scope reference for the orchestrator: `src/content/blog/fieldbuses-and-industrial-ethernet.mdx:373` writes the Davis et al. title in title case ("Controller Area Network (CAN) Schedulability Analysis: Refuted, Revisited and Revised"). The published title is "Controller Area Network (CAN) schedulability analysis: Refuted, revisited and revised", vol. 35, no. 3, pp. 239–272, 2007.
 - Vietnamese translation affected: no translation exists. No `updatedAt`: published 2026-10-13.
+
+## Independent review (wave 2)
+- Report: `reviews/embedded-and-real-time-systems.md` (reviewed commit 9232ed9, 2026-10-14).
+- Fact-check: pass (UM10204 rev. 7.0 details verified on the NXP PDF; Di Natale subtitle verified, F3 optional). Technical: pass (CAN script and CRC check value reproduce; all numbers recomputed).
+- Findings: F3, T2 (optional).
+- Not verified: I2C Fm/Fm+ table values (line 164–166) and CAN fault-confinement thresholds (line 325) against the document text (UM10204 Table 10 not in the fetched part; ISO 11898-1 paywalled).
+
+## Revision log (wave 2 resolution)
+
+- F3 (optional): the Di Natale et al. title now includes the subtitle "Theory and Practice", checked on Springer on 2026-10-15.
+- T2 (optional): §5.1 now glosses characteristic impedance and reflection in one added sentence.
+- There is no Vietnamese translation.

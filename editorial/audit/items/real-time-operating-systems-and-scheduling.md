@@ -65,3 +65,13 @@ Ran all three Python programs (identical output). Recomputed by hand: U = 0.8333
   - Sentences of 50 and 46 words are left (opening paragraph, §4).
 - Flags for independent review: the Mars Pathfinder statement (§3.3) is uncited (A1).
 - Vietnamese translation affected: no translation exists. No `updatedAt`: published 2026-10-13.
+
+## Independent review (wave 2)
+- Report: `reviews/embedded-and-real-time-systems.md` (reviewed commit 9232ed9, 2026-10-14).
+- Fact-check: fail until F2 is resolved (Mars Pathfinder account uncited; Reeves's 15 December 1997 account located and confirms the substance). Technical: pass (all three programs reproduce; RTA, simulation and exercises recomputed).
+- Findings: F2 (should fix).
+- Not verified: none beyond the reference details not re-fetched in this pass (listed in the report).
+
+## Revision log (wave 2 resolution)
+
+- F2: §3.3 now attributes the Mars Pathfinder account to G. E. Reeves (JPL) and says "semaphore" instead of "mutex". The Reeves email of 15 December 1997 was added to the References, and the source was re-fetched on 2026-10-15. There is no Vietnamese translation.

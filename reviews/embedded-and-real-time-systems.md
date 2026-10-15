@@ -1,287 +1,255 @@
 # Series review: Embedded and Real-Time Systems
 
 - Series: `embedded-and-real-time-systems` (5 articles, status published, 0 planned entries)
-- Reviewed commit: b27867d
-- Date: 2026-10-13
-- Content hash: sha256:4f41890309ef95608d7bb5bd8694986a83909f4205976da0de107cfc425ef0cc
+- Reviewed commit: 9232ed9
+- Date: 2026-10-14
+- Reviewer: independent reviewer for wave 2 (fact-check, technical review, series review). The reviewer did not author or revise any text in this scope.
 
 ## Summary
 
-The series is technically strong and well built. It moves from the vocabulary of real-time systems and the parts of a microcontroller, through polling, interrupts and DMA, serial buses, and RTOS scheduling theory, to measurement. Each entry builds on the previous ones with accurate, linked cross-references. Every program and calculation in the five entries was recompiled or rerun and reproduced its printed output, and the CAN CRC-15 check value 0x059E was confirmed. All nineteen references were checked and are real, with consistent authors, titles, venues and years.
+The series is technically sound and ready to publish after three should-fix corrections; nothing is blocking. Every program in the five entries was recompiled or rerun and reproduces its printed output. The exception is the wake-up experiment of the fifth entry, which by design gives different numbers on every run; a rerun showed the same pattern. Every worked number and exercise answer was recomputed and is correct, and the 25 distinct references are real works; those fetched in this pass have correct details, the rest are listed in the verification log. The wave-1 revision changed prose, headings, descriptions and reference formatting but no technical content, and it introduced no error.
 
-There is one blocking finding. The concurrency fix in the second entry's Exercise 3 claims a guarantee that does not hold: the overflow interrupt can still be pending when the high half is re-read. The should-fix findings are:
-- the CAN termination sentence, which reads as if 60 Ω matched the cable;
-- an exception-frame size given without the floating-point case, which the fifth entry does mention;
-- ISO 11898-1/-2 and POSIX editions that were superseded in 2024, cited without saying so;
-- the wake-up experiment of the fifth entry, whose numbers could not be reproduced and whose framing needs to say plainly that they describe one session on a shared machine;
-- an understated superloop latency.
+The three should-fix findings:
+- the Arm reference, cited in three entries, still has no issue or year (now verified: DDI 0403E.e, 2021);
+- the Mars Pathfinder account in the fourth entry is a dated factual claim with no source;
+- the new sequence paragraph of the series overview says that every entry removes a limit of the previous one, which is not true of the third entry, and it says the second entry replaces the superloop's waiting "with polling", although the superloop already polls.
 
-The series can be published once these are corrected.
-Findings: 1 blocking, 6 should fix, 6 optional.
+The reworded objective 4 matches what the fourth and fifth entries deliver.
+Findings: 0 blocking, 3 should fix, 6 optional.
+
+## Objectives coverage
+
+| Objective (from the series file) | Covered by | Assessment |
+|---|---|---|
+| Describe how a microcontroller's CPU, memory, timers, converters and peripherals work together. | Entry 1, §§2–7 | Met: core, flash/SRAM, memory map, startup, clocks, timers, GPIO, ADC, firmware layers. |
+| Choose between polling, interrupts and DMA for moving sensor data. | Entry 2, §§2–6 (decision table and four worked decisions in §6) | Met. |
+| Compare serial buses (UART, SPI, I2C, CAN) by topology, speed and error handling. | Entry 3, §§2–6 (comparison table in §6) | Met. |
+| Explain real-time scheduling, calculate worst-case response times and check them against measurements. | Entry 4, §§1–4 (RM/DM, utilization bound, RTA, EDF, blocking, worked design); entry 5, §§3.3–3.4, 4.1, 7 | Met. The wave-1 wording ("check them against measurements") matches entry 5 §3.2 and §4.1, which argue that measurement alone cannot establish a worst case. The wave-1 flag is confirmed. |
+
+## Findings
+
+| ID | Severity | Article | Location | Dimension | Finding |
+|---|---|---|---|---|---|
+| F1 | Should fix | `src/content/blog/inside-a-microcontroller.mdx`, `interrupts-polling-and-dma.mdx`, `measuring-timing-latency-and-resource-use.mdx` | References (lines 455, 393, 461) | evidence | Arm DDI 0403 is cited without issue or year; the verified current issue is DDI 0403E.e (2021). |
+| F2 | Should fix | `src/content/blog/real-time-operating-systems-and-scheduling.mdx` | §3.3 (line 295) | evidence | The Mars Pathfinder account (1997, resets, priority inheritance fix) has no source. |
+| S1 | Should fix | `src/content/series/embedded-and-real-time-systems.md` | Body, second paragraph (line 15) | accuracy | "each one removing a limit that the previous one exposes" is false for the third entry, and "replaces that waiting with polling" misdescribes the second entry. |
+| F3 | Optional | `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx` | References (line 416) | evidence | The Di Natale et al. title omits its subtitle "Theory and Practice" (verified). |
+| S2 | Optional | `src/content/series/embedded-and-real-time-systems.md` | Body (lines 13–17) | purpose | The overview does not say what the series leaves out. |
+| S3 | Optional | `src/content/blog/inside-a-microcontroller.mdx` | Opening (line 15) | consistency | "how to check by measurement that it does" restates the claim that objective 4 was reworded to avoid. |
+| T1 | Optional | `src/content/blog/interrupts-polling-and-dma.mdx` | §3.4 (line 119), §6 (line 334) | structure | "task" is used in its RTOS sense two entries before tasks are introduced. |
+| T2 | Optional | `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx` | §5.1 (line 200) | structure | "characteristic impedance" and "reflections" are used without a gloss. |
+| T3 | Optional | `src/content/blog/interrupts-polling-and-dma.mdx` | Opening (line 21) | language | "data shared between code that can interrupt itself" is imprecise. |
+
+### F1. Arm reference without issue or year
+- **Where:** `src/content/blog/inside-a-microcontroller.mdx:455`, `src/content/blog/interrupts-polling-and-dma.mdx:393`, `src/content/blog/measuring-timing-latency-and-resource-use.mdx:461`, section "References"
+- **Text:** "Arm Limited, *Armv7-M Architecture Reference Manual*, document ARM DDI 0403."
+- **Problem:** Standards 7.3 requires a year for every reference, and 7.2 requires the edition or issue; the wave-1 logs flagged this for the fact-checker (A1). The front matter of the manual reads "Armv7-M Architecture Reference Manual", "ARM DDI 0403E.e (ID021621)", Issue E.e, 15 February 2021. Arm's own documentation pages returned no content when fetched, so this was read from a copy of the PDF at kib.kiev.ua (`DDI0403E_e_armv7m_arm.pdf`, fetched 2026-10-14); the same index lists issues C, D, E.b, E.c, E.d and E.e. The content these entries cite (address map regions, exception entry, PRIMASK and BASEPRI, the optional DWT cycle counter) is the same in every E issue, so citing the current issue is safe.
+- **Recommended correction:** in all three entries, replace the entry with:
+  `- Arm Limited, *Armv7-M Architecture Reference Manual*, ARM DDI 0403E.e, 2021.`
+
+### F2. Mars Pathfinder account without a source
+- **Where:** `src/content/blog/real-time-operating-systems-and-scheduling.mdx:295`, section "3.3 Priority inversion"
+- **Text:** "A widely reported case occurred on the Mars Pathfinder lander in 1997, whose computer repeatedly reset itself because a high-priority task was kept waiting this way; the fix was to enable priority inheritance on the mutex concerned."
+- **Problem:** This is a dated historical claim, and standards 7.2 does not allow it to stand without a source; "widely reported" is not a source (wave-1 flag A1). The substance is correct. G. E. Reeves of the Jet Propulsion Laboratory gave a first-hand account in an email of 15 December 1997 (copy fetched 2026-10-14 at https://www.cs.unc.edu/~anderson/teach/comp790/papers/mars_pathfinder_long_version.html). In it:
+  - the high-priority bus distribution task (`bc_dist`) was blocked on a semaphore held by the low-priority ASI/MET task while medium-priority tasks ran;
+  - the scheduler task then detected the overrun, and the computer reset;
+  - the fix was a global setting that created those semaphores with priority inheritance enabled.
+- **Recommended correction:** attribute the account and add a reference. Replace the sentence with:
+  "A widely cited case occurred on the Mars Pathfinder lander in 1997. According to the account of G. E. Reeves of the Jet Propulsion Laboratory, its computer repeatedly reset itself because a high-priority task was kept waiting this way, and the fix was to enable priority inheritance on the semaphore concerned."
+  Add to the references, in alphabetical order (after Liu and Layland):
+  `- G. E. Reeves, account of the Mars Pathfinder resets, email of 15 December 1997, Jet Propulsion Laboratory.`
+  If a primary email account is not acceptable to the author, delete the sentence. The paragraph's argument does not depend on it.
+
+### S1. Overview sequence paragraph misdescribes two entries
+- **Where:** `src/content/series/embedded-and-real-time-systems.md:15`, body, second paragraph (new in wave 1)
+- **Text:** "The entries follow data through an embedded system and then turn to the question of time, each one removing a limit that the previous one exposes. ... The second replaces that waiting with polling, interrupts and direct memory access (DMA) ... The third follows data off the chip over four serial buses ..."
+- **Problem:**
+  1. The third entry does not remove a limit exposed by the second. The second entry ends by handing over to buses as the next topic (`interrupts-polling-and-dma.mdx:389`). The limit it does expose, "they leave the processing work in a single main loop, where long and short jobs still delay each other" (`:336`), is removed by the fourth entry. Standards 6.5 forbids an overview that promises what the entries do not deliver.
+  2. The superloop's waiting is already periodic polling. The second entry says so ("Periodic polling: the program checks the flag once per pass of a loop ... as in the superloop of the first entry", `interrupts-polling-and-dma.mdx:50`). So "replaces that waiting with polling" is self-contradictory.
+- **Recommended correction:** replace the paragraph with:
+  "The entries follow data through an embedded system and then turn to the question of time. The first entry defines the timing vocabulary of the whole series (events, deadlines, latency and jitter) and the parts of a microcontroller, and ends with the simplest firmware structure, the superloop, in which every event waits for the rest of the loop. The second analyzes the polling that the superloop performs and shows how interrupts and direct memory access (DMA) let hardware events be handled when they occur, with what each method costs in latency and processor time. The third follows data off the chip over four serial buses: the universal asynchronous receiver-transmitter (UART), the Serial Peripheral Interface (SPI), Inter-Integrated Circuit (I2C) and the Controller Area Network (CAN). The fourth removes the limit the second leaves, processing that still runs in one loop, by organizing it into prioritized tasks under a real-time operating system, and calculates whether every deadline is met in the worst case. The fifth measures execution time, latency, jitter, processor load and memory use on real hardware, and checks the calculation against those measurements."
+  Update `src/content/series/vi/embedded-and-real-time-systems.md` accordingly.
+
+### F3. Di Natale et al. title incomplete
+- **Where:** `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx:416`
+- **Text:** "M. Di Natale, H. Zeng, P. Giusto and A. Ghosal, *Understanding and Using the Controller Area Network Communication Protocol*, Springer, 2012."
+- **Problem:** Springer's book page (link.springer.com/book/10.1007/978-1-4614-0314-2, fetched 2026-10-14) gives the subtitle "Theory and Practice"; the authors, publisher (Springer New York) and year (2012) are correct. This settles the item that wave 1 left unverified.
+- **Recommended correction:** `*Understanding and Using the Controller Area Network Communication Protocol: Theory and Practice*, Springer, 2012.`
+
+### S2. Scope exclusions not stated
+- **Where:** `src/content/series/embedded-and-real-time-systems.md:13–17`
+- **Text:** The body states the reader, the prerequisites, the sequence and the conventions, but not what is left out.
+- **Problem:** The series-review dimension "Purpose, audience and scope" asks for what the series leaves out. Standards 6.5 does not require it, so this is optional.
+- **Recommended correction:** append to the first paragraph: "It treats single-core microcontrollers; multicore scheduling, embedded Linux, the API of any particular kernel, circuit design and safety certification are outside its scope."
+
+### S3. Entry 1 opening repeats the overclaim that objective 4 removed
+- **Where:** `src/content/blog/inside-a-microcontroller.mdx:15`
+- **Text:** "how their software is organized so that it meets its deadlines, and how to check by measurement that it does."
+- **Problem:** Wave 1 reworded objective 4 because "verify ... by measurement" contradicts entry 5 §3.2 and §4.1. This sentence makes a weaker form of the same claim. The end of §7.2 (line 382) already has the right wording: "predicted (fourth entry) and checked by measurement (fifth entry)".
+- **Recommended correction:** "... how their software is organized so that its worst-case timing can be calculated, and how to check that calculation by measurement."
+
+### T1. "Task" used before it is introduced
+- **Where:** `src/content/blog/interrupts-polling-and-dma.mdx:119` ("setting a variable or signaling a task") and `:334` ("busy-waiting for completion inside a task")
+- **Problem:** Tasks are defined in the fourth entry (§1.1). In the second entry the program is still a superloop, so at line 334 "inside a task" has no referent.
+- **Recommended correction:** line 119: "setting a variable or signaling a task (a unit of an operating system's schedule, fourth entry)"; line 334: "busy-waiting for completion in the main program (or, under an operating system, in a task of the fourth entry)".
+
+### T2. Characteristic impedance not glossed
+- **Where:** `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx:200`
+- **Text:** "terminated at each end by a 120 Ω resistor, which matches the cable's nominal 120 Ω characteristic impedance and so prevents reflections"
+- **Problem:** Transmission-line ideas are not among the series prerequisites (`embedded-and-real-time-systems.md:13`).
+- **Recommended correction:** after "characteristic impedance", insert "(the ratio of voltage to current of a wave travelling along the cable; a line ended in that resistance absorbs the wave instead of reflecting it back)".
+
+### T3. Imprecise phrase in entry 2's opening
+- **Where:** `src/content/blog/interrupts-polling-and-dma.mdx:21`
+- **Text:** "It then treats the problem that interrupts create, data shared between code that can interrupt itself, and ends with a way to choose."
+- **Problem:** "Code that can interrupt itself" suggests reentrancy. What is meant is data shared between the main program and the handlers that interrupt it (§4).
+- **Recommended correction:** "It then treats the problem that interrupts create, data shared between the main program and the interrupt handlers that preempt it, and ends with a way to choose."
+
+## Concept introduction map
+
+| Concept | First used (path:line) | Introduced where | Assessment |
+|---|---|---|---|
+| Embedded system, firmware | `inside-a-microcontroller.mdx:15` | `inside-a-microcontroller.mdx:27` | OK |
+| Real-time, event, job, release, deadline, response time, latency, jitter | `inside-a-microcontroller.mdx:15` | `inside-a-microcontroller.mdx:37–46` | OK; reused by link in entries 2, 4, 5 |
+| CPU, registers, stack pointer, link register, PC | `inside-a-microcontroller.mdx:74` | `inside-a-microcontroller.mdx:74, 89` | OK |
+| Memory-mapped I/O, `volatile` | `inside-a-microcontroller.mdx:123` | `:123, :127` | OK |
+| Interrupt handler | `inside-a-microcontroller.mdx:198` | `:198`, in full in `interrupts-polling-and-dma.mdx:70` | OK (forward reference stated) |
+| DMA | `inside-a-microcontroller.mdx:217` | `interrupts-polling-and-dma.mdx:19, 252` | OK (expanded at first use) |
+| Vector table, reset handler | `inside-a-microcontroller.mdx:223` | `:223` | OK |
+| Timer, prescaler, PWM, input capture, watchdog | `inside-a-microcontroller.mdx:254` | `:254–320` | OK |
+| Open-drain output | `inside-a-microcontroller.mdx:329` | `:329`; reused in `serial-buses-uart-spi-i2c-and-can.mdx:133` | OK |
+| ADC | `inside-a-microcontroller.mdx:217` | `:217` (expanded), `:337` | OK |
+| NVIC, exception, priority, preemption | `interrupts-polling-and-dma.mdx:72` | `:72, :111` | OK |
+| Race condition, critical section, atomics | `interrupts-polling-and-dma.mdx:138` | `:138, :152, :166` | OK |
+| Task (RTOS sense) | `interrupts-polling-and-dma.mdx:119` | `real-time-operating-systems-and-scheduling.mdx:25` | Used before introduction: T1 (optional) |
+| Synchronous/asynchronous, differential, bit time, baud | `serial-buses-uart-spi-i2c-and-can.mdx:27` | `:27, :42` | OK |
+| Characteristic impedance, reflections | `serial-buses-uart-spi-i2c-and-can.mdx:200` | not introduced | T2 (optional) |
+| CRC | `serial-buses-uart-spi-i2c-and-can.mdx:239` | `:239` (table: "Cyclic redundancy check") | OK; polynomial given at `:248` |
+| RTOS, TCB, context switch, tick, PendSV | `real-time-operating-systems-and-scheduling.mdx:17` | `:25, :31, :51, :57` | OK |
+| WCET, utilization, RM, DM, RTA, critical instant, hyperperiod, EDF | `real-time-operating-systems-and-scheduling.mdx:90` | `:90–138, :260, :264` | OK |
+| Mutex, semaphore, priority inversion, inheritance, ceiling | `real-time-operating-systems-and-scheduling.mdx:274` | `:274–302` | OK |
+| High-water mark, BCET, probe effect, stack painting | `measuring-timing-latency-and-resource-use.mdx:35` | `:45, :116, :330` | OK (high-water mark in the table at :35, defined at :45, ten lines later) |
+
+## Versions, defaults and conventions
+
+| Assumption | Where it appears | Stated in the text? | Assessment |
+|---|---|---|---|
+| C11 (ISO/IEC 9899:2011) | All code | Yes, every entry's Conventions and the overview | OK |
+| Generic Armv7-M Cortex-M at 48 MHz, 3.3 V; invented register layouts | Entries 1–5 | Yes | OK |
+| Arm-specific statements (12-cycle entry, 8-word frame, PRIMASK/BASEPRI, PendSV, DWT) | Entries 2, 4, 5 | Yes, marked as Arm-specific | OK |
+| GCC 13, `-std=c11` | Entries 1, 2, 5 | Yes | OK; reproduced here with GCC 13.3.0 |
+| Python 3, standard library | All calculations | Yes | OK; rerun with Python 3.13.16 |
+| POSIX IEEE Std 1003.1-2017, note on 2024 edition | Entries 4, 5 | Yes | OK |
+| ISO 11898-1:2015 / -2:2016 (classical CAN, CAN FD), with a note on the 2024 editions | Entry 3 | Yes | OK |
+| I2C UM10204 rev. 7.0 (2021); controller/target terms | Entry 3 | Yes | OK (verified on the NXP PDF) |
+| UART 8N1, 16× oversampling | Entries 2, 3 | Yes (`serial-buses...:57, :61`) | OK |
+| Priority numbering (lower number = higher on Cortex-M) | Entries 2, 4 | Yes | OK |
+| Timer $P$, $N$ as actual ratios, not register values | Entry 1 | Yes (`:270`) | OK |
+| SI time prefixes, binary memory prefixes | Overview, entry 1 | Yes | OK |
+| Jitter as peak-to-peak | Entries 1, 5 | Yes | OK |
+| $D_i \le T_i$, no self-suspension, synchronous release | Entry 4 | Yes (`:92–94`) | OK |
+
+## Series design
+
+**Purpose, audience and scope.** The overview and entry 1 agree on the reader (basic C and digital logic, no embedded experience) and the goal. The overview does not say what is left out (S2, optional). The four objectives are checkable, each starts with an assessable verb, and each is met by named entries (table above).
+
+**Sequence and rationale.** The order (hardware, data movement, buses, software organization, measurement) suits the stated reader. The fourth entry depends on the second (ISR load in RTA) and the fifth on the fourth. The third is a side path whose CAN arbitration prepares the scheduling view of the fourth; the overview's claim that every entry removes a limit of the previous one is wrong for it (S1). Moving the buses after scheduling was considered and rejected. Entry 4's view of CAN as a non-preemptive scheduler, and its use of entry 2's UART ISR in the worked design, read better with the buses already covered.
+
+**Prerequisites and dependencies.** Nothing depends on a later entry, except the optional T1 ("task" in entry 2). Every cross-entry reference was checked against the target heading and content (map below).
+
+**Notation and depth.** $C_i, T_i, D_i, B_i, R_i, U$ agree between entries 4 and 5; $L$ (entry 2), $t_\text{bit}$ and $C_m$ (entry 3) are local and defined. Letters are reused for unrelated local quantities: $C$ and $N$ for the PWM compare value and count in entry 1, $N$ for the idle count in entry 5, $c$ for cycles per interrupt in entry 2. Each is defined where it is used and never mixed with the scheduling symbols in one passage, so this is acceptable. Depth is even: every entry has a worked example, runnable code with real output, 4–5 exercises with answers, a summary table and references.
+
+**Overview completeness.** The reader, prerequisites, sequence and shared conventions (C11, Cortex-M at 48 MHz, invented registers, POSIX, Python 3, SI and binary prefixes) are all present, as standards 6.5 requires. The only promise that the entries do not keep is the "each one removing a limit" claim (S1). The description is one sentence of 151 characters.
+
+## Series-level notes
+
+Cross-reference map (all checked by hand; every link resolves in the build):
+
+| From | Reference | Target says what is claimed |
+|---|---|---|
+| Entry 2 :21, entry 4 :92, entry 5 :17 | Section 1.2 of the first entry | Yes |
+| Entry 2 :50 | First entry §7.2, superloop | Yes |
+| Entry 2 :87 | Section 4.1 of the first entry, vector table | Yes |
+| Entry 2 :140, entry 5 :53 | Section 3.3 of the first entry, read-modify-write and set/clear registers | Yes |
+| Entry 2 :274 | Section 6.2 of the first entry, timer-triggered ADC | Yes |
+| Entry 2 :113 | "deadline-based priority assignment of the fourth entry" | Yes (entry 4 §2.2, DM) |
+| Entry 3 :71 / :79 / :125 / :133 | First entry §4.2; second entry §1.1; second entry §6 (7 µs SPI); first entry §6.1 | Yes |
+| Entry 4 :31 | First entry §3.4, 64 KiB SRAM | Yes |
+| Entry 4 :45 / :57 / :118 / :274 / :280 / :319 | Second entry §2.1; first entry §5.1; second entry §3.3; §4.1; §3.4; §3.5 | Yes |
+| Entry 4 :225 (entry 3) / entry 4 :150 | Davis et al. corrected analysis | Consistent wording in both entries |
+| Entry 5 :42, :59, :61, :161, :204, :298, :316, :326 | First entry §§2.3, 5, 3.4; second entry §§5.3, 4.4, 3.2; fourth entry §§2.4, 1.4, 1.2, 4 | Yes |
+| Promises: entry 1 :215 (stack measured in the fifth), :316 (input capture for latency), entry 4 :31, :53, :76 | Entry 5 §§6.2, 2.1, 2.1, 4.1 | Fulfilled |
+
+Terminology is consistent: "utilization" for the scheduling quantity, "controller/target" (I2C) and "controller/peripheral" (SPI), I2C written in ASCII, "startup" throughout, American spelling. All five entries have the same structure: opening, Conventions, numbered sections, Exercises, Summary table, closing paragraph that leads to the next entry, and `### References`.
+
+## Verification log
+
+- Build: not run, as the brief instructs. The current full-site build at `/tmp/claude-0/b2` (SITE_URL=https://acrr.asia) was used. It reflects the reviewed text: the wave-1 descriptions, headings and objective 4 wording are present in the built pages.
+- `node scripts/check-links.mjs /tmp/claude-0/b2`: "Checked 314 pages and 9667 internal references ... All internal links resolve."
+- Built pages:
+  - `grep -c katex-error` returns 0 for all five.
+  - Mermaid min-widths are 449 px (entry 1), 335/418 px (entry 2), 474 px (entry 3), 398 px (entry 4) and 233 px (entry 5), all under 600 px.
+  - Glued inline text: none. The two hits in entry 1 are inside KaTeX markup for $\log_2$.
+- `npm run -s eos -- lint embedded-and-real-time-systems`: 6 files, 0 errors, 0 warnings, 60 suggestions. The suggestions are the acronym-expansion and sentence-length items that wave 1 accounted for, and none is re-reported here.
+- `npm run -s eos -- syntax <series file and five entries>`: "All files compile."
+- Code rerun (GCC 13.3.0, Python 3.13.16):
+  - Entry 1: GPIO program (`-std=c11 -Wall -Wextra -pedantic`) and timer-settings script: output identical.
+  - Entry 2: ring-buffer program (`-std=c11 -O2 -pthread`), three runs, all identical to the printed output; DMA/interrupt load table identical.
+  - Entry 3: CAN frame/CRC script identical; CRC-15 of "123456789" = 0x059E.
+  - Entry 4: all three Python programs (RTA sets A/B/blocking, unit-time FP/EDF simulation, worked design with exact fractions) identical.
+  - Entry 5: cycle-counter program identical; combined Python script (three fragments) identical; stack-painting program identical.
+  - Wake-up program (`-std=c11 -O2`, x86-64 Linux container): "absolute: min 66.0 us, median 98.9 us, 99th pct 1129.6 us, max 5033.3 us ...; relative: ... 309.1 ms behind the grid". These are different numbers with the same pattern (no drift with absolute sleeping, about 0.15 ms per period with relative sleeping, maximum about 50 times the median), as the text says to expect.
+- Recomputed:
+  - Entry 1:
+    - 20.83 ns; 12.2% (8000/65 536); 1.728 s; 1.365 ms; 89.48 s;
+    - log2 2400 = 11.23; 0.806 mV; 1.25 µs and 800 kS/s; servo C = 1500;
+    - exercises 2.083 µs, 2.417 V, 10.91 bits, 7.2 KiB / 1.2 KiB;
+    - the Armv7-M address map table agrees with the architecture's default map.
+  - Entry 2:
+    - 86.8 µs; U = 2.4%, 20.8%, 100%; 15.25 µs = 61× entry time; jitter 15 µs;
+    - 25.6 ms; 39.1 interrupts/s;
+    - exercises 1.8 ms, 29.25 µs (margin 20.75 µs), 10 ms.
+  - Entry 3:
+    - UART: 5.26%, 4.61%; 26.04 → 115 385 baud (+0.16%); 8.68 → 111 111 baud (−3.55%); Exercise 1 9615 baud (+0.16%).
+    - I2C: ln(0.7/0.3) = 0.8473; pull-up limits 967, 1770 and 5901 Ω; Exercise 2 885 and 2950 Ω; 81 clocks = 202.5 µs = 28.9× the SPI time.
+    - SPI: 56 clocks = 7 µs; mode table and Exercise 3 (mode 2).
+    - CAN arbitration: binary forms of 0x65A, 0x652, 0x6A0, 0x100 and 0x0FF, and the drop-out bits.
+    - CAN timing: worst-case 8-byte frame 135 bits, 270 µs, 47%; bus load 27%; Exercise 4 95 bits, 380 µs, 38%; bus length 40 m and 115 m.
+  - Entry 4:
+    - U = 0.833; bounds 0.828 and 0.780, limit ln 2 = 0.693;
+    - RTA iterations 3 → 6 → 7 → 9 → 10; set C U = 0.971 with RM 4 → 6 → 8 > 7; timeline slots 3, 5, 9;
+    - ISR increments 0.0375, 0.0875 and 0.2479 ms, margins 2.46, 2.41 and 1.75 ms; 10 KiB = 15.6% of 64 KiB;
+    - Exercises 1–5, including the DM/RM counterexample (R_a = 4 under RM, 2 under DM, R_b = 4).
+  - Entry 5:
+    - 3840 cycles = 80 µs; 0x2000 = 8192 cycles = 170.7 µs; 3.47 ms;
+    - P(never seen) table; 4.61 × 10⁶ runs = 5.12 h;
+    - margin-fed RTA 1.484, 3.452 and 10.140 ms; load 60% and 30%;
+    - flash/SRAM 43 100 B (16.4%) and 7372 B (11.2%); stack 724 B (71%);
+    - wake-up bullets: drift 0.157–0.182 ms per period; max/median ratios 68.8, 47.8 and 132.
+- References checked (fetched 2026-10-14 unless stated):
+  - NXP UM10204 rev. 7.0, 1 October 2021 (NXP PDF): controller/target terms introduced in rev. 7, 16 reserved addresses, Sm rise time 1 µs, 400 pF, 3 mA, bus clear with nine clocks, Hs 3.4 Mbit/s, UFm 5 Mbit/s, and a resistor pull-up limited to about 200 pF in Fast-mode (consistent with entry 3 §4.4 and Exercise 2).
+  - Di Natale et al. on Springer: F3.
+  - Arm DDI 0403E.e: F1.
+  - Wilhelm et al. 2008: the spelling "J. Staschulat" is confirmed by the authors' preprint (F. Mueller's site, NCSU) and the CiteDrive record for DOI 10.1145/1347375.1347389. The Chalmers record's "Stachulat" is the error, so no change is needed (resolves the wave-1 flag); volume 7, issue 3 and year 2008 are confirmed by the Chalmers record.
+  - Reeves's Mars Pathfinder account: F2.
+  - Not fetched again in this pass, and consistent with the reviewer's knowledge of the works: Davis et al. (vol. 35, no. 3, pp. 239–272, verified by wave 1 on Springer); Liu and Layland; Leung and Whitehead; Joseph and Pandya; Audsley et al.; Sha et al.; Kopetz 2nd ed. 2011; Lee and Seshia 2nd ed. 2017; White 2011; Yiu 3rd ed. 2014; Ganssle 2nd ed. 2008; Burns and Wellings 4th ed. 2009; Buttazzo 3rd ed. 2011; Horowitz and Hill 3rd ed. 2015; Bosch CAN 2.0 (1991); TIA-232-F (1997); TIA-485-A (1998); ISO 11898-1:2015 and 11898-2:2016 titles.
+- Not verified:
+  - The printed wake-up output in entry 5 §4.1 (`measuring-timing-latency-and-resource-use.mdx:275–280`). It describes one session on a shared VM and cannot be reproduced by design; the text says so, and a rerun here showed the same pattern.
+  - "an earlier session on the same machine gave maxima of up to 38 ms" (`measuring-timing-latency-and-resource-use.mdx:287`). The only record is the resolution section of the earlier series review; no output was kept. The sentence is qualified and not load-bearing.
+  - Wilhelm et al. article number and pages (the ACM Digital Library could not be fetched), so the citation correctly stops at vol. 7, no. 3.
+  - Arm DDI 0403E.e date: read from an unofficial copy of the Arm PDF, because Arm's site returned no content.
+  - Arm's 12-cycle interrupt entry for Cortex-M3/M4 (`interrupts-polling-and-dma.mdx:97`), the I2C Fm/Fm+ rise-time, capacitance and current values (`serial-buses-uart-spi-i2c-and-can.mdx:164–166`), and the CAN fault-confinement thresholds (`:325`): checked against the reviewer's knowledge of the Yiu book, UM10204 Table 10 and ISO 11898-1, not against fetched text. The ISO standard is paywalled, and the fetched part of UM10204 did not include Table 10.
 
 ## Resolution
 
-At the owner's request, all 13 findings (F1–F13) were applied on 2026-10-13 in the English articles. None of the five articles has a Vietnamese translation, and the series file did not change, so no translation needed updating.
+- F1 (Should fix): fixed - all three entries now cite "Arm Limited, *Armv7-M Architecture Reference Manual*, ARM DDI 0403E.e, 2021." (`inside-a-microcontroller.mdx:455`, `interrupts-polling-and-dma.mdx:393`, `measuring-timing-latency-and-resource-use.mdx:461`). Issue E.e (ID021621, 15 February 2021) was re-checked on 2026-10-15 in the front matter of the PDF copy at kib.kiev.ua; Arm's own pages still return no content.
+- F2 (Should fix): fixed - the Mars Pathfinder sentence is now attributed to G. E. Reeves, as recommended, and the reference "G. E. Reeves, account of the Mars Pathfinder resets, email of 15 December 1997, Jet Propulsion Laboratory." is added between Liu and Layland and Sha et al. (`real-time-operating-systems-and-scheduling.mdx:295, 435`). The account was re-fetched on 2026-10-15: the author, the date, the bc_dist/ASI/MET inversion, the reset and the priority-inheritance fix on the select() semaphore all agree with the text.
+- S1 (Should fix): fixed - the sequence paragraph is replaced with the recommended text (`src/content/series/embedded-and-real-time-systems.md:15-17`). It is split into two paragraphs after the third entry, so that the fourth entry's "removes the limit the second leaves" stands at the start of its own paragraph. No copied field changed, so the Vietnamese series file still builds. Its prose is now out of date (see below).
 
-Applied as recommended:
-- F1, Exercise 3 of entry 2: the false guarantee is replaced by the pending-interrupt caveat and the overflow-flag check.
-- F2, entry 3 §5.1: the termination sentence is reworded.
-- F3, entry 2 §3.1: the floating-point case is added to the exception frame.
-- F4, entry 3 Conventions: a note says that the cited ISO 11898 editions have been revised in 2024.
-- F5, Conventions of entries 4 and 5: a note says that the POSIX interfaces used are unchanged in the 2024 edition. The reference entries still cite the 2017 edition the examples were written against.
-- F7, entry 1 §7.2: the latency is now "more than 20 ms, a whole pass of the loop".
-- F9, F10, F11, F12 and F13: applied with the wording given in each finding.
+Optional findings applied: F3 (subtitle "Theory and Practice", re-checked on Springer's book page on 2026-10-15), S2 (scope sentence appended to the first paragraph of the overview), S3 (entry 1 opening), T1 (both locations in entry 2), T2 (entry 3 §5.1: a separate gloss sentence, not a parenthesis, with "characteristic impedance" in bold as the term being defined and the American spelling "traveling"), T3 (entry 2 opening). Optional findings not applied: none.
 
-Applied with changes:
-- F6, entry 5 §4.1: the unverifiable output was replaced by output reproduced for this review. It comes from one session of three successive runs of the unchanged `wakeup.c`, built with GCC 13.3 `-std=c11 -O2` on a four-core x86-64 Linux VM shared with other jobs. The text now says that the numbers describe that machine at that moment, and that a rerun gives different numbers. The bullets were recomputed from the new output:
-  - drift of 314.0–363.1 ms, that is 0.16–0.18 ms per period;
-  - medians of about 0.12 ms;
-  - maxima of 5.8–15.3 ms, 48–132 times the median of the same run;
-  - an earlier session on the same machine gave maxima of up to 38 ms.
-- F8, entry 1: the introduction is shortened to one sentence, and the closing paragraph of §7.2 to one sentence. The §1.3 table remains the one full roadmap.
-- Entry 3, the other long entry, was checked for redundancy. Apart from the wording fixes nothing was cut, because its overlapping passages each serve a distinct purpose (definitions, then the comparison table).
+Translation follow-up: `src/content/series/vi/embedded-and-real-time-systems.md` should take the new scope sentence (S2) and the new sequence paragraphs (S1). Its objective 4 still has the old "verify by measurement" meaning that wave 1 changed. None of the five entries has a Vietnamese translation.
 
-Second pass (full re-read of all five entries after the corrections):
-- **S1 (should fix, entry 3 §5.7, line 329 of the reviewed commit).** "bit rate times bus length is roughly constant, so halving the bit rate roughly doubles the usable length" contradicted the section's own model: at 500 kbit/s the same assumptions give $(750 - 175)/5 = 115$ m, not 80 m. The sentence now says that halving the bit rate at least doubles the length (more than doubles it in this model, because the node delays are fixed) and gives the 115 m figure.
-- **S2 (should fix, entry 4 §2.4, line 150).** "The same equation, with a blocking term ..., gives the worst-case response times of the CAN messages ..., as worked out by Davis, Burns, Bril and Lukkien (2007)" misattributed the result. The paper is known for showing that this direct adaptation can be optimistic. The text now says that an adapted form of the equation applies, and that Davis et al. showed the earlier direct version could be optimistic and gave the corrected analysis.
-- Wording fixes introduced by the corrections:
-  - F7 "after its check" became "after the loop has checked for it";
-  - the F4 note was split into its own sentence;
-  - the F6 framing sentence was tightened.
-- A further full pass over the changed passages found no blocking and no should-fix issues.
+Checks: `eos lint` (series file and five entries): 0 errors, 0 warnings, 58 suggestions. `eos syntax`: "All files compile." No code or number was changed, so nothing was rerun.
 
-Re-run results:
-- `npm run build:local`: exit 0, with 0 errors and 0 warnings from `astro check`.
-- Pagefind: 81 pages indexed, in 2 languages.
-- `npm run check:links`: "Checked 216 pages and 6146 internal references in dist. All internal links resolve."
-- dist checks: Mermaid min-widths are 449, 335/418, 474, 398 and 233 px. No `katex-error`, and no text glued to inline elements.
-
-All code blocks were unchanged by the corrections, so their recomputed outputs (Verification log) still apply.
-
-Line numbers below refer to the reviewed commit, not to the corrected articles.
-
-## Objectives coverage
-| Objective (from the series file) | Covered by | Assessment |
-|---|---|---|
-| Describe how a microcontroller's CPU, memory, timers, converters and peripherals work together. | Entry 1 (§§2–7) | Met: core, flash/SRAM, memory map, startup, clocks, timers, GPIO, ADC and firmware layering, with worked numbers. |
-| Choose between polling, interrupts and DMA for moving sensor data. | Entry 2 (§§2–6) | Met: mechanisms, latency and load models, a decision table and four worked decisions. |
-| Compare serial buses (UART, SPI, I2C, CAN) by topology, speed and error handling. | Entry 3 (§§2–6) | Met: each bus treated in a common frame, comparison table in §6. |
-| Explain real-time scheduling and verify that deadlines are met by measurement. | Entries 4 and 5 | Met: RM/DM, utilisation bound, RTA, EDF, blocking; entry 5 measures and feeds results back into RTA. |
-
-## Findings
-| ID | Severity | Article | Location | Dimension | Finding |
-|---|---|---|---|---|---|
-| F1 | Blocking | `src/content/blog/interrupts-polling-and-dma.mdx` | §7 Exercise 3 answer (line 363) | Technical accuracy | The double-read fix for a 64-bit tick is said to be safe "as long as interrupts are enabled"; it is not. |
-| F2 | Should fix | `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx` | §5.1 (line 200) | Technical accuracy | "60 Ω in total, matching the cable's characteristic impedance" reads as if the 60 Ω total matched the cable. |
-| F3 | Should fix | `src/content/blog/interrupts-polling-and-dma.mdx` | §3.1 (line 87) | Technical accuracy / Factual consistency | Exception entry said to save eight registers, 32 bytes, with no floating-point case; entry 5 (line 380) adds it. |
-| F4 | Should fix | `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx` | Conventions (line 19), references (416–417) | Stated versions | ISO 11898-1:2015 and ISO 11898-2:2016 are presented as current; both were replaced by 2024 editions. |
-| F5 | Should fix | `src/content/blog/real-time-operating-systems-and-scheduling.mdx`, `src/content/blog/measuring-timing-latency-and-resource-use.mdx` | Conventions (line 19 in both), code comment (entry 5 line 207) | Stated versions | IEEE Std 1003.1-2017 is cited as if current; IEEE Std 1003.1-2024 has replaced it. |
-| F6 | Should fix | `src/content/blog/measuring-timing-latency-and-resource-use.mdx` | §4.1 (lines 272–288) | Fit with site rules / Technical accuracy | The wake-up output came from one session on a shared VM and could not be reproduced. The text draws precise ratios from it without saying that a rerun gives different numbers. |
-| F7 | Should fix | `src/content/blog/inside-a-microcontroller.mdx` | §7.2 (line 378) | Technical accuracy | "a sample may wait up to 20 ms" understates the wait: it can be a whole loop pass, more than 20 ms. |
-| F8 | Optional | `src/content/blog/inside-a-microcontroller.mdx` | Introduction (line 17), §7.2 (line 380) | Writing quality | The roadmap is given three times (introduction, §1.3 table, closing paragraph of §7.2). |
-| F9 | Optional | `src/content/blog/interrupts-polling-and-dma.mdx` | §6 (line 332) | Writing quality | "Bytes arrive irregularly, every 86.8 µs at most" is ambiguous. |
-| F10 | Optional | `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx` | §6 table (line 346) | Terminology | "ADCs" is not expanded in this entry. |
-| F11 | Optional | `src/content/blog/measuring-timing-latency-and-resource-use.mdx` | §2.2 (line 59) | Technical accuracy | The DWT cycle counter must be enabled before it counts; not mentioned. |
-| F12 | Optional | `src/content/blog/inside-a-microcontroller.mdx` | §4.1 (lines 225–230) | Technical accuracy | The numbered startup steps imply an order; many startup files configure clocks before copying `.data`. |
-| F13 | Optional | `src/content/blog/inside-a-microcontroller.mdx` | §2.2 (line 91) | Technical accuracy | The list of Cortex-M profiles omits Armv8.1-M (Cortex-M55, M85). |
-
-### F1. False guarantee in the overflow-read fix
-- **Where:** `src/content/blog/interrupts-polling-and-dma.mdx:363`, section "7. Exercises", Exercise 3 answer
-- **Text:** "A standard fix is to read `ticks_high`, then the counter, then `ticks_high` again, and repeat if the two high reads differ. (The fix also assumes the overflow ISR is not delayed past the read, which holds as long as interrupts are enabled.)"
-- **Problem:** Interrupts being enabled is not enough to guarantee that the overflow ISR has run by the second read.
-  - The counter can wrap between the first read of `ticks_high` and the read of `TIMER->COUNT`. The overflow interrupt is then pending, but its entry takes 12 or more cycles (§3.2 of the same entry), while the second load of `ticks_high` follows within a few cycles. Both high reads then return the old value, the low half is the new small value, and the result is wrong by $2^{32}$ counts: the very error the fix is meant to remove.
-  - The same happens whenever the reader runs at a priority equal to or higher than the overflow ISR, for example inside another ISR, or inside a critical section.
-  - As written, the parenthesis gives the reader a false guarantee for concurrency code.
-- **Recommended correction:** Replace the parenthesis with: "(This assumes that the overflow ISR has run before the second read of `ticks_high`. That is not guaranteed even with interrupts enabled: the interrupt may still be pending, during its entry time or because the reading code runs at the same or a higher priority. Robust code therefore also checks the timer's overflow flag: if it is set and the counter value is small, it adds one to the high half.)"
-
-### F2. CAN termination and characteristic impedance
-- **Where:** `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx:200`, section "5.1 The physical layer"
-- **Text:** "terminated at each end by a 120 Ω resistor (60 Ω in total, matching the cable's characteristic impedance to prevent reflections)"
-- **Problem:** The sentence attaches "matching the cable's characteristic impedance" to "60 Ω in total". ISO 11898-2 specifies a cable with a nominal characteristic impedance of 120 Ω. Each 120 Ω terminator matches the cable at its own end, and 60 Ω is only the resistance between the two wires that the transmitters see.
-- **Recommended correction:** "terminated at each end by a 120 Ω resistor, which matches the cable's nominal 120 Ω characteristic impedance and so prevents reflections (the two in parallel present 60 Ω between the wires)."
-
-### F3. Exception frame size without the floating-point case
-- **Where:** `src/content/blog/interrupts-polling-and-dma.mdx:87`, section "3.1 The mechanism"
-- **Text:** "On Cortex-M, hardware saves eight registers (R0 to R3, R12, the link register LR, the program counter PC and the status register, 32 bytes) on the stack"
-- **Problem:** The text is correct for the basic frame. On a core with a floating-point unit, such as the Cortex-M4 with FPU whose 12-cycle entry the next section quotes, an interrupted context that uses floating point gets an extended frame of 26 words (104 bytes), or lazy reservation of that space. The fifth entry says so: "32 bytes, more if floating-point state is saved" (`measuring-timing-latency-and-resource-use.mdx:380`). Readers of the second entry are given the figure as if it were universal.
-- **Recommended correction:** "...the status register, 32 bytes; on cores with a floating-point unit, more when the interrupted code was using floating-point registers) on the stack".
-
-### F4. ISO 11898 editions superseded
-- **Where:** `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx:19` and references at lines 416–417
-- **Text:** "CAN follows ISO 11898-1:2015 (data link layer) and ISO 11898-2:2016 (high-speed physical layer)"
-- **Problem:** The text presents these editions as current. ISO 11898-1:2024 ("Data link layer and physical coding sublayer", which adds CAN XL) and ISO 11898-2:2024 ("High-speed physical medium attachment (PMA) sublayer") have replaced them. Citing the earlier editions is legitimate, but the text should say that they have been superseded.
-- **Recommended correction:** Append to the Conventions sentence: "(both have since been revised in 2024 editions, which add CAN XL; this entry describes classical CAN and CAN FD as specified in the editions cited)".
-
-### F5. POSIX edition superseded
-- **Where:** `src/content/blog/real-time-operating-systems-and-scheduling.mdx:19`, `src/content/blog/measuring-timing-latency-and-resource-use.mdx:19` and `:207`
-- **Text:** "the real-time interface of POSIX, the Portable Operating System Interface (IEEE Std 1003.1-2017)"
-- **Problem:** IEEE Std 1003.1-2024 (POSIX.1-2024, Issue 8) has replaced the 2017 edition. The interfaces the examples use (`clock_gettime`, `clock_nanosleep` with `TIMER_ABSTIME`, `CLOCK_MONOTONIC`) are in both editions, so nothing in the examples is wrong, but the edition is presented as if it were the current one.
-- **Recommended correction:** "(IEEE Std 1003.1-2017; the interfaces used here are unchanged in the current 2024 edition)".
-
-### F6. Framing of the wake-up experiment
-- **Where:** `src/content/blog/measuring-timing-latency-and-resource-use.mdx:272–288`, section "4.1 Release jitter of a periodic task: an experiment"
-- **Text:** "It was compiled with GCC 13 (`-std=c11 -O2`) and run three times in succession, as an ordinary process without real-time priority, on a four-core x86-64 Linux virtual machine under other load" and "the maxima were 5.4 to 9.4 ms, roughly fifty to eighty times the median of the same run"
-- **Problem:** The printed output was captured in one session on a shared virtual machine. Rerunning `wakeup.c` for this review (GCC 13.3, four-core x86-64 Linux VM shared with other jobs) gave medians of 98–107 µs, consistent with the article. The maxima, however, were 7.0, 37.9 and 34.3 ms, and the relative-sleep drift was 303.0, 999.0 and 405.7 ms. The qualitative conclusions all hold. The quoted output, though, cannot be checked, and the bullets draw specific ratios from it ("fifty to eighty times") as if it were a representative measurement. The site's rules require measured results to be genuine and presented for what they are.
-- **Recommended correction:** Replace the output block with output that was reproduced and can be vouched for, and describe it as one session on a shared machine. Say explicitly that another run, or another machine, gives different maxima and drift and that only the pattern should be taken from it. Make the bullets match the new numbers.
-
-### F7. Superloop latency understated
-- **Where:** `src/content/blog/inside-a-microcontroller.mdx:378`, section "7.2 The superloop"
-- **Text:** "If `update_display()` takes 20 ms, a sample may wait up to 20 ms to be processed"
-- **Problem:** A result that becomes ready just after `adc_result_ready()` has been checked waits for the rest of the pass: `button_changed()`/`update_mode()`, the 20 ms `update_display()`, `watchdog_feed()`, and the next check. The wait is at least 20 ms in the worst case, not at most 20 ms. Entry 2 §2.2 correctly gives the bound as one whole loop pass $L$.
-- **Recommended correction:** "If `update_display()` takes 20 ms, a sample that becomes ready just after its check waits more than 20 ms, a whole pass of the loop, to be processed".
-
-### F8. Repeated roadmap in the first entry (author asked for redundancy to be cut)
-- **Where:** `src/content/blog/inside-a-microcontroller.mdx:17` and `:380`
-- **Text:** line 17 lists the entry's contents item by item; line 380 restates the whole series plan already given in the §1.3 table.
-- **Problem:** The same plan is given three times in one entry, which adds length (the entry is about 5,600 words of prose) without adding information.
-- **Recommended correction:** Shorten line 17 to a one-sentence statement of the entry's scope. Reduce line 380 to two sentences that link the superloop's weakness to the next entries.
-
-### F9. Ambiguous byte rate
-- **Where:** `src/content/blog/interrupts-polling-and-dma.mdx:332`
-- **Text:** "Bytes arrive irregularly, every 86.8 µs at most."
-- **Recommended correction:** "Bytes arrive irregularly, at most one every 86.8 µs."
-
-### F10. "ADCs" not expanded in entry 3
-- **Where:** `src/content/blog/serial-buses-uart-spi-i2c-and-can.mdx:346`
-- **Text:** "Fast sensors, flash memory, displays, ADCs"
-- **Recommended correction:** "Fast sensors, flash memory, displays, analog-to-digital converters".
-
-### F11. Cycle counter needs enabling
-- **Where:** `src/content/blog/measuring-timing-latency-and-resource-use.mdx:59`
-- **Text:** "Where it exists, it gives cycle resolution with a single register read."
-- **Problem:** The DWT cycle counter does not run until trace is enabled in the debug control registers and the counter itself is enabled. "The counter reads zero" is a common bring-up surprise.
-- **Recommended correction:** "Where it exists, and once it has been enabled (it is off after reset), it gives cycle resolution with a single register read."
-
-### F12. Order of startup steps
-- **Where:** `src/content/blog/inside-a-microcontroller.mdx:225–230`
-- **Text:** "1. Copy the initial values of `.data` ... 3. Configure the clocks (Section 4.2) ... 4. Call `main`."
-- **Problem:** The numbering implies a fixed order. Many vendor startup files call the clock set-up first, before `.data` and `.bss` are initialised.
-- **Recommended correction:** Add after the list: "The order varies: many startup files configure the clocks first, so that the copying runs at full speed."
-
-### F13. Armv8.1-M missing from the profile list
-- **Where:** `src/content/blog/inside-a-microcontroller.mdx:91`
-- **Text:** "defined by the Armv6-M, Armv7-M and Armv8-M architecture profiles"
-- **Recommended correction:** "defined by the Armv6-M, Armv7-M and Armv8-M architecture profiles (the newest cores implement Armv8.1-M, an extension of Armv8-M)".
-
-## Concept introduction map
-| Concept | First used (path:line) | Introduced where (path:line, or "not introduced") | Assessment |
-|---|---|---|---|
-| Embedded system, firmware | `inside-a-microcontroller.mdx:15` | `inside-a-microcontroller.mdx:27` | Good |
-| Real-time, deadline, latency, jitter, response time | `inside-a-microcontroller.mdx:15` | `inside-a-microcontroller.mdx:37–46` | Good; reused consistently in all later entries |
-| Microcontroller, CPU, peripherals | `inside-a-microcontroller.mdx:15` | `inside-a-microcontroller.mdx:74` | Good |
-| Registers, SP/LR/PC, load-store, Thumb | `inside-a-microcontroller.mdx:89` | same lines | Good |
-| Memory map, memory-mapped I/O, `volatile` | `inside-a-microcontroller.mdx:108` | `inside-a-microcontroller.mdx:108, 123, 127` | Good |
-| Vector table, reset handler | `inside-a-microcontroller.mdx:223` | same line | Good |
-| Timer, prescaler, PWM, input capture, watchdog | `inside-a-microcontroller.mdx:223` (watchdog) | `inside-a-microcontroller.mdx:252–318` | Good; watchdog forward-referenced to §5.4 |
-| ADC, LSB | `inside-a-microcontroller.mdx:217` | `inside-a-microcontroller.mdx:217, 337`; sampling theory linked to another series | Good |
-| Interrupt, ISR | `inside-a-microcontroller.mdx:198` | `inside-a-microcontroller.mdx:198`; `interrupts-polling-and-dma.mdx:70` | Good |
-| DMA | `inside-a-microcontroller.mdx:217` | `inside-a-microcontroller.mdx:217`; `interrupts-polling-and-dma.mdx:19, 252` | Good |
-| Exception, NVIC, PRIMASK, BASEPRI | `interrupts-polling-and-dma.mdx:72` | `interrupts-polling-and-dma.mdx:72, 152, 160` | Good |
-| Race condition, critical section, C11 atomics, memory order | `interrupts-polling-and-dma.mdx:138` | `interrupts-polling-and-dma.mdx:138, 152, 166` | Good |
-| Bit rate, baud, synchronous/asynchronous, differential | `serial-buses-uart-spi-i2c-and-can.mdx:27` | `serial-buses-uart-spi-i2c-and-can.mdx:27, 42` | Good |
-| UART, SPI, I2C, CAN | `interrupts-polling-and-dma.mdx:31` (UART), `:62` (SPI) | expanded at first use in entry 2; defined in `serial-buses-uart-spi-i2c-and-can.mdx:17, 48, 95, 133, 198` | Good |
-| CRC, bit stuffing, dominant/recessive | `serial-buses-uart-spi-i2c-and-can.mdx:202` | `serial-buses-uart-spi-i2c-and-can.mdx:202–246` | Good |
-| RTOS, task, TCB, context switch, PendSV | `interrupts-polling-and-dma.mdx:336` | `real-time-operating-systems-and-scheduling.mdx:25–51` | Good |
-| WCET, utilisation, RM, DM, RTA, EDF, hyperperiod | `real-time-operating-systems-and-scheduling.mdx:90` | `real-time-operating-systems-and-scheduling.mdx:90–264` | Good |
-| Mutex, semaphore, priority inversion, inheritance, ceiling | `real-time-operating-systems-and-scheduling.mdx:45` | `real-time-operating-systems-and-scheduling.mdx:274–302` | Good |
-| High-water mark, BCET, probe effect, stack painting | `measuring-timing-latency-and-resource-use.mdx:35` | `measuring-timing-latency-and-resource-use.mdx:45, 116, 330` | Good |
-| Characteristic impedance | `serial-buses-uart-spi-i2c-and-can.mdx:200` | not introduced | Acceptable for the stated prerequisites; F2 rewords the sentence |
-
-## Versions, defaults and conventions
-| Assumption | Where it appears | Stated in the text? | Assessment |
-|---|---|---|---|
-| C11 (ISO/IEC 9899:2011) | all entries | Yes (entry 1 line 21, conventions of each entry) | Deliberate, stated; later C editions do not affect the examples |
-| GCC 13, host x86-64 Linux for runnable C | entry 1 line 21; entry 2 line 239; entry 5 line 272 | Yes | Reproduced with GCC 13.3 |
-| Generic Cortex-M at 48 MHz, 3.3 V; invented register layouts | entry 1 line 21; conventions of entries 2, 5 | Yes | Good |
-| Armv7-M memory map, exception frame, PRIMASK/BASEPRI, DWT | entries 1, 2, 5 | Yes, marked as Arm-specific | F3 adds the FP case |
-| SI prefixes for time and bit rate, binary prefixes for memory | entry 1 line 21; entry 3 line 19 | Yes | Good |
-| Priority numbering (lower number = higher on NVIC) | entry 2 line 111; entry 4 line 19 | Yes | Good |
-| UART 8N1, 16× oversampling | entry 3 lines 57, 61 | Yes | Good |
-| I2C per UM10204 rev 7.0 (2021); controller/target terminology | entry 3 line 19 | Yes | Values in the table agree with the specification's Sm/Fm/Fm+ limits |
-| CAN per ISO 11898-1:2015 / 11898-2:2016; classical base-format frame | entry 3 line 19 | Yes, but superseded editions not flagged | F4 |
-| POSIX IEEE Std 1003.1-2017 | entry 4 line 19; entry 5 lines 19, 207 | Yes, but superseded edition not flagged | F5 |
-| Python 3, standard library | all entries | Yes | Reproduced with Python 3.13 |
-| Times in ms in task examples, deadlines $D \le T$ | entry 4 lines 19, 92 | Yes | Good |
-
-## Series-level notes
-- **Terminology and spelling.** British spelling is consistent: initialise, organise, prioritise, utilisation, synchronisation, analyse, behaviour. "Analog-to-digital" and "quantization" follow the site-wide convention used by the other series and by the linked article title, so they are not counted as inconsistencies. "Synchronization" appears only in the title of a cited paper.
-- **Cross-references.** Every "the first/second/third/fourth/fifth entry" claim was checked against its target. The checked claims include:
-  - interrupts treated in entry 2;
-  - SPI transfer time computed in entry 3 §3.3;
-  - deadline-monotonic priority in entry 4 §2.2;
-  - context switch, stack use and wake-up latency measured in entry 5 §§2.1, 6.2, 4.1;
-  - CAN response-time analysis mentioned in entry 4 §2.4.
-
-  Every "Section N of entry M" link points to the stated section, and its anchor resolves. Link texts match their targets.
-- **Consistency of numbers across entries.**
-  - UART 115 200 baud: 86.8 µs and 11 520 bytes/s (entries 2, 3, 4, 5).
-  - ISR at 100 cycles: 2.4 % load (entries 2, 4).
-  - 64 KiB SRAM (entries 1, 4, 5).
-  - 32-bit counter wrap of 89.48 s (entries 1, 5).
-  - SPI transfer of 7 µs (entries 2, 3).
-  - Blocking of 0.5 ms and $R_2 = 3.5$ ms (entries 4, 5).
-
-  All agree.
-- **Structure.** Each entry has a Conventions paragraph, numbered sections, exercises with answers, a summary table, a pointer to the next entry and a reference list. Frontmatter (category "Computing Systems", series, `seriesOrder` 1–5, date) is consistent.
-
-## Verification log
-- `npm run build:local`: passed (exit 0; localhost warning only, as expected for a local build).
-- `npm run check:links`: "Checked 216 pages and 6146 internal references in dist. All internal links resolve."
-- dist checks: Mermaid min-widths are 449, 335/418, 474, 398 and 233 px (all ≤ 600). No `katex-error`. No text glued to `<a>`, `<code>` or `<strong>` in the five pages.
-- Recomputed with GCC 13.3 (`-std=c11 -Wall -Wextra -pedantic`, plus `-O2 -pthread` for the ring buffer) and Python 3.13:
-  - entry 1:
-    - GPIO program output: identical;
-    - `timer_settings` output: identical (1000 Hz, 50 Hz exact; 44 100 Hz → 44 117.647 Hz, +400.2 ppm);
-    - 20.83 ns, 1.365 ms, 89.48 s, 1.73 s/day, PWM 2400 steps and 11.2 bits, 0.806 mV, 1.650 V, 1.25 µs, 8000 B ≈ 12 % of 64 KiB, and Exercises 1–5 (2.08 µs, 2.417 V, 1920 steps and 10.9 bits, 7.2 KiB): all correct.
-  - entry 2:
-    - ring buffer: three runs, each "received 1000000 items, 0 out of order / buffer was full at least once", on a four-core x86-64 host as stated;
-    - load table: identical;
-    - 86.8 µs, 15.25 µs (×61 of 250 ns), 2.4 % / 20.83 %, 25.6 ms, 39.1 interrupts/s, Exercise 2 (29.25 µs) and Exercise 4 (10 ms): correct.
-  - entry 3:
-    - CAN program output: identical;
-    - CRC-15 of ASCII "123456789" (bits MSB first, register 0, polynomial 0x4599) = 0x059E: confirmed;
-    - UART tolerance 5.26 % and 4.6 %; dividers 26.04 → 115 385 baud (+0.16 %) and 8.68 → 111 111 baud (−3.55 %); Exercise 1 (9615 baud, +0.16 %): correct;
-    - I2C pull-up limits 967 Ω, 1770 Ω, 5901 Ω, 885 Ω and 2950 Ω, and ln(0.7/0.3) = 0.8473: correct;
-    - I2C 81 clocks and 202.5 µs (≈29 × 7 µs): correct;
-    - arbitration bit patterns of 0x65A/0x652/0x6A0 and 0x100/0x0FF: correct;
-    - worst-case frame of 135 bits / 270 µs, 47 %, 27 % load; Exercise 4 (95 bits, 380 µs, 38 %): correct;
-    - bus length bound of 40 m: correct.
-  - entry 4:
-    - all three program outputs: identical;
-    - RTA table iterations, RM bound 0.7798 and 0.828: correct;
-    - Set C RTA (8 > 7) and $U$ = 0.971: correct;
-    - margins of 2.46, 2.41 and 1.75 ms: correct;
-    - Exercises 1–5: correct.
-  - entry 5:
-    - wrap program and stack-painting program outputs: identical;
-    - Python script outputs (probabilities, margin RTA, load): identical;
-    - Exercise 1 (8192 cycles, 170.7 µs), Exercise 2 (4.6 × 10⁶ runs, ≈5.1 h), Exercise 3 (30 %), and the size arithmetic (43 100 B ≈ 16 %, 7372 B ≈ 11 %): correct.
-  - entry 5 `wakeup.c`: compiled cleanly. Three reruns gave:
-    - absolute sleeping: medians 98.3, 102.1 and 107.3 µs; maxima 7029.1, 37925.2 and 34306.0 µs;
-    - relative sleeping: drift of 303.0, 999.0 and 405.7 ms.
-
-    The medians and the qualitative pattern agree with the article; the maxima and drift differ (F6).
-- References checked:
-  - Scheduling and timing papers: Liu & Layland (JACM 20(1), 1973); Leung & Whitehead (Performance Evaluation 2(4), 1982); Joseph & Pandya (Computer Journal 29(5), 1986); Audsley, Burns, Richardson, Tindell & Wellings (Software Engineering Journal 8(5), 1993); Sha, Rajkumar & Lehoczky (IEEE Trans. Computers 39(9), 1990); Davis, Burns, Bril & Lukkien (Real-Time Systems 35(3), 2007); Wilhelm et al. (ACM TECS 7(3), 2008, fifteen authors as listed).
-  - Books: Buttazzo (3rd ed., Springer, 2011); Burns & Wellings (4th ed., Addison-Wesley, 2009); Kopetz (2nd ed., Springer, 2011); Lee & Seshia (2nd ed., MIT Press, 2017); Yiu (3rd ed., Newnes, 2014); White (O'Reilly, 2011); Ganssle (2nd ed., Newnes, 2008); Di Natale, Zeng, Giusto & Ghosal (Springer, 2012); Horowitz & Hill (3rd ed., CUP, 2015).
-  - Specifications and standards: Bosch CAN Specification 2.0 (1991); ARM DDI 0403 (Armv7-M ARM); ISO/IEC 9899:2011; UM10204 rev 7.0 (1 October 2021, confirmed from the NXP document); TIA-232-F (1997); TIA-485-A (1998); ISO 11898-1:2015; ISO 11898-2:2016; IEEE Std 1003.1-2017 (published 2018).
-
-  All are real works with the details given. Later editions of the last three are noted in F4/F5.
-- Facts checked:
-  - Cortex-M3/M4 entry of 12 cycles with zero-wait-state memory;
-  - Armv7-M memory map regions;
-  - basic exception frame of 8 words;
-  - PRIMASK masks all configurable-priority exceptions; BASEPRI in Armv7-M;
-  - PendSV used for context switching at lowest priority;
-  - DWT CYCCNT optional in Armv7-M, absent in Armv6-M;
-  - MSPLIM/PSPLIM in Armv8-M Mainline;
-  - I2C limits per UM10204 (Sm/Fm/Fm+ $t_r$ 1000/300/120 ns, $C_b$ 400/400/550 pF, $I_{OL}$ 3/3/20 mA at 0.4 V; 16 reserved addresses; nine-clock bus clear; Hs 3.4 Mbit/s, UFm 5 Mbit/s);
-  - CAN fault confinement (TEC +8, REC +1, −1 on success, error-passive above 127, bus-off above 255, recovery after 128 × 11 recessive bits);
-  - nominal levels 2.5/3.5/1.5 V;
-  - RS-485 32 unit loads;
-  - RS-232 ±3 V receiver thresholds;
-  - Mars Pathfinder account (1997 resets from priority inversion, fixed by enabling priority inheritance on the semaphore): accurate at the level of generality given.
-- Not verified:
-  - the original `wakeup.c` numbers in entry 5 (one session on a different shared machine; not reproducible by nature);
-  - the exact text of ISO 11898 and TIA standards, which are paywalled. The values the articles take from them are the widely documented ones listed above.
-  - the I2C sink currents (3/3/20 mA at 0.4 V): the rise times and bus capacitances were confirmed in UM10204 and TI SLVA689, but the sink-current row was not displayed in either source; it is kept from the specification as remembered.
+Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.

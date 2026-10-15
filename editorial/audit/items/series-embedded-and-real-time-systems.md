@@ -58,3 +58,15 @@ P2: metadata and structure defects a reader of the series page would notice; the
 - Remaining warnings: none (lint 0 errors, 0 warnings).
 - Flags for independent review: series editor to confirm the reworded objective 4 matches entries 4 and 5.
 - Vietnamese translation affected: yes. `src/content/series/vi/embedded-and-real-time-systems.md` needs its description, body and objective 4 updated (the meaning of objective 4 changed: "calculate worst-case response times and check them against measurements" instead of "verify by measurement").
+
+## Independent review (wave 2)
+- Report: `reviews/embedded-and-real-time-systems.md` (reviewed commit 9232ed9, 2026-10-14).
+- Fact-check: pass (no factual claims needing sources). Technical: fail until S1 is resolved (the sequence paragraph misdescribes entries 2 and 3).
+- Findings: S1 (should fix), S2 (optional). Wave-1 flag confirmed: reworded objective 4 matches entries 4 and 5.
+- Not verified: none.
+
+## Revision log (wave 2 resolution)
+
+- S1: the sequence paragraph is replaced with the reviewer's wording, now in two paragraphs. Entry 2 now analyzes the superloop's polling and adds interrupts and DMA, and entry 4, not entry 3, removes the one-loop limit.
+- S2 (optional): a scope sentence is added that lists the topics the series leaves out.
+- No copied field changed. Translation follow-up for `series/vi/embedded-and-real-time-systems.md`: carry over S1 and S2. Its objective 4 also still has the meaning from before wave 1.

@@ -79,3 +79,14 @@ Ran the timer-settings Python (output identical), compiled and ran the GPIO prog
   - The 58-word count at line 223 comes from the linter joining a parenthetical sentence to the next one; three sentences of 46 words are left as they read clearly.
 - Flags for independent review: the fact-checker should give Arm DDI 0403 its issue and year (A1); this was not verified in this session.
 - Vietnamese translation affected: no translation exists (`src/content/blog/vi/inside-a-microcontroller.mdx` absent). No `updatedAt`: published 2026-10-13.
+
+## Independent review (wave 2)
+- Report: `reviews/embedded-and-real-time-systems.md` (reviewed commit 9232ed9, 2026-10-14).
+- Fact-check: fail until F1 is resolved (Arm DDI 0403 lacks issue/year; verified DDI 0403E.e, 2021). Technical: pass (both programs reproduce; all numbers and exercises recomputed).
+- Findings: F1 (should fix), S3 (optional).
+- Not verified: the DDI 0403E.e date was read from an unofficial copy of the Arm PDF (Arm's site returned no content).
+
+## Revision log (wave 2 resolution)
+
+- F1: the Arm reference now gives the issue and year, "ARM DDI 0403E.e, 2021" (References). The issue date of 15 February 2021 was checked on 2026-10-15.
+- S3 (optional): the opening's last sentence now reads "so that its worst-case timing can be calculated, and how to check that calculation by measurement". The meaning change is for the translation follow-up; this entry has no Vietnamese translation.

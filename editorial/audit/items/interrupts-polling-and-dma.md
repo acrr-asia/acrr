@@ -58,3 +58,16 @@ Ran the load-comparison Python (identical output). Compiled and ran the ring-buf
   - "Reference has no year" for Arm DDI 0403 (fact-checker flag, as in entry 1).
 - Flags for independent review: Arm DDI 0403 issue and year.
 - Vietnamese translation affected: no translation exists. No `updatedAt`: published 2026-10-13.
+
+## Independent review (wave 2)
+- Report: `reviews/embedded-and-real-time-systems.md` (reviewed commit 9232ed9, 2026-10-14).
+- Fact-check: fail until F1 is resolved (Arm DDI 0403 issue/year). Technical: pass (ring buffer, three runs, and the load table reproduce; all numbers recomputed).
+- Findings: F1 (should fix), T1, T3 (optional).
+- Not verified: Arm's 12-cycle Cortex-M3/M4 entry latency (line 97), checked from the reviewer's knowledge, not a fetched source.
+
+## Revision log (wave 2 resolution)
+
+- F1: the Arm reference now gives the issue and year, "ARM DDI 0403E.e, 2021".
+- T1 (optional): §3.4 glosses "task" with a forward reference to the fourth entry, and §6 (SPI sensor) now says "in the main program (or, under an operating system, in a task of the fourth entry)".
+- T3 (optional): the opening now says that the shared data is between the main program and the interrupt handlers that preempt it.
+- There is no Vietnamese translation.

@@ -62,3 +62,13 @@ Ran the combined Python script (identical output). Compiled and ran the cycle-co
   - Several sentences of 46–51 words were left, because they read clearly.
 - Flags for independent review: fact-checker to confirm the spelling "J. Staschulat" against the ACM record; the Chalmers record has "Jan Stachulat" (A1). Arm DDI 0403 year.
 - Vietnamese translation affected: no translation exists. No `updatedAt`, because the entry was published 2026-10-13.
+
+## Independent review (wave 2)
+- Report: `reviews/embedded-and-real-time-systems.md` (reviewed commit 9232ed9, 2026-10-14).
+- Fact-check: fail until F1 is resolved (Arm DDI 0403 issue/year). The spelling "J. Staschulat" is confirmed (authors' preprint, CiteDrive); the Chalmers record is wrong, so no change is needed. Technical: pass (deterministic programs reproduce; the wake-up rerun shows the same pattern).
+- Findings: F1 (should fix).
+- Not verified: the printed wake-up output (one session, not reproducible by design); "an earlier session ... up to 38 ms" (line 287, no kept output); Wilhelm et al. article number and pages.
+
+## Revision log (wave 2 resolution)
+
+- F1: the Arm reference now gives the issue and year, "ARM DDI 0403E.e, 2021". There is no Vietnamese translation.
