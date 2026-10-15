@@ -62,3 +62,9 @@ P1: first entry of the series; the vocabulary of entries 2-5 rests on it.
 - Remaining warnings and why they stay: 6 `contractions` warnings on "don't-care" (heading 2.5 and lines 160, 162, 169, 171, 416). It is the established technical term for an unspecified truth-table entry (Mano and Ciletti, *Digital Design*, "don't-care conditions"), defined in bold at line 160, not a prose contraction; replacing it would make the term unrecognizable. One `intensifiers` suggestion ("described more clearly", line 259) is a comparison, not an intensifier. Acronym suggestions (TRUE, FALSE, ON, OFF, AND, OR, NOT, state names) are false positives.
 - Flags for independent review: none on accuracy. Fact-check: the statement "a fourth edition replaced it in 2025" rests on the previous review's check of the IEC listing (IEC 61131-3:2025, ED4, 22 May 2025); not re-verified in this wave.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Fact-check: pass (IEC 61131-3:2025 Ed. 4.0, 22 May 2025, verified; IEC 60848:2013 and IEC 61131-3:2013 references consistent).
+- Technical: pass (both Python blocks re-run, output identical; Karnaugh maps, exercises, timer bounds and mixing-tank timings recomputed).
+- Findings concerning this item: none. Report: `reviews/industrial-automation.md`.
+- Not verified: book editions and years of Bolton, Cassandras and Lafortune, Mano and Ciletti (consistent with reviewer knowledge, not fetched); Petruzella 5th ed. 2016 verified.

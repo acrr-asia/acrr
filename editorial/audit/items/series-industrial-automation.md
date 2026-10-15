@@ -60,3 +60,16 @@ P1: the series front door; its objectives are the yardstick the series review an
 - Remaining lint: 3 suggestions (ISA, OPC, UA "not expanded"): ISA-95 and OPC UA are standard names; expanding OPC (Open Platform Communications) on the overview adds nothing for the reader and entry 5 explains both.
 - Flags for independent review: Series Editor: confirm the new objective is the right summary of entry 5 and that the overview promises nothing the entries do not deliver. The series file changed, so `reviews/industrial-automation.md`'s content-hash stamp is now stale (series gate); a new series review and `series-pipeline stamp` are needed.
 - Vietnamese translation affected: yes. `src/content/series/vi/industrial-automation.md` needs the fifth objective, the new description, and the restructured body (meaning of the existing text unchanged; added: the dependency of each entry on the previous one and the conventions paragraph). No copied field changed (`status`, `category`, `example`, `plannedEntries` untouched), so the build is unaffected.
+
+## Independent review (wave 2)
+- Fact-check: pass (no factual claim in the overview is wrong; its IEC 61131-3 edition statement rests on the entries).
+- Technical: pass (no technical content).
+- Series review: the new fifth objective is an accurate summary of entry 5; the overview promises nothing undelivered except a slight overstatement (S1).
+- Findings concerning this item: S1 (Optional, "notes what the 2025 edition changes"), S2 (Optional, link the Foundations of Control Systems series). Report: `reviews/industrial-automation.md`.
+- Not verified: removal of Instruction List by IEC 61131-3:2025 (implied at line 18; see the report).
+
+## Revision log (wave 2 resolution)
+- S1 (optional): line 18 now says the second entry notes that the published scope of the 2025 edition no longer lists Instruction List.
+- S2 (optional): line 14 links Foundations of Control Systems.
+- No copied field changed (status, category, plannedEntries untouched). Meaning changes for the Vietnamese follow-up (`src/content/series/vi/industrial-automation.md`, already stale since wave 1): S1 and S2 wording, together with the wave-1 description, objectives and body.
+- eos lint: 0 errors, 0 warnings; eos syntax: pass.

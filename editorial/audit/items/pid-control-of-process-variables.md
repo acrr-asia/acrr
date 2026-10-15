@@ -46,3 +46,13 @@ P2.
 - Remaining warnings: none. Suggestions: sentence-length (50-66 words, mostly in the summary paragraph and the transition, read naturally), acronym false positives (ISA expanded in the same sentence, SIMC expanded inline, ASME in a journal title).
 - Flags for independent review: Series Editor: Foundations of Control Systems is being revised in the same wave; re-check that its first entry still introduces the Laplace variable with the transfer function and lists tracking and disturbance rejection, and that `feedback-and-system-behavior` still shows the proportional offset on a first-order plant. Tag `control-theory` (hyphenated, unlike the series' other tags) left unchanged because tags are copied by translations.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Fact-check: pass (cross-series references to Foundations of Control Systems re-checked in the current files: loop vocabulary, Tracking/Disturbance rejection, Laplace transform in Section 3.2, proportional offset in Section 2.3 of the second entry; all accurate).
+- Technical: pass (both blocks re-run as one script, output identical; instability of the ZN loop without limits and the no-overshoot claim confirmed by re-run; all exercises and the integrating-loop damping formula recomputed).
+- Findings concerning this item: F3 (Optional, line 15). Report: `reviews/industrial-automation.md`.
+- Not verified: bibliographic details of Skogestad (2003), Ziegler and Nichols (1942) and the three books (consistent with reviewer knowledge, not fetched).
+
+## Revision log (wave 2 resolution)
+- F3 (optional): introduction (line 15) "in the great majority of loops" replaced by "in most loops" (unsourced quantitative claim removed).
+- No Vietnamese translation exists. eos lint: 0 errors, 0 warnings; eos syntax: pass.

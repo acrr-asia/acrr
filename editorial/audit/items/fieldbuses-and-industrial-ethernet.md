@@ -51,3 +51,14 @@ P2.
 - Flags for independent review: (1) fact-check "the joint IEC/IEEE 60802 project defines a TSN profile" (line 300): the profile may now be published as a standard, in which case "project" should become the standard's designation; (2) fact-check "Protocols such as PROFINET and EtherNet/IP ... are being adapted to run over it" for currency; (3) another series cites ISO 11898-1:2015 (`serial-buses-uart-spi-i2c-and-can.mdx`); both editions exist, but the Series Editor may want one edition site-wide.
 - Vietnamese translation affected: no translation of this article exists.
 - Coordinator request (embedded-series editor, Davis et al. reference): applied. Line 367 now reads exactly `R. I. Davis, A. Burns, R. J. Bril and J. J. Lukkien, "Controller Area Network (CAN) schedulability analysis: Refuted, revisited and revised," *Real-Time Systems*, vol. 35, no. 3, pp. 239–272, 2007.` This is the published sentence-case title. It matches the form that editor checked against the Springer page, so this series and the embedded series cite the paper identically.
+
+## Independent review (wave 2)
+- Fact-check: fail until F1 and F2 are resolved (IEC/IEEE 60802 published 2026-06-29; IEC 61784-1/-2 references carry superseded titles). ISO 11898-1:2024 title verified.
+- Technical: pass (all three Python blocks re-run, output identical; CAN frame and stuffing bound, Ethernet, EtherCAT, PTP and all exercises recomputed; Modbus "recommends" wording correct).
+- Findings concerning this item: F1 (Should fix, line 300), F2 (Should fix, lines 370-371). Report: `reviews/industrial-automation.md`.
+- Not verified: Modbus serial-line V1.02 text for the 1.75 ms recommendation (fetch failed; matches reviewer knowledge); PROFIBUS DP segment lengths and the 40 m CAN figure (standard values, not fetched).
+
+## Revision log (wave 2 resolution)
+- F1: Section 9 (line 300) now calls IEC/IEEE 60802 a standard published in 2026; reference IEC/IEEE 60802:2026 added (line 372; title checked on the SCC catalogue). Meaning change for translation: "project" becomes "standard, published in 2026".
+- F2: IEC 61784-1 and -2 references replaced by IEC 61784-1-0:2023 and IEC 61784-2-0:2023 with current titles (lines 370-371; IEC webstore and catalogue listings). Body text unchanged.
+- Anchor `#9-time-sensitive-networking` unchanged. No Vietnamese translation exists. eos lint: 0 errors, 0 warnings; eos syntax: pass.

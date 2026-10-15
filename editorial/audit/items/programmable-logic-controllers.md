@@ -48,3 +48,14 @@ P2: should-fix metadata and style problems a reader would notice; no accuracy pr
 - Remaining warnings and why they stay: none. Suggestions: sentence-length (46-51 words, each a single list or chain the split would weaken), acronym false positives (FALSE, ON, OFF, MIX; PNP and NPN are transistor type names; NE is a document prefix), one `reference-format` (IEC 61508 undated: the text cites the standard family and its machinery counterparts, not an edition).
 - Flags for independent review: fact-check that IEC 61508 parts 1-7 are still edition 2.0 (2010) if the reference should be dated; NE 43 receiver thresholds remain deferred to the current edition (as resolved in the previous review).
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Fact-check: pass, with one not-verified item (below). NE 43 2021 edition and title, IEC 61131-2:2017 Ed. 4.0, IEC 61131-3:2025 date verified.
+- Technical: fail until T2 is resolved (both Python blocks re-run, output identical; all exercise arithmetic and the Exercise 4 statement-order trace recomputed; T2 is a wording error about which scan resets the mix timer).
+- Findings concerning this item: T2 (Should fix, line 342). Report: `reviews/industrial-automation.md`.
+- Not verified: removal of Instruction List by IEC 61131-3:2025 (lines 17, 194, 356, 445, 447): official abstracts mention only an Annex B list of removed features; supported by secondary sources only. Book editions of Bolton and John and Tiegelkamp not fetched.
+
+## Revision log (wave 2 resolution)
+- T2: Section 5.3 (line 342) now says the mix timer resets in the scan in which the state changes from MIX to DRAIN.
+- Not-verified IL removal: qualified at lines 17, 194, 356 and 447 to what the IEC-derived abstract of IEC 61131-3:2025 supports (its published scope lists ST, LD, FBD and SFC and no longer lists Instruction List); Annex B was not accessible.
+- No Vietnamese translation exists. eos lint: 0 errors, 0 warnings; eos syntax: pass.

@@ -47,3 +47,14 @@ P2.
 - Remaining warnings: none. Suggestions: `reference-format` ×4 (standard series IEC 62264-1, IEC 62443, IEC 62541, ISO 23247 cited as series or undated, as the text cites them); sentence-length (several 46-61-word sentences that are lists of parallel items); "actually" at line 104 ("the values actually used", contrasted with requested intervals) is meaningful; acronym false positives (SCADA, IT, OT, ANSI, ISA are expanded in the same sentence; MQTT, OLE, DCOM, IFAC are names).
 - Flags for independent review: none on accuracy.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Fact-check: pass.
+- Technical: fail until T1 is resolved ("doubles" the fault signature; the answer's own numbers give 1.7 times). Leak program re-run, output identical; 40-seed alarm ranges reproduced with seeds 0-39 (36-49 s; 62-102 s for the smaller leak); residual formula derived from the code.
+- Findings concerning this item: T1 (Should fix, line 314), T3 (Optional, line 260). Report: `reviews/industrial-automation.md`.
+- Not verified: Kritzinger et al. (2018) and Mahnke et al. (2009) bibliographic details, OPC UA and MQTT protocol constants (consistent with reviewer knowledge, not fetched).
+
+## Revision log (wave 2 resolution)
+- T1: Exercise 4 answer (line 314): "doubles" replaced by "enlarges ... by about 70% (from 4.6 to 8 mm)" (recomputed: factor 1.72, L = 0.0274).
+- T3 (optional): time-step index in Section 5.6 renamed from k to j (line 260); k remains the outflow coefficient.
+- No Vietnamese translation exists. eos lint: 0 errors, 0 warnings; eos syntax: pass.
