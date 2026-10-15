@@ -4,6 +4,7 @@
 - Reviewed commit: 9232ed9 (the four articles and the series file are unchanged since the wave-1 revision 530f71c and have no uncommitted changes)
 - Date: 2026-10-13
 - Review: independent review (wave 2) of the wave-1 revision; fact-check (F), technical review (T) and series review (S) combined in one report. Previous reviews (two passes, all findings applied) are superseded by this report.
+- Content hash: sha256:cf8d7d63d3ff5098ea6eafb825d2ca73b7d4bcf98f7d87fd6813282fc5e5f73f
 
 ## Summary
 
@@ -143,3 +144,24 @@ Findings: 0 blocking, 3 should fix, 3 optional.
 - Optional applied: T2 (Exercise 1 question reworded, `sensing-and-state-estimation.mdx:227`), S1 (link target changed to `/series/foundations-of-control-systems`, `what-is-a-robot.mdx:18`), S2 ("outward", `planar-arm-kinematics.mdx:168`). Optional not applied: none.
 
 Resolved by the wave-1 author on 2026-10-14; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the working tree at HEAD 0d10069 (the five files of this series have no uncommitted changes) and the build in `/tmp/claude-0/b6`.
+
+- T1 (Should fix): confirmed. `sensing-and-state-estimation.mdx:250` reads "about two standard deviations of the innovation ($\sqrt{4.24} = 2.06$, with $\sqrt{S} = 0.58$ m) from the predicted measurement". Recomputed (python3 -I, NumPy): $d^2 = 1.44/0.34 = 4.235$, $d = 2.058$, $\sqrt{0.34} = 0.583$ m.
+- F1 (Should fix): confirmed. `sensing-and-state-estimation.mdx:184` reads "developed by Julier and Uhlmann in the mid-1990s (their 1997 paper cited below is the usual reference)"; no reference added, the 1997 SPIE entry is unchanged.
+- F2 (Should fix): confirmed. `what-is-a-robot.mdx:245` reads "N. J. Nilsson, Ed., *Shakey the Robot*, Technical Note 323, Artificial Intelligence Center, SRI International, 1984."
+- T2 (Optional): confirmed applied (`sensing-and-state-estimation.mdx:227`).
+- S1 (Optional): confirmed applied (`what-is-a-robot.mdx:18` links `/series/foundations-of-control-systems`).
+- S2 (Optional): confirmed applied (`planar-arm-kinematics.mdx:168`, "straight outward").
+
+Checks: `eos lint introduction-to-robotics` 0 errors, 0 warnings, 6 suggestions (organization names in reference lists); `eos syntax` on the five files: all compile; `check-links /tmp/claude-0/b6`: 314 pages, 9,693 internal references, all resolve; `eos validate-site /tmp/claude-0/b6`: no issue on any English page (issues reported only on `/vi/` pages, outside this verdict); `katex-error` count 0 on all five pages; the build contains the three should-fix corrections. Independent spot-checks (python3 -I, NumPy 2.5): planar FK $(1.0472, 1.1761)$, the Newton error sequence 0.478, 0.113, 0.0116, $1.8\times10^{-4}$, $6.4\times10^{-8}$ ending at $(30^\circ, 45^\circ)$, the second inverse solution $(66.64^\circ, -45^\circ)$, the first Newton and damped steps $(166.6^\circ, -401.6^\circ)$ and $(1.80^\circ, -1.33^\circ)$, the damped iteration ending at radius 1.700, 0.0507 from target; the camera example $(1.8, 2.5)$; gimbal-lock pairs; Kalman $P = 0.0662$, ten-move $\sigma = 0.683$ m, $d^2 = 11.8$ for a 12.0 m reading. All agree with the text.
+
+QA observations (optional, not blocking, recorded in the scores):
+
+- Q1 (Optional, language): the overview's objectives 1 and 4 and its conventions sentence use the serial comma ("actuators, sensors, and computation"; "sense, plan, and act"; "column vectors, and angles"), against standards 5.1. Same in the Summary table of `what-is-a-robot.mdx:228, 235`. Remove the final comma when the files are next edited.
+
+Verdict: no finding reopened. All five items pass the QA gate.
+
+Build re-check: `/tmp/claude-0/b6` was deleted after the checks above, so they were run again on `/tmp/claude-0/b9`. That build has the same text for this series, plus later commits to other series (HEAD 3dd5a22; this series' files are unchanged). `check-links`: 314 pages, 9,695 internal references, all resolve. `eos validate-site`: no issue on any English page. `katex-error` count is 0 on every page of this series. The corrected text is present.

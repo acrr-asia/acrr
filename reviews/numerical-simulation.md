@@ -4,6 +4,7 @@
 - Reviewed commit: 9232ed9
 - Date: 2026-10-13
 - Review type: independent review (wave 2) of the wave-1 revision (`dfb4316`, audit logs in `editorial/audit/series/numerical-simulation.md` and `editorial/audit/items/`), combining fact-check (F), technical review (T) and series review (S). The reviewer did not write or revise any of the text.
+- Content hash: sha256:e7297a51aac5170a355c6cbb645c4030088126c0ce2e2ac00b22be0f888c8eb6
 
 ## Summary
 
@@ -236,3 +237,25 @@ Findings: 0 blocking, 1 should fix, 4 optional.
 - Optional findings applied: S2 (`verifying-and-validating-a-simulation.mdx:50, :313`, "insight note" → "insight"), T1 (`solving-large-linear-systems.mdx:329`, "by a factor of $10^8$; the actual counts, measured with the residual criterion, ..."), T2 (`solving-large-linear-systems.mdx:230`, "over all vectors $\mathbf{U}^{(0)} + \mathbf{w}$ with $\mathbf{w}$ in the Krylov subspace") and T3 (`finite-element-method.mdx:292–295`, $|e|$ for the area of triangle $e$). Optional findings not applied: none.
 
 Resolved by the wave-1 author on 2026-10-14; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the working tree at HEAD 0d10069 (the six files of this series have no uncommitted changes) and the build in `/tmp/claude-0/b6`.
+
+- S1 (Should fix): confirmed. `solving-large-linear-systems.mdx:43` defines $T$ as $\text{tridiag}(-1, 2, -1)$, identifies $T/h^2$ with the first entry's $A$ (link to `#61-poisson-in-one-dimension`, which resolves) and says that $T$ is the negative of entry 2's $T$; `:138` reads "with their sign reversed"; `:377` reads "the tridiagonal matrix $T/h^2$ (the first entry's $A$)". Entry 2's $T$ (`finite-differences-for-heat-and-waves.mdx:44-49`) is $\text{tridiag}(1, -2, 1)$, so the statement is correct; entry 1's $A$ (`from-differential-equations-to-discrete-problems.mdx:238`) is $\tfrac{1}{h^2}\text{tridiag}(-1, 2, -1)$. The code of §3.1 and Exercise 3's value 2,593.2 are unchanged and re-run.
+- S2 (Optional): confirmed applied (`verifying-and-validating-a-simulation.mdx:50, :313`).
+- T1 (Optional): confirmed applied (`solving-large-linear-systems.mdx:329`, "by a factor of $10^8$"); the bound counts 96.7, 194.4, 389.2 hold.
+- T2 (Optional): confirmed applied (`solving-large-linear-systems.mdx:230`, "$\mathbf{U}^{(0)} + \mathbf{w}$ with $\mathbf{w}$ in the Krylov subspace").
+- T3 (Optional): confirmed applied (`finite-element-method.mdx:292-295`, $|e|$).
+
+Checks: `eos lint numerical-simulation` 0 errors, 0 warnings, 13 suggestions (each justified in the wave-1 logs); `eos syntax` on the six files: all compile; `check-links /tmp/claude-0/b6`: 314 pages, 9,693 internal references, all resolve; `eos validate-site /tmp/claude-0/b6`: no issue on any English page; `katex-error` count 0 on all six pages; the build contains the S1 and T3 text. Code: all 18 Python blocks re-run independently with `python3 -I` (NumPy 2.5), each file's blocks in one namespace; the output of all five files matches the printed `text` blocks. Spot-checks: entry 2 Exercise 5 (moduli 1.8391, 1.8678, 1.8750; 48, 95, 190 steps; $5.0\times10^{-4}$, $6.0\times10^{9}$, $7.4\times10^{35}$), Exercise 4 (112.8 steps; BTCS 0.0099), the FTCS factor $-1.0274$ over 392 steps; entry 4 Exercise 3 ($N \approx 2{,}526$); entry 5 Exercise 4 ($[-3.78, 0.34]$ K). All agree with the text.
+
+QA observations (optional, not blocking, recorded in the scores):
+
+- Q1 (Optional, language): `solving-large-linear-systems.mdx:377` now has two parentheticals in a row, "$T/h^2$ (the first entry's $A$) (with $N - 1$ unknowns)", a side effect of the S1 fix. Suggest "the tridiagonal matrix $T/h^2$ with $N - 1$ unknowns (the first entry's $A$)".
+- Q2 (Optional, language): `from-differential-equations-to-discrete-problems.mdx:19` "the time-stepping in the second entry" hyphenates the noun; the series uses "time stepping" as a noun (overview line 14).
+- Q3 (Optional, structure): the closing paragraph of `verifying-and-validating-a-simulation.mdx:374` summarizes the chain but does not lead back to the series objectives or link the series page, as standards 6.2 item 6 asks of a last entry.
+
+Verdict: no finding reopened. All six items pass the QA gate.
+
+Build re-check: `/tmp/claude-0/b6` was deleted after the checks above, so they were run again on `/tmp/claude-0/b9`. That build has the same text for this series, plus later commits to other series (HEAD 3dd5a22; this series' files are unchanged). `check-links`: 314 pages, 9,695 internal references, all resolve. `eos validate-site`: no issue on any English page. `katex-error` count is 0 on every page of this series. The corrected text is present.
