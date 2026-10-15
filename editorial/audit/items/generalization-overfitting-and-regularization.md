@@ -56,3 +56,13 @@ P2.
 - Remaining suggestions and why they stay: `acronym-expansion` MIT at `:337` (publisher name in the reference list).
 - Flags for independent review: technical reviewer may confirm the D1 replacement sentence ("reduces the variance without adding bias") for the polynomial setting of the entry: with a fixed model family the bias term does not depend on $n$ in the fixed-design formula, which is how the entry uses it.
 - Vietnamese translation affected: no translation exists. `publishedAt` 2026-10-13, so no `updatedAt`.
+
+## Revision log (wave 2 resolution)
+
+Resolves `reviews/machine-learning-fundamentals.md` T2, T5, T6, F3 (entry 3 part).
+- T2: "Unlike the other remedies," removed from the more-data item (`:267`); averaging models also reduces variance without changing the bias.
+- T5: test-error standard deviation now "shrinks in proportion to $1/\sqrt{m}$" (`:31`).
+- T6: cyclic-trace reason and the linear-independence condition added to the trace-of-projection step (`:133`).
+- F3: Hoerl and Kennard (1970) attached to ridge (`:194`), Tibshirani (1996) to the lasso (`:255`), Geman, Bienenstock and Doursat (1992) to the decomposition (`:108`).
+- Code and outputs unchanged. Lint: 0 errors, 0 warnings; syntax compiles.
+- Meaning changes for the translation follow-up (no translation exists yet): Sections 1.1, 3.1, 3.2, 4.1, 4.2, 4.4.

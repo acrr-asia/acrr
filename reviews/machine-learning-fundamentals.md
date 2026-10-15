@@ -1,292 +1,221 @@
 # Series review: Machine Learning Fundamentals
 
 - Series: `machine-learning-fundamentals` (4 articles, status published, 0 planned entries)
-- Reviewed commit: 0654c71
-- Date: 2026-10-13
-- Content hash: sha256:fa76c5d851e830c40a198b9f2c6c3f6a91a2958a5567e3c8cb9d9d413f4d1e21
+- Reviewed commit: 9232ed9 (the series' content was last changed in d0a5aa8, "Audit and revise the Machine Learning Fundamentals series (wave 1)")
+- Date: 2026-10-14
+- Review type: independent review, wave 2 (fact-check, technical review and series review in one report; the reviewer did not write or revise any of this text)
 
 ## Summary
 
-The series is technically strong. It builds supervised learning in a clear order (problem, optimizer, generalization, evaluation), each entry links back to the one before it, and the four series objectives are all met. All eleven Python blocks were rerun with Python 3.13.16 and numpy 2.5.3, and every quoted output matches byte for byte. Every number in the prose that can be recomputed was checked and is correct except one step count, and all 25 cited works exist as cited.
-
-The one blocking finding is in entry 3: the sentence on feature scale in ridge regression has the millimetre/metre relation backwards. The should-fix findings cover:
-- the early-stopping ≈ ridge correspondence, which is called "precise" but is only a heuristic;
-- an unsupported claim about why very large models generalize;
-- two links whose text names a subsection while the link goes to the parent section;
-- an incorrect step count (910 instead of 930);
-- seed choices that are not presented as one sample among many (entries 3 and 4);
-- the framing of the coin-flip selection example;
-- the scope of the fixed-design bias–variance simulation;
-- two linear-algebra objects (trace, covariance matrix) that are used without being introduced;
-- an overstated claim about early stopping.
-
-The build and the link check pass. The series is ready once the blocking and should-fix items are corrected.
-
-Findings: 1 blocking, 11 should fix, 4 optional.
-
-## Resolution
-
-All 16 findings (F1–F16) were applied on 2026-10-13, at the owner's request:
-- **F1:** the units sentence now says that the metre-scale weight is the larger one and is penalized a million times more. It uses American spelling ("meters", "millimeters"), which also covers that part of F13.
-- **F2:** §4.3 of entry 3 now gives both shrinkage fractions. These are $1-(1-\eta\mu_i)^t$ for gradient descent and $\mu_i/(\mu_i+2\lambda)$ for ridge with every weight penalized. The text calls the correspondence a rule of thumb that holds roughly, for the flat directions, when $2\lambda \approx 1/(\eta t)$.
-- **F3:** the large-model remark is rephrased as an observation, with the cause called an open research question. It cites Belkin, Hsu, Ma and Mandal, PNAS 116(32), 2019, which was confirmed online (par.nsf.gov record; DOI 10.1073/pnas.1903070116; abstract: "they often obtain high accuracy on test data"). The reference was added to entry 3's list. No other reference was added or removed: all 25 existing ones were confirmed.
-- **F4, F5:** the two anchors now point to `#32-many-dimensions-curvature-and-conditioning` and `#33-empirical-risk`. Both resolve in `dist/`.
-- **F6:** "about 930 steps".
-- **F7:** entry 1 now says that seeds are not claimed to be typical and that the text states the variation where it matters. Entry 3 §2.3 has a new paragraph giving the spread over seeds 0–20:
-  - the three regimes appear every time;
-  - the best degree is 3 for 14 seeds, 5 for 6 and 7 for 1;
-  - the first degree with a fresh-data MSE above 1 ranges from 7 to 15.
-- **F8:** entry 4 §3.2 now says that the CV minimum falls below 0.09 only for seeds 4, 5, 8 and 14 of 0–20.
-- **F9:** the coin-flip paragraph now:
-  - speaks of the "best of 50 noisy estimates";
-  - presents the coin flips as a simulation of 50 equally good candidates that ignore their inputs;
-  - explains that 0.45 is consistent with 0.5 (standard deviation 0.05);
-  - says that seed 5 is typical (mean best validation accuracy 0.61 over seeds 0–199).
-- **F10:** entry 3 §3.1 defines random versus fixed design. §3.3 says that the "expected error" column is the in-sample expected error at the 20 inputs and is not comparable with §2.
-- **F11:** entry 3 §3.2 glosses the covariance matrix (including covariance itself and the rule $ACA^\top$), the trace, and $P^\top = P$, $PP = P$.
-- **F12:** "costs little beyond periodic evaluations of the held-out error … widely used for neural networks, often together with weight decay".
-- **F13–F16:** "defenses", the condition for $\sigma^2(n-p)/n$, $p = d+1$ in entry 2, and "Cross-validation (CV), in its usual $k$-fold form" were applied as recommended.
-
-Second pass: a full reread after the corrections found four problems introduced by them, all fixed:
-- the new seed paragraph in entry 3 §2.3 referred to "the three regimes" before they were described, so it was moved after the regime bullets and the gap paragraph;
-- §3.1 repeated "a new sample of 20 examples", now "as just described";
-- "which is why it shows" had lost its subject, now "the simulation shows";
-- the early-stopping paragraph used $\lambda_i$ for a Hessian eigenvalue next to the ridge strength $\lambda$. The eigenvalue is now $\mu_i$, with a note that entry 2 calls it $\lambda_i$.
-
-Before writing the seed paragraph, I confirmed that the "three regimes every time" claim holds: degree 1 never goes below 0.285, and every seed explodes at high degree. A third read of the changed paragraphs found nothing further.
-
-No Vietnamese file needed changing. None of the four articles has a translation in `src/content/blog/vi/`, and the series file and its translation were not edited.
-
-Re-run results after the final edit:
-- `npm run build:local`: 0 errors, 0 warnings, 80 pages indexed.
-- `npm run check:links`: 217 pages, 6138 internal references, all resolve.
-- `dist/` checks: no `katex-error`, Mermaid min-widths 475/532/288px, no glued inline text.
-- All 11 Python blocks still reproduce their quoted output byte for byte. Code and outputs were not changed.
-
-The series content hash stamp (`node scripts/series-pipeline.mjs stamp`) was not added, because this task did not include publication.
-
-Line numbers below refer to the reviewed commit 0654c71, not to the corrected articles.
+The series is accurate and well built. All eleven Python blocks reproduce their printed output byte for byte with Python 3.13.16 and NumPy 2.5.3, every number in the prose that can be recomputed was recomputed and is right (including the seed-variation claims added after the first review), and all 27 entries in the four reference lists exist with the bibliographic details given. The wave-1 attributions to Cawley and Talbot and to Dietterich are supported by the papers. There are no blocking findings. The five should-fix findings are local: the claim that library defaults for Adam match the paper is not true of Keras (entry 2); the exact result $H = 2I$ after standardization depends on the divisor-$n$ convention, which is not stated (entry 2); a sentence added in wave 1 says that only more data reduces variance without adding bias, which the entry's own "averaging models" remedy contradicts (entry 3); the definition of label shift leaves out the condition that makes it a special case (entry 4); and the standard error and the confidence interval are used in entry 4 without being said to be what they are. The series is ready as published once those five are corrected.
+Findings: 0 blocking, 5 should fix, 6 optional.
 
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |
 |---|---|---|
-| Formulate a supervised learning problem in terms of a model, a loss function, and a data set. | Entry 1 §1–3 | Met. |
-| Explain gradient-based optimization and the role of the learning rate. | Entry 2 §2–5 | Met; the 1-D and eigenvalue analyses are exact and match the code. |
-| Distinguish training error from generalization error, and explain why held-out evaluation matters. | Entry 1 §5–6, entry 3 §1–3, §5 | Met. |
-| Identify common sources of data leakage and bias in an evaluation setup. | Entry 4 §4–5 | Met. |
+| Formulate a supervised learning problem in terms of a model, a loss function, and a data set. | Entry 1, Sections 1–3 (examples, models, loss functions, risk, ERM); Section 5 worked example | Met. |
+| Explain gradient-based optimization and the role of the learning rate. | Entry 2, Sections 2–5 (update rule, $0 < \eta < 2/\lambda_{\max}$, conditioning, SGD, schedules, momentum, Adam) | Met. |
+| Distinguish training error from generalization error, and explain why held-out evaluation matters. | Entry 1, Sections 3 and 6; entry 3, Sections 1–3 and 5; entry 4, Section 2 | Met. |
+| Identify common sources of data leakage and bias in an evaluation setup. | Entry 4, Sections 4 and 5 (with the summary table in Section 4.7) | Met. |
 
 ## Findings
 
 | ID | Severity | Article | Location | Dimension | Finding |
 |---|---|---|---|---|---|
-| F1 | Blocking | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §4.1 (line 202) | Technical accuracy | The millimetre/metre scaling of a ridge weight is stated backwards |
-| F2 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §4.3 (line 253) | Technical accuracy | Early stopping ≈ ridge with λ ~ 1/(ηt) is said to be "made precise" but is a rough heuristic |
-| F3 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §3.4 (line 180) | Fit with site rules / Technical accuracy | Unsupported claim, and an asserted mechanism, for why very large models generalize |
-| F4 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §4.3 (line 253) | Cross-article references | Link text "Section 3.2 of the second entry" targets `#3-the-learning-rate` |
-| F5 | Should fix | `src/content/blog/evaluating-models-honestly.mdx` | §2.1 (line 38) | Cross-article references | Link text "Section 3.3 of the first entry" targets `#3-risk-and-empirical-risk` |
-| F6 | Should fix | `src/content/blog/gradient-descent-and-its-variants.mdx` | §3.4 (line 213) | Technical accuracy | "about 910 steps" should be about 930 |
-| F7 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` (and `learning-from-data.mdx` line 23) | §2.2–2.3 (lines 76–100) | Fit with site rules | Seed 9 is presented without saying how the outcome varies with the seed |
-| F8 | Should fix | `src/content/blog/evaluating-models-honestly.mdx` | §3.2 (line 173), Exercise 5 (line 375) | Fit with site rules | The "CV score below the irreducible error" point depends on seed 4; it occurs for only 4 of seeds 0–20 |
-| F9 | Should fix | `src/content/blog/evaluating-models-honestly.mdx` | §2.2 (lines 50, 74) | Technical accuracy / Writing quality | Coin-flip example framing: "minimum" of estimates but code takes a maximum; 0.45 called "at chance" without noise context |
-| F10 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §3.1 (line 106–108), §3.3 (line 172) | Technical accuracy | Fixed-design simulation: what is redrawn, and what "expected error" measures, is not stated clearly |
-| F11 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §3.2 (line 127) | Concept introduction | Covariance matrix and trace are used without introduction (not among the stated prerequisites) |
-| F12 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | §4.3 (line 255) | Technical accuracy | "costs nothing extra" and "the most common regularizer" are unsupported/overstated |
-| F13 | Optional | `src/content/blog/generalization-overfitting-and-regularization.mdx`, `evaluating-models-honestly.mdx` | lines 202; 298 | Terminology | British spellings "millimetres", "metres", "defences" in an American-spelled series |
-| F14 | Optional | `src/content/blog/learning-from-data.mdx` | §6 (line 263) | Technical accuracy | σ²(n−p)/n does not need Gaussian noise, but does need the model to contain the true mean |
-| F15 | Optional | `src/content/blog/gradient-descent-and-its-variants.mdx` | §3.2 (line 125) | Terminology | $p$ (number of parameters) is used without definition in this entry |
-| F16 | Optional | `src/content/blog/evaluating-models-honestly.mdx` | §3.1 (line 102) | Terminology | "K-fold" with capital K while $k$ is used everywhere else |
+| F1 | Should fix | `src/content/blog/gradient-descent-and-its-variants.mdx` | Section 5 (line 322) | Stated versions and defaults | "library implementations generally use the same values": Keras 3 uses $\epsilon = 10^{-7}$, not $10^{-8}$. |
+| T1 | Should fix | `src/content/blog/gradient-descent-and-its-variants.mdx` | Section 3.4 (lines 186, 213) | Stated versions and defaults | $H = 2I$ after standardization holds only with the divisor-$n$ standard deviation; the convention is not stated. |
+| T2 | Should fix | `src/content/blog/generalization-overfitting-and-regularization.mdx` | Section 4.4 (line 267) | Technical accuracy | "Unlike the other remedies, more data reduces the variance without adding bias" is contradicted by the averaging remedy two lines below. |
+| T3 | Should fix | `src/content/blog/evaluating-models-honestly.mdx` | Section 5.1 (line 300) | Technical accuracy | Label shift defined only as "the class proportions change", without $P(\mathbf{x} \mid y)$ fixed. |
+| S1 | Should fix | `src/content/blog/evaluating-models-honestly.mdx` | Section 6.1 (line 318) | Concept introduction | Standard error and confidence interval used without saying what they are. |
+| T4 | Optional | `src/content/blog/gradient-descent-and-its-variants.mdx` | Section 6, Exercise 2 (line 342) | Technical accuracy | $\ln(10^{-6})/\ln(0.980)$ is 684, not 690; 690 comes from the unrounded $99/101$. |
+| T5 | Optional | `src/content/blog/generalization-overfitting-and-regularization.mdx` | Section 1.1 (line 31) | Technical accuracy | "a standard deviation of order $1/\sqrt{m}$" omits the loss's own spread; "proportional to" is meant. |
+| T6 | Optional | `src/content/blog/generalization-overfitting-and-regularization.mdx` | Section 3.2 (line 133) | Concept introduction | "the trace of a projection matrix equals the dimension" is asserted without the one-line reason or the full-rank condition. |
+| F2 | Optional | `src/content/blog/gradient-descent-and-its-variants.mdx` | Section 5 (line 315) | Evidence | "The most widely used is Adam": an unsourced superlative. |
+| F3 | Optional | `generalization-overfitting-and-regularization.mdx`, `evaluating-models-honestly.mdx` | References (entry 3 lines 336, 339, 340; entry 4 lines 408, 410) | Evidence | Five listed works (Geman et al., Hoerl and Kennard, Tibshirani, Kaufman et al., Stone) are never attached to the claims they support. |
+| S2 | Optional | `src/content/series/machine-learning-fundamentals.md` | Body (line 13) | Overview completeness | The overview names neither the stated seed policy's caveat (digits may differ with other NumPy versions) nor where the entries recall extra mathematics; minor, entry 1 states both. |
 
-### F1. Ridge penalty and feature units stated backwards
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:202`, section "4.1 Ridge regression: penalizing large weights"
-- **Text:** "a weight on a feature measured in millimetres must be a thousand times larger than on the same feature in metres, so it is penalized a million times more."
-- **Problem:** A length in millimetres is a thousand times larger numerically than the same length in metres. To produce the same prediction $w_{\text{mm}} x_{\text{mm}} = w_{\text{m}} x_{\text{m}}$, the millimetre weight must be a thousand times *smaller*: $w_{\text{mm}} = w_{\text{m}}/1000$. The weight on the metre feature is the larger one, and it is the one penalized a million times more. The sentence's conclusion (the penalty depends on units, so standardize) is right, but the stated relation is wrong.
-- **Recommended correction:** "The penalty depends on the scale of each feature: the same length recorded in meters instead of millimeters takes values a thousand times smaller, so its weight must be a thousand times larger to give the same predictions, and that weight is penalized a million times more."
+### F1. Adam defaults in libraries
+- **Where:** `src/content/blog/gradient-descent-and-its-variants.mdx:322`, section "5. Momentum and adaptive methods"
+- **Text:** "The defaults proposed in the original paper are $\beta_1 = 0.9$, $\beta_2 = 0.999$ and $\epsilon = 10^{-8}$; library implementations generally use the same values, but check the documentation of the version in use."
+- **Problem:** The paper's values are right (Kingma and Ba, arXiv:1412.6980, Algorithm 1). But the Keras 3 API documentation (keras.io/api/optimizers/adam/, fetched 2026-10-14) gives `keras.optimizers.Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-07, ...)` and notes that this epsilon is the "epsilon hat" of the paper's alternative formulation, not the $\epsilon$ of Algorithm 1. PyTorch (`torch.optim.Adam`, documentation version 2.14, fetched 2026-10-14) uses `eps=1e-08`. One of the two most common libraries differs, so "generally use the same values" misleads a reader who copies hyperparameters from one library to another. Standards 5.3 ("Name versions") and the series-review dimension "Stated versions and defaults" apply.
+- **Recommended correction:** Replace from "; library implementations" to the end of the sentence with: ". Library defaults do not always match: PyTorch's `torch.optim.Adam` uses the same three values, while Keras 3's `Adam` uses $\epsilon = 10^{-7}$ (applied in a slightly different place in the update), so check the documentation of the library and version in use."
 
-### F2. Early stopping and ridge: a heuristic presented as precise
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:253`, section "4.3 Early stopping"
-- **Text:** "For least squares the analogy can be made precise: after $t$ steps with learning rate $\eta$, the iterates behave roughly like a ridge solution with $\lambda$ of the order of $1/(\eta t)$."
-- **Problem:** "made precise" and "roughly" contradict each other. The correspondence is a heuristic. Along an eigenvector of $H$ with eigenvalue $\lambda_i$, gradient descent from zero recovers the fraction $1-(1-\eta\lambda_i)^t$ of the least-squares component. Ridge with a penalty on every weight recovers $\lambda_i/(\lambda_i+2\lambda)$. The two filters agree only in the limits (steep and flat directions) and when $2\lambda \approx 1/(\eta t)$. Recomputed on the entry-1 data with $\eta=0.05$, $t=20$, they give 0.149 vs 0.139 for the flat direction and 0.936 vs 0.720 for the steep one. The author's note asks for this to be labelled as a heuristic.
-- **Recommended correction:** state the two filter factors, say they agree only roughly and only in the limits, and call it a rule of thumb (text in the Resolution).
+### T1. Standardization and the divisor of the standard deviation
+- **Where:** `src/content/blog/gradient-descent-and-its-variants.mdx:186` and `:213`, section "3.4 Feature scaling"
+- **Text:** "the **standardized** feature $z = (x - \bar{x})/s_x$, which has mean 0 and standard deviation 1 on the training set" and "With a centered feature of unit variance, $\frac{1}{n}X^\top X$ is the identity matrix, so $H = 2I$, both eigenvalues equal 2, and $\eta = 0.5$ reaches the minimum in a single step."
+- **Problem:** $\frac{1}{n}\sum_i z_i^2 = 1$ only when $s_x$ is computed with divisor $n$, which is what the code does (`x.std()`, NumPy's default `ddof=0`). With the divisor $n - 1$ that many readers and libraries use for "the standard deviation", $\frac{1}{n}\sum_i z_i^2 = (n-1)/n = 0.95$ for $n = 20$, so $H = \operatorname{diag}(2, 1.9)$: the eigenvalues are 2 and 1.9, not equal, and $\eta = 0.5$ no longer reaches the minimum in one step. The exact result depends on a convention the prose does not state (standards 5.5, "State conventions that a result depends on"). The series already uses this convention explicitly elsewhere (entry 1, Exercise 2: "the sample variance (with divisor $n$)").
+- **Recommended correction:** At line 186, after "$z = (x - \bar{x})/s_x$", insert ", where $s_x$ is the standard deviation computed with divisor $n$ (NumPy's default for `x.std()`)". At line 213, change "With a centered feature of unit variance" to "With a centered feature whose mean square is 1 (the divisor-$n$ convention)".
 
-### F3. Unsupported remark on very large models
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:180`, section "3.4 The trade-off"
-- **Text:** "Very large modern models, with far more parameters than training examples, can still generalize well when they are trained in ways that restrict which of their many possible solutions is reached."
-- **Problem:** The sentence has no source. It also presents one candidate explanation (implicit restriction by the training procedure) as the established reason, although this is still an open research question. The phenomenon itself is documented, for example in Belkin, Hsu, Ma and Mandal, PNAS 116(32), 2019, whose abstract says such models "often obtain high accuracy on test data". The cause is not settled.
-- **Recommended correction:** "Very large models, such as neural networks with more parameters than training examples, have been observed to predict well in many applications even when they fit their training data almost exactly (Belkin et al., 2019); when and why this happens is an active research question outside the scope of this series. The decomposition still holds for such models, since it is an identity; what fails is the use of the parameter count as a measure of the variance, as in the formula of Section 3.2." Add the reference.
+### T2. "Unlike the other remedies" (sentence added in wave 1)
+- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:267`, section "4.4 Other remedies"
+- **Text:** "Unlike the other remedies, more data reduces the variance without adding bias, but it is often expensive or impossible to obtain."
+- **Problem:** The fixed-design reasoning behind the main clause is right (the bias term of Section 3.1 does not depend on $n$ for a fixed model family, and $\sigma^2 p/n$ falls with $n$), so the first half of the wave-1 flag is confirmed. The contrast with "the other remedies" is not: the list continues at line 270 with "**Averaging models.** ... reduces variance, because the fluctuations of the individual models partly cancel", and averaging identically distributed fitted models leaves their expected prediction, and therefore the bias, unchanged (Hastie, Tibshirani and Friedman, *The Elements of Statistical Learning*, 2nd ed., Section 15.2, make this point for bagged trees; the book is in the entry's reference list). Data augmentation with transformations that truly preserve the label (line 269) also does not by itself add bias. The comparative is therefore false as stated for at least one item of the same list.
+- **Recommended correction:** "More data reduces the variance without adding bias, but it is often expensive or impossible to obtain."
 
-### F4. Link text names Section 3.2 but links to Section 3
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:253`
-- **Text:** "(Section 3.2 of the [second entry](/blog/gradient-descent-and-its-variants#3-the-learning-rate))"
-- **Problem:** The anchor goes to the "3. The Learning Rate" heading, not to §3.2. The id `32-many-dimensions-curvature-and-conditioning` exists in `dist/blog/gradient-descent-and-its-variants.html`.
-- **Recommended correction:** link to `/blog/gradient-descent-and-its-variants#32-many-dimensions-curvature-and-conditioning`.
+### T3. Definition of label shift
+- **Where:** `src/content/blog/evaluating-models-honestly.mdx:300`, section "5.1 Unrepresentative data and distribution shift"
+- **Text:** "Common special cases are **covariate shift**, where the distribution of the inputs changes but the relation $P(y \mid \mathbf{x})$ does not, and **label shift**, where the class proportions change."
+- **Problem:** A special case of distribution shift is defined by what stays fixed, as the covariate-shift half of the sentence does. As written, any shift in which the class proportions $P(y)$ change qualifies as label shift, including shifts in which $P(y \mid \mathbf{x})$ or $P(\mathbf{x} \mid y)$ also change, so the term no longer names a special case. The standard definition keeps the class-conditional input distribution $P(\mathbf{x} \mid y)$ fixed; that invariant is what lets label shift be corrected by reweighting classes. The reader is left with an imprecise definition of a term the entry introduces in bold.
+- **Recommended correction:** "... and **label shift**, where the class proportions $P(y)$ change but the distribution of the inputs within each class, $P(\mathbf{x} \mid y)$, does not."
 
-### F5. Link text names Section 3.3 but links to Section 3
-- **Where:** `src/content/blog/evaluating-models-honestly.mdx:38`
-- **Text:** "by the argument of [Section 3.3 of the first entry](/blog/learning-from-data#3-risk-and-empirical-risk)"
-- **Problem:** The anchor goes to the parent heading. The id `33-empirical-risk` exists.
-- **Recommended correction:** link to `/blog/learning-from-data#33-empirical-risk`.
+### S1. Standard error and confidence interval not introduced
+- **Where:** `src/content/blog/evaluating-models-honestly.mdx:318`, section "6.1 Uncertainty of a test score" (forward reference at `:29`; also mentioned in `src/content/blog/learning-from-data.mdx:151`)
+- **Text:** "A test accuracy $\hat{p}$ measured on $m$ independent examples is an average of $m$ zero-one values, so its standard error is approximately $\sqrt{\hat{p}(1 - \hat{p})/m}$, and for large $m$ an approximate 95% confidence interval is $\hat{p} \pm 1.96\sqrt{\hat{p}(1 - \hat{p})/m}$ (the normal approximation)."
+- **Problem:** The series' stated prerequisites are expected value, variance and the normal distribution (overview line 13; entry 1 line 21), and the overview says each entry recalls any further idea where it first uses it. "Standard error" and "confidence interval" are used here, and the confidence interval is the recommended way to report a score (Section 6.2 table, "A score without an interval cannot be compared"), but neither is said to be what it is: that the standard error is the standard deviation of the estimate over repeated test sets, and that a 95% interval is produced by a rule that covers the true value in 95% of repeated samples. The ingredients are in the series (entry 1 Section 3.3; entry 4 line 74 computes the same quantity as "a standard deviation"), so only the definitions are missing. Not raised to blocking because the concept is a reporting tool rather than what the series is about, and its derivation from the prerequisites is otherwise present.
+- **Recommended correction:** Replace the sentence with: "A test accuracy $\hat{p}$ measured on $m$ independent examples is an average of $m$ zero-one values. Its **standard error**, the standard deviation of such an estimate over repeated test sets of the same size (Section 3.3 of the first entry), is approximately $\sqrt{\hat{p}(1 - \hat{p})/m}$. A **95% confidence interval** is an interval computed from the sample by a rule that, over repeated samples, contains the true value 95% of the time. For large $m$ the average is approximately normally distributed, and the rule $\hat{p} \pm 1.96\sqrt{\hat{p}(1 - \hat{p})/m}$ gives such an interval (the normal approximation)."
 
-### F6. Step count after rescaling
-- **Where:** `src/content/blog/gradient-descent-and-its-variants.mdx:213`, section "3.4 Feature scaling"
-- **Text:** "reducing it by a factor of $10^6$ takes about 910 steps instead of about 110."
-- **Problem:** With the unrounded factor $(\kappa-1)/(\kappa+1) = 0.98526$ ($\kappa = 134.69$), $\ln 10^{-6}/\ln 0.98526 = 930.3$. The figure 910 (914) comes from the rounded factor 0.985, and a rounding in the third decimal changes the count by 2 %. The 110 figure is correct (110.3).
-- **Recommended correction:** "about 930 steps instead of about 110".
+### T4. Step count in Exercise 2 of entry 2
+- **Where:** `src/content/blog/gradient-descent-and-its-variants.mdx:342`, section "6. Exercises"
+- **Text:** "so reducing it by a factor of $10^6$ takes about $\ln(10^{-6})/\ln(0.980) \approx 690$ steps."
+- **Problem:** Recomputed: $\ln(10^{-6})/\ln(0.980) = 683.8$; $\ln(10^{-6})/\ln(99/101) = 690.75$. The printed expression and the printed value use different roundings of the factor.
+- **Recommended correction:** "... takes about $\ln(10^{-6})/\ln(99/101) \approx 691$ steps."
 
-### F7. Seed 9 presented without its variability
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:76–100`; series-wide statement at `src/content/blog/learning-from-data.mdx:23`
-- **Text:** "With seed 9 it prints:" followed by a reading of the table ("A good fit (degree 3 to about 7)", "Overfitting (degree 9 and above)") as if it were the general pattern.
-- **Problem:** The seeds used across the series (0, 1, 4, 5, 6, 7, 9, 11) are not one fixed default, and the entries never say how sensitive each result is to the seed. A rerun with seeds 0–20 shows the following:
-  - Every seed gives the three regimes and a training MSE that falls with degree.
-  - The lowest fresh-data MSE is at degree 3 for 14 seeds, at degree 5 for 6 seeds and at degree 7 for 1 seed.
-  - The first degree with a fresh-data MSE above 1 ranges from 7 to 15.
+### T5. "Of order $1/\sqrt{m}$"
+- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:31`, section "1.1 The two quantities"
+- **Text:** "With $m$ test examples the test error has a standard deviation of order $1/\sqrt{m}$ around the risk"
+- **Problem:** The standard deviation is $\sigma_\ell/\sqrt{m}$, where $\sigma_\ell$ is the standard deviation of the per-example loss; "of order $1/\sqrt{m}$" reads as if the constant were 1. Entry 1 (line 151) says it correctly: "shrinks in proportion to $1/\sqrt{n}$".
+- **Recommended correction:** "has a standard deviation around the risk that shrinks in proportion to $1/\sqrt{m}$".
 
-  Seed 9 is an ordinary member of this set, but the reader cannot know that, and entry 4 already reports seed sensitivity (§3.2, §4.4). Seed choices must be disclosed honestly. Entry 1 says only that the seed is fixed and stated.
-- **Recommended correction:** after the entry-3 table, add a sentence giving the spread over seeds 0–20 (text in the Resolution). In entry 1 line 23, add: "The seeds are not claimed to be typical; where a result varies noticeably from one seed to another, the text says by how much."
+### T6. Trace of a projection matrix
+- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:133`, section "3.2 Variance grows with the number of parameters"
+- **Text:** "and the trace of a projection matrix equals the dimension of the space it projects onto, here the number of parameters $p$."
+- **Problem:** The fact is correct but is the one step of the derivation the reader cannot check from what precedes it, and it needs the columns of $X$ to be linearly independent (true for every degree used, all below 20 with distinct inputs).
+- **Recommended correction:** "and the trace of a projection matrix equals the dimension of the space it projects onto (its eigenvalues are 0 or 1, and $\operatorname{tr} P = \operatorname{tr}\big((X^\top X)^{-1}X^\top X\big) = p$ when the $p$ columns of $X$ are linearly independent)."
 
-### F8. The CV score below the noise floor depends on the seed
-- **Where:** `src/content/blog/evaluating-models-honestly.mdx:173` (and Exercise 5, line 375)
-- **Text:** "The CV score of the chosen setting, 0.0886, is below the irreducible error of 0.09, which no predictor can genuinely achieve."
-- **Problem:** The rerun is correct, but over seeds 0–20 the CV minimum is below 0.09 only for seeds 4, 5, 8 and 14. For the other 17 seeds it lies between 0.0937 and 0.1493. The bullet and Exercise 5 present a seed-specific event without saying so. The seed-2 failure that the text does mention (λ = 1e-5, test 1.31, fresh 0.65, and 0.14 at λ = 1e-2) was confirmed.
-- **Recommended correction:** append: "This particular seed shows the effect starkly; among seeds 0 to 20 the CV minimum falls below 0.09 only for seeds 4, 5, 8 and 14, but the selection effect of Section 2.2 is present whatever the seed."
+### F2. "The most widely used"
+- **Where:** `src/content/blog/gradient-descent-and-its-variants.mdx:315`, section "5. Momentum and adaptive methods"
+- **Text:** "The most widely used is **Adam** (Kingma and Ba)"
+- **Problem:** A superlative about usage with no source (standards 7.2). Nothing in the entry depends on the ranking.
+- **Recommended correction:** "A widely used one is **Adam** (Kingma and Ba)".
 
-### F9. Framing of the coin-flip selection example
-- **Where:** `src/content/blog/evaluating-models-honestly.mdx:50, 74`
-- **Text:** "The reported error of the winner is now the minimum of 50 noisy estimates, and the minimum of noisy estimates is biased downwards even when every candidate is equally good. The code below makes this concrete with the most extreme case: 50 "models" that each guess every label by a fair coin flip" … "and is at chance on data that played no part in the selection."
-- **Problem:** The prose speaks of the minimum error, but the code and output report the maximum accuracy. The candidates are described as "the most extreme case", but the example's real point is that they are *equally good*: these models ignore their inputs, and the coin flip is only a way of simulating candidates of identical true accuracy. A test accuracy of 0.45 is called "at chance" with no mention that the standard deviation for 100 examples is 0.05. Seed 5 is typical: over seeds 0–199 the best validation accuracy averages 0.613, median 0.61.
-- **Recommended correction:** reword as "the best of 50 noisy estimates … biased in the winner's favor"; describe the code as a simulation of 50 candidates of equal quality, represented by input-ignoring coin-flip guessers; say that 0.45 is consistent with 0.5 given a standard deviation of 0.05; and note that the seed is typical.
+### F3. Listed works not attached to claims
+- **Where:** entry 3 references at `src/content/blog/generalization-overfitting-and-regularization.mdx:336, 339, 340`; entry 4 references at `src/content/blog/evaluating-models-honestly.mdx:408, 410`
+- **Text:** Geman et al. (1992), Hoerl and Kennard (1970), Tibshirani (1996); Kaufman et al. (2012), Stone (1974)
+- **Problem:** Wave 1 attached Belkin, Ambroise, Cawley, Dietterich and Quiñonero-Candela to their claims; these five specific papers remain unattached, so the reader cannot tell which claim each supports (standards 6.1). They are the original sources of the ridge and lasso, an early systematic treatment of cross-validation, and a formal treatment of leakage, so the attachment is natural.
+- **Recommended correction:** Entry 3, line 194 after "adds a penalty on the size of the weights to the objective": "(Hoerl and Kennard, 1970)"; line 255 after "The **lasso**": "(Tibshirani, 1996)"; line 104 section 3.1, end of the first paragraph: "Geman, Bienenstock and Doursat (1992) discuss the decomposition for neural networks." Entry 4, line 104 after "**Cross-validation** (CV)": "(Stone, 1974, is an early systematic treatment)"; line 186, end of the first paragraph: "Kaufman et al. (2012) give a formal definition and methods for detecting and avoiding it."
 
-### F10. Fixed-design simulation: what is averaged
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:106–108, 172`
-- **Text:** "a different sample of 20 examples would give a different curve" … "averaging over both the training set and the new noise"; the simulation prints "expected error 0.1115" etc.
-- **Problem:** §3.1 motivates the randomness by redrawing whole samples (inputs and noise), while §3.2–3.3 redraw only the noise at fixed inputs. The printed "expected error" is the expected squared error on a new label *at the 20 training inputs*. It is not the risk at random new inputs that §2 measured, so 0.1115 at degree 3 and 0.1047 in §2 are different quantities. Line 174 hints at this, but the label "expected error" invites a direct comparison.
-- **Recommended correction:** in §3.1, say that the training set can be random in its inputs and noise, or in its noise only (a fixed design), and that the decomposition holds in both cases. After the simulation output, say that "expected error" is the in-sample expected error at the 20 fixed inputs and is not directly comparable with the fresh-data MSE of Section 2.
-
-### F11. Covariance matrix and trace used without introduction
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:127`
-- **Text:** "the covariance of $P\mathbf{y}$ is $\sigma^2 P P^\top = \sigma^2 P$, and the trace of a projection matrix equals the dimension it projects onto"
-- **Problem:** The series prerequisites (entry 1 lines 19–21) list vectors, matrices, product, transpose and inverse, plus the variance of a random variable. The covariance matrix of a random vector, the trace, and the projection identities $P^\top = P$, $P^2 = P$ are not among them and are used without a gloss.
-- **Recommended correction:** gloss them inline (text in the Resolution).
-
-### F12. Early stopping: overstated cost and prevalence
-- **Where:** `src/content/blog/generalization-overfitting-and-regularization.mdx:255`
-- **Text:** "It costs nothing extra in computation and is the most common regularizer for large neural networks, usually combined with weight decay."
-- **Problem:** Monitoring requires repeated evaluations on held-out data, so it is cheap but not free. "The most common regularizer" is an unsourced ranking.
-- **Recommended correction:** "It costs little beyond periodic evaluations of the held-out error, and it is widely used for neural networks, often together with weight decay."
-
-### F13. British spellings
-- **Where:** `generalization-overfitting-and-regularization.mdx:202` ("millimetres", "metres"); `evaluating-models-honestly.mdx:298` ("defences").
-- **Problem:** The series otherwise uses American spelling ("behavior", "regularization", "centered", "favor").
-- **Recommended correction:** "millimeters", "meters", "defenses".
-
-### F14. Condition for the expected training MSE
-- **Where:** `src/content/blog/learning-from-data.mdx:263`
-- **Text:** "For least squares with $p$ parameters and Gaussian noise of variance $\sigma^2$, the expected training MSE is $\sigma^2 (n - p)/n$"
-- **Problem:** Gaussianity is not needed: independent noise with mean zero and variance σ² is enough. The formula does require the model family to contain the true conditional mean (here it does).
-- **Recommended correction:** "For least squares with $p$ parameters, when the model family contains the true conditional mean (as it does here) and the noise is independent with variance $\sigma^2$, …"
-
-### F15. $p$ undefined in entry 2
-- **Where:** `src/content/blog/gradient-descent-and-its-variants.mdx:125`
-- **Text:** "real **eigenvalues** $\lambda_1 \le \dots \le \lambda_p$"
-- **Recommended correction:** add "where $p = d + 1$ is the number of parameters".
-
-### F16. "K-fold"
-- **Where:** `src/content/blog/evaluating-models-honestly.mdx:102`
-- **Text:** "**K-fold cross-validation** (CV) uses every example"
-- **Recommended correction:** "**Cross-validation** (CV), in its usual $k$-fold form, uses every example".
+### S2. Overview: reproducibility caveat
+- **Where:** `src/content/series/machine-learning-fundamentals.md:17`
+- **Text:** "Every data set is synthetic and generated with a stated seed, so the true relation and the irreducible error are known and each number can be reproduced."
+- **Problem:** Entry 1 (line 23) adds the necessary qualification that the digits are reproducible "with the same NumPy version (other versions may produce different random streams)". The overview states the conventions shared by all entries (standards 6.5) and is where a reader decides whether to run the code; the unqualified "each number can be reproduced" overstates slightly.
+- **Recommended correction:** "... so the true relation and the irreducible error are known and each number can be reproduced with the stated NumPy version."
 
 ## Concept introduction map
 
-| Concept | First used (path:line) | Introduced where | Assessment |
+| Concept | First used (path:line) | Introduced where (path:line, or "not introduced") | Assessment |
 |---|---|---|---|
-| Supervised learning, example, feature, label | learning-from-data.mdx:15 | learning-from-data.mdx:36–45 | Introduced before use. |
-| Probability distribution, i.i.d. | learning-from-data.mdx:73 | learning-from-data.mdx:21 (prerequisite), 73 | OK. |
-| Loss, risk, empirical risk, ERM | learning-from-data.mdx:100 | learning-from-data.mdx:100–163 | OK. |
-| Design matrix, normal equations | learning-from-data.mdx:92 | learning-from-data.mdx:92, 204 | OK. |
-| Logistic (sigmoid) function | learning-from-data.mdx:113 | learning-from-data.mdx:113 | OK. |
-| Gradient, Hessian | gradient-descent…:52, 113 | gradient-descent…:52, 113 | OK. |
-| Eigenvalues, eigenvectors | gradient-descent…:125 | gradient-descent…:125 (recalled, announced at line 17) | OK. |
-| Condition number | gradient-descent…:130 | gradient-descent…:130 | OK. |
-| Convexity, L-smoothness | gradient-descent…:221 | gradient-descent…:221 | OK. |
-| Mini-batch, epoch | gradient-descent…:243–249 | same | OK. |
-| Projection matrix | generalization…:127 | generalization…:127 | OK (defined by formula). |
-| Covariance matrix, trace | generalization…:127 | not introduced | F11. |
-| Singular value decomposition | generalization…:49 | named only | Acceptable (only the name of a solver). |
-| Bias–variance decomposition | generalization…:110 | generalization…:106–121 | OK. |
-| Hoeffding's inequality, union bound | evaluating…:40, 74 | evaluating…:40–46, 74 | OK. |
-| Standard error, normal-approximation CI | evaluating…:316 | evaluating…:316 | OK; uses the prerequisite normal distribution. |
-| McNemar's test | evaluating…:318 | described in one clause, cited (Dietterich 1998) | Acceptable. |
+| Supervised learning, example, feature, label | `learning-from-data.mdx:15` | `learning-from-data.mdx:15, 36–39, 45` | Good. |
+| i.i.d. assumption, data-generating distribution | `learning-from-data.mdx:73` | `learning-from-data.mdx:73` | Good. |
+| Loss function, squared/absolute/zero-one/cross-entropy loss | `learning-from-data.mdx:100` | `learning-from-data.mdx:100–115` | Good. |
+| Logistic (sigmoid) function | `learning-from-data.mdx:113` | `learning-from-data.mdx:113`; reused `gradient-descent-and-its-variants.mdx:32` | Good. |
+| Risk, empirical risk, ERM, Bayes risk | `learning-from-data.mdx:121` | `learning-from-data.mdx:121–163` | Good. |
+| Gradient, normal equations, design matrix | `learning-from-data.mdx:92, 198` | `learning-from-data.mdx:92, 198–204` | Good. |
+| Hessian, eigenvalues and eigenvectors, condition number | `gradient-descent-and-its-variants.mdx:113` | `gradient-descent-and-its-variants.mdx:113–130` (recalled where used, as the opening promises) | Good. |
+| Convexity, $L$-smoothness, strong convexity, saddle point | `gradient-descent-and-its-variants.mdx:221` | `gradient-descent-and-its-variants.mdx:221–229` | Good. |
+| Mini-batch, epoch, learning-rate schedule | `gradient-descent-and-its-variants.mdx:243` | `gradient-descent-and-its-variants.mdx:243–258` | Good. |
+| Capacity, underfitting, overfitting | `generalization-overfitting-and-regularization.mdx:17` | `generalization-overfitting-and-regularization.mdx:17, 35, 94–96` | Good. |
+| Bias, variance (estimator sense), fixed design | `generalization-overfitting-and-regularization.mdx:108` | `generalization-overfitting-and-regularization.mdx:108–125` | Good; the three senses of "bias" are separated at `:125` and in entry 4 `:32`. |
+| Projection matrix, covariance matrix, trace | `generalization-overfitting-and-regularization.mdx:129` | `:129` (projection, by its properties), `:131` (covariance, trace) | Adequate; the trace property is asserted (T6, optional). |
+| Ridge, lasso, elastic net, early stopping | `generalization-overfitting-and-regularization.mdx:194` | `:194–263`; early stopping first named `gradient-descent-and-its-variants.mdx:88` with a forward reference | Good. |
+| Hoeffding's inequality, union bound | `evaluating-models-honestly.mdx:40` | `evaluating-models-honestly.mdx:40–46, 76` | Good. |
+| Cross-validation, folds, stratification, nested CV | `evaluating-models-honestly.mdx:104` | `evaluating-models-honestly.mdx:104–112, 180` | Good. |
+| Data leakage, group split, target leakage | `evaluating-models-honestly.mdx:186` | `evaluating-models-honestly.mdx:186–281` | Good. |
+| Covariate shift, label shift | `evaluating-models-honestly.mdx:300` | `evaluating-models-honestly.mdx:300` | Label shift definition incomplete (T3). |
+| Standard error, confidence interval | `learning-from-data.mdx:151`; `evaluating-models-honestly.mdx:29` | not introduced (used at `evaluating-models-honestly.mdx:318`) | S1. |
+| McNemar's test, paired comparison | `evaluating-models-honestly.mdx:320` | `evaluating-models-honestly.mdx:320` (what it counts and tests) | Adequate for the stated purpose. |
 
 ## Versions, defaults and conventions
 
 | Assumption | Where it appears | Stated in the text? | Assessment |
 |---|---|---|---|
-| Python 3.13, numpy 2.5.3, `default_rng` streams | all entries (learning-from-data.mdx:23, gradient…:17, generalization…:19, evaluating…:17) | Yes | Matches this environment (Python 3.13.16, numpy 2.5.3); all outputs reproduce. |
-| MSE without factor ½ | learning-from-data.mdx:115 | Yes | Consistent with every gradient formula. |
-| Natural logarithm (nats) in cross-entropy | learning-from-data.mdx:113 | Yes | OK. |
-| Binary labels coded {0, 1} | learning-from-data.mdx:50 | Yes | Consistent with entry 2's logistic gradient. |
-| Intercept unpenalized in ridge; ridge scaling $n\lambda$ | generalization…:194–197 | Yes | Consistent with the code in entries 3 and 4. |
-| Adam defaults (β₁ 0.9, β₂ 0.999, ε 1e-8) | gradient…:322 | Yes, with "check the documentation" | OK. |
-| Seeds | all code | Stated, but their typicality is not | F7, F8. |
-| Fixed versus random design | generalization…:127–174 | Partly | F10. |
+| Python 3.13, NumPy 2.5.3 | All code blocks | Yes: overview `:17`; entry 1 `:23`; entry 2 `:17`; entry 3 `:19`; entry 4 `:17` | Good; outputs reproduced with Python 3.13.16 and NumPy 2.5.3. |
+| `default_rng` streams depend on NumPy version | All seeded examples | Yes, entry 1 `:23` | Good; overview omits it (S2, optional). |
+| MSE without the factor 1/2 | Every MSE | Yes: overview `:17`; entry 1 `:115` | Good; consistent with gradients $\frac{2}{n}X^\top(X\mathbf{w}-\mathbf{y})$ in entries 1–2 and the ridge normal equations in entry 3. |
+| Classes coded $\{0, 1\}$ | Cross-entropy, logistic regression, accuracy | Yes: overview `:17`; entry 1 `:50` | Good. |
+| Natural logarithm (nats) | Cross-entropy, Hoeffding | Yes: entry 1 `:113`; Exercise 1 | Good. |
+| Standard deviation with divisor $n$ in standardization | Entry 2 `:186, 200, 213` | No (code only) | T1. |
+| Variance with divisor $n$ in Exercise 2 of entry 1 | Entry 1 `:284` | Yes | Good. |
+| Intercept unpenalized in ridge; $D$ with zero first entry | Entry 3 `:200–206`; entry 4 code | Yes | Good; checked algebraically (below). |
+| Polynomial features in $t = 2x - 1$ | Entries 3–4 code | Yes, entry 3 `:49` | Good. |
+| Adam defaults | Entry 2 `:322` | Paper values stated; library defaults overstated | F1. |
+| Eigenvalue symbol $\lambda_i$ vs $\mu_i$ | Entry 2 `:125`; entry 3 `:261` | Yes, the change is explained at entry 3 `:261` | Good. |
+| Normal-approximation interval conditions | Entry 4 `:318` | Yes ("$m$ large enough and $\hat{p}$ not too close to 0 or 1") | Good. |
+
+## Series design
+
+**Purpose, audience and scope.** The overview (`src/content/series/machine-learning-fundamentals.md:13`) names the reader (can program; derivatives, vectors and matrices, basic probability), says that further ideas are recalled where first used, and the entries keep that promise (eigenvalues in entry 2 Section 3.2, covariance matrix and trace in entry 3 Section 3.2, Hoeffding's inequality in entry 4 Section 2.1), except for the confidence interval (S1). Unsupervised learning is excluded explicitly in entry 1 Section 1.2. The four objectives each begin with an assessable verb and each is met (table above).
+
+**Sequence and rationale.** Problem, optimizer, generalization, evaluation is the right order for this reader: each entry resolves a question the previous one leaves open, and the overview's second paragraph (`:15`) says so entry by entry. No entry would serve the reader better moved, split or merged. Entry 3's choice of $\lambda$ by peeking at fresh data is deliberately deferred to entry 4, and both entries say so (entry 3 Section 5, entry 4 opening and Section 3.2).
+
+**Prerequisites and dependencies.** Nothing depends on a later entry. Forward references (early stopping in entry 2 Section 2.3 to entry 3; standardization on the training set only in entry 2 Section 3.4 to entry 4 Section 4.2; confidence intervals in entry 1 Section 3.3 to entry 4) are announcements, not dependencies.
+
+**Notation and depth.** $\mathbf{w}$, $X$ with a leading column of ones, $n$, $p = d + 1$, $\hat{R}_n$, $R$, $\sigma^2$ and $f^*$ are used identically in all four entries; the switch from $\lambda_i$ to $\mu_i$ for eigenvalues is explained. Depth is comparable: every entry has a derivation, at least one runnable worked example with stated seeds and multi-seed context where a result depends on the seed, four or five exercises with answers, a summary table and references.
+
+**Overview completeness.** The overview states the sequence rationale, what each entry contributes, the shared conventions and checkable objectives (standards 6.5). It promises nothing the entries do not deliver. One small qualification is missing (S2).
 
 ## Series-level notes
 
-- **Cross-references.** Checked every in-series reference:
-  - learning-from-data.mdx:78 → entry 4 §5.1 ✓; :94 → entry 3 §2.1 ✓; :151 → entry 4 §6.1 ✓; :298 → entry 4 §5.2 ✓.
-  - gradient…:88 → entry 3 §4.3 ✓; :215 → entry 4 §4.2 ✓; :299 → entry 4 §3.2/§6.1 ✓.
-  - generalization…:268 "next entry" ✓.
-  - evaluating…:190 "as recommended in the second entry" ✓; :302 "the first entry's third exercise" ✓; :320 ✓.
-  - Every "next entry" link names the actual next article. The only link-text mismatches are F4 and F5.
-- **Terminology.** The three meanings of "bias" are explicitly separated (entry 1 line 92, entry 3 line 123, entry 4 line 32). "Fresh-data MSE" is used consistently. "Generalization error" = risk throughout.
-- **Structure.** Every entry has numbered sections, exercises with answers, a summary table and a reference list; tone is consistent.
-- **References.** All 25 references were checked. The four that the author flagged were confirmed online:
-  - Polyak 1964: Zh. Vychisl. Mat. Mat. Fiz. 4(5) 791–803; English translation USSR Comput. Math. Math. Phys. 4(5) 1–17 (mathnet.ru).
-  - Kaufman, Rosset, Perlich, Stitelman: ACM TKDD 6(4), article 15, 2012 (DOI 10.1145/2382577.2382579).
-  - Ambroise & McLachlan: PNAS 99(10) 6562–6566, 2002 (PMC124442).
-  - Cawley & Talbot: JMLR 11, 2010 (jmlr.org/papers/v11/cawley10a).
-
-  The others are standard works whose bibliographic details as given are correct (Robbins–Monro 1951 AMS 22(3); Kingma–Ba ICLR 2015; Hoerl–Kennard 1970 Technometrics 12(1); Tibshirani 1996 JRSS-B 58(1); Geman et al. 1992 Neural Computation 4(1); Hoeffding 1963 JASA 58(301); Stone 1974 JRSS-B 36(2); Dietterich 1998 Neural Computation 10(7); Bottou–Curtis–Nocedal 2018 SIAM Review 60(2); and the textbooks).
-- **Frontmatter.** The frontmatter is consistent: category "AI and Machine Learning", `seriesOrder` 1–4, all dated 2026-10-13. The tag `numerical-methods` (entry 2) is hyphenated unlike the others, but it is an existing site tag shared with another article, so it was left as is.
+- **Cross-reference map (all checked against the targets):** entry 2 → entry 1 Section 5 (`#5-worked-example-least-squares-on-synthetic-data`, resolves; link text matches); entry 3 → entry 2 Section 3.2 (`#32-many-dimensions-curvature-and-conditioning`, resolves; text matches); entry 4 → entry 1 Section 3.3 (`#33-empirical-risk`, resolves; the cited argument is there). Ordinal references checked: "the first entry's third exercise" (entry 4 `:304`) is Exercise 3 of entry 1 (2% disease), correct; "the second entry showed how much a single run of stochastic gradient descent (SGD) can vary" (entry 4 `:322`) matches entry 2 Section 4.3; "Exercise 3 asks why" (entry 3 `:102`) matches Exercise 3. Every "next entry" closing paragraph names the actual next entry; entry 4 closes against the four objectives.
+- **Terminology:** "data set", "fresh-data MSE", "irreducible error", "excess risk", "generalization gap" and "held-out" are used consistently. "Bias" in its three senses is disambiguated in entries 1, 3 and 4.
+- **Wave-1 flags resolved by this review:** (1) Polyak: citing the English translation (*USSR Comput. Math. Math. Phys.* 4(5), 1–17) under its English title is correct; Math-Net.ru lists it as the translation of *Zh. Vychisl. Mat. Mat. Fiz.* 4(5), 791–803. No change needed. (2) Entry 3 "more data ... without adding bias": the main clause is confirmed; the comparative is not (T2). (3) Cawley and Talbot: supported (Section 5.3 of the paper: "In many cases, the bias is of similar magnitude to the typical difference observed between competitive learning algorithms"; Section 5.2 notes benchmarks where it is larger). (4) Dietterich: supported (abstract: "For algorithms that can be executed only once, McNemar's test is the only test with acceptable Type I error"). (5) Dietterich issue 7 and (6) Kaufman et al. article 15: see the verification table.
+- **Vietnamese:** none of the four articles has a translation. `src/content/series/vi/machine-learning-fundamentals.md` has the old one-paragraph body and the old description, so it no longer matches the revised English overview (copied fields are unchanged, so the build passes). Wave 1 marked it for update, as standards Section 11 requires; it is outside this review.
+- **Working tree:** during the review an uncommitted one-line change appeared in `src/content/blog/gradient-descent-and-its-variants.mdx` (tag `numerical-methods` → `numerical methods`), made outside this review. It changes no line number cited here and no content reviewed.
 
 ## Verification log
 
-- `npm run build:local`: passed (astro check 0 errors, 0 warnings; Pagefind indexed 80 pages in 2 languages).
-- `npm run check:links`: 217 pages, 6138 internal references, all resolve.
-- `dist/blog/<slug>.html`:
-  - Mermaid min-width 475px (entry 1), 532px (entry 2) and 288px (entry 4), all under 600px.
-  - No `katex-error`.
-  - No prose text glued to `<a>`, `<strong>` or `<code>`.
-- Code: all 11 Python blocks were rerun (Python 3.13.16, numpy 2.5.3) and every quoted output matches byte for byte. The blocks are:
-  - entry 1 §5.3;
-  - entry 2 §3.3, §3.4 and §4.3;
-  - entry 3 §2.2, §3.3 and §4.1;
-  - entry 4 §2.2, §3.2, §4.3 and §4.4.
-- Recomputed, entry 1:
-  - cross-entropy values 0.105/2.303/0.693/0.223/1.609 (ratio 7.2);
-  - Section 4 table (20.4, 2.4, 16.4, 3.2);
-  - a = 0.1812, b = −0.2929, risk 0.25836, excess 0.00836.
-- Recomputed, entry 2:
-  - 1-D table (all twelve values);
-  - H = [[2.000, 1.025], [1.025, 0.732]], λ = 0.1608/2.5709, η limit 0.778, κ 15.99, best η 0.732, factor 0.882;
-  - factors 0.992, 0.920, 0.928, 1.057;
-  - steps 110.3 (correct) and 930.3 (text 910, F6);
-  - Exercise 2: 690.8 steps;
-  - final SGD η 0.0091;
-  - SGD over shuffle seeds 1–20: medians 4.13e-3, 1.91e-4, 4.40e-5; batch-1 range 2.48e-5 to 3.05e-2. All as stated.
-- Recomputed, entry 3:
-  - training-input gap 0.065–0.287, minimum 0.006, maximum 0.983 ✓;
-  - degree 9 with n = 2000: fresh-data MSE 0.090 (three seeds) ✓;
-  - exact squared bias 0.1928 / 0.0039 / 1.33e-5 ✓;
-  - ratio 2.3751/0.2533 = 9.4 ✓;
-  - exercises 0.05 and 0.00045 ✓;
-  - seed spread 0–20 (F7);
-  - early-stopping and ridge filter factors (F2).
-- Recomputed, entry 4:
-  - Hoeffding m = 738 and 6623; deviations 0.195 and 0.136; normal-approximation SE 0.0252 and CI ±0.049; Hoeffding ±0.096; SE 0.0266 at 0.83 ✓;
-  - seed 2: λ 1e-5, test 1.3079, fresh 0.6479, fresh at 1e-2 0.1421 ✓;
-  - over seeds 0–20, test above fresh in 10 of 21 ✓;
-  - group seeds 8 and 9: 0.404 and 0.488 ✓;
-  - coin-flip typicality (mean maximum 0.613);
-  - feature selection over seeds 0–20: leaky mean 0.935, honest mean 0.461 (seed 6 typical).
-- Not verified: none of the numerical claims. The general statements about practice (for example that step and cosine decay are common) are standard and were not checked against a source.
+- Build: not run, per the wave-2 brief (parallel reviewers). The prebuilt site `/tmp/claude-0/b2` (built after wave 1 with `SITE_URL=https://acrr.asia`) contains the wave-1 text (checked: "Cawley and Talbot (2010) show" in entry 4, "costs disproportionately more" in entry 1).
+- `node scripts/check-links.mjs /tmp/claude-0/b2`: "Checked 314 pages and 9667 internal references ... All internal links resolve."
+- Rendered pages `/tmp/claude-0/b2/blog/<slug>.html`: `katex-error` count 0 in all four; Mermaid `min-width` 475px (entry 1), 532px (entry 2), none (entry 3), 288px (entry 4), all under 600px; no letter or punctuation glued to `<strong>`, `<a `, `<code>` or `<em>`.
+- `npm run -s eos -- lint machine-learning-fundamentals`: 5 files, 0 errors, 0 warnings, 9 suggestions (entry 4: `sentence-length` at 180 and 300, splitter artifacts before bold-initial sentences, confirmed by reading; `acronym-expansion` for ACM, MIT, SIAM, USSR in reference lists and QR in entry 1, all names rather than abbreviations to expand). Not re-reported.
+- `npm run -s eos -- syntax` on the five files: "All files compile."
+- Code: all eleven Python blocks extracted and run with `python3 -I` (Python 3.13.16, NumPy 2.5.3); every stdout is byte-identical to the printed output block (entry 1: 1 block; entry 2: 3; entry 3: 3; entry 4: 4).
+- Recomputed, entry 1: $a = 0.18120$, $b = -0.29287$, risk of the fitted line $0.25836$, excess $0.00836$ (text 0.2584, 0.0084); cross-entropy $0.105, 2.303, 0.693, 0.223, 1.609$, ratio 7.2 ("about seven times"); MSE 20.4/16.4, MAE 2.4/3.2; $\sigma^2(n-p)/n = 0.225$; Exercise 4, 0.29.
+- Recomputed, entry 2: $H = \begin{psmallmatrix}2&1.0247\\1.0247&0.7317\end{psmallmatrix}$, eigenvalues 0.16079 and 2.57091, limit 0.7779, $\kappa = 15.99$, best rate 0.7321, factor 0.8823; per-direction factors 0.992, 0.920, 0.928, 1.057; steps for $10^6$: 110.3 ($\kappa = 16$) and 930.5 ($\kappa = 134.7$), factor 0.985; 1-D table rows for $\eta = 0.1, 0.5, 0.75, 1.1$; Exercise 1 (0.25, 0.125); Exercise 2: 0.0396, 0.9802, 690.75 steps (683.8 with 0.980, T4); Exercise 3 derivation; decayed rate after 999 steps 0.0091. Multi-seed SGD (shuffle seeds 1–20): medians $4.13\times10^{-3}$, $1.91\times10^{-4}$, $4.40\times10^{-5}$; batch-1 constant-rate range $2.48\times10^{-5}$ to $3.05\times10^{-2}$ (text: $2.5\times10^{-5}$ to $3.1\times10^{-2}$), all as stated. Convergence bound $L\lVert\mathbf{w}_0-\mathbf{w}^*\rVert^2/(2t)$ for $\eta = 1/L$ checked against the standard result for convex $L$-smooth functions; Robbins–Monro conditions and the schedule $\eta_0/(1+t/\tau)$ checked.
+- Recomputed, entry 3: seeds 0–20, best degree 3 for 14, 5 for 6, 7 for 1; first degree with fresh-data MSE > 1 ranges 7–15 (seed 9: 12); seed-9 sorted training inputs, gap 0.065–0.287, extremes 0.006 and 0.983; exact squared bias in the fixed design 0.19276 (degree 1), 0.0039203 (3), $1.33\times10^{-5}$ (5), $3.4\times10^{-12}$ (9); $0.1047 - 0.09 = 0.0147$ ("within 0.015"); $2.3751/0.2533 = 9.38$ ("almost a factor of ten"); Exercise 1, 0.05; Exercise 3, 0.00045; degree 9 with 2000 examples, fresh-data MSE 0.0903–0.0908 over seeds 0–4 (no overfitting, as stated). Algebra: ridge normal equations $(X^\top X + n\lambda D)\mathbf{w} = X^\top\mathbf{y}$ and Hessian increment $2\lambda D$ from $J_\lambda$; invertibility for $\lambda > 0$ given the column of ones; intercept shift under $\mathbf{y} \to \mathbf{y} + c\mathbf{1}$; early-stopping fraction $1-(1-\eta\mu)^t$ and ridge fraction $\mu/(\mu+2\lambda)$, matching at $2\lambda \approx 1/(\eta t)$ for flat directions; $\operatorname{Cov}(P\mathbf{y}) = \sigma^2 P$, $\operatorname{tr}P = p$.
+- Recomputed, entry 4: $\ln 40/0.005 = 737.8$ (738); union-bound deviations 0.1949 ($M = 50$) and 0.1358 ($M = 1$); mean best validation accuracy over seeds 0–199, 0.6127 ("averages 0.61"); CV minimum below 0.09 for seeds 4, 5, 8, 14 among 0–20 (as stated); seed 2: CV chooses $10^{-5}$, test MSE 1.308, fresh-data MSE 0.648, $\lambda = 10^{-2}$ would give 0.142 (as stated); group split seeds 8 and 9: 0.404 and 0.488 (text 0.40, 0.49); standard errors 0.02525 (0.85) and 0.02656 (0.83), half-width 0.0495, Hoeffding half-width for $m = 200$ 0.0960; Exercise 1, 6622.9 (6623).
+- Fact-check verification table:
+
+| Claim or reference | Location | Status | Source consulted |
+|---|---|---|---|
+| Bishop, *PRML*, Springer, 2006 | entry 1 `:328`, entry 3 `:335` | Verified (existence, publisher) | Bookseller and repository listings (Springer, Information Science and Statistics) |
+| Hastie, Tibshirani, Friedman, *ESL*, 2nd ed., Springer, 2009 | entries 1, 3, 4 | Verified (second edition, ISBN 9780387848570) | MIT Press Bookstore and library listings |
+| James, Witten, Hastie, Tibshirani, *ISL*, Springer, 2013 | entry 1 `:330` | Verified (first edition; a second edition exists, 2021) | statlearning.com and library listings |
+| Shalev-Shwartz and Ben-David, CUP, 2014 | entry 1 `:331` | Verified | Library/bookseller listings |
+| Vapnik, *The Nature of Statistical Learning Theory*, Springer, 1995 | entry 1 `:332` | Not verified by a fetched source (well-known first edition; no listing retrieved) | none retrieved |
+| Bottou, Curtis, Nocedal, *SIAM Review* 60(2), 223–311, 2018 | entry 2 `:380` | Verified | First-page header of the author-hosted PDF (leon.bottou.org) |
+| Boyd and Vandenberghe, CUP, 2004; Nocedal and Wright, 2nd ed., Springer, 2006 | entry 2 `:381, 384` | Verified (existence, publisher) | Authors' book pages (ucla.edu, northwestern.edu), WorldCat OCLC 53331084 |
+| Goodfellow, Bengio and Courville, *Deep Learning*, MIT Press, 2016 | entry 2 `:382`, entry 3 `:337` | Not verified by a fetched source (well-known; no listing retrieved) | none retrieved |
+| Kingma and Ba, Adam, ICLR 2015 | entry 2 `:383` | Verified (arXiv:1412.6980; the arXiv page carries no venue line; ICLR 2015 publication is the standard citation) | arxiv.org/abs/1412.6980 |
+| Adam paper defaults $0.9, 0.999, 10^{-8}$ | entry 2 `:322` | Verified | Kingma and Ba, Algorithm 1 |
+| Library Adam defaults "generally the same" | entry 2 `:322` | Corrected (F1) | keras.io Adam page (epsilon 1e-07); PyTorch 2.14 `torch.optim.Adam` page (eps 1e-08) |
+| Polyak 1964, *USSR Comput. Math. Math. Phys.* 4(5), 1–17 | entry 2 `:385` | Verified (translation of *Zh. Vychisl. Mat. Mat. Fiz.* 4(5), 791–803) | Math-Net.ru record zvmmf7713 |
+| Robbins and Monro, *Ann. Math. Statist.* 22(3), 400–407, 1951 | entry 2 `:386` | Verified | Scan of the paper (columbia.edu), journal header |
+| Robbins–Monro step-size conditions | entry 2 `:258` | Verified | Same paper; standard result |
+| Belkin et al., PNAS 116(32), 15849–15854, 2019; title in sentence case | entry 3 `:334` | Verified | NSF PAR record; author PDF (title, abstract: interpolating models "often obtain high accuracy on test data") |
+| Geman, Bienenstock, Doursat, *Neural Computation* 4(1), 1–58, 1992 | entry 3 `:336` | Verified | ML Anthology record, DOI 10.1162/neco.1992.4.1.1 |
+| Hoerl and Kennard, *Technometrics* 12(1), 55–67, 1970 | entry 3 `:339` | Verified | CMU-hosted scan (path VOL-12-01/v1201055) |
+| Tibshirani, JRSS B 58(1), 267–288, 1996 | entry 3 `:340` | Verified | Scan with journal header (washington.edu) |
+| Ambroise and McLachlan, PNAS 99(10), 6562–6566, 2002; supports feature-selection leakage | entry 4 `:196, 403` | Verified | Scan of the paper, header "6562–6566 · PNAS · May 14, 2002 · vol. 99 · no. 10"; text on optimistic CV error within gene selection |
+| Cawley and Talbot, JMLR 11, 2079–2107, 2010; optimism comparable to differences between methods | entry 4 `:180, 404` | Verified | jmlr.org abstract page and PDF (Section 5.3) |
+| Dietterich, *Neural Computation* 10(7), 1895–1923, 1998; McNemar when trained once | entry 4 `:320, 405` | Verified: volume, pages, year and claim from ML Anthology record and the author's PDF abstract; issue 7 from a secondary listing only (Raschka lecture notes, "10.7") | mlanthology.org; web.engr.oregonstate.edu author PDF |
+| Hoeffding, JASA 58(301), 13–30, 1963 | entry 4 `:407` | Verified | Bibliographic record (cs.utexas.edu reading list) |
+| Kaufman et al., *ACM TKDD* 6(4), art. 15, 2012 | entry 4 `:408` | Verified (article 15; no page range in the record consulted) | IUCC research portal, DOI 10.1145/2382577.2382579 |
+| Quiñonero-Candela et al., Eds., *Dataset Shift in Machine Learning*, MIT Press, 2009 | entry 4 `:300, 409` | Verified | Bookseller and MPI listings (ISBN 9780262170055) |
+| Stone, JRSS B 36(2), 111–147, 1974 | entry 4 `:410` | Verified | Scan with journal header (washington.edu) |
+
+- Not verified: (1) Dietterich (1998) issue number 7: confirmed only by a secondary listing (lecture notes); the MIT Press page could not be fetched. The value is the conventional one and consistent with the October 1998 issue; recommend keeping it. (2) Kaufman et al. (2012) page range: not given in the record consulted; the entry correctly gives only "art. 15". (3) Vapnik (1995) and Goodfellow et al. (2016): no catalogue listing was retrieved in this session; both are standard textbooks and the details given are the conventional ones, so no change is recommended. The other textbooks were checked against listings (existence, publisher, edition), not against title pages.
+
+## Resolution
+
+- F1 (Should fix): fixed - the sentence now gives the paper's values, then says that PyTorch's `torch.optim.Adam` uses the same three values while Keras 3's `Adam` uses $\epsilon = 10^{-7}$ (applied in a slightly different place in the update); `src/content/blog/gradient-descent-and-its-variants.mdx:322`. Verified 2026-10-15 against keras.io/api/optimizers/adam/ (`epsilon=1e-07`, the "epsilon hat" of the paper) and docs.pytorch.org/docs/2.14 (`betas=(0.9, 0.999)`, `eps=1e-08`).
+- T1 (Should fix): fixed - the divisor-$n$ convention is stated where $z$ is defined (worded as a condition after "standard deviation 1 on the training set", so "which" keeps $z$ as its antecedent) and "a centered feature whose mean square is 1 (the divisor-$n$ convention)" replaces "unit variance"; `gradient-descent-and-its-variants.mdx:186, 213`. Recomputed with the entry's data (seed 0, $n = 20$): eigenvalues 2.0, 2.0 with `ddof=0` and 1.9, 2.0 with `ddof=1`.
+- T2 (Should fix): fixed - "Unlike the other remedies," removed; the sentence now reads "More data reduces the variance without adding bias, but it is often expensive or impossible to obtain."; `src/content/blog/generalization-overfitting-and-regularization.mdx:267`.
+- T3 (Should fix): fixed - label shift now keeps $P(\mathbf{x} \mid y)$ fixed while $P(y)$ changes, matching Lipton, Wang and Smola (ICML 2018, PMLR 80) abstract: "the label marginal p(y) changes but the conditional p(x|y) does not". To keep the lint clean, the 48-word sentence was split into "One common special case is covariate shift ... Another is label shift ...", and the 179-word paragraph was split before "Distribution shift is the general term"; `src/content/blog/evaluating-models-honestly.mdx:300–302`.
+- S1 (Should fix): fixed - the reviewer's wording applied: standard error defined as the standard deviation of the estimate over repeated test sets (pointing to Section 3.3 of the first entry), the 95% confidence interval defined by its coverage, then the normal-approximation rule; `evaluating-models-honestly.mdx:320`. The numbers that follow are unchanged and recomputed (standard error 0.0252, half-width 0.0495).
+
+Optional findings applied: T4 (the expression now uses $\ln(99/101)$, $\approx 691$; recomputed 690.75, while $\ln(0.980)$ gives 683.8; `gradient-descent-and-its-variants.mdx:342`), T5 (`generalization-overfitting-and-regularization.mdx:31`), T6 (a parenthetical gives the cyclic-trace argument $\operatorname{tr} P = \operatorname{tr} I_p = p$ and the linear-independence condition, which holds because every fixed-design degree has $p \le 16 < n = 20$ with distinct inputs; `:133`), F2 (`gradient-descent-and-its-variants.mdx:315`), F3 (Hoerl and Kennard at entry 3 `:194`, Tibshirani at `:255`, Geman, Bienenstock and Doursat at the end of the first paragraph of Section 3.1 `:108`; Kaufman et al. at the end of the first leakage paragraph of entry 4 `:186`; Stone placed as its own sentence at the end of the paragraph after the $k$-fold steps, `:110`, instead of inside the opening sentence, because the inserted parenthetical made that sentence 49 words long), S2 (the overview now says each number can be reproduced "with the stated NumPy version (other versions may produce different random streams)"; `src/content/series/machine-learning-fundamentals.md:17`). Not applied: none.
+
+Checks: `eos lint` on the four articles and the series file: 0 errors, 0 warnings (9 suggestions, all pre-existing: acronyms in reference lists and one long sentence at entry 4 `:180`); `eos syntax`: all files compile. No headings changed, so every anchor is kept. No code or output changed. No build was run (outside this task). Vietnamese: no article has a translation; `src/content/series/vi/machine-learning-fundamentals.md` has no copied field affected, but its body should gain the S2 qualification when it is next updated (it already lags the wave-1 overview).
+
+Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.

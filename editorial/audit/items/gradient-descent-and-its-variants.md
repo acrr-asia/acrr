@@ -50,3 +50,13 @@ P2: metadata and structural inconsistencies a reader notices; content correct.
 - Remaining suggestions and why they stay: `acronym-expansion` SIAM, MIT, USSR at `:380–385`: parts of journal and publisher names in the reference list.
 - Flags for independent review: fact-check that the Polyak citation should give the English translation (pages 1–17) rather than the Russian original (pages 791–803); the entry previously cited the translation journal, so that choice was kept.
 - Vietnamese translation affected: no translation exists. `publishedAt` 2026-10-13, so no `updatedAt`.
+
+## Revision log (wave 2 resolution)
+
+Resolves `reviews/machine-learning-fundamentals.md` F1, T1, T4, F2.
+- F1: Adam library defaults no longer claimed to match the paper; PyTorch (same values) and Keras 3 ($\epsilon = 10^{-7}$, the paper's "epsilon hat") named, verified against both libraries' documentation on 2026-10-15 (`:322`).
+- T1: divisor-$n$ standard deviation stated where $z$ is defined (`:186`) and at the $H = 2I$ claim (`:213`); recomputed: eigenvalues 2, 2 with `ddof=0`, 1.9, 2 with `ddof=1`.
+- T4: Exercise 2 now $\ln(10^{-6})/\ln(99/101) \approx 691$ (recomputed 690.75) (`:342`).
+- F2: "The most widely used is Adam" became "A widely used one is Adam" (`:315`).
+- Code and outputs unchanged. Lint: 0 errors, 0 warnings; syntax compiles.
+- Meaning changes for the translation follow-up (no translation exists yet): Sections 3.4 and 5, Exercise 2.

@@ -54,3 +54,10 @@ P2: the front door of a complete series; structural gaps against Section 6.5 a r
 - Remaining warnings: none expected.
 - Flags for independent review: none.
 - Vietnamese translation affected: yes, `src/content/series/vi/machine-learning-fundamentals.md` body and description no longer match the English (the English body now explains the sequence and conventions). No copied field changed.
+
+## Revision log (wave 2 resolution)
+
+Resolves `reviews/machine-learning-fundamentals.md` S2.
+- Overview: "each number can be reproduced with the stated NumPy version (other versions may produce different random streams)" (`src/content/series/machine-learning-fundamentals.md:17`). No front-matter field changed.
+- Lint: 0 errors, 0 warnings.
+- Meaning change for the translation follow-up: `src/content/series/vi/machine-learning-fundamentals.md` body should carry this qualification (it already lags the wave-1 overview); no copied field affected, so the build is unaffected.

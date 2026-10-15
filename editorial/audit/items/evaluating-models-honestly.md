@@ -57,3 +57,12 @@ P2.
 - Remaining suggestions and why they stay: `sentence-length` at `:180` (64 words) and `:300` (48 words) are artefacts of the sentence splitter, which does not break before a sentence that starts with bold text ("**Nested cross-validation**", "**Distribution shift**"); the real sentences are under 40 words. `acronym-expansion` ACM and MIT at `:408–409` are publisher/journal names in references.
 - Flags for independent review (fact-check): (1) Cawley and Talbot (2010) attribution "the resulting optimism can be as large as the differences between the learning methods being compared" paraphrases their abstract from memory; confirm the wording. (2) Dietterich (1998) "recommends McNemar's test when each model can be trained only once": confirm against the paper's conclusions. (3) Dietterich issue number 7 not confirmed by the record consulted. (4) Kaufman et al. page range (art. 15) not confirmed.
 - Vietnamese translation affected: no translation exists. `publishedAt` 2026-10-13, so no `updatedAt`.
+
+## Revision log (wave 2 resolution)
+
+Resolves `reviews/machine-learning-fundamentals.md` T3, S1, F3 (entry 4 part).
+- T3: label shift now defined with $P(\mathbf{x} \mid y)$ fixed (Lipton, Wang and Smola, ICML 2018, abstract, checked 2026-10-15); the sentence was split and the Section 5.1 paragraph split before "Distribution shift" to clear two new length suggestions (`:300–302`).
+- S1: standard error and 95% confidence interval defined in Section 6.1 (`:320`); figures unchanged (recomputed 0.0252 and 0.0495).
+- F3: Stone (1974) attached to cross-validation as a sentence after the $k$-fold steps (`:110`); Kaufman et al. (2012) attached at the end of the first leakage paragraph (`:186`).
+- Code and outputs unchanged; no heading changed. Lint: 0 errors, 0 warnings; syntax compiles.
+- Meaning changes for the translation follow-up (no translation exists yet): Sections 3.1, 4.1, 5.1, 6.1.
