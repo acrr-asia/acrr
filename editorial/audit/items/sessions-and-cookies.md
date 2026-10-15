@@ -55,3 +55,11 @@ P2.
 - Remaining warnings: none.
 - Flags for independent review: none beyond the usual check of the browser-behavior statements in §3.2 and §5.3 against current browsers.
 - Vietnamese translation affected: yes, in wording of headings 4.1 and 5.1, one added sentence in the opening, and the References list; no technical change.
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: F4 (optional), S1 (should fix, Vietnamese translation)
+- Not verified: browser defaults for an absent SameSite (unsourced, stated qualitatively); Chrome shipping DBSC (secondary source only).

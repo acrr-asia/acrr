@@ -49,3 +49,11 @@ P2.
 - Remaining suggestions and why they stay: line 17 counts three italic questions as one sentence; "URIs" (line 28) is expanded in the same phrase in plural form.
 - Flags for independent review: (fact-check) confirm RFC 10017's status and that it still describes the token-mediating back end as passing access tokens to the browser.
 - Vietnamese translation affected: yes, meaning changed in §2.3 (published RFC instead of ongoing guidance) and the References (RFC 10017 no longer "in progress"); one added sentence in the opening.
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: fail
+- Technical: pass
+- Findings: F1 (should fix), T2 (optional), S1 (should fix, Vietnamese translation still calls RFC 10017 a draft)
+- Not verified: none.

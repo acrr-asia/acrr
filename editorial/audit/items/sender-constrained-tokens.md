@@ -44,3 +44,11 @@ P2.
 - Remaining suggestions and why they stay: SHA-256 is an algorithm name.
 - Flags for independent review: none.
 - Vietnamese translation affected: yes, in the opening sentence (specification numbers, mention of §5) and the References list; no technical change.
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: S1 (should fix, Vietnamese translation only)
+- Not verified: RFC 8472 and 8473 status taken from the wave-1 check (RFC 8471 re-fetched: Proposed Standard).

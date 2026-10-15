@@ -219,3 +219,29 @@ Optional findings applied: T4 (the expression now uses $\ln(99/101)$, $\approx 6
 Checks: `eos lint` on the four articles and the series file: 0 errors, 0 warnings (9 suggestions, all pre-existing: acronyms in reference lists and one long sentence at entry 4 `:180`); `eos syntax`: all files compile. No headings changed, so every anchor is kept. No code or output changed. No build was run (outside this task). Vietnamese: no article has a translation; `src/content/series/vi/machine-learning-fundamentals.md` has no copied field affected, but its body should gain the S2 qualification when it is next updated (it already lags the wave-1 overview).
 
 Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the current working tree and the build in `/tmp/claude-0/b9` (built after the resolution; the new F1 and S1 text is present in the rendered pages).
+
+- F1 (Should fix): confirmed. `gradient-descent-and-its-variants.mdx:322` gives the paper's values, then PyTorch (same values) and Keras 3 ($\epsilon = 10^{-7}$).
+- T1 (Should fix): confirmed. The divisor-$n$ convention is stated at :186 and :213.
+- T2 (Should fix): confirmed. "Unlike the other remedies," removed (`generalization-overfitting-and-regularization.mdx:267`).
+- T3 (Should fix): confirmed. Label shift now keeps $P(\mathbf{x} \mid y)$ fixed (`evaluating-models-honestly.mdx:302`).
+- S1 (Should fix): confirmed. Standard error and 95% confidence interval are defined before use (`evaluating-models-honestly.mdx:320`). Recomputed: standard error 0.02525, half-width 0.04949, Hoeffding half-width for $m = 200$ 0.09603.
+- Optional T4 (recomputed $\ln 10^{-6}/\ln(99/101) = 690.75$, printed $\approx 691$), T5, T6 (cyclic-trace argument correct), F2, F3, S2: applied as described.
+- Checks: `eos lint machine-learning-fundamentals` 0 errors, 0 warnings, 22 suggestions (13 of them `serial-comma`, see Q1); `eos syntax` on the five files: all compile; `check-links /tmp/claude-0/b9`: all internal links resolve; `eos validate-site /tmp/claude-0/b9`: no issue on any page of this scope; KaTeX errors 0 on the four pages. All 11 Python blocks rerun independently (`python3 -I`, NumPy 2.5): 11 of 11 outputs identical.
+
+### New QA findings
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Should fix | titles of entries 1 and 3; overview objective 1 and :15; entry 1 :28, :30, :56, :60, :269; entry 3 :15, :143; entry 4 :30, :78, :239, :300, :306, :333, :398; entry 2 :376 (link text carrying entry 3's title) | language / consistency | The series uses the serial comma systematically, against standards 5.1 ("No serial comma"). The two titles are the only titles on the site with a serial comma (`grep '^title:.*, and ' src/content`), so the inconsistency shows on every listing, the RSS feed and the series page. |
+| Q2 | Optional | `gradient-descent-and-its-variants.mdx:186` | language | The T1 fix made the sentence 54 words long (`sentence-length`); the Resolution's "all pre-existing" for the lint suggestions no longer holds. |
+
+#### Q1. Serial commas throughout the series
+- **Where:** `learning-from-data.mdx:2` "Learning from Data: Models, Loss Functions, and Risk"; `generalization-overfitting-and-regularization.mdx:2` "Generalization, Overfitting, and Regularization"; `machine-learning-fundamentals.md:7` "a model, a loss function, and a data set" and :15 "..., bias in the evaluation setup, and reporting with uncertainty"; prose instances listed above (most are also reported by the `serial-comma` lint suggestion: entry 1 :29, :56, :269; entry 3 :15, :96, :108, :143; entry 4 :78, :186, :333; entry 2 :376; overview :13, :15; some are clause series or ambiguity guards and may stay, e.g. entry 1 :21, overview :13).
+- **Problem:** Standards 5.1 make the omission of the serial comma house style, to be checked by hand; the wave-1 copy edit removed one instance in entry 1 only (`editorial/audit/items/learning-from-data.md:44`). Every other series on the site follows the rule ("The z-Transform, Poles and Stability", "Interrupts, Polling and DMA"). The copy stage therefore does not yet meet the language standard for these items.
+- **Correction:** Titles: "Learning from Data: Models, Loss Functions and Risk"; "Generalization, Overfitting and Regularization" (and the same title wherever it is quoted: entry 1 :29, entry 2 :376, overview :15). Objective 1: "in terms of a model, a loss function and a data set" (update the Vietnamese series file's objectives in step if they are copied). Remove the comma before the final "and"/"or" in each prose list above unless it separates items that themselves contain "and". Vietnamese overview: titles quoted there should follow.
+
+Verdict: no finding of the wave-2 review is reopened, but Q1 is a new, open should-fix finding. No item of this series is recorded and the series is not stamped until Q1 is resolved and checked.

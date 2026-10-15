@@ -60,3 +60,11 @@ P2: should-fix metadata, references and a stale citation; no technical error.
 - Remaining suggestions and why they stay: HOTP, TOTP and SMS flagged at their headings (102, 112, 131); each is expanded in the first sentence below its heading. SHA-256 and FIDO2 are names (FIDO is expanded). PKCS is in a reference title. Sentences of 46–48 words at 19, 104, 203 read clearly and were left.
 - Flags for independent review: (fact-check) "FIDO (Fast IDentity Online)" expansion from general knowledge, not from a fetched page; middle initial of Grassi omitted because the NIST page gives "Paul Grassi". (technical) none.
 - Vietnamese translation affected: yes. New versions paragraph in the opening; §2.3 and §3.4 now name revision 4 of SP 800-63B; §2.1 and §3.1 reordered (hash and HMAC definitions moved); References list replaces "The specifications".
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: fail
+- Technical: fail
+- Findings: F2 (should fix), T1 (should fix), S1 (should fix, Vietnamese translation)
+- Not verified: graphics-processor hash rate and phishing-kit availability (qualitative, unsourced); FIDO expansion confirmed only in press coverage.

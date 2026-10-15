@@ -4,6 +4,7 @@
 - Reviewed commit: 49941d2 (the wave-1 revision of this series is ab51b74; no file in scope changed after it). During the review the working tree gained an uncommitted, site-wide tag normalization that touches four entries' front matter only ("linear systems", "FFT", "control theory"); it changes no line number or text cited below.
 - Date: 2026-10-14
 - Review type: independent review (wave 2), fact-check, technical review and series review, of the text as revised in wave 1 (`git diff e21dcc8`).
+- Content hash: sha256:e21e48391dacc08c298e205d872bf276e54f94231c2c2a748e4e6f8334e116c1
 
 ## Summary
 
@@ -169,3 +170,18 @@ The objectives begin with "Describe", "Use", "Compute", "Design" and "Treat"; "U
 - Vietnamese follow-up (meaning changes, translation not edited): overview :14 (new prerequisite sentence) and :18 (conventions sentence). No Vietnamese translation of the five articles exists.
 
 Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+
+QA editor (final gate), 2026-10-15, against the current working tree and the build in `/tmp/claude-0/b9`.
+
+- T1 (Blocking): confirmed. `signals-and-systems-in-discrete-time.mdx:377` now says the 60 Hz component is "only reduced, to 0.21 of its amplitude, not removed" and states the $N$-point condition. Recomputed (`python3 -I`, NumPy): gain 0.20601 (−13.72 dB); 50 Hz gains 0.333, 0.333, 0.667 at $f_s$ = 100, 200, 300 Hz; $N$-point average at $f_s = 50N$ gives below 1.3e-16 for $N$ = 2 to 5; 10 Hz gain 0.9424. Agrees with `z-transform-poles-and-stability.mdx:268`.
+- F1 (Should fix): confirmed. `designing-fir-and-iir-filters.mdx:307` no longer claims popularity or a reason; the remaining statements (equal delay count under transposition; zeros before poles in TDF-II) are correct.
+- S1 (Should fix): confirmed. Prerequisite sentence present in the overview (:14) and entry 1 (:17); Introduction to Control Systems does introduce the Laplace transform (§3.2), poles (§3.4) and the loop vocabulary (§1.2; the Resolution's "§2" is a slip in the report only, the article text cites no section).
+- S2 (Should fix): confirmed. `from-signal-processing-to-digital-control.mdx:249` reads "## 5. Choosing the sampling rate".
+- Optional S3, S4, S5, S6, T2, T3, F2: applied as described (checked at each line).
+- Q1 (Optional, new): the S3 change put "causal IIR filters" into entry 2 (`z-transform-poles-and-stability.mdx:264`), and entry 2 never expands IIR (standards 5.3; `acronym-expansion` suggestion). Minor; recorded in the item's notes, not blocking.
+- Checks: `eos lint digital-signal-processing` 0 errors, 1 warning (entry 1 :27 `heading-numbering`, justified), 18 suggestions; `eos syntax` on the six files: all compile; `check-links /tmp/claude-0/b9`: 314 pages, all internal links resolve; `eos validate-site /tmp/claude-0/b9`: no issue on any page of this scope; KaTeX errors 0 on the five pages. All 13 Python blocks rerun independently: 13 of 13 outputs identical. Window table of entry 3 recomputed (−13.26/−31.47/−42.67/−58.11 dB; 3.92/1.42/1.75/1.10 dB; ENBW 1.00/1.50/1.36/1.73): matches.
+
+Verdict: no finding reopened.
+- Q2 (Optional, new): `designing-fir-and-iir-filters.mdx` has two serial commas against standards 5.1 (:17 "compares the two, and ends"; :63 "an electrocardiogram, or a data pulse"); the `serial-comma` lint suggestion at :324 is a false positive (clauses). Minor; reflected in the item's language score (3) and notes, not blocking.

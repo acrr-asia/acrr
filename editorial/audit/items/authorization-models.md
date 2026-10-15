@@ -51,3 +51,11 @@ P2.
 - Remaining suggestions and why they stay: "ACL" flagged in the heading of §1.2 (expanded in the first bullet below it); ACM, SP and USENIX occur only in reference entries; the 52-word sentence at line 146 is a list of three parallel examples.
 - Flags for independent review: (fact-check) the title of the 2004 edition of INCITS 359 is assumed identical to the 2012 title checked on webstore.ansi.org; Bell–LaPadula (1973) and Biba (1977) dates unreferenced (A1).
 - Vietnamese translation affected: yes, in headings 2.1, 3.1 and 4.1 and the References list; no technical change.
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: F3 (optional), S2 (optional), S1 (should fix, Vietnamese translation)
+- Not verified: none.

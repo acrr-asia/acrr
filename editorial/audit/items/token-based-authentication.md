@@ -73,3 +73,11 @@ P1: the foundational entry that every later entry refers back to.
 - Remaining suggestions and why they stay: line 146 "52-word sentence" is a splitter artifact (it joins sentences that begin with inline code; the longest real sentence there is 33 words); HS256 and SHA-256 are algorithm names, HS256 is explained in the same sentence; ESD and TR are part of a report number in the reference list.
 - Flags for independent review: (fact-check) Saltzer and Schroeder volume/issue/pages taken from the MIT 6.033 reading list, not from IEEE Xplore (not reachable); OWASP reference has no named authors (organization only). (technical) none.
 - Vietnamese translation affected: yes, but only lightly in meaning: new closing paragraph of §11 leading to entry 2; one added sentence at the end of the opening's second paragraph; §4.3 OWASP sentence reworded; References replace "The specifications" (new works listed: Anderson, Saltzer and Schroeder, XACML, OWASP, the cookie draft).
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: S1 (should fix, Vietnamese translation only)
+- Not verified: Saltzer and Schroeder volume, issue and pages not confirmed from a primary page (IEEE Xplore unreachable); consistent with all secondary listings.

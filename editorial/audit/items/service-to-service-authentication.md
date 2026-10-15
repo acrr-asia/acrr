@@ -44,3 +44,11 @@ P2.
 - Remaining suggestions and why they stay: "SVID" is glossed in words rather than in the "Expansion (ABBR)" form; ACM, SIGOPS and SP occur only in reference entries; line 30 (46 words) is a definition that reads clearly.
 - Flags for independent review: (fact-check) Hardy's volume and issue (22(4)) not confirmed from a primary source and therefore omitted (A1); (series) the new objectives paragraph in the Summary maps objectives to entries and should be checked against the revised overview.
 - Vietnamese translation affected: yes. §8 merged into §7 (the Vietnamese file still has a separate section), a new paragraph on the objectives, and the References list.
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: S1 (should fix, Vietnamese translation keeps the removed §8)
+- Not verified: Hardy volume and issue (ACM DL unreachable; omitted in the text); exact titles of the SPIFFE standards (GitHub unreachable).

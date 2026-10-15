@@ -56,3 +56,11 @@ P1: the front door of the series; the missing prerequisites and sequence rationa
 - Remaining warnings: none.
 - Flags for independent review (series): confirm that the two new objectives are fully delivered (objective 2 by entry 2 §1–§6; objective 6 by entry 6 and entry 7 §2–§5); the series review stamp is now stale because the series file and all English entries changed.
 - Vietnamese translation affected: yes. New description, two new objectives (pairing check compares only status, category, example and the planned-entry count, so the build does not fail, but the translation now lists four objectives against six), and the body is replaced by three new paragraphs.
+
+## Independent review (wave 2)
+
+- Report: `reviews/identity-and-access-control.md`
+- Fact-check: pass
+- Technical: pass
+- Findings: S1 (should fix: Vietnamese overview still has four objectives and the old body)
+- Not verified: none.
