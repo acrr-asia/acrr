@@ -489,10 +489,12 @@ export function lintItem(cfg, item, site) {
     if (words.length > cfg.thresholds.headingMaxWords) add('heading-length', { line: h.line }, `Heading has ${words.length} words; headings should be short labels.`);
     if (/[.:;,]$/.test(h.bare)) add('heading-punctuation', { line: h.line }, 'Heading ends with punctuation.');
     if (cfg.language?.headingCase === 'sentence') {
-      const rest = words.slice(1).map((w) => w.replace(/[^\p{L}\p{N}-]/gu, '')).filter(Boolean);
+      const phrases = (cfg.properNouns ?? []).filter((n) => n.includes(' '));
+      const caseWords = phrases.reduce((t, n) => t.split(n).join(' '), h.bare).split(/\s+/).filter(Boolean);
+      const rest = (h.bare.startsWith(caseWords[0] ?? '') ? caseWords.slice(1) : caseWords).map((w) => w.replace(/[^\p{L}\p{N}-]/gu, '')).filter(Boolean);
       const titled = rest.filter((w) => w.length >= 4 && /^\p{Lu}\p{Ll}+$/u.test(w) && !(cfg.properNouns ?? []).includes(w));
       const lower = rest.filter((w) => w.length >= 4 && /^\p{Ll}/u.test(w));
-      if (titled.length >= 2 && titled.length > lower.length) {
+      if ((titled.length >= 2 && titled.length > lower.length) || (titled.length >= 1 && lower.length === 0)) {
         add('heading-case', { line: h.line }, `Heading looks like title case ("${h.bare}"); the house style is sentence case (capitalize only the first word and proper nouns).`);
       }
     }
