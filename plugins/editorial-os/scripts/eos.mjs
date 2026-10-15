@@ -70,7 +70,10 @@ export function loadConfig(explicit) {
   }
   const cfg = JSON.parse(readFileSync(file, 'utf8'));
   const marker = findUp(path.dirname(file), ['package.json', '.git']);
-  const root = path.resolve(marker ? path.dirname(marker) : path.dirname(file), cfg.content?.root ?? '.');
+  // Without a package.json or .git, the project root is the folder that holds editorial/ (or the config itself).
+  const cfgDir = path.dirname(file);
+  const fallback = ['editorial', '.editorial'].includes(path.basename(cfgDir)) ? path.dirname(cfgDir) : cfgDir;
+  const root = path.resolve(marker ? path.dirname(marker) : fallback, cfg.content?.root ?? '.');
   cfg.rules = { ...defaultRules(), ...(cfg.rules ?? {}) };
   cfg.thresholds = {
     titleMaxChars: 70, descriptionMinChars: 70, descriptionMaxChars: 165, sentenceMaxWords: 45,
@@ -883,8 +886,8 @@ export function status(cfg) {
     let stage;
     if (item.draft) stage = 'draft';
     else if (!rec) stage = 'needs-review';
-    else if (rec.decision !== 'publish') stage = 'needs-fixes';
     else if (rec.hash !== item.hash) stage = 'review-stale';
+    else if (rec.decision !== 'publish') stage = 'needs-fixes';
     else if (lint.counts.error) stage = 'lint-errors';
     else stage = 'ready';
     if (rec && rec.decision === 'publish') {
@@ -908,6 +911,8 @@ function gate(cfg, opts = {}) {
     }[r.stage];
     failures.push(`${r.path}: ${why}`);
   }
+  // A gate that matched no content is a misconfiguration (wrong globs or root), not a pass.
+  if (!rows.length) failures.push('no content items matched content.types globs; check eos.config.json (globs, content.root)');
   return { ok: failures.length === 0, failures, rows };
 }
 
