@@ -55,3 +55,13 @@ P1: the series front door; every entry depends on it, and its description is the
 - Flags for independent review: series editor to confirm the overview against standards 6.5; D3 (objective 5 bundles three outcomes) left for the series editor.
 - Vietnamese translation affected: yes. `src/content/series/vi/sensor-systems.md` body and description should be retranslated from the new English body (meaning expanded: sequence rationale, running examples, conventions). No copied field changed.
 - Note: the series content hash changes with this wave, so `reviews/sensor-systems.md` will need a new review and `stamp` before the publication gate passes.
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- S1: "build that chain on one chip" -> "in a single package" (line 16).
+- S3: "Noise figures are ..." -> "Noise voltages and currents are root-mean-square values, computed at 300 K unless stated otherwise." (line 20).
+- S6: units sentence now names g and mV/V; VIM/GUM moved to its own sentence (line 20).
+- Vietnamese follow-up: the three changes above alter meaning in `series/vi/sensor-systems.md`; no copied field changed.
+- Lint: 0 errors, 0 warnings; syntax: compiles.

@@ -46,3 +46,11 @@ P2.
 - Remaining warnings: none. Suggestions: RMS (line 90, expanded in earlier entries; common in the series), FIFO flagged after expansion (lint matches the bolded form), sentence length at 96, 143, 151.
 - Flags for independent review: technical reviewer to confirm "rates that differ by orders of magnitude" for KOH on (100)/(111) planes (replacing "very different rates"); typical constants (silicon 130–190 GPa, gauge factor ≈ 100) still uncited.
 - Vietnamese translation affected: yes, wording only (description, opening, KOH phrase, self-test sentence, bus expansions).
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- S1: "on the same chip" -> "in the same package" (line 82), and the preceding "needs its electronics on the chip" -> "in the same package" (line 77). Heading "4. The electronics on the chip" kept for anchor stability.
+- Vietnamese follow-up: lines 77 and 82 wording.
+- Lint: 0 errors, 0 warnings; syntax: compiles.

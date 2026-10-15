@@ -62,3 +62,15 @@ P2: should-fix structure and metadata; no accuracy problem.
 - Remaining warnings: none. Suggestions: sentence length (19, mostly derivation steps with lists), ILAC/OIML (expanded in the same sentence), TS (part of the standard's designation), MIT (publisher name), PT100 (introduced in entry 1).
 - Flags for independent review: series editor to confirm the closing paragraph matches the objectives as worded in the series file; fact-check of standard titles' dash punctuation.
 - Vietnamese translation affected: no translation exists.
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- T2: replaced the claim that one-second averages "should be somewhat quieter" than the 0.1-10 Hz budget with the reviewer's 1/f-aware wording, split for length (line 145). Recomputed: 75.5 nV (1/f, 1/600-0.5 Hz) + 7.1 nV white -> 75.9 nV vs 74.8 nV.
+- F1: ISO/TS 28037:2010 -> ISO 28037:2026 in the text (line 202) and references (line 544); verified on iso.org.
+- F2: reference updated to ILAC-G24:2022 / OIML D 10:2022 with its new title (line 542); verified in the OIML PDF.
+- S1, S7: closing paragraph now says "integrated in one package" and "Building on the uncertainty budget of the first entry, this entry has propagated and combined uncertainties ..." (line 535).
+- Code: unchanged; no output re-run needed.
+- Vietnamese: no translation exists.
+- Lint: 0 errors, 0 warnings; syntax: compiles.

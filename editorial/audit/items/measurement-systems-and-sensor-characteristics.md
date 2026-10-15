@@ -66,3 +66,12 @@ P1: foundational first entry; its vocabulary is used by every later entry.
 - Remaining warnings: none. Suggestions left: sentence length at lines 28, 51, 100 (lists of SI units and of chain stages; splitting would separate items from their list), `acronym-expansion` PT100 at line 86 (explained in the same sentence, after the symbol).
 - Flags for independent review: fact-check that IEC 60751:2008 and :2022 give identical $A$, $B$ coefficients (carried over from the previous review, not re-verified); confirm VIM/GUM original title punctuation (en dash vs em dash in the JCGM PDFs).
 - Vietnamese translation affected: yes, wording only: description; opening paragraph 2; PT100 gloss; "endpoint line" definition; VIM sentence split. No technical meaning changed. Headings in Vietnamese are already lower case by convention.
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- S5: figure caption now says "relative to the endpoint line" (line 104).
+- F4: removed the unverified parenthetical "(The 2008 edition gives the same coefficients.)" from the IEC 60751:2022 reference (line 243).
+- Vietnamese follow-up: caption wording (S5) and the reference parenthetical (F4).
+- Lint: 0 errors, 0 warnings; syntax: compiles.

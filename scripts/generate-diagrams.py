@@ -433,8 +433,8 @@ svg('Aliasing', 620, 290, 'A 9 hertz sinusoid sampled at 10 hertz produces the s
     b)
 
 # ---------- 14. Voltage noise density with a 1/f corner ----------
-# Values from "Noise, Interference and the Limits of Detection": e(f) = e_w sqrt(1 + f_c / f) with
-# white density e_w = 10 nV/sqrt(Hz) and corner frequency f_c = 10 Hz, on log-log axes.
+# Values from "Noise, Interference and the Limits of Detection": e(f) = e_w sqrt(1 + f_nc / f) with
+# white density e_w = 10 nV/sqrt(Hz) and corner frequency f_nc = 10 Hz, on log-log axes.
 ew, fcorner = 10.0, 10.0
 dens = lambda f: ew*math.sqrt(1 + fcorner/f)
 P = Plot(70, 30, 510, 200, (-2, 3), (0.5, 2.7))   # log10(f / Hz), log10(e / nV/sqrt(Hz))
@@ -448,12 +448,12 @@ for v, lab in ((-2, '0.01'), (-1, '0.1'), (0, '1'), (1, '10'), (2, '100'), (3, '
 b += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
 b += text(P.x0+P.w, P.y0+P.h+34, 'frequency  ' + var('f') + '  (Hz)', 'end', 'small')
 b += text(P.x0, P.y0-10, 'noise density  (nV/√Hz)', 'start', 'small')
-# asymptotes: white floor and the 1/f line e_w sqrt(f_c / f)
+# asymptotes: white floor and the 1/f line e_w sqrt(f_nc / f)
 b += line([(P.X(-2), P.Y(1)), (P.X(3), P.Y(1))], 'mut', ' stroke-dasharray="4 4"')
 b += line([(P.X(-2), P.Y(math.log10(ew*math.sqrt(fcorner/0.01)))), (P.X(1.6), P.Y(math.log10(ew*math.sqrt(fcorner/10**1.6))))], 'mut', ' stroke-dasharray="4 4"')
 b += P.curve(lambda u: math.log10(dens(10**u)), n=300)
 b += f'  <circle class="dot" cx="{P.X(1):.1f}" cy="{P.Y(math.log10(dens(10))):.1f}" r="3.5" />\n'
-b += text(P.X(1)+8, P.Y(math.log10(dens(10)))-10, 'corner ' + sub('f', 'c') + '= 10 Hz', 'start', 'small')
+b += text(P.X(1)+8, P.Y(math.log10(dens(10)))-10, 'corner ' + sub('f', 'nc') + '= 10 Hz', 'start', 'small')
 b += text(P.X(2.6), P.Y(1)-8, 'white: 10 nV/√Hz', 'middle', 'small')
 b += text(P.X(-1.0)+6, P.Y(math.log10(dens(0.1)))-14, '1/' + var('f') + ' region', 'start', 'small')
 svg('NoiseDensity', 620, 286, 'Voltage noise density of an amplifier with a 1/f corner at 10 hertz',

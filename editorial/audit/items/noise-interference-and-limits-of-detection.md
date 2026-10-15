@@ -48,3 +48,12 @@ P2.
 - Remaining warnings: none. Suggestions: RMS at line 28 (the heading uses the abbreviation; the body expands it at first use), sentence length at 82 and 196.
 - Flags for independent review: fact-check "Johnson–Nyquist noise, after the two physicists who measured and explained it in 1928" (Phys. Rev. 32, 1928; uncited in the entry).
 - Vietnamese translation affected: yes: the symbol change $f_c \to f_\text{nc}$ in §2.3 must be copied into the Vietnamese math; description, opening, ground-loop paragraph and "towards DC" wording.
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- T1: the NoiseDensity figure label now reads f_nc (generator `scripts/generate-diagrams.py` and regenerated `src/components/diagrams/NoiseDensity.astro`; only that component changed).
+- S1: "built together on one chip" -> "in one package" (line 213).
+- Vietnamese follow-up: S1 wording; the Vietnamese entry still writes the 1/f corner as $f_c$ in its prose (nine places), now inconsistent with the shared figure.
+- Lint: 0 errors, 0 warnings; syntax: compiles.

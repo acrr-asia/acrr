@@ -53,3 +53,11 @@ P2: should-fix metadata and style problems a reader would notice; no accuracy pr
 - Remaining warnings: none. Suggestions: PT100 at line 55 (explained in entry 1, used here with its value), CRC (publisher name), one 56-word sentence on Hall-sensor uses (a list).
 - Flags for independent review: fact-check typical constants (quartz 2.3 pC/N, type K ≈ 41 µV/K) against a cited source (Fraden or Webster/Eren); not verified in this wave.
 - Vietnamese translation affected: yes, wording only (description, opening paragraph 2, removed sentence in §9, "Special charge amplifiers" → "Charge amplifiers").
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- S2: link text now "the joint encoders described in the [first entry](/blog/what-is-a-robot) of the robotics series" (line 166).
+- Vietnamese follow-up: link wording at the corresponding place.
+- Lint: 0 errors, 0 warnings; syntax: compiles.

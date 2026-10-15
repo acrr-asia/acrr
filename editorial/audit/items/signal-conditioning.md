@@ -46,3 +46,10 @@ P2.
 - Remaining warnings: none. Suggestions: PT100 (line 32, glossed in the same sentence), CMRR (false positive, defined in bold at line 141), "very large open-loop gain" (kept: the point is that it is too large to use directly), sentence length at 18, 39, 268 (each one idea with a list).
 - Flags for independent review: none new.
 - Vietnamese translation affected: yes, wording only (description, §7.1 sentence split, LVDT expansion).
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- S4: "$x/2 = 0.1$ %" -> "$x/2 = 0.1\%$" (line 80). No meaning change.
+- Lint: 0 errors, 0 warnings; syntax: compiles.

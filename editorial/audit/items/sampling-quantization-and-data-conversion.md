@@ -46,3 +46,11 @@ P2.
 - Remaining warnings: none. Suggestion: FSR (expanded in words before the abbreviation as "full-scale range"; lint false positive).
 - Flags for independent review: **fact-check**: standards.ieee.org lists IEEE 1241-2010 as Inactive-Reserved (2021) and superseded by IEEE 1241-2023. The text says "defined in IEEE Std 1241" without a year, so it remains true; the reference should probably cite the 2023 edition after its title and content are checked.
 - Vietnamese translation affected: yes, wording only (description, opening sentence, SAR sentences, OSR definition, RC expansion).
+
+## Revision log (wave 2 resolution)
+
+Date: 2026-10-15. Resolves `reviews/sensor-systems.md`.
+
+- F3: reference updated to IEEE Std 1241-2023 (verified Active, published 2023-10-06; line 223). Body unchanged.
+- Vietnamese follow-up: the reference list entry.
+- Lint: 0 errors, 0 warnings; syntax: compiles.
