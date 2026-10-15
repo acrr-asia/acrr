@@ -69,3 +69,15 @@ P2.
 - Remaining warnings: none. Suggestions kept: `acronym-expansion` IIR at `:375` (inside the linked title "Designing FIR and IIR Filters"), ASSP at `:381` (part of the journal name *IEEE ASSP Magazine*, which is cited as published).
 - Flags for independent review: fact-check the Gauss attribution in §3.1 ("later traced back to work by Gauss that was not published in his lifetime") against Heideman, Johnson and Burrus (1984); the earlier series review recorded it as not verified.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Report: `reviews/digital-signal-processing.md` (reviewed commit 49941d2, 2026-10-14).
+- Fact-check: pass. Wave-1 flag resolved: Heideman, Johnson and Burrus state that Gauss's 1805 treatise "was not published in his lifetime" (published 1866); Cooley–Tukey, Harris, Heideman et al. and Welch citations confirmed.
+- Technical: pass. Findings: S6 (optional: version wording :19), T2 (optional: grammar :300).
+- Code: three blocks rerun, outputs identical; window table, leakage levels and exercises recomputed.
+- Not verified: Harris's 1.78 dB Hamming scalloping loss (:253; table cell illegible in the scan, computation consistent).
+
+## Revision log (wave 2 resolution)
+- Date: 2026-10-15. Report: `reviews/digital-signal-processing.md`, section Resolution.
+- Changes: S6 applied at :19 (code run with the versions stated in the first entry). T2 applied at :300 (scalloping-loss sentence rewritten). No code changed.
+- `eos lint`: 0 errors; the only warning in the series is entry 1's justified `heading-numbering`. `eos syntax`: pass.

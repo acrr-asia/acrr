@@ -69,3 +69,15 @@ P2: should-fix problems a reader would notice (metadata, headings), no accuracy 
 - Remaining warnings: none. Suggestions kept: `acronym-expansion` DFT/FFT at `:386`, which occur in the linked title "Spectra: The DFT and the FFT"; the same sentence then names the discrete Fourier transform and the fast Fourier transform in full.
 - Flags for independent review: none.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Report: `reviews/digital-signal-processing.md` (reviewed commit 49941d2, 2026-10-14).
+- Fact-check: pass (Jury, Wiley, 1964 confirmed in a library catalogue).
+- Technical: pass. Findings: S3 (optional: :264 "recursive filters" → "causal IIR filters").
+- Code: both blocks rerun, outputs identical; all exercise answers recomputed.
+- Not verified: Oppenheim and Schafer and Proakis and Manolakis editions not re-checked in this pass.
+
+## Revision log (wave 2 resolution)
+- Date: 2026-10-15. Report: `reviews/digital-signal-processing.md`, section Resolution.
+- Changes: S3 applied at :264 ("recursive filters" to "causal IIR filters"). No code changed.
+- `eos lint`: 0 errors; the only warning in the series is entry 1's justified `heading-numbering`. `eos syntax`: pass.

@@ -92,3 +92,15 @@ P1: first (foundational) entry; its conventions anchor `#conventions-used-throug
 - Remaining warnings and why they stay: `heading-numbering` at `:27` (unnumbered "Conventions used throughout the series" before numbered sections). It is front matter for the whole series, the target of `#conventions-used-throughout-the-series` from entries 2–5; numbering it would renumber every section of the entry and every "Section N" reference to it, and demoting it to a paragraph would remove the anchor. Suggestions kept: `acronym-expansion` at `:23–24` (DFT, FFT, FIR, IIR appear first in the published titles used as link text, and each is expanded later in the same list item).
 - Flags for independent review: none technical. Fact-check: the reference details were verified by the earlier series review and only reformatted here.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Report: `reviews/digital-signal-processing.md` (reviewed commit 49941d2, 2026-10-14).
+- Fact-check: pass (references exist; editions accepted from the earlier review).
+- Technical: fail. Findings: T1 (blocking: §6.2 :377, the 60 Hz gain at 150 Hz is 0.21, not "almost untouched", and $f_s$ a multiple of 50 Hz is not sufficient), S1 (should fix: prerequisite paragraph :17), S4 (optional: :276 "shows" → "notes").
+- Code: both blocks rerun, outputs identical.
+- Not verified: book editions (Oppenheim and Schafer 2010; Oppenheim, Willsky and Nawab 1997; Proakis and Manolakis 2007) not re-checked in this pass.
+
+## Revision log (wave 2 resolution)
+- Date: 2026-10-15. Report: `reviews/digital-signal-processing.md`, section Resolution.
+- Changes: T1 fixed at :377 (60 Hz gain 0.21 at 150 Hz; $N$-point average removes interference when $f_s = N$ times its frequency; recomputed). S1 fixed at :17 (Laplace transform, $s$-plane poles and feedback vocabulary added to the prerequisites, linking Introduction to Control Systems). S4 applied at :276 ("shows" to "notes"). Anchor `#conventions-used-throughout-the-series` unchanged. No code changed.
+- `eos lint`: 0 errors; the only warning in the series is entry 1's justified `heading-numbering`. `eos syntax`: pass.

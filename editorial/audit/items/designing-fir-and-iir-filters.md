@@ -67,3 +67,15 @@ P2.
 - Remaining warnings: none. Suggestions kept: `acronym-expansion` IIR at `:15` (expanded in the same phrase, "finite and infinite impulse response (FIR and IIR)"); sentence-length at `:162` and `:188` (wording set by the previous series review, F7/F12, to state carefully qualified general properties; splitting would separate the claim from its qualification), `:328`, `:374`, `:454` (47–48 words, readable as written).
 - Flags for independent review: technical/fact-check: "transposed direct form II is popular in floating-point implementations because its state variables hold partial sums of moderate size" (§5) was recorded as untested by the earlier review; "Most signal-processing hardware offers saturation as an option" (§6.4) is a general claim without a source.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Report: `reviews/digital-signal-processing.md` (reviewed commit 49941d2, 2026-10-14).
+- Fact-check: fail. Findings: F1 (should fix: :307 transposed direct form II "popular in floating-point ... partial sums of moderate size" unsourced; the authoritative account found gives a different reason), F2 (optional: :374 "Most signal-processing hardware offers saturation").
+- Technical: pass. Findings: S6 (optional: version wording :17).
+- Code: four blocks rerun, outputs identical; window-design table, Kaiser, biquad, noise gains and exercises recomputed. Parks–McClellan citation confirmed.
+- Not verified: F1 and F2 claims (wave-1 flags); Oppenheim and Schafer, Proakis and Manolakis, IEEE Std 754-2019 not re-checked in this pass.
+
+## Revision log (wave 2 resolution)
+- Date: 2026-10-15. Report: `reviews/digital-signal-processing.md`, section Resolution.
+- Changes: F1 fixed at :307 (unsourced popularity claim removed; transposed forms need the same number of delays, and in TDF-II the zeros act before the poles, checked against J. O. Smith III, CCRMA, "Numerical Robustness of TDF-II"). F2 applied at :374 (saturation sentence qualified, with Arm's saturating addition as the example). S6 applied at :17. No code changed.
+- `eos lint`: 0 errors; the only warning in the series is entry 1's justified `heading-numbering`. `eos syntax`: pass.

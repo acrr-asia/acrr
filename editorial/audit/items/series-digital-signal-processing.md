@@ -43,3 +43,16 @@ P2.
 - Remaining warnings: none. Suggestion kept: `acronym-expansion` IIR at `:16`, a false positive (expanded in the same phrase, "finite and infinite impulse response (FIR and IIR)").
 - Flags for independent review: series editor: confirm that "each uses the tools of the one before" is a fair description of entry 3, which relies on entry 2 only for the DTFT definition.
 - Vietnamese translation affected: yes. `src/content/series/vi/digital-signal-processing.md` should be updated: the English description was shortened and rephrased (same scope), and the body now names and links the prerequisite entry, explains the order of the entries, and mentions the shared conventions table. Objectives and copied fields are unchanged, so the build pairing is unaffected.
+
+## Independent review (wave 2)
+- Report: `reviews/digital-signal-processing.md` (reviewed commit 49941d2, 2026-10-14).
+- Fact-check: pass (no factual claims beyond the entries; the overview promises nothing the entries do not deliver).
+- Technical: pass.
+- Series review: should-fix findings open. Findings concerning this item: S1 (should fix: prerequisites omit the Laplace transform and feedback vocabulary), S5 (optional: "notation table" holds neither the sign convention nor the at-rest assumption). Wave-1 flag ("each uses the tools of the one before"): fair, including for entry 3 (see report, Series design).
+- Not verified: none.
+- Vietnamese overview still to be updated for the wave-1 rewrite (and for S1/S5 if applied).
+
+## Revision log (wave 2 resolution)
+- Date: 2026-10-15. Report: `reviews/digital-signal-processing.md`, section Resolution.
+- Changes: S1 fixed at :14 (prerequisite sentence on the Laplace transform, $s$-plane poles and feedback vocabulary). S5 applied at :18 (conventions sentence). No copied field changed; the Vietnamese overview needs these two sentences in the translation follow-up.
+- `eos lint`: 0 errors; the only warning in the series is entry 1's justified `heading-numbering`. `eos syntax`: pass.

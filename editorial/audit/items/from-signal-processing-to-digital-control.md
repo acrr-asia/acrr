@@ -59,3 +59,15 @@ P2.
 - Remaining warnings: none. Suggestions kept: sentence-length at `:15` (46 words, the list of the four earlier entries) and `:149` (48 words, the Euler comparison, readable as written).
 - Flags for independent review: none new.
 - Vietnamese translation affected: no translation of this article exists.
+
+## Independent review (wave 2)
+- Report: `reviews/digital-signal-processing.md` (reviewed commit 49941d2, 2026-10-14).
+- Fact-check: pass (cross-site attributions to Feedback and System Behavior, Stability and Eigenvalues, Designing a State-Feedback Controller and the numerical integration notes checked).
+- Technical: pass. Findings: S2 (should fix: :249 heading "5. Choosing the Sampling Rate" still title case), S6 (optional: version wording :17), T3 (optional: :232 qualify the crossover-phase rule).
+- Code: both blocks rerun, outputs identical; coth table, emulation images and exercises recomputed.
+- Not verified: "45° to 60°, a common design target" (:243); Åström–Wittenmark, Franklin–Powell–Workman, Åström–Murray editions not re-checked in this pass.
+
+## Revision log (wave 2 resolution)
+- Date: 2026-10-15. Report: `reviews/digital-signal-processing.md`, section Resolution.
+- Changes: S2 fixed at :249 (heading in sentence case; slug unchanged). T3 applied at :232 (rule qualified to loops whose gain crosses 1 once; sentence split). S6 applied at :17 (separate sentence). No code changed.
+- `eos lint`: 0 errors; the only warning in the series is entry 1's justified `heading-numbering`. `eos syntax`: pass.
