@@ -74,3 +74,10 @@ P2: should-fix metadata and style problems plus one loose numerical statement in
 - Remaining warnings and why they stay: none. Suggestion kept: `acronym-expansion` "SIAM" in the reference list (publisher's name).
 - Flags for independent review: technical reviewer to confirm the corrected Exercise 5 wording (A1).
 - Vietnamese translation affected: no (no translation of this entry exists).
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), 2026-10-14; report `reviews/numerical-simulation.md`.
+- Fact-check: pass (Courant-Friedrichs-Lewy 1928, Crank-Nicolson 1947, Lax-Richtmyer 1956 confirmed). Technical: pass (4 code blocks re-run, output identical; corrected Exercise 5 confirmed: moduli 1.8391/1.8678/1.8750, estimates 5.0e-4, 6.0e9, 7.4e35, ratios 13 and 10).
+- Findings concerning this item: S1 (its matrix `T` = tridiag(1,-2,1) conflicts with entry 3's `T`; correction proposed in entry 3, no change needed here).
+- Not verified: imprint years of LeVeque 2007, Morton and Mayers 2005, Strikwerda 2004 not re-fetched in this pass.

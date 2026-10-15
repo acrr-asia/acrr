@@ -85,3 +85,10 @@ P1: the foundational entry of the series; the four later entries cite its sectio
 - Remaining warnings and why they stay: none. Two suggestions kept: `acronym-expansion` "SIAM" in the reference list (the publisher's name as printed on the title page); `intensifiers` "actually" at line 36 ("as actually obtained"), which carries the contrast between the exact solution of the discrete problem and the numbers the computer produces.
 - Flags for independent review: none new. The fact-checker may wish to confirm the edition years of Strauss (2nd ed., Wiley, 2008) and Morton and Mayers (2nd ed., CUP, 2005), already checked in the 2026-10-13 series review.
 - Vietnamese translation affected: no (no translation of this entry exists).
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), 2026-10-14; report `reviews/numerical-simulation.md`.
+- Fact-check: pass. Technical: pass (3 code blocks re-run, output identical; all worked numbers and Exercises 1-5 recomputed).
+- Findings concerning this item: none (its matrix `A` is the reference point for S1, which is corrected in entry 3).
+- Not verified: imprint years of Higham 2002, LeVeque 2007, Morton and Mayers 2005, Strikwerda 2004, IEEE 754-2019 not re-fetched in this pass (Strauss 2nd ed., Wiley, confirmed).

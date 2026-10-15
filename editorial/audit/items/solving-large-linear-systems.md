@@ -68,3 +68,18 @@ P2.
 - Remaining warnings and why they stay: none. Suggestions kept: `sentence-length` on one 46-word sentence (see lint output; a single argument), and `acronym-expansion` "SIAM" in the reference list (publisher's name).
 - Flags for independent review: none. "D. Bau III" confirmed by web search on 2026-10-13 (library catalogue record "Numerical linear algebra / Lloyd N. Trefethen, David Bau III", catalogue.i2m.univ-amu.fr/bib/9110, and the author's page people.maths.ox.ac.uk/trefethen/text.html).
 - Vietnamese translation affected: no (no translation of this entry exists).
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), 2026-10-14; report `reviews/numerical-simulation.md`.
+- Fact-check: pass (George 1973, Hestenes-Stiefel 1952 confirmed). Technical: pass after S1 (5 code blocks re-run, output identical; Exercise 4 re-run in float32: 1.71e-5 at N = 256, 3.62e-4 at N = 1024).
+- Findings concerning this item: S1 (should fix, lines 43, 138, 377), T1 (optional, line 329), T2 (optional, line 230).
+- Not verified: imprint years of Briggs-Henson-McCormick 2000, Davis 2006, Golub-Van Loan 2013, Higham 2002, Saad 2003 not re-fetched in this pass.
+
+## Revision log (wave 2 resolution)
+
+- S1: §1.1 now defines $T = \text{tridiag}(-1, 2, -1)$, identifies $T/h^2$ with entry 1's $A$ (link to entry 1 §6.1) and says it is the negative of entry 2's $T$. §3.1 now says the eigenvalues of entry 2 are taken "with their sign reversed". Exercise 3 now reads "the tridiagonal matrix $T/h^2$ (the first entry's $A$)".
+- T1: §6 now reads "by a factor of $10^8$", noting that the measured counts use the residual criterion.
+- T2: §5.1 now states CG's optimality over $\mathbf{U}^{(0)} + \mathcal{K}_m$.
+- No code or output changed. Lint: 0 errors, 0 warnings. Syntax compiles.
+- Vietnamese: no translation exists. Meaning changes: notation clarified in §1.1, §3.1 and Exercise 3; the CG optimality statement made precise.

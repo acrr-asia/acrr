@@ -69,3 +69,11 @@ P2: the overview is the series' front door and its description is the card summa
 - Remaining warnings: none.
 - Flags for independent review: series editor to confirm that the new objective 5 ("Verify ... and validate ...") is fully covered by entry 5 (it is, Sections 2-4, in this editor's reading).
 - Vietnamese translation affected: yes. `src/content/series/vi/numerical-simulation.md` now differs in meaning: new description, five objectives instead of four (objective 4 split), and a rewritten body with a conventions paragraph. No copied field changed (status, category, example, plannedEntries untouched), so the build is not affected.
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), 2026-10-14; report `reviews/numerical-simulation.md`.
+- Fact-check: pass (no factual claims needing a source; objectives and promises match the entries).
+- Technical: pass (shared conventions stated correctly; objective 5 confirmed covered by entry 5 §2-4).
+- Findings concerning this item: S1 (series-level notation; correction proposed in entry 3, optionally also a line in the conventions paragraph).
+- Not verified: none.

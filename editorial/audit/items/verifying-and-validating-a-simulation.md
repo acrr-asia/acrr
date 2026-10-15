@@ -62,3 +62,14 @@ P2.
 - Remaining warnings and why they stay: none. Suggestions kept: `sentence-length` at lines 17 and 38 (the linter counts across sentences that contain bold terms; the actual sentences are under 30 words), line 239 (47 words, one conditional statement) and line 353 (Exercise 5's question with its four lettered cases); `acronym-expansion` "JCGM" in the reference list (the document designation).
 - Flags for independent review: none new.
 - Vietnamese translation affected: no (no translation of this entry exists).
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), 2026-10-14; report `reviews/numerical-simulation.md`.
+- Fact-check: pass (Richardson 1911 vol. 210 pp. 307-357 confirmed; ASME V&V 10-2006 and V&V 20-2009 titles confirmed). Technical: pass (3 code blocks re-run, output identical; validation arithmetic and Exercises 1-4 recomputed).
+- Findings concerning this item: S2 (optional, lines 50, 313).
+- Not verified: pages/issue of Roache 1994 (title and journal confirmed); final word of Richardson's title ("stresses" vs "stress" in secondary records); whether V&V 20 divides the GCI to obtain u_num (text calls its choice conservative); imprint details of AIAA G-077-1998, JCGM 100/101:2008, Oberkampf-Roy 2010, Roache 1998 not re-fetched.
+
+## Revision log (wave 2 resolution)
+
+- S2: "the insight note" → "the insight" in §1.2 and §5. Wording only. Lint: 0 errors, 0 warnings. Syntax compiles. Vietnamese: no translation exists; no meaning change.

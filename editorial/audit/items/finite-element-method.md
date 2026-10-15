@@ -61,3 +61,14 @@ P2.
 - Remaining warnings and why they stay: none. Three `sentence-length` suggestions (46-51 words, Sections 2.2, 4.1, 5.4) kept: each is one definition or list that reads more clearly unbroken.
 - Flags for independent review: none new.
 - Vietnamese translation affected: no (no translation of this entry exists).
+
+## Independent review (wave 2)
+
+- Reviewer: independent reviewer (fact-check, technical, series), 2026-10-14; report `reviews/numerical-simulation.md`.
+- Fact-check: pass (Courant 1943 confirmed; Zienkiewicz-Taylor-Zhu 7th ed. 2013 confirmed). Technical: pass (3 code blocks re-run, output identical; P2 element matrix, Exercise 2 matrix, Exercise 3 recomputed).
+- Findings concerning this item: T3 (optional, line 292).
+- Not verified: imprint years of Brenner-Scott 2008, Hughes 1987/2000, Johnson 1987, Strang-Fix 1973 not re-fetched in this pass.
+
+## Revision log (wave 2 resolution)
+
+- T3: the triangle's area in §5.2 is now written $|e|$ (the area of triangle $e$) instead of $|T|$, which avoids another meaning of $T$ in the series. Lint: 0 errors, 0 warnings. Syntax compiles. Vietnamese: no translation exists; notation only.
