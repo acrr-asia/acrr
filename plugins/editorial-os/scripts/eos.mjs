@@ -97,7 +97,7 @@ export function loadConfig(explicit) {
 function defaultRules() {
   return {
     'spelling-variant': 'warning', terminology: 'warning', phrases: 'warning', intensifiers: 'suggestion',
-    contractions: 'off', 'doubled-word': 'error', placeholder: 'error', 'sentence-length': 'suggestion',
+    contractions: 'off', 'doubled-word': 'error', 'serial-comma': 'suggestion', placeholder: 'error', 'sentence-length': 'suggestion',
     'paragraph-length': 'suggestion', exclamation: 'warning', 'heading-levels': 'error', 'heading-case': 'off',
     'heading-numbering': 'warning', 'heading-punctuation': 'warning', 'heading-duplicate': 'warning',
     'heading-length': 'suggestion', 'title-length': 'warning', 'description-length': 'warning',
@@ -582,7 +582,13 @@ export function lintItem(cfg, item, site) {
   }
   if (cfg.language?.contractions === 'avoid') {
     const re = /\b(?:[A-Za-z]+n['’]t|it['’]s|that['’]s|there['’]s|here['’]s|what['’]s|let['’]s|who['’]s|where['’]s|[A-Za-z]+['’]re|[A-Za-z]+['’]ve|[A-Za-z]+['’]ll|I['’]m|(?:I|you|we|they|he|she|it)['’]d)\b/g;
-    for (const m of masked.matchAll(re)) add('contractions', m.index, `Contraction "${m[0]}"; the house style writes it out in article prose.`, { match: m[0] });
+    // A contraction joined by a hyphen is part of a compound term ("don't-care" in digital logic), not a contraction in prose.
+    for (const m of masked.matchAll(re)) if (masked[m.index + m[0].length] !== '-') add('contractions', m.index, `Contraction "${m[0]}"; the house style writes it out in article prose.`, { match: m[0] });
+  }
+  if (cfg.language?.serialComma === false) {
+    // "A, B, and C": a comma before the conjunction that closes a list of three or more short items.
+    const re = /\b[\w-]+(?: [\w-]+){0,2}, [\w-]+(?: [\w-]+){0,2}, (?:and|or) [\w-]+/g;
+    for (const m of masked.matchAll(re)) if (isBody(m.index) && !inRefs(m.index)) add('serial-comma', m.index + m[0].lastIndexOf(','), 'Serial comma before the last item of a list; the house style omits it.', { match: m[0] });
   }
   for (const m of masked.matchAll(/\b([A-Za-z]+)[ \t]+([A-Za-z]+)\b/g)) {
     const [, a, b] = m;
