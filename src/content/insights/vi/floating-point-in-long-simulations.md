@@ -1,6 +1,6 @@
 ---
 title: "Sai số làm tròn dấu phẩy động trong các mô phỏng dài"
-description: "Một ghi chú phương pháp ngắn về việc độ chính xác hữu hạn, thứ tự cộng dồn và sai số làm tròn tích lũy có thể ảnh hưởng thế nào đến các mô phỏng chạy qua rất nhiều bước."
+description: "Độ chính xác hữu hạn, thứ tự cộng dồn và sai số làm tròn tích lũy có thể ảnh hưởng thế nào đến một mô phỏng dài, và cách kiểm tra xem chúng có đáng kể không."
 publishedAt: 2026-10-07
 kind: "Methodological note"
 tags:
@@ -9,19 +9,23 @@ tags:
   - verification
 ---
 
+Một mô phỏng chạy qua hàng triệu bước thực hiện hàng tỉ phép toán được làm tròn, và kết quả của nó có thể phụ thuộc vào những chi tiết tưởng như không liên quan, chẳng hạn thứ tự cộng các số. Ghi chú này trình bày những gì đã biết về sai số làm tròn dấu phẩy động, khi nào nó đáng được kiểm tra trong một mô phỏng dài, và cách kiểm tra điều đó với chi phí thấp.
+
 ## Đã xác lập
 
-Máy tính lưu số thực với độ chính xác hữu hạn, nên phần lớn kết quả số học đều bị làm tròn. Trong số học dấu phẩy động (floating point) IEEE 754 với chế độ làm tròn về giá trị gần nhất, đơn vị làm tròn (unit roundoff) $u$ bằng $2^{-24} \approx 6\times10^{-8}$ đối với binary32 ("độ chính xác đơn") và $2^{-53} \approx 1.1\times10^{-16}$ đối với binary64 ("độ chính xác kép"). Mỗi phép toán cơ bản trả về kết quả được làm tròn đúng, nên sai số tương đối của nó không vượt quá $u$, trừ khi xảy ra tràn trên hoặc tràn dưới.
+Máy tính lưu số thực với độ chính xác hữu hạn, nên phần lớn kết quả số học đều bị làm tròn. Trong số học dấu phẩy động (floating point) IEEE 754 với chế độ làm tròn về giá trị gần nhất, **đơn vị làm tròn** (unit roundoff) $u$ bằng $2^{-24} \approx 6\times10^{-8}$ đối với binary32 ("độ chính xác đơn") và $2^{-53} \approx 1.1\times10^{-16}$ đối với binary64 ("độ chính xác kép"). Mỗi phép toán cơ bản trả về kết quả được làm tròn đúng, nên sai số tương đối của nó không vượt quá $u$, trừ khi xảy ra tràn trên hoặc tràn dưới.
 
 Phép cộng dấu phẩy động có tính giao hoán nhưng không có tính kết hợp: $(a+b)+c$ và $a+(b+c)$ có thể khác nhau. Ở độ chính xác kép, $(10^{16}+1)+1$ cho kết quả $10^{16}$, trong khi $10^{16}+(1+1)$ cho $10^{16}+2$. Vì vậy thứ tự cộng dồn có thể làm thay đổi kết quả, và một phép rút gọn song song (parallel reduction) có thứ tự thay đổi giữa các lần chạy có thể khiến kết quả khác nhau giữa các lần chạy.
 
-Sai số làm tròn tích lũy dần. Với phép cộng dồn đệ quy thông thường gồm $n$ số hạng, cận sai số trong trường hợp xấu nhất theo chuẩn mực là khoảng $n\,u$ nhân với tổng các giá trị tuyệt đối của các số hạng. Với một trường hợp giả định gồm $10^6$ số hạng, $n\,u$ vào khoảng $0.06$ ở độ chính xác đơn và khoảng $10^{-10}$ ở độ chính xác kép. Đây là các cận, và sai số thực tế thường nhỏ hơn nhiều. Một bộ đếm độ chính xác đơn được tăng mỗi lần thêm 1 sẽ ngừng thay đổi tại $2^{24} = 16777216$.
+Sai số làm tròn tích lũy dần. Với phép cộng dồn đệ quy thông thường gồm $n$ số hạng, cận sai số chuẩn trong trường hợp xấu nhất vào khoảng $n\,u$ nhân với tổng các giá trị tuyệt đối của các số hạng (N. J. Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM, 2002, chương 4). Với một trường hợp giả định gồm $10^6$ số hạng, $n\,u$ vào khoảng $0.06$ ở độ chính xác đơn và khoảng $10^{-10}$ ở độ chính xác kép. Đây là các cận, và sai số thực tế thường nhỏ hơn nhiều. Một bộ đếm độ chính xác đơn được tăng mỗi lần thêm 1 sẽ ngừng thay đổi tại $2^{24} = 16777216$.
+
+Sai số làm tròn cũng giới hạn việc làm mịn. Loạt bài Mô phỏng số trình bày một thương sai phân có sai số [ngừng giảm rồi tăng lên](/blog/from-differential-equations-to-discrete-problems#52-checking-the-orders-and-where-rounding-takes-over) khi bước thu nhỏ, và một nghiên cứu làm mịn trong đó [sai số làm tròn vượt qua sai số rời rạc hóa](/blog/solving-large-linear-systems#32-where-rounding-overtakes-discretization) khi lưới đủ mịn.
 
 ## Diễn giải
 
 Một cách hiểu là: trong một lần chạy ngắn, làm tròn thường chỉ là nguồn sai số thứ yếu, nhưng đáng được kiểm tra khi số phép tính tăng lên. Việc kiểm tra có vẻ cần thiết nhất khi lần chạy rất dài, khi kết quả là một hiệu nhỏ giữa các đại lượng lớn, khi hệ khuếch đại các nhiễu loạn nhỏ (như các hệ hỗn loạn), hoặc khi kết quả sẽ được dùng làm cơ sở cho một quyết định.
 
-Từ đó có hai cách kiểm tra, và chi phí của chúng phụ thuộc vào mã nguồn. Chạy lại ở độ chính xác cao hơn, hoặc cộng dồn bằng một phương pháp có bù sai số (compensated) hay cộng theo cặp (pairwise), rồi so sánh. Hoặc đổi thứ tự cộng dồn rồi so sánh. Nếu các khác biệt nhỏ hơn hẳn sai số rời rạc hóa và mục tiêu độ chính xác đã nêu, làm tròn khó có thể là mối lo chính. Sự trùng khớp là bằng chứng chứ không phải chứng minh, vì nó chỉ thăm dò những biến thể đã được thử.
+Từ đó có hai cách kiểm tra, và chi phí của chúng phụ thuộc vào mã nguồn. Cách thứ nhất chạy lại với ít sai số làm tròn hơn, ở độ chính xác cao hơn hoặc với các tổng được cộng dồn bằng một phương pháp có bù sai số (compensated) hay cộng theo cặp (pairwise), rồi so sánh kết quả. Cách thứ hai đổi thứ tự cộng dồn rồi so sánh. Nếu các khác biệt nhỏ hơn hẳn sai số rời rạc hóa và mục tiêu độ chính xác đã nêu, làm tròn khó có thể là mối lo chính. Sự trùng khớp là bằng chứng chứ không phải chứng minh, vì nó chỉ thăm dò những biến thể đã được thử. [Bài thứ năm của loạt bài Mô phỏng số](/blog/verifying-and-validating-a-simulation#34-the-other-numerical-errors) đặt phép kiểm tra này bên cạnh các sai số số khác của một mô phỏng.
 
 ## Câu hỏi còn mở
 
