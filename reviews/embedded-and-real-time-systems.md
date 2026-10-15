@@ -4,6 +4,7 @@
 - Reviewed commit: 9232ed9
 - Date: 2026-10-14
 - Reviewer: independent reviewer for wave 2 (fact-check, technical review, series review). The reviewer did not author or revise any text in this scope.
+- Content hash: sha256:344fdf1b66249bee3edd495dc8fdb973ba4fff5e4eecddf7c15fe6c763a8536f
 
 ## Summary
 
@@ -253,3 +254,12 @@ Translation follow-up: `src/content/series/vi/embedded-and-real-time-systems.md`
 Checks: `eos lint` (series file and five entries): 0 errors, 0 warnings, 58 suggestions. `eos syntax`: "All files compile." No code or number was changed, so nothing was rerun.
 
 Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+QA editor (final gate), 2026-10-15, against the current files; build `/tmp/claude-0/b9`.
+- F1 (Should fix): confirmed - `inside-a-microcontroller.mdx:455`, `interrupts-polling-and-dma.mdx:393` and `measuring-timing-latency-and-resource-use.mdx:461` all read "Arm Limited, *Armv7-M Architecture Reference Manual*, ARM DDI 0403E.e, 2021."
+- F2 (Should fix): confirmed - `real-time-operating-systems-and-scheduling.mdx:295` attributes the Mars Pathfinder account to G. E. Reeves of the Jet Propulsion Laboratory and says "semaphore"; the reference is at `:435`, in alphabetical order between Liu and Layland and Sha et al. The entry's argument does not depend on the example.
+- S1 (Should fix): confirmed - overview lines 15-17 no longer claim that every entry removes a limit of the previous one; the second entry "analyzes the polling that the superloop performs", and the limit the second entry leaves (processing in one loop) is assigned to the fourth, which matches `interrupts-polling-and-dma.mdx:336` and the fourth entry's opening.
+- Optional F3, S2, S3, T1, T2, T3: confirmed applied (Di Natale subtitle at entry 3 `:416`; scope sentence at overview line 13; entry 1 opening line 15; "task" glossed at entry 2 `:119` and `:334`; characteristic impedance defined at entry 3 `:200`; entry 2 opening line 21).
+- Checks: `eos lint embedded-and-real-time-systems` 0 errors, 0 warnings; `eos syntax` on the six files: all compile; `check-links` on the build: 314 pages, all internal links resolve; `eos validate-site --json`: no issue on any page of this series (all 29 issues are `/vi/` pages); `katex-error` 0 in all five built pages. Re-run with GCC 13.3.0 and Python 3.13: GPIO, ring-buffer, cycle-counter and stack-painting programs and all Python blocks reproduce the printed output; the wake-up program gave different numbers with the same pattern (absolute: max about 41 times the median; relative: 248.6 ms behind the grid after 2000 periods), as the text says to expect.
+- Reopened: none.

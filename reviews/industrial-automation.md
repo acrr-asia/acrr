@@ -4,6 +4,7 @@
 - Reviewed commit: 49941d2 (series content last changed in 699e575, the wave-1 revision; diff against e21dcc8 read in full)
 - Date: 2026-10-14
 - Review type: independent review (wave 2): fact-check (F), technical review (T) and series review (S) by a reviewer who did not write or revise the series
+- Content hash: sha256:76d1f534200cdb3a3ac3f31c22beb7c94ed73d27cf6c6c15fa1ad72630c39623
 
 ## Summary
 The series is accurate and coherent. Every Python program (ten blocks in five entries) was re-run and reproduces its printed output byte for byte, and every worked number, exercise answer and derivation that could be recomputed checks out, including the claims stated in prose (the unbounded growth of the Ziegler–Nichols loop without output limits, the 40-seed alarm ranges of the leak example). The wave-1 revision changed metadata, headings, references and prose. It changed no technical content, and the one technical wording change (Modbus 1.75 ms "recommends") is correct. No finding is blocking. Four should-fix items remain. The third entry still calls IEC/IEEE 60802 a "project", although it was published as a standard on 29 June 2026. Its IEC 61784-1 and -2 references give, undated, the titles of the 2019 editions, which IEC replaced in 2023. In the fifth entry, Exercise 4 says a smaller observer gain "doubles" the fault signature when it raises it 1.7 times. In the second entry, one sentence places the reset of the mixing-tank timer one scan late. The fourth edition of IEC 61131-3 (22 May 2025) is confirmed. Its removal of Instruction List could not be confirmed from a primary source here (see Not verified). With the four corrections the series is ready.
@@ -174,3 +175,14 @@ Findings: 0 blocking, 4 should fix, 4 optional.
 Optional findings applied: S1 (overview line 18, now names the one change, with the same qualified wording), S2 (overview line 14 links Foundations of Control Systems), T3 (step index renamed to $j$, `networked-automation-and-digital-twins.mdx:260`; $k$ kept for the outflow coefficient, the only other use of either symbol in the prose), F3 (`pid-control-of-process-variables.mdx:15`, "in most loops"). Not applied: none.
 
 Resolved by the wave-1 author on 2026-10-15; awaiting the reviewer's resolution check.
+
+## Resolution check
+QA editor (final gate), 2026-10-15, against the current files; build `/tmp/claude-0/b9`.
+- F1 (Should fix): confirmed - `fieldbuses-and-industrial-ethernet.mdx:300` calls IEC/IEEE 60802 a standard published in 2026; `IEC/IEEE 60802:2026` is in the References (`:372`) in alphabetical position.
+- F2 (Should fix): confirmed - `:370-371` cite IEC 61784-1-0:2023 and IEC 61784-2-0:2023 with the current "Industrial networks – Profiles" titles; the body text (`:193`, `:226`) still describes the IEC 61784 family correctly.
+- T1 (Should fix): confirmed - `networked-automation-and-digital-twins.mdx:314` reads "enlarges the fault signature by about 70% (from 4.6 to 8 mm)"; recomputed with `python3 -I`: r = -4.6468 mm at L = 0.05, 8/4.6468 = 1.72, L = 0.0274.
+- T2 (Should fix): confirmed - `programmable-logic-controllers.mdx:342` now places the reset in the scan in which the state changes from MIX to DRAIN, which matches the `CASE`-before-timer order of `MixingTank`.
+- Not verified (IL removal): confirmed as qualified - lines 17, 194, 356, 447 of entry 2 and overview line 18 state only that the published scope of the 2025 edition no longer lists Instruction List; no sentence asserts the removal outright.
+- Optional S1, S2, T3, F3: confirmed applied (overview lines 14 and 18; step index $j$ at entry 5 line 260 with $k$ kept for the outflow coefficient; "in most loops" at entry 4 line 15).
+- Checks: `eos lint industrial-automation` 0 errors, 6 warnings (the "don't-care" contractions in entry 1, justified in its revision log); `eos syntax` on the six files: all compile; `check-links` on the build: 314 pages, all internal links resolve; `eos validate-site --json`: no issue on any page of this series (all 29 issues are `/vi/` pages). All ten Python blocks re-run: output identical to the text.
+- Reopened: none.
