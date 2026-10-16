@@ -11,6 +11,38 @@ The series is technically strong and coherent. Each entry delivers its objective
 
 Findings: 0 blocking, 11 should fix, 7 optional.
 
+## Resolution
+
+All 11 should-fix findings and six of the seven optional ones were applied by the author side (the editor who coordinated the series, not the reviewer), mostly with the reviewer's recommended text. This series has no Vietnamese translations yet, so no translation needed the same changes.
+
+| Finding | Resolution |
+|---|---|
+| F1 | Entries 2 and 5 now say "reported at 2.1 GHz". Entry 4 says "reported at 2.1 GHz (Section 5.4 of the first entry infers that the cores ran faster)". |
+| F2 | Entry 4, Section 2.3, now relates its 22.3 GB/s to the one-core triad figures of entry 2, Section 6.3, and explains the difference by the absence of write-allocate traffic. It also calls the one-core ridge point a rough figure. |
+| F3 | Entry 4, Section 2.2, no longer names the target that `-march=native` selected. It states that all four GCC 13.3 AVX-512 Xeon targets prefer 256-bit vectors. |
+| F4 | Entry 1 Conventions now says what OpenMP is and how the thread count is set, and links Section 2 of the third entry. |
+| F5 | Entry 2 uses $k$ for associativity and $N_{\mathrm{sets}}$ for the number of sets, in Section 2.1 and in the Summary. |
+| F6 | Entry 5, Section 5.2, describes the row as "$N + 2$ values (the variable `W` in the code)". |
+| F7 | Entry 1, Section 2.2: the communication model is "built from the latency and bandwidth of each message, measured on the reference machine and assumed for a cluster". |
+| F8 | Entry 2 opening: "developed the roofline bound". |
+| F9 | The series overview now names GCC 13.3, OpenMP specification 5.2, MPI through Open MPI 4.1.6, Python 3.13 and NumPy 2.5. |
+| F10 | The DOI of Williams, Waterman and Patterson is added in entries 2 and 3. |
+| F11 | Entry 4, Section 3.4, now refers back to entry 2, Section 6.4, for Little's law instead of defining it again. The Little (1961) reference is kept. |
+| F12 (optional) | Applied: entry 2, Section 4.1, notes $n/12$ when the write of $C$ is not counted, with a link to entry 1, Section 5.2. |
+| F13 (optional) | Applied, with the recommended wording. |
+| F14 (optional) | Applied: "The C standard defines the problem precisely, in subclause 5.1.2.4 of both C11 and its 2018 revision". |
+| F15 (optional) | Applied as part of F1: "a Kernel-based Virtual Machine (KVM) guest". |
+| F16 (optional) | Applied: "most likely a small part of a large server processor". |
+| F17 (optional) | Applied: the lead-in now says that `...` marks where the second run begins. |
+| F18 (optional) | Not applied. Choosing one in-text citation form for the series is polish, and it is left for the next revision, as the reviewer suggested. |
+
+Second pass. After the corrections, the whole series was checked again:
+- `npm run build:local` exits 0, `npm run check:links` reports that all internal links resolve, and `eos validate-site dist` reports no issues.
+- `eos lint` shows 0 errors and 0 warnings on all six files.
+- The two new links (to `#63-measuring-sustainable-bandwidth` and `#64-what-limits-one-core-and-what-limits-many` of entry 2) and the links to entry 1 `#52-intensity-of-three-kernels` and entry 3 `#2-parallel-loops-with-openmp` resolve, and their targets say what the linking text claims.
+- No symbol introduced by F5 collides with another symbol in entry 2: $k$ and $N_{\mathrm{sets}}$ appear nowhere else in it.
+- The independent QA stage re-reads each item before its record is written; anything it finds is added below.
+
 ## Objectives coverage
 
 | Objective (from the series file) | Covered by | Assessment |

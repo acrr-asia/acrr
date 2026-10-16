@@ -11,11 +11,11 @@ series: parallel-and-high-performance-computing
 seriesOrder: 2
 ---
 
-[The first entry](/blog/performance-models-and-scaling-laws) ended with [the roofline bound](/blog/performance-models-and-scaling-laws#5-the-roofline-bound), $P \le \min(P_{\mathrm{peak}}, B\,I)$ of Williams, Waterman and Patterson (2009). It caps the attainable performance $P$ of a kernel by its peak arithmetic rate $P_{\mathrm{peak}}$ and by the product of the memory bandwidth $B$ and the arithmetic intensity $I$, the floating-point operations (FLOP) performed per byte moved. The insight [Compute-Bound or Memory-Bound?](/insights/compute-bound-or-memory-bound) showed that a kernel such as $y \leftarrow y + a x$ sits far below the ridge point $I^* = P_{\mathrm{peak}}/B$. Both treated $B$ and the bytes moved as given. This entry opens them up: where the bytes come from, why the same loop can move eight times as many of them when written in a different order, and how a program can be restructured so that each byte fetched is used many times.
+[The first entry](/blog/performance-models-and-scaling-laws) developed [the roofline bound](/blog/performance-models-and-scaling-laws#5-the-roofline-bound), $P \le \min(P_{\mathrm{peak}}, B\,I)$ of Williams, Waterman and Patterson (2009). It caps the attainable performance $P$ of a kernel by its peak arithmetic rate $P_{\mathrm{peak}}$ and by the product of the memory bandwidth $B$ and the arithmetic intensity $I$, the floating-point operations (FLOP) performed per byte moved. The insight [Compute-Bound or Memory-Bound?](/insights/compute-bound-or-memory-bound) showed that a kernel such as $y \leftarrow y + a x$ sits far below the ridge point $I^* = P_{\mathrm{peak}}/B$. Both treated $B$ and the bytes moved as given. This entry opens them up: where the bytes come from, why the same loop can move eight times as many of them when written in a different order, and how a program can be restructured so that each byte fetched is used many times.
 
 The entry assumes the roofline bound and the measurement practice of the first entry, and a reading knowledge of C and Python. Every program runs on one core except the bandwidth test at the end. Each effect is measured on one machine or, where a timing shows that order matters but not why, counted exactly with a small cache simulator that the reader can run.
 
-**Conventions.** The C programs are C11 compiled with the GNU Compiler Collection (GCC) 13.3 at the optimization level stated with each listing; the simulator and the matrix-multiply comparison use Python 3.13 and NumPy 2.5. The bandwidth test uses Open Multi-Processing (OpenMP) threads through `gcc -fopenmp`. The reference machine is a Kernel-based Virtual Machine (KVM) guest with four cores of an Intel Xeon processor rated at 2.1 GHz, with the 512-bit Advanced Vector Extensions (AVX-512), the cache sizes listed in Section 1.2 and 16 GiB of RAM, running Linux.
+**Conventions.** The C programs are C11 compiled with the GNU Compiler Collection (GCC) 13.3 at the optimization level stated with each listing; the simulator and the matrix-multiply comparison use Python 3.13 and NumPy 2.5. The bandwidth test uses Open Multi-Processing (OpenMP) threads through `gcc -fopenmp`. The reference machine is a Kernel-based Virtual Machine (KVM) guest with four cores of an Intel Xeon processor reported at 2.1 GHz, with the 512-bit Advanced Vector Extensions (AVX-512), the cache sizes listed in Section 1.2 and 16 GiB of RAM, running Linux.
 
 The machine is shared with other virtual machines, so its timings are noisy: each is the median of five or ten repetitions, describes this machine only, and supports only conclusions drawn from differences much larger than the run-to-run spread ([Section 6 of the first entry](/blog/performance-models-and-scaling-laws#6-measuring-performance-honestly)). Data are 8-byte doubles, C arrays are row-major and indices start at 0. Cache and memory sizes are in KiB and MiB (powers of two), bandwidths in gigabytes per second (GB/s, $10^9$ bytes per second) and arithmetic rates in giga floating-point operations per second (GFLOP/s, $10^9$ FLOP per second).
 
@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
 }
 ```
 
-Run in two parts, `./latency rand 4k 4 32768` and `./latency rand 4k 65536 1048576`, it printed (the median of five timings of $2^{23}$ steps for each size; the 8 KiB, 128 KiB, 512 KiB and 8 MiB rows are omitted):
+Run in two parts, `./latency rand 4k 4 32768` and `./latency rand 4k 65536 1048576`, it printed (the median of five timings of $2^{23}$ steps for each size; the 8 KiB, 128 KiB, 512 KiB and 8 MiB rows are omitted, and `...` marks where the second run begins):
 
 ```text
 mode rand, pages 4 KiB
@@ -183,13 +183,13 @@ The virtual machine hides the actual clock frequency, so the times are not conve
 
 A cache does not store individual bytes. It stores **cache lines** (also called blocks), aligned chunks of memory of fixed size, 64 bytes on the reference machine. When a load misses, the whole line containing the requested byte is brought in. This granularity is the first reason that access order matters: a line fetched for one double also brings the seven doubles next to it, free of further cost if they are used soon.
 
-To find a line quickly, the cache is divided into **sets**, and each line address may live in only one set. A cache of capacity $C$ bytes with line size $L$ bytes and **associativity** $W$ (the number of lines, or **ways**, per set) has
+To find a line quickly, the cache is divided into **sets**, and each line address may live in only one set. A cache of capacity $C$ bytes with line size $L$ bytes and **associativity** $k$ (the number of lines, or **ways**, per set) has
 
 $$
-S = \frac{C}{L\,W}
+N_{\mathrm{sets}} = \frac{C}{L\,k}
 $$
 
-sets; for the L1 data cache of the reference machine, $S = 49\,152/(64 \times 12) = 64$. An address is read as three fields. The low $\log_2 L = 6$ bits are the **offset** within the line, the next $\log_2 S = 6$ bits the **index** that selects the set, and the remaining bits the **tag**, stored with the line to tell apart the lines that share a set. Each line also carries a **valid bit** and, in a write-back cache, a **dirty bit** (Section 2.3). For the address `0x7ffd1234` the offset is `0x34` = 52 and the index is $(\mathtt{0x7ffd1234} \gg 6) \bmod 64 = 8$. Every address that differs from it by a multiple of $64 \times 64 = 4096$ bytes has the same index and competes for the same 12 ways.
+sets; for the L1 data cache of the reference machine, $N_{\mathrm{sets}} = 49\,152/(64 \times 12) = 64$. An address is read as three fields. The low $\log_2 L = 6$ bits are the **offset** within the line, the next $\log_2 N_{\mathrm{sets}} = 6$ bits the **index** that selects the set, and the remaining bits the **tag**, stored with the line to tell apart the lines that share a set. Each line also carries a **valid bit** and, in a write-back cache, a **dirty bit** (Section 2.3). For the address `0x7ffd1234` the offset is `0x34` = 52 and the index is $(\mathtt{0x7ffd1234} \gg 6) \bmod 64 = 8$. Every address that differs from it by a multiple of $64 \times 64 = 4096$ bytes has the same index and competes for the same 12 ways.
 
 A lookup selects the set by the index, compares the tag with the tags of all ways of that set in parallel, and either returns the data (a **hit**) or starts a **miss**:
 
@@ -204,7 +204,7 @@ flowchart TB
     F --> H
 ```
 
-A **direct-mapped** cache has one way per set ($W = 1$), so two lines with the same index evict each other even when the rest of the cache is empty. A **fully associative** cache has one set, so any line can go anywhere, but every lookup compares every stored tag, which is practical only for small structures. Real caches are **set-associative**, in between.
+A **direct-mapped** cache has one way per set ($k = 1$), so two lines with the same index evict each other even when the rest of the cache is empty. A **fully associative** cache has one set, so any line can go anywhere, but every lookup compares every stored tag, which is practical only for small structures. Real caches are **set-associative**, in between.
 
 ### 2.2 Replacement
 
@@ -500,7 +500,7 @@ $$
 I = \frac{2n^3}{32\,n^2} = \frac{n}{16}\ \text{FLOP/byte},
 $$
 
-which for $n = 1024$ is 64 FLOP/byte, far above any ridge point: every element of $A$ and $B$ takes part in $n$ multiplications. Whether a program realizes this reuse depends on whether an element is still in a cache when it is needed again.
+($n/12$ if the write of $C$ is not counted, as in [Section 5.2 of the first entry](/blog/performance-models-and-scaling-laws#52-intensity-of-three-kernels)), which for $n = 1024$ is 64 FLOP/byte, far above any ridge point: every element of $A$ and $B$ takes part in $n$ multiplications. Whether a program realizes this reuse depends on whether an element is still in a cache when it is needed again.
 
 ### 4.2 Loop order
 
@@ -824,7 +824,7 @@ AoS: every line is read (64 bytes) and, being dirty, written back (64 bytes): 12
 |---|---|
 | The gap | One random load from beyond the caches took 180 to 270 ns on the reference machine, against 1.5 ns from L1; the one-core ridge point is about 6.8 FLOP/byte. |
 | Hierarchy | Registers, L1 (48 KiB), L2 (2 MiB), a shared L3 and DRAM; each level larger and slower. Pointer chasing shows a plateau per level. |
-| Cache organization | $S = C/(L\,W)$ sets; an address splits into tag, index and offset; LRU-like replacement; write-back with write-allocate. |
+| Cache organization | $N_{\mathrm{sets}} = C/(L\,k)$ sets; an address splits into tag, index and offset; LRU-like replacement; write-back with write-allocate. |
 | Misses | Compulsory (first touch), capacity (too small even if fully associative), conflict (too many lines in one set); each has its own remedy. |
 | Locality | Row-order traversal of a row-major array was 11 times faster than column order; strides of a line or more use one value per line fetched. |
 | Blocking | Tiles of size $b$ raise the intensity of matrix multiply to $b/16$ to $b/8$ FLOP/byte, depending on the tile-loop order; traffic of order $n^3/\sqrt{M}$ is optimal (Hong and Kung). |
@@ -847,5 +847,5 @@ The memory hierarchy rewards programs that use data soon after it was fetched an
 - J. D. C. Little, "A proof for the queuing formula: L = λW," *Operations Research*, vol. 9, no. 3, pp. 383–387, 1961.
 - J. D. McCalpin, "Memory bandwidth and machine balance in current high performance computers," *IEEE Computer Society Technical Committee on Computer Architecture (TCCA) Newsletter*, pp. 19–25, December 1995.
 - D. A. Patterson, "Latency lags bandwidth," *Communications of the ACM*, vol. 47, no. 10, pp. 71–75, 2004.
-- S. Williams, A. Waterman and D. Patterson, "Roofline: An insightful visual performance model for multicore architectures," *Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009.
+- S. Williams, A. Waterman and D. Patterson, "Roofline: An insightful visual performance model for multicore architectures," *Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009, doi: 10.1145/1498765.1498785.
 - W. A. Wulf and S. A. McKee, "Hitting the memory wall: Implications of the obvious," *ACM SIGARCH Computer Architecture News*, vol. 23, no. 1, pp. 20–24, 1995.
