@@ -297,3 +297,31 @@ Stage EOS 7, by the author. Every should-fix finding was applied using the revie
 | T8 (optional) | Applied | Section 3.3: "fit every point of this run to within a factor of 1.22; the eager-range bandwidth is the least repeatable of the fitted values." |
 
 No open should-fix or blocking finding remains.
+
+## QA
+
+Stage EOS 10, by an independent QA editor who wrote and revised none of this entry. Record: `editorial/records/article/distributed-memory-and-message-passing.json`.
+
+**Decision: publish. Total 27/28.** Critical conditions C1-C9: none holds (C9: the series review is resolved; its content-hash stamp is still to be recorded with `series-pipeline stamp`, which the gate enforces).
+
+| Dimension | Score | Justification |
+|---|---|---|
+| purpose | 4 | Opening states what it builds on, scope, versions and machine; the closing meets the fifth objective. |
+| structure | 4 | Concepts before mechanics throughout; ending resolves the series. |
+| accuracy | 3 | Everything recomputes, but "each quoted time is the median of several repetitions" (`:18`) does not describe the individual runs quoted in Section 5.3 or the single 1.95 s run (Q1). |
+| evidence | 4 | Every reference exists with complete details; measurements stated as measurements of the stated machine. |
+| language | 4 | House style throughout; remaining lint suggestions justified (C6; `:273` is one attribution sentence of 47 words). |
+| consistency | 4 | Series notation now respected (W, f_s, clock wording); cross-references hold. |
+| publishing | 4 | Lint 0 errors, 0 warnings; `eos validate-site dist`: no issues; one h1, no glued inline elements, Mermaid within the column. |
+
+Checks performed:
+- `npm run eos -- lint`: 0 errors, 0 warnings, 8 suggestions. `npm run eos -- validate-site dist`: 330 pages, no issues (`dist/blog/distributed-memory-and-message-passing.html` built after the last edit).
+- Every blocking and should-fix finding in this report and the series findings for this entry (F1, F6, F13) confirmed in the text: `:18`, `:36`, `:165`, `:253`, `:259`, `:273`, `:362`, `:394`, `:454`, `:456`, `:530`, `:549`, `:612`, `:615–617`, `:626–627`.
+- Recomputed in Python: strong-scaling rows p = 4, 64, 4096 (both layouts, T_p, comm %, S, E, e); weak scaling blocks p = 4096 (T_p 1.18421 ms, f_s 0.0297326, model 3974.215, law 3974.245) and strips (E 0.898); Exercise 4 (18.825, 8.410, 24.010, 51.244 µs; S 1800.1, E 0.439; every 10 sweeps S 3632.7, E 0.887); n_1/2 25,614 B and 4.15 GB/s; allreduce estimate 0.7395 µs; Section 6.1 model (1.166 s, 0.592 s, communication 2.99%, ratios 1.12, 1.30, 1.10); pi^2/6 − total 9.756e-9 with remainder 2.44e-10 against the tail; change-norm differences 2.36e-13 and 2.62e-13. All match.
+- References checked against the fact-check table: Hockney (1994), Karp and Flatt (1990), Thakur et al. (2005), Patarasuk and Yuan (2009, now with no. 2), Gropp et al. (2014): all match.
+- Cross-references: threads entry `#3-data-races-and-how-to-remove-them`, finite differences `#21-…`, `#22-…`, solving linear systems `#42-…`, first entry `#2-…`, `#22-…`, `#23-…`, `#3-…`, second entry and fourth entry; each target exists and says what the link claims. Inbound promises (first entry Section 2.2 and its `#6-predicting-scaling` link, fourth entry closing) are fulfilled by Sections 3, 6.1 to 6.3.
+
+Optional finding (not required for publication):
+- **Q1.** `:18`, Conventions: "each quoted time is the median of several repetitions and describes this machine only." Section 5.3 quotes individual runs and the medians are computed from them; the 1.95 s run is a single run. Suggested text: "each quoted time is the median of several repetitions, unless the individual runs are shown, and describes this machine only."
+
+Not verified: the reference-machine timings (the VM is no longer available; the text presents them as measurements of that stated machine, and the reviewers re-ran every deterministic output); the full text of Thakur et al., Patarasuk and Yuan and Culler et al. (formulas verified by derivation); the 15% run-to-run spread of Section 3.2.

@@ -302,3 +302,38 @@ Stage EOS step 7, 2026-10-16, by the writer. The container no longer runs on the
 | T9 | Optional | Applied: "makes little difference beyond the run-to-run spread". |
 
 `eos lint` (after): 0 errors, 0 warnings, 6 suggestions. These are the GNU, STREAM and ACM names, as kept in the copy edit, and three sentence-length false positives.
+
+## QA
+
+EOS step 10, 2026-10-16, by an independent QA editor who did not write, review or revise the entry. Record: `editorial/records/article/memory-hierarchy-and-locality.json`.
+
+**Decision: publish** (total 26/28; no critical condition).
+
+| Dimension | Score | Reason below 4 |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 4 | |
+| evidence | 3 | The Section 6.2 claim that prefetchers do not cross 4 KiB page boundaries has no source (Q1). The locators in Hennessy and Patterson are not verified. |
+| language | 4 | |
+| consistency | 3 | In-text citations give years here, but entries 1 and 3 do not (series F18, deferred). The machine is "a KVM guest" here, while entry 1 writes "(KVM) hypervisor". |
+| publishing | 4 | |
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Optional | `:714`, Section 6.2 | evidence | "Prefetchers generally do not cross 4 KiB page boundaries" has no source. Cite Drepper (2007) only after confirming the passage; otherwise leave it as it is. |
+
+### Checks
+- `eos lint`: 0 errors, 0 warnings, 6 suggestions, each justified in the copy edit. `eos validate-site dist`: no issues. The dist page is newer than the source.
+- Every blocking and should-fix finding is present in the text: T1 (the regenerated report, which QA reproduced with GCC 13.3), T2-T5, F1, F2, D1-D3, C1 and C2, and the series findings F5, F8, F10, F12 and F17.
+- QA reran `cachesim.py`: the traversal block, the matrix-multiply block and the Exercise 2 line are identical. `latency.c`, `traverse.c` and `triad.c` are identical to the writer's files. The saved outputs `layout.txt`, `triad.txt`, `traverse.txt` and `lat_rand4k_*.txt` match the quoted blocks.
+- QA recomputed the ridge point, set indices, particle bandwidths, traffic ratios, Little's law, huge-page reductions, the matmul ratios and GFLOP/s, the NumPy shares and Exercises 1, 3 and 4. All agree with the text.
+- References checked against the fact-check table: Hong and Kung, Little, Wulf and McKee, and Patterson. All agree.
+- Cross-references to entries 1, 3 and 4 resolve and say what is claimed.
+- The opening states what the entry builds on and assumes. The ending leads to the third entry.
+
+### Not verified
+- Reference-machine timings: the VM is gone, and the text presents them as measurements of that stated machine. Some blocks have no saved raw file (fact-check).
+- The Hennessy and Patterson locators and the Drepper passages.
+- McCalpin's pages, which come from secondary citations.
+- The series review is resolved but not yet stamped.

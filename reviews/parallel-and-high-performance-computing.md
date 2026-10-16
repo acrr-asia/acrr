@@ -4,6 +4,7 @@
 - Reviewed commit: 3ac0c65
 - Date: 2026-10-16
 - Reviewer: independent Series Editor (EOS step 8); I did not write or revise any of the entries or the series file.
+- Content hash: sha256:593619cfab5a162a24b949ae3585dc8d71da38257563d665ef22049cf08defbf
 
 ## Summary
 
@@ -42,6 +43,7 @@ Second pass. After the corrections, the whole series was checked again:
 - The two new links (to `#63-measuring-sustainable-bandwidth` and `#64-what-limits-one-core-and-what-limits-many` of entry 2) and the links to entry 1 `#52-intensity-of-three-kernels` and entry 3 `#2-parallel-loops-with-openmp` resolve, and their targets say what the linking text claims.
 - The F5 symbols do not collide with any other symbol in entry 2: $N_{\mathrm{ways}}$ and $N_{\mathrm{sets}}$ appear nowhere else in it.
 - The independent QA stage re-reads each item before its record is written; anything it finds is added below.
+- QA findings applied after this pass: in entry 1, Section 4.3 now states correctly how OpenMP and message-passing reductions combine partial sums (blocking; OpenMP leaves the order unspecified). In entry 4, the F2 paragraph of Section 2.3 is split and linked, and a listing comment now gives the right byte count. Each of the two entries passed a second QA pass on the changed passages, and the build, link check and lint were repeated with clean results.
 
 ## Objectives coverage
 
@@ -294,3 +296,28 @@ The per-item resolutions were checked against the text: every change recorded in
   - Entry 4: `offload.py` reproduces the table and break-even $n = 253$; formula 252.6; 390 625 blocks; 62 500 loads; 50% occupancy; GFLOP/s and GB/s from the axpy and reduction timings; Exercises 3, 5, 6. `gcc -Q --help=target` (13.3.0): preferred width 256 for `skylake-avx512`, `cascadelake`, `icelake-server`, `sapphirerapids` (F3).
   - Entry 5: `model.py` and `collectives.py` outputs identical to the writer's `model.out` and `collectives.out`; `fit.py` reproduces the three fits; $n_{1/2}$ values; half-bandwidth check 4.15 GB/s; allreduce model 0.74 µs; $\pi^2/6 - $ total and 2.4e-10 remainder; medians and $S(2) = 1.75$, $S(4) = 2.98$ and 3.52; relative difference 2.6e-13; Gustafson check $f_s = 0.0297326$, model 3974.215, law 3974.245; Exercise 4.
 - Not verified: every reference-machine timing (the container now runs on a different host, 2.8 GHz with 32 KiB L1d and 1 MiB L2, so the timings cannot be re-observed; they are accepted as the writers' measurements, as the per-item reviews did); the target `-march=native` selected on the reference machine (F3); the primary text of Amdahl (1967), as recorded in entry 1's fact-check. Vietnamese translations were not reviewed.
+
+## QA
+
+Stage EOS 10 for the series overview `src/content/series/parallel-and-high-performance-computing.md`, by an independent QA editor who wrote and revised none of it. Record: `editorial/records/series/parallel-and-high-performance-computing.json`.
+
+**Decision: publish. Total 26/28.** Critical conditions C1-C9: none holds. The content-hash stamp of this review is still to be recorded (`node scripts/series-pipeline.mjs stamp parallel-and-high-performance-computing`; status today `review-stale`).
+
+| Dimension | Score | Justification |
+|---|---|---|
+| purpose | 4 | Reader, prerequisites and scope explicit. |
+| structure | 4 | Sequence rationale given and followed by the entries. |
+| accuracy | 4 | Version statement (F9) now matches every entry; conventions agree with entry 1's Conventions. |
+| evidence | 4 | No references needed; each claim about the entries holds. |
+| language | 3 | Line 14 is one 60-word sentence (Q2); GCC not expanded at line 18 (Q1). |
+| consistency | 3 | Link text shortens the insight title (Q3); "speedup always compares with the best sequential program" beside entry 4, Exercise 1, "the speedup over a scalar build" (an explicitly named baseline). |
+| publishing | 4 | Lint 0 errors, 0 warnings, 3 suggestions; validate-site no issues; description 160 characters, one sentence. |
+
+Series overview checklist (standards 9.4): sequence rationale yes; audience and prerequisites yes; shared conventions yes; five checkable objectives, each covered by a named entry (entry 1 Sections 1–3 and 5; entry 2 Sections 2–5; entry 3 Sections 2, 3, 5 and 6; entry 4 Sections 2–6; entry 5 Sections 3, 4 and 6, all confirmed against the headings); description within limits; no promise the entries do not keep (work and span, roofline, OpenMP 5.2, Open MPI 4.1.6, NumPy "where stated", one stated machine with other hardware labeled assumed, the GPU half illustrative); series review resolved, stamp pending. The copy check of the overview was done in this stage, since no separate copy-edit report exists for it.
+
+Optional findings (not required for publication):
+- **Q1.** `:18` "compiled with GCC 13.3" → "compiled with the GNU Compiler Collection (GCC) 13.3".
+- **Q2.** `:14` split after "sequential code": "... cost in ordinary sequential code. The [Numerical Simulation for Engineers](/series/numerical-simulation) series supplies ..., and the insight ... introduces the roofline idea that the first entry develops."
+- **Q3.** `:14` link text "Compute-Bound or Memory-Bound?" → "Compute-Bound or Memory-Bound? The Roofline Idea" (the insight's title).
+
+Not verified: the reference machine itself (no longer available); no Vietnamese overview exists.

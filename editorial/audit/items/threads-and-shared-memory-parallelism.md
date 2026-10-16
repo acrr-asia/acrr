@@ -311,3 +311,31 @@ Unlogged observations (Fact-check, Not verified). The writer saw all four in run
 Lint after resolution: `npm run eos -- lint src/content/blog/threads-and-shared-memory-parallelism.mdx` gives 0 errors, 0 warnings and 5 suggestions (GNU, GFLOP, STREAM, the Lamport quotation, ACM; all justified in the Copy edit section).
 
 Open findings: none.
+
+## QA
+
+Stage EOS 10, by an independent QA editor who did not write, revise or review the entry in an earlier stage. Review input: `/tmp/claude-0/hpc/qa/threads-and-shared-memory-parallelism.json`; record: `editorial/records/article/threads-and-shared-memory-parallelism.json`.
+
+**Decision: publish, total 27/28.** Critical conditions C1-C8: none holds. C9: the series review `reviews/parallel-and-high-performance-computing.md` is complete and resolved, but `series-pipeline gate` still reports it as never stamped; the stamp is the orchestrator's step after QA.
+
+| Dimension | Score | Justification |
+|---|---|---|
+| purpose | 4 | Opening links what it builds on, states versions, flags and machine; every section serves the stated objective. |
+| structure | 4 | Concepts before code throughout; the 5.2/5.3 swap reads correctly; Summary and closing paragraph lead to the fourth entry. |
+| accuracy | 4 | All findings resolved in the text; QA recomputations agree (below). |
+| evidence | 4 | Every reference verified by the fact-check; unlogged observations are labeled as such. |
+| language | 4 | House style throughout; remaining lint suggestions justified in the copy edit. |
+| consistency | 3 | In-text citation style differs from entries 2, 4 and 5 (series F18, deferred); KVM wording differs slightly from entries 1 and 4 (Q1). |
+| publishing | 4 | Lint 0 errors, 0 warnings, 5 justified suggestions; `eos validate-site dist`: no issues; `dist/` page newer than the source. |
+
+Checks performed:
+- Every blocking and should-fix finding (D1-D4, C1-C4, F1, T1-T4, series F10, F14, F16) confirmed in the text.
+- Recomputed with Python 3.13: expected race total 4999998; 52.8 and 240.2 ns per increment; ratios 9.18 and 14.29; barrier 1785 cycles at 2.1 GHz and 2380 at 2.8 GHz; 2851 FLOP; `model.py` output identical to the article.
+- References spot-checked against the fact-check table: Lamport 1979, Sewell et al. 2010, Adve and Gharachorloo 1996 (venue *Computer*), Williams et al. 2009 (with DOI, matching entry 1).
+- Cross-references: entry 1 Sections 2, 4, 4.2 and 5; entry 2 Sections 2, 2.3, 5.3, 6 and 6.4 (45.6 GB/s on four cores, Little's law, the saturation inference); entry 4; the floating-point insight. All targets exist and say what is claimed.
+- Opening and ending read correctly; the ending leads to the fourth entry.
+
+Optional finding:
+- **Q1** (optional, consistency), `:20`: "a virtual machine under the Linux Kernel-based Virtual Machine (KVM)" could read "a virtual machine under the Kernel-based Virtual Machine (KVM) hypervisor", as in entry 1.
+
+Not verified: reference-machine timings (the reference VM is no longer available; the text presents them as measurements of that machine, and the reviewers re-ran every deterministic output); the four unlogged observations, now labeled; the Exercise 4 premise that a `volatile` flag lets the loop terminate on the reference machine (QA built `spin.c` with `static volatile int ready` on the current host: it printed `reader saw ready, payload = 42` and exited 0); the explanation of the plain-increment result, which the text already marks as not verified.

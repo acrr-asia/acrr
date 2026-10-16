@@ -297,3 +297,77 @@ EOS step 7, by the author. Every should-fix finding of the fact-check and techni
 | T4 | Optional | Applied: $T_p$ changed to $T_{10^4}$ in the Exercise 4 answer. |
 
 Developmental and copy findings (D1–D8, C1–C7) were resolved by the editors in their own stages, as recorded above. The author did not reopen them.
+
+## QA
+
+EOS step 10, 2026-10-16, by an independent QA editor who did not write, review or revise the entry. Record: `editorial/records/article/performance-models-and-scaling-laws.json`.
+
+**Decision: revise** (total 23/28; critical C1 and C8 hold because of Q1). The entry is publishable once Q1 is applied and QA is recorded again.
+
+| Dimension | Score | Reason below 4 |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 2 | Q1: the OpenMP reduction is described as a tree combine, which GCC 13.3 does not do and the specification does not require. |
+| evidence | 3 | The two Intel hardware statements in Section 5.4 are attributed but have no reference entry (the fact-checker could not open the documents). |
+| language | 3 | "evidently busier" (Q2, copy C7) states an inference as an observation. |
+| consistency | 3 | In-text citations have no years, while entries 2, 4 and 5 give them (series F18, deferred). OpenMP is not expanded here, but entry 2 expands it. |
+| publishing | 4 | |
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Blocking | `:311`, Section 4.3 | accuracy | OpenMP reductions are said to combine partial sums by a tree. |
+| Q2 | Optional | `:393`, Section 5.3 | language | "evidently busier" (copy C7, not applied). |
+
+### Q1. OpenMP reductions are not tree combines
+- **Where:** `src/content/blog/performance-models-and-scaling-laws.mdx:311`, Section 4.3
+- **Text:** "Each processor sums a contiguous block of $n/p$ numbers sequentially, then the $p$ partial sums are combined by a tree. ... This is how the reduction operations of OpenMP and of message-passing libraries work, as the third and fifth entries show."
+- **Problem:** The OpenMP specification leaves the order of combination unspecified, and the third entry says so (Section 2.3, `threads-and-shared-memory-parallelism.mdx:136`). GCC 13.3, the compiler of the series, combines the per-thread copies one after another with atomic updates. A QA compile of a `reduction(+:s)` loop with `gcc -std=c11 -O2 -fopenmp -fdump-tree-ompexp` shows `__atomic_load_8` and `.ATOMIC_COMPARE_EXCHANGE`, with no tree. The tree combine is correct for MPI, as the fifth entry shows in Section 4.2 (binomial tree, recursive doubling). So the sentence states something false about OpenMP, and the third entry does not show what the sentence says it shows.
+- **Correction:** Replace the last sentence of the paragraph with: "Library reductions follow the same pattern of private partial sums combined at the end. An OpenMP `reduction` clause leaves the order of combination unspecified, and GCC 13.3 adds each thread's partial sum into the result with an atomic update, one after another. Message-passing libraries typically combine the partial sums along a tree. The third and fifth entries show both."
+
+### Q2. "evidently busier" (optional)
+- **Where:** `:393`
+- **Text:** "Earlier trial runs, made while the shared host was evidently busier, gave medians as low as 17 GB/s"
+- **Correction:** "made while the shared host was apparently busier".
+
+### Checks
+- `eos lint`: 0 errors, 0 warnings, 5 suggestions, each justified in the copy edit. `eos validate-site dist`: no issues. `dist/blog/performance-models-and-scaling-laws.html` is newer than the source, and its title and description are correct.
+- Every blocking and should-fix finding of D, C, F and T, and the series findings F4, F7 and F10, is present in the text.
+- Recomputation: QA reran `amdahl.py` (identical except for trailing spaces in the header line), the Gustafson program, the tree-reduction program and `roofline.py` (all identical). In Python, QA recomputed the Section 2-3 figures, Exercises 1-3 and 5, the triad rates, the FMA medians and implied clocks, the ridge point and its percentages, the 14.7% spread and the 16.6-17.8% `-ffast-math` change. All agree with the text.
+- Every quoted timing block appears verbatim in the writer's `output.txt`.
+- References checked against the fact-check table: Amdahl, Gustafson and Brent. All agree.
+- Cross-references to entries 2-5 and to the two insights resolve and say what is claimed, except the third-entry half of Q1.
+- The opening states the purpose, prerequisites and conventions. The ending leads to the second entry.
+
+### Not verified
+- Reference-machine timings: the VM is gone, and the text presents them as measurements of that stated machine.
+- The primary text of Amdahl (1967), Hennessy and Patterson, and the OpenMP 5.2 wording for `omp_get_wtime`.
+- The Intel documents behind the two Section 5.4 attributions.
+- The series review is resolved but not yet stamped (`series-pipeline gate`: "never stamped").
+
+## Resolution of the QA findings
+
+- Q1 (blocking): applied. Section 4.3 now says that an OpenMP `reduction` leaves the order of combination unspecified, that GCC 13.3 combines with atomic updates one after another (the QA editor checked this with `-fdump-tree-ompexp`), and that message-passing libraries typically combine along a tree. It also says that the third entry treats the OpenMP clause and the fifth the message-passing reductions. This wording differs slightly from the QA editor's last sentence, which had both entries showing both cases.
+- Q2 (optional): applied ("apparently busier", the copy edit's C7).
+
+### QA, second pass (after the resolution of Q1 and Q2)
+
+**Decision: publish** (total 26/28). No critical condition holds, and no finding is open. The record `editorial/records/article/performance-models-and-scaling-laws.json` was written again; its history keeps the earlier revise record.
+
+| Dimension | Score | Reason below 4 |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 4 | |
+| evidence | 3 | The two Intel hardware statements in Section 5.4 are attributed but have no reference entry. |
+| language | 4 | |
+| consistency | 3 | In-text citations have no years (series F18, deferred), and OpenMP is not expanded here, though entry 2 expands it. |
+| publishing | 4 | |
+
+- **Q1 resolved.** The passage at `:311` now says three things. An OpenMP `reduction` leaves the order of combination unspecified. GCC 13.3 adds each thread's partial sum with an atomic update, one after another. Message-passing libraries typically combine the partial sums along a tree.
+- The passage agrees with entry 3, Section 2.3 (`threads-and-shared-memory-parallelism.mdx:136`, "The order of combination is unspecified"), and with entry 5, Section 4.2 (binomial-tree reduction, recursive doubling). The GCC statement matches the QA check with `-fdump-tree-ompexp`.
+- The author's last sentence, "The third entry treats the OpenMP clause and the fifth the message-passing reductions", is more accurate than the QA text it replaced, and it is accepted.
+- **Q2 resolved:** the text now reads "apparently busier".
+- The article diff touches only lines 311 and 393.
+- `eos lint`: 0 errors, 0 warnings, 5 suggestions (unchanged and justified). `eos validate-site dist`: no issues. The rebuilt page is newer than the source and renders the new passage, with no glued inline elements.
+- This edit changes the series content hash, so the series review has to be stamped against the current text.

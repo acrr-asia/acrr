@@ -298,3 +298,65 @@ Stage EOS step 7, by the author. The container now runs on a different processor
 | T9 | Applied | Added a `...` line before the first loop of the `offload.py` listing, marking the omitted header print. |
 | F1 | Applied | "Flynn (1966) classified ... and developed the classification in a later paper (Flynn, 1972)"; reference M. J. Flynn, "Very high-speed computing systems," *Proceedings of the IEEE*, vol. 54, no. 12, pp. 1901–1909, 1966, added before the 1972 entry (details as verified by the fact-checker). |
 | F2 | No change | As the fact-checker recommends: the sentence stays a qualified general statement with no figure and no citation to an unchecked page. |
+
+## QA
+
+Stage EOS 10, by an independent QA editor who did not write, revise or review the entry in an earlier stage. Review input: `/tmp/claude-0/hpc/qa/data-parallelism-vector-units-and-gpus.json`.
+
+**Decision: revise. Not recorded.** Two should-fix defects are open (Q1, Q2). Provisional scores: purpose 4, structure 3, accuracy 3, evidence 3, language 2, consistency 3, publishing 4, total 22/28. These scores fail the article thresholds (24 total, 3 per dimension). Critical conditions C1-C8: none holds. Q2 is a misleading code comment, not a wrong result. C9: the series review is resolved but not yet stamped.
+
+Confirmed resolved in the text: D1-D3, C1-C3, T1-T5 (and T6-T9, F1), series F1, F2, F3, F11, F15. QA recomputed `offload.py` (the output matches every digit), the break-even point 252.6, the 4-ulp difference between the two sums, 13.4 × 32/24 = 17.9 GB/s, 0.112/0.072 = 1.56 and 0.237/0.051 = 4.6. The cross-references to entry 1 (Sections 4, 5, 5.4, 6, 6.3), entry 2 (Sections 4, 5, 5.2, 6.3, 6.4), entry 3 (Sections 3 and the whole entry), entry 5, the two insights and `solving-large-linear-systems` Section 4 all exist and say what is claimed. Lint gives 0 errors, 0 warnings and 8 suggestions. Two of the suggestions are new since the Resolution: `paragraph-length` and `sentence-length` at `:112`. `eos validate-site dist` reports no issues.
+
+### Q1. Should fix (structure, language). The Section 2.3 paragraph is overloaded and uses an unintroduced figure
+- **Where:** `src/content/blog/data-parallelism-vector-units-and-gpus.mdx:112`, Section 2.3
+- **Text:** "... Axpy reads the array it writes, so it moves no write-allocate traffic, and, as Section 5.2 of the second entry found, how much one core sustains depends on the mix of reads and writes; the one-core ridge point of about 6.8 FLOP/byte is therefore a rough figure. Going from 4 lanes to 8, however, ..."
+- **Problem:** The series F2 fix made this a 232-word paragraph (lint `paragraph-length`) with a 50-word sentence (lint `sentence-length`). The paragraph covers three topics: the intensity and roofline, the bandwidth reconciliation, and the lane-width result. "The one-core ridge point of about 6.8 FLOP/byte" appears nowhere else in this entry, has no link, and is not introduced; it comes from Section 1.1 of the second entry. "Section 5.2 of the second entry" is also unlinked. The "however" sentence now follows the reconciliation instead of the vectorization gain it contrasts with.
+- **Correction:** Split the paragraph in two places and replace the middle part. Keep the first paragraph as is, up to and including "(1.56 for the 256-bit build in the run shown)." Then add:
+
+  "This suggests that the scalar loop did not keep enough memory requests in flight. The vectorized loop's 22.3 GB/s is well above the 13.4 GB/s that one core sustained on the triad of [Section 6.3 of the second entry](/blog/memory-hierarchy-and-locality#63-measuring-sustainable-bandwidth), 17.9 GB/s counting the write-allocate read. Axpy reads the array it writes, so it moves no write-allocate traffic. As [Section 5.2 of the second entry](/blog/memory-hierarchy-and-locality#52-array-of-structures-and-structure-of-arrays) found, how much one core sustains depends on the mix of reads and writes, so the one-core ridge point of about 6.8 FLOP/byte that [Section 1.1 of the second entry](/blog/memory-hierarchy-and-locality#11-the-processor-memory-gap) derived from the triad is only a rough figure."
+
+  Start a new paragraph at "Going from 4 lanes to 8, however, changed nothing beyond the noise, ..." and leave its text unchanged to the end. Both fragments exist in `dist/blog/memory-hierarchy-and-locality.html`.
+
+### Q2. Should fix (accuracy). The listing comment contradicts the byte count
+- **Where:** `src/content/blog/data-parallelism-vector-units-and-gpus.mdx:358`, Section 6.1 listing
+- **Text:** `for n in (10**6, 10**8):         # axpy: 2n FLOP, 24n bytes each way`
+- **Problem:** The program passes `Q_link = 24 * n` in total, and `:376` says "x and y are sent and y is returned, 24 bytes per element". "Each way" means 24n in each direction, 48n in all. The program `offload.py` does not have this comment: its comment reads "memory traffic 24n bytes; send x and y, return y". The model's output is unaffected.
+- **Correction:** `for n in (10**6, 10**8):         # axpy: 2n FLOP, 24n bytes in memory and over the link`
+
+### Q3. Optional (language, consistency)
+- `:18`: "with 4 cores of an Intel Xeon processor reported at 2.1 GHz (Section 5.4 of the first entry infers that the cores ran faster) that supports the 512-bit vector extensions". The relative clause after the parenthesis is ambiguous, and standards 5.5 call for words for small counts that are not measurements, as in the other entries. Suggested text: "with four cores of an Intel Xeon processor that supports the 512-bit vector extensions, reported at 2.1 GHz (Section 5.4 of the first entry infers that the cores ran faster)".
+
+After Q1 and Q2 are applied, the entry needs only a re-lint, a rebuild and a fresh QA record. No technical re-review is needed: the changes add no new claim.
+
+Not verified: the reference-machine timings and the ranges from repeated runs that were not logged (the reference VM is no longer available; the text presents them as measurements of that machine); the Volta independent-scheduling statement, which is verified by search but not cited; the FP64 statement, which is qualified and uncited; and the claims attributed to Hwu, Kirk and El Hajj, which were checked against standard CUDA behavior, not against the book's pages.
+
+## Resolution of the QA findings
+
+- Q1 (should fix): applied with the QA editor's text. The F2 sentence is now its own paragraph, links Sections 5.2 and 1.1 of the second entry, and says where the 6.8 FLOP/byte ridge point comes from. "Going from 4 lanes to 8" starts a new paragraph.
+- Q2 (should fix): the listing comment now reads "24n bytes in memory and over the link".
+- Q3 (optional): applied ("four cores of an Intel Xeon processor that supports the 512-bit vector extensions, reported at 2.1 GHz ...").
+
+## QA (second pass)
+
+The independent QA editor ran this pass after the author applied Q1 to Q3 (see "Resolution of the QA findings" above). The record is `editorial/records/article/data-parallelism-vector-units-and-gpus.json`.
+
+**Decision: publish, total 26/28.** None of the critical conditions C1-C8 holds. C9: the series review is resolved but not yet stamped.
+
+Checked:
+- **Q1.** `:112` now ends after the 1.56 parenthesis. `:114` carries the reconciliation in the QA wording, with working links to the second entry's Sections 6.3, 5.2 and 1.1. `:116` starts "Going from 4 lanes to 8, however,", which now follows the vectorization result it contrasts with.
+- **Q2.** `:362` reads `# axpy: 2n FLOP, 24n bytes in memory and over the link`.
+- **Q3.** `:18` is applied.
+- **Lint.** 0 errors, 0 warnings and 7 suggestions. The paragraph-length suggestion is gone. The remaining sentence-length suggestion at `:114` (50 words) is one connected inference and is kept.
+- **Site checks.** `eos validate-site dist` reports no issues. `check:links` reports that all internal links resolve. `dist/` was rebuilt after the edit.
+
+| Dimension | Score | Justification |
+|---|---|---|
+| purpose | 4 | Purpose, prior results and conventions are explicit. |
+| structure | 4 | Section 2.3 now runs intensity, then gain, then reconciliation, then width. |
+| accuracy | 4 | Every finding is resolved; the listing comment now matches the program and the text. |
+| evidence | 3 | The Volta and FP64 statements are uncited (verified by search, or qualified). |
+| language | 4 | House style throughout; the remaining suggestions are justified. |
+| consistency | 3 | In-text citation style differs between entries (series F18, deferred). |
+| publishing | 4 | Lint, build, links and validate-site are clean. |
+
+Not verified: unchanged from the first pass.
