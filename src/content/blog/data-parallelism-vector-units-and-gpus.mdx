@@ -1,0 +1,489 @@
+---
+title: "Data Parallelism: Vector Units and GPUs"
+description: "How vector instructions and GPUs apply one operation to many data elements, what stops a loop from vectorizing, and when moving work to a GPU repays the transfer."
+publishedAt: "2026-10-16"
+category: "Computing Systems"
+tags:
+  - parallel computing
+  - performance
+  - GPU
+series: parallel-and-high-performance-computing
+seriesOrder: 4
+---
+
+[The third entry](/blog/threads-and-shared-memory-parallelism) divided a loop among threads, each running its own instruction stream on its own core. This entry turns to a different kind of parallelism, found inside a single core and, in much larger quantity, inside a graphics processing unit (GPU): one instruction applied to many data elements at once. It builds on three earlier results. The roofline bound of [the first entry](/blog/performance-models-and-scaling-laws#5-the-roofline-bound) decides whether wider arithmetic can help a kernel at all. The data layouts of [the second entry](/blog/memory-hierarchy-and-locality#5-data-layout) decide whether the elements a vector instruction needs sit next to each other in memory. And the threads and races of [the third entry](/blog/threads-and-shared-memory-parallelism#3-data-races-and-how-to-remove-them) reappear, in a new form, on a GPU.
+
+The same roofline reasoning runs through both halves. On the CPU, compiler reports and timings show which loops gain from vector instructions and which program properties stop a compiler from using them. On the GPU, the execution model, the memory system and the limits explain how the hardware keeps thousands of lanes busy, and a cost model decides when moving a computation to the GPU repays the cost of moving its data.
+
+**Conventions.** The C code is C11 compiled with the GNU Compiler Collection (GCC) 13.3 as `gcc -std=c11 -O3 -march=native` unless stated otherwise; the models are Python 3.13. Measurements come from the series' reference machine: a Kernel-based Virtual Machine (KVM) guest with four cores of an Intel Xeon processor that supports the 512-bit vector extensions, reported at 2.1 GHz (Section 5.4 of the first entry infers that the cores ran faster). Each core has 48 KiB of level-1 (L1) data cache and 2 MiB of level-2 (L2) cache, and the shared level-3 (L3) cache is reported by `lscpu` as 260 MiB. All timings use one thread, report the median of 7 repetitions, were taken while no other benchmark ran, and describe this machine only; it is a shared virtual machine, so its timings are noisy, and differences of a few percent are not interpreted.
+
+The reference machine has no GPU: every GPU listing here is an illustration that was not compiled or run, and every GPU figure is labeled as assumed or attributed to a cited source. Rates are in billions of floating-point operations (FLOP) per second (GFLOP/s) and gigabytes per second (GB/s, $10^9$ bytes per second); data are 8-byte doubles.
+
+## 1. Data parallelism
+
+### 1.1 One operation on many elements
+
+A computation is **data-parallel** when it applies the same operation independently to many data elements. The update $y_i \leftarrow a\,x_i + y_i$ for $i = 0, \dots, n-1$ (called **axpy**, for "$a$ times $x$ plus $y$") is the standard example: each element needs only its own $x_i$ and $y_i$, so the $n$ updates can happen in any order, or all at once. In the work-span terms of [the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism), the work is $W = 2n$ operations and the span is $D = 2$ operations (a multiplication, then the addition that uses it), so the parallelism $W/D = n$ grows with $n$. Elementwise array arithmetic, grid stencils and matrix multiplication have this shape.
+
+Data parallelism is a property of the computation, not of the hardware. Threads can exploit it, each taking a range of $i$. So can hardware that executes one instruction on several elements at once, which is cheaper, because one instruction is fetched, decoded and scheduled for several elements. The hardware this entry describes is built for the second way.
+
+### 1.2 Flynn's taxonomy
+
+Flynn (1966) classified computer organizations by the number of instruction streams and data streams they process at once, and developed the classification in a later paper (Flynn, 1972). The four classes are:
+
+- **single instruction stream, single data stream** (SISD), the classic sequential processor;
+- **single instruction stream, multiple data streams** (SIMD), in which one instruction acts on many data elements;
+- **multiple instruction streams, single data stream** (MISD), a class with few practical examples;
+- **multiple instruction streams, multiple data streams** (MIMD), in which independent processors each run their own program on their own data.
+
+A multicore processor running the threads of the third entry is MIMD; the vector units inside each of its cores are SIMD. A GPU sits between the two: it runs many independent groups of threads, as an MIMD machine would, but each group executes in SIMD fashion (Section 3).
+
+### 1.3 Task parallelism and data parallelism
+
+The contrast is **task parallelism**, in which different operations run at the same time: one thread reads input while another computes and a third writes results. Task parallelism needs MIMD hardware, since the tasks run different code. Data parallelism can use either, and the levels multiply: a loop can be split across 4 threads and, within each thread, executed 4 or 8 elements at a time by vector instructions.
+
+## 2. Vector instructions on a CPU
+
+### 2.1 Registers and lanes
+
+A **vector register** (or SIMD register) holds several values of the same type side by side; each position is a **lane**. A vector instruction operates on all lanes at once: a vector addition adds lane 0 of one register to lane 0 of another, lane 1 to lane 1, and so on. The x86 architecture has added vector extensions of growing width, each documented in Intel's architecture manual (Intel, 2024):
+
+| Extension | Register width | Registers | Lanes of doubles | Lanes of 32-bit floats |
+|---|---|---|---|---|
+| Streaming SIMD Extensions (SSE, SSE2) | 128 bits | `xmm` | 2 | 4 |
+| Advanced Vector Extensions (AVX, AVX2) | 256 bits | `ymm` | 4 | 8 |
+| AVX-512 | 512 bits | `zmm` | 8 | 16 |
+
+The width bounds the gain: a loop whose arithmetic is done in 256-bit instructions does at most 4 times as many double-precision operations per instruction as its scalar version. AVX-512 also added **mask registers**, which select the lanes an instruction acts on and leave the others unchanged (Intel, 2024). Vector, SIMD and GPU architectures are compared at length in chapter 4 of Hennessy and Patterson (2017).
+
+### 2.2 Auto-vectorization
+
+Programmers rarely write vector instructions by hand. At `-O3`, GCC's **auto-vectorizer** looks for loops whose iterations can be executed several at a time and rewrites them to process a register's worth of elements per iteration, with a scalar or narrower loop for the elements left over. The flag `-march=native` lets it use every instruction the build machine supports; `-fopt-info-vec` reports each loop it vectorized, `-fopt-info-vec-missed` each loop it did not, and `-fno-tree-vectorize` turns it off, which gives a scalar baseline (Stallman and the GCC Developer Community, 2024).
+
+The test program `kernels.c` contains two loops. The first evaluates a polynomial of degree 8 by Horner's rule, 8 multiplications and 8 additions per element, on arrays of 2048 doubles (16 KiB each, so both fit in the L1 cache) swept $10^5$ times. Since the data stay in the cache, it is limited by arithmetic. The second is axpy on arrays of $2^{26}$ doubles (512 MiB each, larger than the L3), so every element comes from main memory:
+
+```c
+void poly(long n, const double *restrict x, double *restrict y) {
+    for (long i = 0; i < n; i++) {
+        double v = x[i], p = 0.5;
+        p = p * v + 0.25; p = p * v + 0.125; p = p * v + 0.0625;
+        p = p * v + 0.03125; p = p * v + 0.015625; p = p * v + 0.0078125;
+        p = p * v + 0.00390625; p = p * v + 0.001953125;
+        y[i] = p;
+    }
+}
+
+void axpy(long n, double a, const double *restrict x, double *restrict y) {
+    for (long i = 0; i < n; i++) y[i] = a * x[i] + y[i];
+}
+```
+
+GCC reports both loops as vectorized (line 31 is the polynomial loop, line 41 the axpy loop; the reports for the copies inlined into `main` and for the initialization loops are cut):
+
+```text
+$ gcc -std=c11 -O3 -march=native -fopt-info-vec kernels.c -o kernels_vec
+kernels.c:31:24: optimized: loop vectorized using 32 byte vectors
+kernels.c:31:24: optimized: loop vectorized using 16 byte vectors
+kernels.c:41:24: optimized: loop vectorized using 32 byte vectors
+kernels.c:41:24: optimized: loop vectorized using 16 byte vectors
+...
+```
+
+The main loops use 32-byte (256-bit) vectors, 4 doubles per instruction; the 16-byte versions handle part of the remainder. Two compiler defaults, noted in [Section 6 of the first entry](/blog/performance-models-and-scaling-laws#6-measuring-performance-honestly), shape these loops. GCC chose 256 bits although the processor supports 512: GCC 13.3's targets for AVX-512 Xeon processors (`skylake-avx512`, `cascadelake`, `icelake-server`, `sapphirerapids`) all set a default preferred vector width of 256 bits, and `-mprefer-vector-width=512` overrides it. And in a strict ISO mode such as `-std=c11`, GCC does not fuse a multiplication and an addition into one fused multiply-add instruction unless asked to with `-ffp-contract=fast` (Stallman and the GCC Developer Community, 2024). The disassembly confirms 8 `vmulpd` and 8 `vaddpd` instructions on 256-bit `ymm` registers in the main polynomial loop, one per Horner step, 8 more of each on 128-bit `xmm` registers in the remainder loop, and their scalar forms `vmulsd` and `vaddsd` in the scalar build.
+
+### 2.3 A compute-bound loop gains and a memory-bound loop does not
+
+The same source was built three ways and run with no other benchmark on the machine:
+
+```text
+--- scalar (-fno-tree-vectorize)
+poly: 0.421 s, 7.79 GFLOP/s (check 0.994632)
+axpy: 0.112 s, 1.20 GFLOP/s, 14.4 GB/s (check 2.000000)
+--- 256-bit (default)
+poly: 0.115 s, 28.40 GFLOP/s (check 0.994632)
+axpy: 0.072 s, 1.86 GFLOP/s, 22.3 GB/s (check 2.000000)
+--- 512-bit (-mprefer-vector-width=512)
+poly: 0.109 s, 30.14 GFLOP/s (check 0.994632)
+axpy: 0.077 s, 1.75 GFLOP/s, 21.0 GB/s (check 2.000000)
+```
+
+The polynomial loop ran $28.40/7.79 = 3.6$ times faster with 4-lane vectors (3.3 to 3.6 times in earlier runs of the same builds), close to the factor of 4 the width allows. With 8 lanes it gained only a little more, $30.14/7.79 = 3.9$. In every run the 512-bit build was faster than the 256-bit one, but by far less than the factor of 2 the width suggests; this entry did not establish why. A wider register does not guarantee a proportional gain.
+
+The axpy loop behaves differently. Its arithmetic intensity, with each operand crossing the memory interface once, is $I = 2/24 \approx 0.083$ FLOP/byte, the value worked out in [the roofline insight](/insights/compute-bound-or-memory-bound); its two printed rates are one measurement expressed two ways ($22.3 \times 0.083 = 1.86$). At this intensity the roofline bound $P \le \min(P_{\mathrm{peak}}, B\,I)$ depends only on bandwidth. Vectorization made the loop 1.4 to 1.6 times faster than the scalar build in repeated runs (1.56 for the 256-bit build in the run shown).
+
+This suggests that the scalar loop did not keep enough memory requests in flight. The vectorized loop's 22.3 GB/s is well above the 13.4 GB/s that one core sustained on the triad of [Section 6.3 of the second entry](/blog/memory-hierarchy-and-locality#63-measuring-sustainable-bandwidth), 17.9 GB/s counting the write-allocate read. Axpy reads the array it writes, so it moves no write-allocate traffic. As [Section 5.2 of the second entry](/blog/memory-hierarchy-and-locality#52-array-of-structures-and-structure-of-arrays) found, how much one core sustains depends on the mix of reads and writes, so the one-core ridge point of about 6.8 FLOP/byte that [Section 1.1 of the second entry](/blog/memory-hierarchy-and-locality#11-the-processor-memory-gap) derived from the triad is only a rough figure.
+
+Going from 4 lanes to 8, however, changed nothing beyond the noise, as expected of a loop limited by bandwidth rather than by instructions. Vector width raises $P_{\mathrm{peak}}$, which helps only kernels under the flat part of the roof; for a memory-bound kernel the productive changes are those of [the second entry](/blog/memory-hierarchy-and-locality), which move fewer bytes.
+
+### 2.4 What blocks vectorization
+
+To vectorize a loop, the compiler must prove that executing several iterations at once gives the same result as executing them in order. Five obstacles are common. The file `blockers.c` contains one loop for each, and `-fopt-info-vec-all` reports (trimmed to the lines that state a decision):
+
+```text
+blockers.c:6:24: optimized:  loop versioned for vectorization because of possible aliasing
+blockers.c:6:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:11:24: missed: couldn't vectorize loop
+blockers.c:16:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:22:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:29:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:34:24: optimized: loop vectorized using 32 byte vectors
+...
+```
+
+**Loop-carried dependences.** A **loop-carried dependence** exists when one iteration uses a value that an earlier iteration produced. The prefix sum on line 11,
+
+```c
+for (long i = 1; i < n; i++) y[i] = y[i - 1] + y[i];
+```
+
+needs the final $y_{i-1}$ before it can compute $y_i$, so consecutive iterations cannot share one vector instruction, and GCC reports `couldn't vectorize loop`. The dependence belongs to the algorithm as written; a parallel prefix sum exists, but it is a different algorithm with more work. Not every dependence forbids vectorization: if an iteration only reads an element that a *later* iteration overwrites, as in `a[i] = a[i + 4] + b[i]`, loading the old values before any store preserves the sequential result (Exercise 2).
+
+**Possible aliasing.** Two pointers **alias** when they refer to overlapping memory. In the axpy of line 6, written without `restrict`, nothing tells the compiler that `x` and `y` do not overlap; if `y` started one element after `x`, the loop would carry a dependence. GCC **versions** the loop: a run-time test of the addresses selects a vectorized loop when the arrays do not overlap and the scalar loop when they do. For more complicated loops the compiler may give up instead. The C99 qualifier `restrict` is the programmer's promise that, during the call, the memory reached through that pointer is not accessed through any other; it removes the question, and a call that breaks the promise has undefined behavior.
+
+**Branches.** A vector instruction does the same operation in every lane, so lanes cannot follow different paths through an `if`. Simple branches are converted into computation of both outcomes followed by a per-lane selection, called **if-conversion** or masking: the clamp loop on line 16, `y[i] = x[i] > 1.0 ? 1.0 : x[i]`, became a comparison into a mask register and a masked move, which blends the two results. Both paths are then evaluated for every element, so an expensive rare path is paid for everywhere. The same trade-off returns on the GPU (Section 5.1).
+
+**Non-unit strides and data layout.** A vector load reads consecutive memory, so a loop that touches every third double must load whole vectors and rearrange them, or use slower gather instructions. Line 29 updates the `x` coordinate of particles stored as an **array of structures** (AoS), `struct particle { double x, y, z; }`, so consecutive `x` values are 24 bytes apart. Line 34 does the same update on a **structure of arrays** (SoA), with all `x` values in one contiguous array (the layouts of [the second entry](/blog/memory-hierarchy-and-locality#5-data-layout)). Both vectorized, but the AoS loop needs three vector loads and two permutations (`vpermt2pd`) to collect four `x` values, then four scalar stores. The two loops were timed on 1024 particles. That is few enough to stay in the L1 or L2 cache, so the difference comes from instructions rather than memory traffic:
+
+```text
+AoS: 0.129 s, 0.32 ns per element
+SoA: 0.056 s, 0.14 ns per element (check 2.800 2.800)
+```
+
+The SoA loop ran about 2.3 times faster (2.3 to 2.5 times in repeated runs). On arrays too large for the caches, the AoS layout also moves more bytes per useful `x`, the effect the second entry measured.
+
+**Reductions.** A **reduction** combines many elements into one value, as in a sum. The sum on line 22 is reported as vectorized, but the disassembly shows four scalar additions (`vaddsd`) per iteration into the same register, in source order:
+
+```text
+ 240:	c5 fb 58 00          	vaddsd (%rax),%xmm0,%xmm0
+ 248:	c5 fb 58 40 e8       	vaddsd -0x18(%rax),%xmm0,%xmm0
+ 24d:	c5 fb 58 40 f0       	vaddsd -0x10(%rax),%xmm0,%xmm0
+ 252:	c5 fb 58 40 f8       	vaddsd -0x8(%rax),%xmm0,%xmm0
+```
+
+GCC produced an *in-order* reduction, for the reason Section 2.5 gives.
+
+### 2.5 Reductions and floating-point reassociation
+
+A vector sum keeps one partial sum per lane, $s_0$ collecting $x_0 + x_4 + x_8 + \dots$, $s_1$ collecting $x_1 + x_5 + \dots$ and so on, and adds the partial sums at the end. That is a different order from the source, and in floating-point arithmetic the order matters, because each addition is rounded and floating-point addition is not associative ([the insight on floating-point rounding](/insights/floating-point-in-long-simulations) gives a two-line example). Without permission to reorder, GCC keeps the source order, so every addition waits for the previous one; [Section 6.3 of the first entry](/blog/performance-models-and-scaling-laws#63-problem-size-and-compiler-settings) measured the same effect in a dot product.
+
+The permission can be given for a whole file with `-fassociative-math`, which GCC accepts only together with `-fno-signed-zeros` and `-fno-trapping-math` and which `-ffast-math` includes (Stallman and the GCC Developer Community, 2024), or for one loop with the directive `#pragma omp simd reduction(+:s)` compiled with `-fopenmp-simd` (OpenMP Architecture Review Board, 2021). The program `reduce.c` sums 2048 doubles of widely varying magnitude, $2 \times 10^5$ times, built both ways:
+
+```text
+$ gcc -std=c11 -O3 -march=native reduce.c -o reduce_ordered
+$ gcc -std=c11 -O3 -march=native -fassociative-math -fno-signed-zeros \
+      -fno-trapping-math reduce.c -o reduce_reassoc
+$ ./reduce_ordered
+sum = 517024.43791358318  time 0.237 s  1.73 GFLOP/s
+$ ./reduce_reassoc
+sum = 517024.43791358295  time 0.051 s  8.03 GFLOP/s
+```
+
+The reordered sum ran 4.6 times faster (4.3 to 5.9 times in other runs). The disassembly shows a single 256-bit accumulator (`vaddpd (%rax),%ymm0,%ymm0`), so the additions still form one dependent chain, now of one vector addition per four elements: the four lanes account for a factor of about 4, and this entry did not establish the source of the rest. The two results differ in their last two digits. The program `exact_sum.py` computes the correctly rounded sum of the same values with Python's `math.fsum`:
+
+```text
+exact (rounded) = 517024.43791358318
+517024.43791358318: error +0 ulp
+517024.43791358295: error -4 ulp
+```
+
+For these data the ordered sum happens to be correctly rounded and the reordered one is 4 units in the last place (ulp) too small. That is not a verdict in favor of source order: four partial sums of $n/4$ terms have a smaller worst-case error bound than one chain of $n$ additions. What changes is reproducibility, since the result now depends on the vector width and the compiler flags. Code that must reproduce results bit for bit has to fix the order of its reductions; code that needs only accuracy can accept the reordering and should compare results with a tolerance.
+
+## 3. The GPU execution model
+
+### 3.1 Many simple cores
+
+A CPU core spends much of its area on making one instruction stream fast: large caches, branch prediction and out-of-order execution. A GPU spends its area on many **streaming multiprocessors** (SMs, the term NVIDIA uses), each with many simple arithmetic units, a large register file and a small fast memory. It relies on running far more threads than it has arithmetic units (Lindholm and colleagues, 2008; Hwu, Kirk and El Hajj, 2022). The design came from graphics, where every pixel is processed independently; the Tesla architecture of 2006 unified the graphics pipeline into one array of programmable processors that could also be programmed for general computation (Lindholm and colleagues, 2008).
+
+This section uses the vocabulary of NVIDIA's Compute Unified Device Architecture (CUDA), the programming model described for Tesla by Lindholm and colleagues and taught in detail by Hwu, Kirk and El Hajj (2022). Other vendors use similar models under other names.
+
+### 3.2 Threads, blocks and grids
+
+A GPU program, or **kernel**, is a function written for one thread. It is launched over a **grid** of **thread blocks**, each containing up to a hardware limit of threads. Each thread finds its place from built-in indices: `blockIdx` (which block), `blockDim` (threads per block) and `threadIdx` (which thread within the block). The threads of one block run on one SM, share its fast on-chip memory and can synchronize with each other; threads in different blocks can do neither (Hwu, Kirk and El Hajj, 2022). Blocks are independent, so the hardware may run them in any order on any SM.
+
+Axpy as a CUDA kernel shows the pattern. The listing, in CUDA C++, is an illustration that was not compiled or run (see Conventions):
+
+```cpp
+// CUDA C++. Illustration only: not compiled or run for this entry.
+__global__ void axpy(int n, double a, const double *x, double *y) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;   // global element index
+    if (i < n)                                        // last block may be partial
+        y[i] = a * x[i] + y[i];
+}
+
+// Host code (abbreviated): allocate device arrays d_x and d_y, copy x and y
+// to them, launch one thread per element in blocks of 256 threads, copy y back.
+//   int threads = 256, blocks = (n + threads - 1) / threads;
+//   axpy<<<blocks, threads>>>(n, a, d_x, d_y);
+//   cudaMemcpy(y, d_y, n * sizeof(double), cudaMemcpyDeviceToHost);
+```
+
+The loop of the C version has become the grid: for $n = 10^8$ the launch creates 390 625 blocks of 256 threads, one thread per element. The guard `if (i < n)` is needed because the last block extends past the end of the arrays whenever $n$ is not a multiple of 256. The device arrays live in the GPU's own memory, so the data must be copied there and back, a cost Section 6 puts into numbers.
+
+### 3.3 Warps of 32 threads
+
+The SM groups the threads of a block into **warps** of 32 consecutive threads and issues one instruction at a time for a whole warp, all 32 threads executing it on their own data. Lindholm and colleagues (2008) called this **single instruction, multiple threads** (SIMT) execution. It is SIMD hardware underneath, with the warp as the vector and each thread as a lane, but the programmer writes the code of one scalar thread and the hardware assembles the vectors. The difference shows when threads of one warp disagree at a branch (Section 5.1). The parts form a hierarchy:
+
+```mermaid
+flowchart LR
+  G["Grid: one kernel launch"] --> B["Thread blocks: each runs on one SM"]
+  B --> W["Warps: 32 threads, one instruction at a time"]
+  W --> T["Threads: one element each"]
+```
+
+### 3.4 Latency hiding and occupancy
+
+A load from GPU memory takes hundreds of cycles. A CPU core hides such latency with caches and out-of-order execution; a GPU hides it by switching. Each SM keeps many warps **resident** at once, their registers held permanently in its register file, so switching between warps costs nothing. While one warp waits for memory, the SM issues instructions from another that is ready (Hwu, Kirk and El Hajj, 2022).
+
+The number of warps needed follows from **Little's law** (Little, 1961), which [Section 6.4 of the second entry](/blog/memory-hierarchy-and-locality#64-what-limits-one-core-and-what-limits-many) applied to one CPU core: the bytes in flight equal bandwidth times latency. A GPU keeps them in flight with warps instead of miss trackers. With assumed round figures of $B = 1000$ GB/s and a latency of 0.5 µs, a GPU needs $1000 \times 10^9 \times 0.5 \times 10^{-6} = 5 \times 10^5$ bytes in flight, or 62 500 outstanding 8-byte loads, each issued by some thread. This is why GPU programs launch tens of thousands of threads or more.
+
+The fraction of an SM's warp slots that are filled is its **occupancy**. Resident warps share the SM's registers and on-chip memory, so a kernel whose threads need many registers fits fewer warps. As an example with assumed limits: if an SM holds at most 64 warps and has 65 536 registers, a kernel needing 64 registers per thread can keep $65\,536/64 = 1024$ threads, or 32 warps, resident, an occupancy of 50%. Occupancy is useful only as far as it supplies enough independent work to hide latency; a kernel with much independent work inside each thread can run well at low occupancy (Hwu, Kirk and El Hajj, 2022).
+
+## 4. GPU memory and coalescing
+
+### 4.1 Global memory and shared memory
+
+**Global memory** is the large memory on the GPU board, visible to every thread of every block, with high bandwidth and long latency. **Shared memory** is a small memory on each SM with much lower latency. It is allocated per block and visible only to that block's threads, and the program manages it explicitly, loading data into it and reading from it (Hwu, Kirk and El Hajj, 2022). Each thread also has its own registers, the fastest storage of all. Much of GPU programming consists of arranging for each value fetched from global memory to be used many times from shared memory or registers, the GPU form of the blocking of [the second entry](/blog/memory-hierarchy-and-locality#4-blocking-for-reuse).
+
+### 4.2 Coalesced and strided access
+
+When the 32 threads of a warp execute a load, the hardware combines their addresses into as few memory transactions as possible. If the threads read consecutive elements, the warp's 32 doubles occupy 256 consecutive bytes and arrive in a few large transactions; this is a **coalesced** access (Hwu, Kirk and El Hajj, 2022). If they read elements far apart, each address may need its own transaction, and most of the bytes moved are discarded. The axpy kernel is coalesced, since thread $i$ reads element $i$. A kernel in which thread $i$ reads element $s\,i$ for a stride $s$ is not:
+
+```cpp
+// Illustration only, not run. Thread i reads x[i * stride]: for stride > 1
+// the warp's 32 addresses spread over 32 * stride * 8 bytes of memory.
+__global__ void strided_copy(int n, int stride, const double *x, double *y) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i * stride < n) y[i] = x[i * stride];
+}
+```
+
+With a stride of 16 doubles (128 bytes), each thread's element lies in a different 128-byte block of memory. If memory is read in whole aligned 128-byte segments (an assumption for this example), the warp moves 4096 bytes to use 256 of them, 1/16 (Exercise 3). This is the AoS problem of Section 2.4 in a more severe form, with the same cure: lay data out so that consecutive threads read consecutive addresses.
+
+### 4.3 Tiling in shared memory
+
+Matrix multiplication $C = AB$ for $n \times n$ matrices shows what shared memory buys. A direct kernel assigns one element $c_{ij}$ to each thread, which reads row $i$ of $A$ and column $j$ of $B$ from global memory: $2n$ loads for $2n$ operations, an intensity of $2n/(8 \cdot 2n) = 1/8$ FLOP/byte if nothing is reused. Yet each element of $A$ is needed by the $n$ threads computing row $i$ of $C$.
+
+**Tiling** exploits that reuse. Each block of $T \times T$ threads computes a $T \times T$ tile of $C$, walking along the shared dimension in steps of $T$. At each step the block loads one $T \times T$ tile of $A$ and one of $B$ into shared memory, one element per thread, and each thread then performs $T$ multiply-add steps from shared memory. Per step the block loads $2T^2$ doubles ($16T^2$ bytes) from global memory and performs $2T^3$ operations, so the intensity with respect to global memory rises to
+
+$$
+I = \frac{2T^3}{16T^2} = \frac{T}{8}\ \text{FLOP/byte},
+$$
+
+a factor $T$ better than the direct kernel: 2 FLOP/byte for $T = 16$. A sketch of the kernel, again an illustration that was not compiled or run, with $n$ assumed to be a multiple of $T$:
+
+```cpp
+// CUDA C++. Illustration only: not compiled or run for this entry.
+// Launched with blocks of T x T threads and an (n/T) x (n/T) grid.
+#define T 16
+__global__ void matmul_tiled(int n, const double *A, const double *B, double *C) {
+    __shared__ double As[T][T], Bs[T][T];
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int row = blockIdx.y * T + ty, col = blockIdx.x * T + tx;
+    double acc = 0.0;
+    for (int k0 = 0; k0 < n; k0 += T) {
+        As[ty][tx] = A[row * n + k0 + tx];      // consecutive tx: coalesced
+        Bs[ty][tx] = B[(k0 + ty) * n + col];    // consecutive tx: coalesced
+        __syncthreads();                        // wait until both tiles are loaded
+        for (int k = 0; k < T; k++)
+            acc += As[ty][k] * Bs[k][tx];
+        __syncthreads();                        // wait until all threads are done
+    }
+    C[row * n + col] = acc;
+}
+```
+
+Both global loads are coalesced, because consecutive values of `tx` read consecutive addresses.
+
+### 4.4 Synchronization within a block
+
+Each call to `__syncthreads()` is a **barrier**: no thread of the block continues past it until every thread of the block has reached it (Hwu, Kirk and El Hajj, 2022). Both barriers prevent a data race of the kind defined in [the third entry](/blog/threads-and-shared-memory-parallelism#3-data-races-and-how-to-remove-them). Without the first, a thread could read `As[ty][k]` before the thread responsible for it had written it. Without the second, a fast thread could overwrite `As` with the next tile while a slower thread still read the current one. A block barrier is cheap, because the threads of a block share one SM; synchronization across blocks is another matter (Section 5.3).
+
+## 5. Divergence and other limits
+
+### 5.1 Branch divergence
+
+Because a warp issues one instruction at a time for all its threads, threads that take different sides of a branch cannot run at the same time. When they disagree, the warp **diverges**: the hardware executes one path with the other threads masked off, then the other path (Hwu, Kirk and El Hajj, 2022). In the classic SIMT model the threads reconverge after the branch; NVIDIA GPUs since the Volta generation schedule each thread independently and do not guarantee reconvergence at that point. Either way the result is correct, but the warp takes as long as both paths together: the masking of Section 2.4, done by the hardware.
+
+The cost depends on whether threads of the *same* warp disagree. A branch on `threadIdx.x % 2` splits every warp in half. A branch on `blockIdx.x`, or on `threadIdx.x / 32`, gives the same answer for all 32 threads of a warp and costs nothing extra. Algorithms with data-dependent control flow, such as per-element iteration counts or the traversal of an irregular tree, lose efficiency in proportion to how much the threads of a warp disagree; a common remedy is to group similar work into the same warps.
+
+### 5.2 Atomic operations
+
+In a **histogram**, each thread reads an element and increments the counter of its bin, and many threads may hit the same bin, so a plain increment would race. An **atomic operation**, such as CUDA's `atomicAdd`, performs the read, the addition and the write as one indivisible step (Hwu, Kirk and El Hajj, 2022). Atomics serialize the threads that collide on one address, so a histogram with few bins spends most of its time waiting. The usual design works in stages: each block builds a private histogram in shared memory and adds it to the global one at the end, one atomic operation per bin per block instead of one per element. A global sum is built the same way, from per-block reductions. With floating-point values, the order of the atomic additions varies between runs, so the reproducibility question of Section 2.5 returns, now between runs of the same binary.
+
+### 5.3 Synchronization across blocks
+
+There is no barrier across the blocks of an ordinary kernel launch. Blocks run in an order the hardware chooses, and a grid may have more blocks than the GPU can hold at once. A block that spins waiting for another may then wait for one that cannot start until it finishes, a deadlock (Hwu, Kirk and El Hajj, 2022). The ordinary global barrier is the end of a kernel: kernels launched one after another in the same stream of work run in order. The cost is a launch and the loss of everything held in registers and shared memory. An iterative solver that needs a global dot product at every iteration pays this at every step, and for small problems the launches can dominate the run time.
+
+### 5.4 Precision
+
+The throughput of double-precision (FP64) arithmetic relative to single precision (FP32) differs widely between GPU products, and is much lower on products designed mainly for graphics than on those designed for scientific computing. A program that needs double precision should check the figure for the specific product in its vendor's documentation; this entry quotes none. Precision is a numerical question first: a solver that loses accuracy in single precision does not become correct by running faster.
+
+### 5.5 Failure modes
+
+The common ways a GPU program goes wrong are these:
+
+- **Out-of-bounds threads.** A missing `if (i < n)` guard lets the last block read and write past the end of the arrays.
+- **Missing or misplaced barriers.** A missing `__syncthreads()` creates a race that may show only on some inputs; a barrier inside a branch that not all threads of the block take is not allowed and can hang the block (Hwu, Kirk and El Hajj, 2022).
+- **Unchecked errors.** A kernel launch returns no value; a failed launch or a faulting kernel is reported only by a later error query, and code that never checks continues with wrong data.
+- **Mistimed measurements.** Launches are asynchronous, so a timer read right after a launch measures the launch, not the kernel, unless the host first waits for the GPU. The rules of [the first entry](/blog/performance-models-and-scaling-laws#6-measuring-performance-honestly) apply with this extra trap.
+- **Transfers that cost more than the kernel**, the subject of Section 6.
+- **Low occupancy and uncoalesced access**, which leave a correct kernel at a small fraction of what the hardware allows.
+
+## 6. When offloading pays
+
+### 6.1 A cost model
+
+Moving a computation from the CPU to a GPU, **offloading** it, pays only if the GPU's time including the data transfer is shorter than the CPU's time. With $Q_{\mathrm{link}}$ the bytes that must cross the link between host and GPU and $B_{\mathrm{link}}$ the link bandwidth,
+
+$$
+T_{\mathrm{gpu}} = T_{\mathrm{transfer}} + T_{\mathrm{kernel}} = \frac{Q_{\mathrm{link}}}{B_{\mathrm{link}}} + T_{\mathrm{kernel}},
+$$
+
+compared with $T_{\mathrm{cpu}}$. Both kernel times are taken as the roofline bound written as a time, $\max(W/P_{\mathrm{peak}},\ Q/B)$, where $W$ is the operation count and $Q$ the bytes moved between the processor and its own memory. All machine figures are assumed round numbers, not measurements and not the specifications of any product: a CPU with $P_{\mathrm{peak}} = 500$ GFLOP/s and $B = 100$ GB/s, a GPU with $P_{\mathrm{peak}} = 10\,000$ GFLOP/s and $B = 1000$ GB/s, and a host link with $B_{\mathrm{link}} = 25$ GB/s, with transfers not overlapped with computation. The program `offload.py` evaluates the model:
+
+```python
+# Python 3. Every machine figure here is ASSUMED for illustration.
+P_CPU, B_CPU = 500e9, 100e9      # assumed CPU: 500 GFLOP/s, 100 GB/s
+P_GPU, B_GPU = 10e12, 1000e9     # assumed GPU: 10 000 GFLOP/s, 1000 GB/s
+B_LINK = 25e9                    # assumed host link: 25 GB/s, no overlap
+
+def roofline_time(W, Q, P, B):
+    return max(W / P, Q / B)
+
+def compare(name, W, Q_mem, Q_link):
+    t_cpu = roofline_time(W, Q_mem, P_CPU, B_CPU)
+    t_xfer = Q_link / B_LINK
+    t_kern = roofline_time(W, Q_mem, P_GPU, B_GPU)
+    t_gpu = t_xfer + t_kern
+    print(f"{name:<16} {t_cpu*1e3:9.4f} {t_xfer*1e3:9.4f} {t_kern*1e3:9.4f}"
+          f" {t_gpu*1e3:9.4f} {t_cpu/t_gpu:8.2f}")
+
+...
+for n in (10**6, 10**8):         # axpy: 2n FLOP, 24n bytes in memory and over the link
+    compare(f"axpy n={n:.0e}", 2 * n, 24 * n, 24 * n)
+for n in (128, 512, 1024, 4096): # matmul: 2n^3 FLOP, 24n^2 bytes
+    compare(f"matmul n={n}", 2 * n**3, 24 * n**2, 24 * n**2)
+...
+```
+
+```text
+kernel               T_cpu    T_xfer    T_kern     T_gpu T_cpu/T_gpu   (times in ms)
+axpy n=1e+06        0.2400    0.9600    0.0240    0.9840     0.24
+axpy n=1e+08       24.0000   96.0000    2.4000   98.4000     0.24
+matmul n=128        0.0084    0.0157    0.0004    0.0161     0.52
+matmul n=512        0.5369    0.2517    0.0268    0.2785     1.93
+matmul n=1024       4.2950    1.0066    0.2147    1.2214     3.52
+matmul n=4096     274.8779   16.1061   13.7439   29.8500     9.21
+matmul break-even: n = 253, intensity over the link 21.1 FLOP/byte
+```
+
+The byte counts are minimums. For axpy, $x$ and $y$ are sent and $y$ is returned, 24 bytes per element. For matrix multiplication, $A$ and $B$ are sent and $C$ returned, $24n^2$ bytes, and each matrix is assumed to cross each processor's memory interface once, which tiling approaches but does not reach.
+
+### 6.2 Reading the result
+
+Axpy never pays, at any size. Its GPU kernel is 10 times faster than the CPU's, but the transfer takes 40 times as long as the GPU kernel, and both the transfer and the CPU time grow in proportion to $n$. The ratio is therefore fixed: $T_{\mathrm{cpu}}/T_{\mathrm{gpu}} \approx (24n/B)/(24n/B_{\mathrm{link}}) = B_{\mathrm{link}}/B = 0.25$, with $B$ the CPU's memory bandwidth. Moving a byte over the link costs more than the CPU spends reading it from its own memory, and axpy does too little with each byte to make up the difference.
+
+Matrix multiplication pays from moderate sizes on. It performs $2n^3$ operations on $24n^2$ transferred bytes, an **intensity over the link** of $W/Q_{\mathrm{link}} = n/12$ FLOP/byte that grows with $n$. For large $n$ both processors are compute-bound, and with $P_{\mathrm{cpu}}$ and $P_{\mathrm{gpu}}$ the two peak rates, offloading pays when
+
+$$
+\frac{24n^2}{B_{\mathrm{link}}} + \frac{2n^3}{P_{\mathrm{gpu}}} < \frac{2n^3}{P_{\mathrm{cpu}}}.
+$$
+
+Dividing by $2n^2$, we get
+
+$$
+n > \frac{12}{B_{\mathrm{link}} \left( 1/P_{\mathrm{cpu}} - 1/P_{\mathrm{gpu}} \right)} = \frac{12}{25 \times 10^9 \times (2 \times 10^{-12} - 10^{-13})} \approx 252.6,
+$$
+
+which agrees with the program's search, $n = 253$. At that size the intensity over the link is about 21 FLOP/byte, close to $P_{\mathrm{cpu}}/B_{\mathrm{link}} = 20$ FLOP/byte: offloading needs roughly as many operations per transferred byte as the CPU can perform in the time one byte crosses the link.
+
+This is the roofline applied to the link: the host link acts as one more level of the memory hierarchy, and what matters is the intensity of the offloaded work with respect to it. Kernels with low intensity, such as elementwise updates or the matrix-vector products of [iterative linear solvers](/blog/solving-large-linear-systems#4-stationary-iterative-methods), do not repay a transfer by themselves. They pay when the data *stay* on the GPU across many kernels: an iterative solver that copies its matrix once and runs hundreds of iterations on it has the intensity of the whole solve, not of one iteration (Exercise 5).
+
+### 6.3 Limits of the model
+
+Like the roofline, the model is optimistic. It assumes both processors reach their roofs; an equal shortfall on both sides would not change the conclusion, but an unequal one would. It ignores the fixed costs of starting a transfer and launching a kernel, which make small problems worse for the GPU than the table shows. It assumes no overlap of transfers with computation, which GPU programming models allow when the work is split into pieces. And its figures are invented: the break-even size scales with $P_{\mathrm{cpu}}/B_{\mathrm{link}}$, so it must be recomputed with measured or documented figures before it decides anything.
+
+## 7. Exercises
+
+**Exercise 1.** How many lanes does an AVX-512 register have for doubles and for 32-bit floats? For the polynomial loop of Section 2.3 and for axpy on arrays larger than the cache, what bound does the vector width put on the speedup over a scalar build, and which of the two can approach it?
+
+<details>
+<summary>Answer</summary>
+
+8 doubles or 16 floats, so the gain from arithmetic is bounded by 8 for doubles. The polynomial loop, limited by arithmetic, can approach that bound (it reached 3.3 to 3.6 with 4 lanes and 3.9 with 8 on the reference machine). Axpy on large arrays is bounded by $B\,I$ with $I \approx 0.083$ FLOP/byte; the width does not appear in that bound, so once the loop reaches the bandwidth roof, wider vectors give nothing, as the 256-bit and 512-bit builds showed.
+
+</details>
+
+**Exercise 2.** Which of these loops can be vectorized with 8-lane vectors without changing the result? (a) `a[i] = a[i + 4] + b[i]`; (b) `a[i] = a[i - 4] + b[i]`; (c) `a[i] = a[i - 8] + b[i]`.
+
+<details>
+<summary>Answer</summary>
+
+(a) Yes. A vector iteration covering $i, \dots, i+7$ loads $a_{i+4}, \dots, a_{i+11}$ before storing $a_i, \dots, a_{i+7}$, so it reads the old values, as the sequential loop does. (b) No. Iteration $i$ needs $a_{i-4}$ as computed by iteration $i-4$, so lanes 4 to 7 need the results of lanes 0 to 3 of the same instruction; the dependence distance 4 allows at most 4 lanes. (c) Yes: the distance equals the vector length, so each vector depends only on the previous vector, which has already been stored.
+
+</details>
+
+**Exercise 3.** Assume that GPU memory is read in aligned 128-byte segments and that a warp of 32 threads loads one double per thread. How many segments are read, and what fraction of the bytes moved are used, for strides of 1, 2 and 16 doubles?
+
+<details>
+<summary>Answer</summary>
+
+Stride 1: 256 bytes in 2 segments, all used (100%). Stride 2: 512 bytes in 4 segments, 256 bytes used (50%). Stride 16: each double lies in its own segment, 32 segments or 4096 bytes for 256 useful bytes, $256/4096 = 6.25\%$. The waste grows with the stride until each element needs its own segment.
+
+</details>
+
+**Exercise 4.** In a warp, threads with `threadIdx.x % 4 == 0` execute a branch that takes 120 cycles and the others an alternative that takes 40 cycles. How long does the warp take for the branch region? What if the condition were `threadIdx.x / 32 % 4 == 0`?
+
+<details>
+<summary>Answer</summary>
+
+With `threadIdx.x % 4`, every warp contains both kinds of thread (8 and 24), so every warp executes both paths: $120 + 40 = 160$ cycles. With `threadIdx.x / 32 % 4`, the condition is the same for all 32 threads of a warp, so each warp executes one path: 120 cycles for one warp in four and 40 cycles for the others, with no divergence.
+
+</details>
+
+**Exercise 5.** An iterative solver performs 500 iterations, each reading 1 GB of data at an intensity of 0.1 FLOP/byte. With the assumed machine of Section 6.1, compare the CPU time with the GPU time in two cases. In (a), the 1 GB is copied to the GPU once and only a small result is returned. In (b), the data are copied to and from the GPU at every iteration (2 GB per iteration).
+
+<details>
+<summary>Answer</summary>
+
+Each iteration does $10^8$ operations on $10^9$ bytes, so it is memory-bound on both processors. CPU: $10^9/(100 \times 10^9) = 10$ ms per iteration, 5 s in all. (a) GPU: one transfer of $10^9/(25 \times 10^9) = 40$ ms plus $500 \times 1$ ms $= 0.5$ s, about 0.54 s, roughly 9 times faster than the CPU. (b) GPU: $500 \times (80 + 1)$ ms $= 40.5$ s, about 8 times slower than the CPU. The kernel is the same; only the placement of the data differs.
+
+</details>
+
+**Exercise 6.** For the tiled matrix multiplication of Section 4.3 with $T = 32$, what is the intensity with respect to global memory, and how much shared memory does each block need?
+
+<details>
+<summary>Answer</summary>
+
+$I = T/8 = 4$ FLOP/byte. Two $32 \times 32$ tiles of doubles take $2 \times 1024 \times 8 = 16\,384$ bytes, 16 KiB. Going from $T = 16$ to $T = 32$ doubles the intensity (2 to 4 FLOP/byte) but quadruples the shared memory (4 KiB to 16 KiB) and the threads per block (256 to 1024), which limits how many blocks an SM can hold: the tile size trades reuse against occupancy.
+
+</details>
+
+## 8. Summary
+
+| Question | Answer |
+|---|---|
+| What is data parallelism? | The same operation applied independently to many elements; SIMD hardware exploits it with one instruction for many elements. |
+| How wide are x86 vector registers? | 128 bits (SSE), 256 bits (AVX, AVX2) and 512 bits (AVX-512): 2, 4 and 8 doubles. |
+| Which loops gain from vectorization? | Compute-bound loops, by up to the number of lanes (3.3 to 3.6 with 4 lanes on the reference machine); memory-bound loops stop at the bandwidth roof (axpy gained 1.4 to 1.6 times, and nothing more from 8 lanes). |
+| What blocks vectorization? | Loop-carried dependences, possible aliasing (remedy: `restrict`), branches (handled by masking), non-unit strides and AoS layouts, and ordered floating-point reductions. |
+| Why can a vectorized sum differ? | It adds in a different order, and floating-point addition is not associative; the result changes in the last bits. |
+| How does a GPU execute a kernel? | As a grid of thread blocks, each on one SM, executed in warps of 32 threads that share one instruction (SIMT). |
+| How does a GPU hide memory latency? | By keeping many warps resident and switching among them; the bytes in flight must equal bandwidth times latency. |
+| What makes GPU memory access efficient? | Coalesced access by consecutive threads, and reuse through tiles in shared memory, which raises intensity by a factor of $T$. |
+| What else limits a GPU? | Divergence within warps, contention on atomic operations, global synchronization only at kernel boundaries, and FP64 throughput on some products. |
+| When does offloading pay? | When the offloaded work has a high intensity with respect to the host link, or the data stay on the GPU across many kernels. |
+
+This entry has stayed inside one machine, where vector lanes and GPU threads share a memory or reach it over a single link. The last entry, [Distributed Memory and Message Passing](/blog/distributed-memory-and-message-passing), removes that shared memory: processes on separate nodes cooperate only by sending messages, and the cost of each message, a latency plus a time per byte, plays the part the host link played in Section 6. The same question, how much work each transferred byte must pay for, then decides how far a computation scales across many nodes.
+
+### References
+
+- M. J. Flynn, "Very high-speed computing systems," *Proceedings of the IEEE*, vol. 54, no. 12, pp. 1901–1909, 1966.
+- M. J. Flynn, "Some computer organizations and their effectiveness," *IEEE Transactions on Computers*, vol. C-21, no. 9, pp. 948–960, 1972.
+- J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017.
+- W.-m. W. Hwu, D. B. Kirk and I. El Hajj, *Programming Massively Parallel Processors: A Hands-on Approach*, 4th ed., Morgan Kaufmann, 2022.
+- Intel Corporation, *Intel 64 and IA-32 Architectures Software Developer's Manual*, 2024.
+- E. Lindholm, J. Nickolls, S. Oberman and J. Montrym, "NVIDIA Tesla: A unified graphics and computing architecture," *IEEE Micro*, vol. 28, no. 2, pp. 39–55, 2008.
+- J. D. C. Little, "A proof for the queuing formula: L = λW," *Operations Research*, vol. 9, no. 3, pp. 383–387, 1961.
+- OpenMP Architecture Review Board, *OpenMP Application Programming Interface*, version 5.2, 2021.
+- R. M. Stallman and the GCC Developer Community, *Using the GNU Compiler Collection*, for GCC version 13.3, Free Software Foundation, 2024.
