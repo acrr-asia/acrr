@@ -138,6 +138,7 @@ p=32   S=  9.03  E= 0.28
 p=48   S=  8.56  E= 0.18
 p=64   S=  7.82  E= 0.12
 p=128  S=  5.42  E= 0.04
+p* = sqrt((1-f)/c) = 30.8
 ```
 
 The speedup peaks at about 9.04 near $p^* = 30.8$ and then falls: with 128 processors the program is slower than with 8. Amdahl's bound without overhead would allow 12.55 at $p = 32$. Once overhead grows with $p$, adding processors can make a program slower. Overheads that grow more slowly, such as the $\log_2 p$ steps of a tree-shaped reduction, move the peak to larger $p$ but do not remove it. The [fifth entry](/blog/distributed-memory-and-message-passing) replaces $c\,(p-1)$ with a communication model built from measured message costs.
@@ -395,7 +396,7 @@ One core alone reached about 13 GB/s, roughly a quarter of the four-core rate, s
 
 ### 5.4 The peak arithmetic rate
 
-The theoretical peak is the product of the core count, the clock rate and the number of FLOP each core can complete per cycle. An AVX-512 register holds eight doubles, and a **fused multiply-add** (FMA) instruction computes $a \times b + c$ on all eight with one rounding, which counts as 16 FLOP. Intel has built Xeon processors with one and with two 512-bit FMA units per core, and the virtual machine reports only a generic model name, so the count cannot be read from `lscpu`. Assuming two units (not a confirmed figure), each core completes 32 FLOP per cycle, and at the reported 2.1 GHz the theoretical peak is
+The theoretical peak is the product of the core count, the clock rate and the number of FLOP each core can complete per cycle. An AVX-512 register holds eight doubles, and a **fused multiply-add** (FMA) instruction computes $a \times b + c$ on all eight with one rounding, which counts as 16 FLOP. Intel's product specifications list one or two AVX-512 FMA units per core, depending on the Xeon model, and the virtual machine reports only a generic model name, so the count cannot be read from `lscpu`. Assuming two units (not a confirmed figure), each core completes 32 FLOP per cycle, and at the reported 2.1 GHz the theoretical peak is
 
 $$
 P_{\mathrm{peak}} = 4 \times 2.1 \times 10^9 \times 32 = 268.8\ \text{GFLOP/s}.
@@ -459,7 +460,7 @@ threads=4  339.7 GFLOP/s  (40.4 FLOP per 2.1 GHz cycle per thread)
 
 The measured rate, a median of 354.0 GFLOP/s with four threads, is above the "theoretical" 268.8 GFLOP/s, and the apparent 42 FLOP per 2.1 GHz cycle exceeds the 32 that two units can deliver. The likely explanation is that the cores did not run at 2.1 GHz: the guest operating system reports a fixed nominal frequency, while the physical processor can raise its clock when power and temperature allow. If each core completes 32 FLOP per cycle, the measured rates imply an average clock of $354.0/(4 \times 32) \approx 2.77$ GHz with four threads and $90.6/32 \approx 2.83$ GHz with one. With a single FMA unit the same rates would require an average clock of about 5.5 GHz, which is implausible for a server processor, so the measurement is consistent with two units, but it does not prove the count.
 
-A peak computed from a nominal clock is therefore neither an upper bound nor a typical figure when the clock varies; on some processors heavy vector load lowers the clock instead. For the roofline of this machine the entry uses the measured $P_{\mathrm{peak}} \approx 354$ GFLOP/s, an estimate for this virtual machine, and keeps 268.8 GFLOP/s as the nominal figure.
+A peak computed from a nominal clock is therefore neither an upper bound nor a typical figure when the clock varies; on some processors, as Intel documents for its Xeon Scalable processors, heavy AVX-512 load lowers the clock instead. For the roofline of this machine the entry uses the measured $P_{\mathrm{peak}} \approx 354$ GFLOP/s, an estimate for this virtual machine, and keeps 268.8 GFLOP/s as the nominal figure.
 
 ### 5.5 The roofline of the reference machine
 
@@ -593,7 +594,7 @@ Compiler options change results as much as code changes do. The same program bui
 -O3 -march=native -ffast-math  first 0.719 ms | min 0.609  median 0.667  max 0.774 ms | 3.14 GFLOP/s | dot = 14.440159752937785
 ```
 
-(The script that runs the four builds prints the flags in the first column; the program prints the rest.) The unoptimized build is about four times slower, so a speedup computed against an `-O0` baseline is mostly a measure of the optimizer. Adding `-O3 -march=native` changed nothing measurable here: GCC vectorizes the multiplications, but without permission to reorder the additions it keeps them in one sequential chain, as in Section 4.3. The flag `-ffast-math` grants that permission, among others. The compiler then splits the sum into vector partial sums and the median fell by about 17%, while the result changed in its 14th significant digit because the additions ran in a different order. Whether such a change is acceptable is a numerical question, not a performance one.
+(The script that runs the four builds prints the flags in the first column; the program prints the rest.) The unoptimized build is about four times slower, so a speedup computed against an `-O0` baseline is mostly a measure of the optimizer. Adding `-O3 -march=native` changed nothing measurable here: GCC vectorizes the multiplications, but without permission to reorder the additions it keeps them in one sequential chain, as in Section 4.3. The flag `-ffast-math` grants that permission, among others. The compiler then splits the sum into vector partial sums. In this single execution the median fell by about 17%, close to the 15% run-to-run spread of Section 6.2, so this run alone shows the direction of the change rather than its size. The result changed in its 14th significant digit because the additions ran in a different order. Whether such a change is acceptable is a numerical question, not a performance one.
 
 Defaults hide behavior too. Under `-std=c11` GCC does not fuse a multiplication and an addition into an FMA unless asked: the triad of Section 5.3 compiles to separate multiply and add instructions with `-std=c11` and to FMA instructions with `-std=gnu11`. With `-march=native` on this machine GCC also prefers 256-bit vectors to 512-bit ones, so code that must use 512-bit FMA, like the microbenchmark, is safest written with intrinsics. The [fourth entry](/blog/data-parallelism-vector-units-and-gpus) returns to vector code generation.
 
@@ -642,7 +643,7 @@ $S_s(64) = 0.1 + 0.9 \times 64 = 57.7$. The scaled problem takes 57.7 time units
 <details>
 <summary>Answer</summary>
 
-On 100 processors, $\max(10^4, 10^3) = 10^4 \le T_{100} \le 10^4 + 10^3 = 1.1 \times 10^4$, a speedup of at least 90.9. On 10,000 processors, $\max(100, 1000) = 1000 \le T_p \le 1100$, a speedup of at least 909 but at most 1000. The parallelism $W/D = 1000$ caps the speedup, so the 10,000 processors run at an efficiency of at most 10%; a machine of about 1000 processors would give nearly the same run time.
+On 100 processors, $\max(10^4, 10^3) = 10^4 \le T_{100} \le 10^4 + 10^3 = 1.1 \times 10^4$, a speedup of at least 90.9. On 10,000 processors, $\max(100, 1000) = 1000 \le T_{10^4} \le 1100$, a speedup of at least 909 but at most 1000. The parallelism $W/D = 1000$ caps the speedup, so the 10,000 processors run at an efficiency of at most 10%. No machine can finish in fewer than $D = 1000$ steps, and 1000 processors already guarantee $T_{1000} \le 2000$, so ten times as many processors buy at most a factor of two.
 
 </details>
 
@@ -681,14 +682,14 @@ The models of this entry share one conclusion: a parallel program's speed is bou
 
 ### References
 
-- G. M. Amdahl, "Validity of the single processor approach to achieving large scale computing capabilities," in *Proceedings of the AFIPS Spring Joint Computer Conference*, pp. 483–485, 1967.
+- G. M. Amdahl, "Validity of the single processor approach to achieving large scale computing capabilities," in *AFIPS Conference Proceedings, Spring Joint Computer Conference*, vol. 30, pp. 483–485, 1967.
 - R. P. Brent, "The parallel evaluation of general arithmetic expressions," *Journal of the ACM*, vol. 21, no. 2, pp. 201–206, 1974.
 - R. L. Graham, "Bounds for certain multiprocessing anomalies," *Bell System Technical Journal*, vol. 45, no. 9, pp. 1563–1581, 1966.
-- J. L. Gustafson, "Reevaluating Amdahl's law," *Communications of the ACM*, vol. 31, no. 5, pp. 532–533, 1988.
+- J. L. Gustafson, "Reevaluating Amdahl's law," *Communications of the ACM*, vol. 31, no. 5, pp. 532–533, 1988, doi: 10.1145/42411.42415.
 - J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017.
-- T. Hoefler and R. Belli, "Scientific benchmarking of parallel computing systems: Twelve ways to tell the masses when reporting performance results," in *Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC15)*, 2015.
+- T. Hoefler and R. Belli, "Scientific benchmarking of parallel computing systems: Twelve ways to tell the masses when reporting performance results," in *Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC15)*, pp. 73:1–73:12, 2015, doi: 10.1145/2807591.2807644.
 - IEEE Std 1003.1-2017, *IEEE Standard for Information Technology: Portable Operating System Interface (POSIX) Base Specifications*, Issue 7, IEEE, 2018.
 - A. H. Karp and H. P. Flatt, "Measuring parallel processor performance," *Communications of the ACM*, vol. 33, no. 5, pp. 539–543, 1990.
 - J. D. McCalpin, "Memory bandwidth and machine balance in current high performance computers," *IEEE Computer Society Technical Committee on Computer Architecture (TCCA) Newsletter*, pp. 19–25, December 1995.
 - OpenMP Architecture Review Board, *OpenMP Application Programming Interface*, version 5.2, 2021.
-- S. Williams, A. Waterman and D. Patterson, "Roofline: An insightful visual performance model for multicore architectures," *Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009.
+- S. Williams, A. Waterman and D. Patterson, "Roofline: An insightful visual performance model for multicore architectures," *Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009, doi: 10.1145/1498765.1498785.

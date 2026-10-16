@@ -23,13 +23,13 @@ The reference machine has no GPU: every GPU listing here is an illustration that
 
 ### 1.1 One operation on many elements
 
-A computation is **data-parallel** when it applies the same operation independently to many data elements. The update $y_i \leftarrow a\,x_i + y_i$ for $i = 0, \dots, n-1$ (called **axpy**, for "$a$ times $x$ plus $y$") is the standard example: each element needs only its own $x_i$ and $y_i$, so the $n$ updates can happen in any order, or all at once. In the work-span terms of [the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism), the work is $W = 2n$ operations and the span is $D = 1$ update, so the parallelism $W/D$ grows with $n$. Elementwise array arithmetic, grid stencils and matrix multiplication have this shape.
+A computation is **data-parallel** when it applies the same operation independently to many data elements. The update $y_i \leftarrow a\,x_i + y_i$ for $i = 0, \dots, n-1$ (called **axpy**, for "$a$ times $x$ plus $y$") is the standard example: each element needs only its own $x_i$ and $y_i$, so the $n$ updates can happen in any order, or all at once. In the work-span terms of [the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism), the work is $W = 2n$ operations and the span is $D = 2$ operations (a multiplication, then the addition that uses it), so the parallelism $W/D = n$ grows with $n$. Elementwise array arithmetic, grid stencils and matrix multiplication have this shape.
 
 Data parallelism is a property of the computation, not of the hardware. Threads can exploit it, each taking a range of $i$. So can hardware that executes one instruction on several elements at once, which is cheaper, because one instruction is fetched, decoded and scheduled for several elements. The hardware this entry describes is built for the second way.
 
 ### 1.2 Flynn's taxonomy
 
-Flynn (1972) classified computer organizations by the number of instruction streams and data streams they process at once. The four classes are:
+Flynn (1966) classified computer organizations by the number of instruction streams and data streams they process at once, and developed the classification in a later paper (Flynn, 1972). The four classes are:
 
 - **single instruction stream, single data stream** (SISD), the classic sequential processor;
 - **single instruction stream, multiple data streams** (SIMD), in which one instruction acts on many data elements;
@@ -78,7 +78,7 @@ void axpy(long n, double a, const double *restrict x, double *restrict y) {
 }
 ```
 
-GCC reports both loops as vectorized (line 31 is the polynomial loop, line 41 the axpy loop; the reports for the initialization loops are cut):
+GCC reports both loops as vectorized (line 31 is the polynomial loop, line 41 the axpy loop; the reports for the copies inlined into `main` and for the initialization loops are cut):
 
 ```text
 $ gcc -std=c11 -O3 -march=native -fopt-info-vec kernels.c -o kernels_vec
@@ -89,7 +89,7 @@ kernels.c:41:24: optimized: loop vectorized using 16 byte vectors
 ...
 ```
 
-The main loops use 32-byte (256-bit) vectors, 4 doubles per instruction; the 16-byte versions handle part of the remainder. Two compiler defaults, noted in [Section 6 of the first entry](/blog/performance-models-and-scaling-laws#6-measuring-performance-honestly), shape these loops. GCC chose 256 bits although the processor supports 512: here `-march=native` selects GCC's `sapphirerapids` target, whose default preferred vector width is 256 bits, and `-mprefer-vector-width=512` overrides it. And in a strict ISO mode such as `-std=c11`, GCC does not fuse a multiplication and an addition into one fused multiply-add instruction unless asked to with `-ffp-contract=fast` (Stallman and the GCC Developer Community, 2024). The disassembly confirms 16 `vmulpd` and 16 `vaddpd` instructions in the vectorized polynomial loop, and their scalar forms `vmulsd` and `vaddsd` in the scalar build.
+The main loops use 32-byte (256-bit) vectors, 4 doubles per instruction; the 16-byte versions handle part of the remainder. Two compiler defaults, noted in [Section 6 of the first entry](/blog/performance-models-and-scaling-laws#6-measuring-performance-honestly), shape these loops. GCC chose 256 bits although the processor supports 512: here `-march=native` selects GCC's `sapphirerapids` target, whose default preferred vector width is 256 bits, and `-mprefer-vector-width=512` overrides it. And in a strict ISO mode such as `-std=c11`, GCC does not fuse a multiplication and an addition into one fused multiply-add instruction unless asked to with `-ffp-contract=fast` (Stallman and the GCC Developer Community, 2024). The disassembly confirms 8 `vmulpd` and 8 `vaddpd` instructions on 256-bit `ymm` registers in the main polynomial loop, one per Horner step, 8 more of each on 128-bit `xmm` registers in the remainder loop, and their scalar forms `vmulsd` and `vaddsd` in the scalar build.
 
 ### 2.3 A compute-bound loop gains and a memory-bound loop does not
 
@@ -109,7 +109,7 @@ axpy: 0.077 s, 1.75 GFLOP/s, 21.0 GB/s (check 2.000000)
 
 The polynomial loop ran $28.40/7.79 = 3.6$ times faster with 4-lane vectors (3.3 to 3.6 times in earlier runs of the same builds), close to the factor of 4 the width allows. With 8 lanes it gained only a little more, $30.14/7.79 = 3.9$. In every run the 512-bit build was faster than the 256-bit one, but by far less than the factor of 2 the width suggests; this entry did not establish why. A wider register does not guarantee a proportional gain.
 
-The axpy loop behaves differently. Its arithmetic intensity, with each operand crossing the memory interface once, is $I = 2/24 \approx 0.083$ FLOP/byte, the value worked out in [the roofline insight](/insights/compute-bound-or-memory-bound); its two printed rates are one measurement expressed two ways ($22.3 \times 0.083 = 1.86$). At this intensity the roofline bound $P \le \min(P_{\mathrm{peak}}, B\,I)$ depends only on bandwidth. Vectorization made the loop 1.4 to 1.5 times faster than the scalar build in repeated runs, which suggests that the scalar loop did not keep enough memory requests in flight to reach the bandwidth one core can draw. Going from 4 lanes to 8, however, changed nothing beyond the noise, as expected of a loop limited by bandwidth rather than by instructions. Vector width raises $P_{\mathrm{peak}}$, which helps only kernels under the flat part of the roof; for a memory-bound kernel the productive changes are those of [the second entry](/blog/memory-hierarchy-and-locality), which move fewer bytes.
+The axpy loop behaves differently. Its arithmetic intensity, with each operand crossing the memory interface once, is $I = 2/24 \approx 0.083$ FLOP/byte, the value worked out in [the roofline insight](/insights/compute-bound-or-memory-bound); its two printed rates are one measurement expressed two ways ($22.3 \times 0.083 = 1.86$). At this intensity the roofline bound $P \le \min(P_{\mathrm{peak}}, B\,I)$ depends only on bandwidth. Vectorization made the loop 1.4 to 1.6 times faster than the scalar build in repeated runs (1.56 for the 256-bit build in the run shown). This suggests that the scalar loop did not keep enough memory requests in flight to reach the bandwidth one core can draw. Going from 4 lanes to 8, however, changed nothing beyond the noise, as expected of a loop limited by bandwidth rather than by instructions. Vector width raises $P_{\mathrm{peak}}$, which helps only kernels under the flat part of the roof; for a memory-bound kernel the productive changes are those of [the second entry](/blog/memory-hierarchy-and-locality), which move fewer bytes.
 
 ### 2.4 What blocks vectorization
 
@@ -136,7 +136,7 @@ needs the final $y_{i-1}$ before it can compute $y_i$, so consecutive iterations
 
 **Possible aliasing.** Two pointers **alias** when they refer to overlapping memory. In the axpy of line 6, written without `restrict`, nothing tells the compiler that `x` and `y` do not overlap; if `y` started one element after `x`, the loop would carry a dependence. GCC **versions** the loop: a run-time test of the addresses selects a vectorized loop when the arrays do not overlap and the scalar loop when they do. For more complicated loops the compiler may give up instead. The C99 qualifier `restrict` is the programmer's promise that, during the call, the memory reached through that pointer is not accessed through any other; it removes the question, and a call that breaks the promise has undefined behavior.
 
-**Branches.** A vector instruction does the same operation in every lane, so lanes cannot follow different paths through an `if`. Simple branches are converted into computation of both outcomes followed by a per-lane selection, called **if-conversion** or masking: the clamp loop on line 16, `y[i] = x[i] > 1.0 ? 1.0 : x[i]`, became a comparison and a blend. Both paths are then evaluated for every element, so an expensive rare path is paid for everywhere. The same trade-off returns on the GPU (Section 5.1).
+**Branches.** A vector instruction does the same operation in every lane, so lanes cannot follow different paths through an `if`. Simple branches are converted into computation of both outcomes followed by a per-lane selection, called **if-conversion** or masking: the clamp loop on line 16, `y[i] = x[i] > 1.0 ? 1.0 : x[i]`, became a comparison into a mask register and a masked move, which blends the two results. Both paths are then evaluated for every element, so an expensive rare path is paid for everywhere. The same trade-off returns on the GPU (Section 5.1).
 
 **Non-unit strides and data layout.** A vector load reads consecutive memory, so a loop that touches every third double must load whole vectors and rearrange them, or use slower gather instructions. Line 29 updates the `x` coordinate of particles stored as an **array of structures** (AoS), `struct particle { double x, y, z; }`, so consecutive `x` values are 24 bytes apart. Line 34 does the same update on a **structure of arrays** (SoA), with all `x` values in one contiguous array (the layouts of [the second entry](/blog/memory-hierarchy-and-locality#5-data-layout)). Both vectorized, but the AoS loop needs three vector loads and two permutations (`vpermt2pd`) to collect four `x` values, then four scalar stores. The two loops were timed on 1024 particles. That is few enough to stay in the L1 or L2 cache, so the difference comes from instructions rather than memory traffic:
 
@@ -174,7 +174,7 @@ $ ./reduce_reassoc
 sum = 517024.43791358295  time 0.051 s  8.03 GFLOP/s
 ```
 
-The reordered sum ran 4.6 times faster (4.3 to 5.9 times in other runs), more than 4 lanes alone would give; one reading is that the separate partial sums also break the chain of dependent additions that limits the ordered loop. The two results differ in their last two digits. The program `exact_sum.py` computes the correctly rounded sum of the same values with Python's `math.fsum`:
+The reordered sum ran 4.6 times faster (4.3 to 5.9 times in other runs). The disassembly shows a single 256-bit accumulator (`vaddpd (%rax),%ymm0,%ymm0`), so the additions still form one dependent chain, now of one vector addition per four elements: the four lanes account for a factor of about 4, and this entry did not establish the source of the rest. The two results differ in their last two digits. The program `exact_sum.py` computes the correctly rounded sum of the same values with Python's `math.fsum`:
 
 ```text
 exact (rounded) = 517024.43791358318
@@ -298,7 +298,7 @@ Each call to `__syncthreads()` is a **barrier**: no thread of the block continue
 
 ### 5.1 Branch divergence
 
-Because a warp issues one instruction at a time for all its threads, threads that take different sides of a branch cannot run at the same time. When they disagree, the warp **diverges**: the hardware executes one path with the other threads masked off, then the other path, and the threads reconverge after the branch (Hwu, Kirk and El Hajj, 2022). The result is correct, but the warp takes as long as both paths together: the masking of Section 2.4, done by the hardware.
+Because a warp issues one instruction at a time for all its threads, threads that take different sides of a branch cannot run at the same time. When they disagree, the warp **diverges**: the hardware executes one path with the other threads masked off, then the other path (Hwu, Kirk and El Hajj, 2022). In the classic SIMT model the threads reconverge after the branch; NVIDIA GPUs since the Volta generation schedule each thread independently and do not guarantee reconvergence at that point. Either way the result is correct, but the warp takes as long as both paths together: the masking of Section 2.4, done by the hardware.
 
 The cost depends on whether threads of the *same* warp disagree. A branch on `threadIdx.x % 2` splits every warp in half. A branch on `blockIdx.x`, or on `threadIdx.x / 32`, gives the same answer for all 32 threads of a warp and costs nothing extra. Algorithms with data-dependent control flow, such as per-element iteration counts or the traversal of an irregular tree, lose efficiency in proportion to how much the threads of a warp disagree; a common remedy is to group similar work into the same warps.
 
@@ -354,6 +354,7 @@ def compare(name, W, Q_mem, Q_link):
     print(f"{name:<16} {t_cpu*1e3:9.4f} {t_xfer*1e3:9.4f} {t_kern*1e3:9.4f}"
           f" {t_gpu*1e3:9.4f} {t_cpu/t_gpu:8.2f}")
 
+...
 for n in (10**6, 10**8):         # axpy: 2n FLOP, 24n bytes each way
     compare(f"axpy n={n:.0e}", 2 * n, 24 * n, 24 * n)
 for n in (128, 512, 1024, 4096): # matmul: 2n^3 FLOP, 24n^2 bytes
@@ -450,7 +451,7 @@ Each iteration does $10^8$ operations on $10^9$ bytes, so it is memory-bound on 
 <details>
 <summary>Answer</summary>
 
-$I = T/8 = 4$ FLOP/byte. Two $32 \times 32$ tiles of doubles take $2 \times 1024 \times 8 = 16\,384$ bytes, 16 KiB. Doubling $T$ doubles the intensity but quadruples the shared memory and the threads per block, which limits how many blocks an SM can hold: the tile size trades reuse against occupancy.
+$I = T/8 = 4$ FLOP/byte. Two $32 \times 32$ tiles of doubles take $2 \times 1024 \times 8 = 16\,384$ bytes, 16 KiB. Going from $T = 16$ to $T = 32$ doubles the intensity (2 to 4 FLOP/byte) but quadruples the shared memory (4 KiB to 16 KiB) and the threads per block (256 to 1024), which limits how many blocks an SM can hold: the tile size trades reuse against occupancy.
 
 </details>
 
@@ -460,7 +461,7 @@ $I = T/8 = 4$ FLOP/byte. Two $32 \times 32$ tiles of doubles take $2 \times 1024
 |---|---|
 | What is data parallelism? | The same operation applied independently to many elements; SIMD hardware exploits it with one instruction for many elements. |
 | How wide are x86 vector registers? | 128 bits (SSE), 256 bits (AVX, AVX2) and 512 bits (AVX-512): 2, 4 and 8 doubles. |
-| Which loops gain from vectorization? | Compute-bound loops, by up to the number of lanes (3.3 to 3.6 with 4 lanes on the reference machine); memory-bound loops stop at the bandwidth roof (axpy gained 1.4 to 1.5 times, and nothing more from 8 lanes). |
+| Which loops gain from vectorization? | Compute-bound loops, by up to the number of lanes (3.3 to 3.6 with 4 lanes on the reference machine); memory-bound loops stop at the bandwidth roof (axpy gained 1.4 to 1.6 times, and nothing more from 8 lanes). |
 | What blocks vectorization? | Loop-carried dependences, possible aliasing (remedy: `restrict`), branches (handled by masking), non-unit strides and AoS layouts, and ordered floating-point reductions. |
 | Why can a vectorized sum differ? | It adds in a different order, and floating-point addition is not associative; the result changes in the last bits. |
 | How does a GPU execute a kernel? | As a grid of thread blocks, each on one SM, executed in warps of 32 threads that share one instruction (SIMT). |
@@ -473,6 +474,7 @@ This entry has stayed inside one machine, where vector lanes and GPU threads sha
 
 ### References
 
+- M. J. Flynn, "Very high-speed computing systems," *Proceedings of the IEEE*, vol. 54, no. 12, pp. 1901–1909, 1966.
 - M. J. Flynn, "Some computer organizations and their effectiveness," *IEEE Transactions on Computers*, vol. C-21, no. 9, pp. 948–960, 1972.
 - J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017.
 - W.-m. W. Hwu, D. B. Kirk and I. El Hajj, *Programming Massively Parallel Processors: A Hands-on Approach*, 4th ed., Morgan Kaufmann, 2022.

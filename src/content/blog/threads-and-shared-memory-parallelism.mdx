@@ -11,13 +11,13 @@ series: parallel-and-high-performance-computing
 seriesOrder: 3
 ---
 
-[The first entry](/blog/performance-models-and-scaling-laws) defined the measures this entry uses to judge every result: speedup $S(p) = T_1/T_p$ and efficiency $E(p) = S(p)/p$. It also derived the bound of [Amdahl's law](/blog/performance-models-and-scaling-laws#2-amdahls-law-and-strong-scaling) and the [work and span](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism) of a computation. [The second entry](/blog/memory-hierarchy-and-locality) showed that memory moves in [64-byte cache lines](/blog/memory-hierarchy-and-locality#2-how-a-cache-works) and that the [bandwidth](/blog/memory-hierarchy-and-locality#6-translation-prefetching-and-bandwidth) of main memory often limits a loop before its arithmetic does. Apart from their bandwidth measurements, both entries treated one processor core. This entry puts several cores to work on one problem through threads that share one memory.
+[The first entry](/blog/performance-models-and-scaling-laws) defined the measures this entry uses to judge every result: speedup $S(p) = T_1/T_p$ and efficiency $E(p) = S(p)/p$. It also derived the bound of [Amdahl's law](/blog/performance-models-and-scaling-laws#2-amdahls-law-and-strong-scaling) and the [work and span](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism) of a computation. [The second entry](/blog/memory-hierarchy-and-locality) showed that memory moves in [64-byte cache lines](/blog/memory-hierarchy-and-locality#2-how-a-cache-works) and that the [bandwidth](/blog/memory-hierarchy-and-locality#6-translation-prefetching-and-bandwidth) of main memory often limits a loop before its arithmetic does. Apart from a few four-core measurements of peak arithmetic rate and bandwidth, both entries treated one processor core. This entry puts several cores to work on one problem through threads that share one memory.
 
 Sharing memory makes parallel code easy to start and easy to get wrong. One directive can make a loop run nearly four times faster on four cores, and the same directive on a slightly different loop can give a wrong result or a slower program without any warning. The entry first shows threads and OpenMP loops working as intended, then measures each way in which they fail: data races, writes that become visible out of order, the cost of synchronization and false sharing, and work divided unevenly among threads.
 
-**Conventions.** The code is C11, compiled with the GNU Compiler Collection (GCC) 13.3 using `-std=c11 -O2 -fopenmp`, plus `-fno-tree-vectorize` where stated. OpenMP is the directive-based interface for shared-memory programming maintained by the OpenMP Architecture Review Board (ARB); this entry cites its current specification, version 5.2. GCC 13 reports `_OPENMP` as `201511`, which denotes version 4.5, and every construct used here exists in 4.5 with the meaning given in 5.2. Two programs use C11 atomics with the threads of the Portable Operating System Interface (POSIX). One short model is written in Python 3.13.
+**Conventions.** The code is C11, compiled with the GNU Compiler Collection (GCC) 13.3 using `-std=c11 -O2 -fopenmp`, plus `-fno-tree-vectorize` where stated. OpenMP is the directive-based interface for shared-memory programming maintained by the OpenMP Architecture Review Board (ARB); this entry cites version 5.2 of its specification (November 2021), the version used throughout the series; a later version, 6.0, appeared in November 2024. GCC 13 reports `_OPENMP` as `201511`, which denotes version 4.5, and every construct used here exists in 4.5 with the meaning given in 5.2. Two programs use C11 atomics with the threads of the Portable Operating System Interface (POSIX). One short model is written in Python 3.13.
 
-All measurements come from the series' reference machine, a virtual machine under the Linux Kernel-based Virtual Machine (KVM). It has four cores of an Intel Xeon processor at 2.1 GHz, with one hardware thread per core, and 16 GiB of memory. Each core has a 48 KiB level-1 (L1) data cache and a 2 MiB level-2 (L2) cache, and the cores share a level-3 (L3) cache that `lscpu` reports as 260 MiB. Threads are bound to cores with `OMP_PROC_BIND=close OMP_PLACES=cores`. Each time is the median of five or seven repetitions. The machine is shared with other jobs, so its timings are noisy: a difference of 10% between two runs is common, and speedups slightly above $p$ appear in some runs for that reason. The timings describe this machine only. Arithmetic rates are given in units of $10^9$ floating-point operations (FLOP) per second, written GFLOP/s, and bandwidths in gigabytes per second (GB/s), units of $10^9$ bytes per second.
+All measurements come from the series' reference machine, a virtual machine under the Linux Kernel-based Virtual Machine (KVM). It has four cores of an Intel Xeon processor reported at 2.1 GHz, with one hardware thread per core, and 16 GiB of memory. Each core has a 48 KiB level-1 (L1) data cache and a 2 MiB level-2 (L2) cache, and the cores share a level-3 (L3) cache that `lscpu` reports as 260 MiB. Threads are bound to cores with `OMP_PROC_BIND=close OMP_PLACES=cores`. Each time is the median of five or seven repetitions. The machine is shared with other jobs, so its timings are noisy: a difference of 10% between two runs is common, and speedups slightly above $p$ appear in some runs for that reason. The timings describe this machine only. Arithmetic rates are given in units of $10^9$ floating-point operations (FLOP) per second, written GFLOP/s, and bandwidths in gigabytes per second (GB/s), units of $10^9$ bytes per second.
 
 ## 1. Threads and shared memory
 
@@ -120,7 +120,7 @@ thread 2 of 4: a = 12, b = 102
 after the region: a = 10, b = 10, c = 46
 ```
 
-The private copies of `a` start at 10 and end at 10 to 13, the original `a` and `b` are unchanged after the region, and the shared `c` is $10 + 11 + 12 + 13 = 46$. The order of the lines differs between runs (another run printed them in the order 0, 1, 2, 3), because nothing orders the threads with respect to each other. The `atomic` directive is needed because four threads update one shared variable; Section 3 shows what happens without it.
+The private copies of `a` start at 10 and end at 10 to 13, the original `a` and `b` are unchanged after the region, and the shared `c` is $10 + 11 + 12 + 13 = 46$. The order of the lines differs between runs (an earlier, unlogged run printed them in the order 0, 1, 2, 3), because nothing orders the threads with respect to each other. The `atomic` directive is needed because four threads update one shared variable; Section 3 shows what happens without it.
 
 ### 2.3 Worksharing loops
 
@@ -137,7 +137,7 @@ The clause `reduction(+ : s)` gives each thread a private copy of `s` initialize
 
 ### 2.4 A compute-bound loop and a memory-bound loop
 
-The program `loops.c` times two loops, first without OpenMP to obtain $T_1$, then with 1, 2 and 4 threads. One evaluates a polynomial of degree 200 by Horner's rule at $2^{21}$ points; the other is the **triad** $a_i = b_i + q\,c_i$ of McCalpin's STREAM benchmark, on arrays of $2^{25}$ doubles (256 MiB each, far larger than any cache). Times are taken with `omp_get_wtime()`, which returns the elapsed wall-clock time in seconds since an arbitrary fixed point in the past:
+The program `loops.c` times two loops, first without OpenMP to obtain $T_1$, then with 1, 2 and 4 threads. One evaluates, by 200 multiply-add steps of Horner's rule, a polynomial of degree 199 at $2^{21}$ points; the other is the **triad** $a_i = b_i + q\,c_i$ of McCalpin's STREAM benchmark, on arrays of $2^{25}$ doubles (256 MiB each, far larger than any cache). Times are taken with `omp_get_wtime()`, which returns the elapsed wall-clock time in seconds since an arbitrary fixed point in the past:
 
 ```c
 /* Excerpt of loops.c (C11 + OpenMP). Each loop also exists without the
@@ -186,7 +186,7 @@ For the roofline, this means that $B$ is the bandwidth of the whole chip, reacha
 
 ### 3.1 What a data race is
 
-The C11 standard defines the problem precisely, in subclause 5.1.2.4 of ISO/IEC 9899:2018 (the 2018 edition corrected C11 without changing its memory model). Two expression evaluations **conflict** if one modifies a memory location and the other reads or modifies the same location. An execution contains a **data race** if it contains two conflicting actions in different threads, at least one of which is not atomic, and neither happens before the other (Section 4.4 defines "happens before"). Any such data race results in **undefined behavior**: the standard places no requirement on what the program does.
+The C11 standard defines the problem precisely, in subclause 5.1.2.4 of ISO/IEC 9899:2018 (the 2018 edition, which replaced C11 and keeps these definitions in the same subclause). Two expression evaluations **conflict** if one modifies a memory location and the other reads or modifies the same location. An execution contains a **data race** if it contains two conflicting actions in different threads, at least one of which is not atomic, and neither happens before the other (Section 4.4 defines "happens before"). Any such data race results in **undefined behavior**: the standard places no requirement on what the program does.
 
 Undefined behavior is stronger than "one of the possible interleavings happens". The compiler optimizes each thread on the assumption that no other thread changes a non-atomic variable behind its back, so it may keep a variable in a register or hoist a load out of a loop. Section 4.2 shows a program that hangs for this reason.
 
@@ -229,7 +229,7 @@ racy       p = 1, totals:  4999998  4999998  4999998  4999998  4999998   median 
 racy       p = 4, totals:  2657992  2665880  2628956  2608162  2616607   median 0.009347 s
 ```
 
-With one thread the result is right. With four, about half the increments are lost and the total differs every time; other runs of the same program gave totals as low as 1 275 620. The racy version is also barely faster than the sequential one, because every increment moves the counter's cache line from core to core.
+With one thread the result is right. With four, about half the increments are lost and the total differs every time; earlier runs of the same program, whose output was not kept, gave totals as low as about 1.3 million. The racy version with four threads is also barely faster than with one (0.0093 against 0.0110 s), because every increment moves the counter's cache line from core to core.
 
 Such a race can pass every test in which the threads happen not to overlap. GCC's ThreadSanitizer (`-fsanitize=thread`) instruments memory accesses and reports conflicting accesses not ordered by synchronization, on the paths a test executes; Section 4.2 shows a report.
 
@@ -369,7 +369,7 @@ WARNING: ThreadSanitizer: data race (pid=9168)
 
 ### 4.3 What x86 reorders: total store order
 
-The x86-64 architecture provides a model close to sequential consistency called **total store order** (TSO), which Sewell and colleagues formalized as x86-TSO. Each hardware thread has a first-in first-out store buffer, and the only reordering other threads can see is a load that completes before an earlier store of the same thread, to a different address, has left the buffer. Hence:
+The x86-64 architecture provides a model close to sequential consistency called **total store order** (TSO), which Sewell and colleagues formalized as x86-TSO. Each hardware thread has a first-in first-out store buffer, from which the thread's own later loads read its pending stores (Section 4.2). Seen from other threads, the one reordering this allows is a load that completes before an earlier store of the same thread, to a different address, has left the buffer. Hence:
 
 - loads are not reordered with loads, and stores are not reordered with stores or with earlier loads;
 - a load can be reordered with an earlier store to a different location;
@@ -397,7 +397,7 @@ SB relaxed                   r0,r1 = 0,0:  235183  0,1:  330402  1,0:  434310  1
 SB seq_cst                   r0,r1 = 0,0:       0  0,1:  338146  1,0:  420525  1,1:  241329
 ```
 
-With relaxed accesses, the outcome forbidden by sequential consistency occurred in 235 183 of $10^6$ trials. With sequentially consistent accesses (`atomic_store` and `atomic_load`, whose default order is `memory_order_seq_cst`), it never occurred: GCC compiles such a store to `xchg`, which drains the store buffer before the load runs. Early versions of the program passed the memory orders as run-time variables, which GCC treats as `memory_order_seq_cst`, and showed no reordering at all. The version shown fixes the orders at compile time, puts each variable in its own cache line and varies the threads' timing so that their accesses overlap. A litmus test that shows nothing proves nothing.
+With relaxed accesses, the outcome forbidden by sequential consistency occurred in 235 183 of $10^6$ trials. With sequentially consistent accesses (`atomic_store` and `atomic_load`, whose default order is `memory_order_seq_cst`), it never occurred: GCC compiles such a store to `xchg`, which drains the store buffer before the load runs. Early versions of the program, whose output was not kept, passed the memory orders as run-time variables, which GCC treats as `memory_order_seq_cst`, and showed no reordering. The version shown fixes the orders at compile time, puts each variable in its own cache line and varies the threads' timing so that their accesses overlap. A litmus test that shows nothing proves nothing.
 
 ### 4.4 Message passing, release and acquire
 
@@ -427,7 +427,7 @@ barrier, 4 threads: 0.85 us each
 empty parallel region, 4 threads: 2.081 us each
 ```
 
-A barrier took 0.85 µs, about 1800 clock cycles at 2.1 GHz, and an empty parallel region about 2.1 µs, the time of roughly 2900 FLOP per thread at the polynomial loop's 1.37 GFLOP/s. A parallel region pays off only when each thread's share is much longer than a few microseconds; a parallel loop inside an inner loop that runs millions of times can be slower than sequential code. The contended increments of Section 3.3, at about 53 and 240 ns, are the same cost on a smaller scale.
+A barrier took 0.85 µs, about 1800 clock cycles at the reported 2.1 GHz, or about 2400 at the 2.8 GHz that the first entry's measurements suggest. An empty parallel region took about 2.1 µs, the time of roughly 2900 FLOP per thread at the polynomial loop's 1.37 GFLOP/s. A parallel region pays off only when each thread's share is much longer than a few microseconds; a parallel loop inside an inner loop that runs millions of times can be slower than sequential code. The contended increments of Section 3.3, at about 53 and 240 ns, are the same cost on a smaller scale.
 
 ### 5.2 A critical section as a serial fraction
 
@@ -446,7 +446,7 @@ $$
 T_p \ge \max\!\left(\frac{T_1}{p},\ f\,T_1\right), \qquad S(p) \le \min\!\left(p,\ \frac{1}{f}\right).
 $$
 
-The same bound follows from the work-span view of [Section 4 of the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism): the critical sections form one chain, so the span is at least $f\,T_1$ and the parallelism at most $1/f$.
+The same bound follows from the work-span view of [Section 4 of the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism): the critical sections run one at a time, as if they formed one chain (in `sync.c` they do, through `shared_sum`), so the span is at least $f\,T_1$ and the parallelism at most $1/f$.
 
 The measurements stay below this bound, the more so the more threads compete: with $f = 0.5$, four threads (1.53) were no faster than two (1.55). Each lock handoff moves the lock's cache line and the protected data between cores, so the effective $f$ rises with contention. The remedies, from least to most restructuring, are keeping critical sections short, moving work out of them and accumulating privately (Section 3.3).
 
@@ -482,7 +482,7 @@ p = 4        0.47          0.33           122.56           5.81
 
 With atomic increments the effect is large. One thread takes about 6 ns per increment in either layout, and with padding four threads still take 5.8 ns each. With adjacent counters the time rises to 43.6 ns with two threads and 122.6 ns with four, 21 times the padded time, although no thread ever reads another thread's counter.
 
-With plain increments the effect was small on this machine: 0.47 against 0.33 ns per increment with four threads in this run, and no difference in some other runs. A likely explanation, consistent with Section 4.3 but not verified here, is that plain stores wait in the store buffer, and a core that obtains the line writes many of them before losing it, whereas each atomic read-modify-write must own the line by itself. The penalty depends on how the writes are made and on the processor, and only a measurement settles it for a given program.
+With plain increments the effect was small on this machine: 0.47 against 0.33 ns per increment with four threads in this run, and no visible difference in some earlier runs whose output was not kept. A likely explanation, consistent with Section 4.3 but not verified here, is that plain stores wait in the store buffer, and a core that obtains the line writes many of them before losing it, whereas each atomic read-modify-write must own the line by itself. The penalty depends on how the writes are made and on the processor, and only a measurement settles it for a given program.
 
 Three remedies follow from the cause; the second, a change of layout, is the one [Section 5.3 of the second entry](/blog/memory-hierarchy-and-locality#53-layout-and-threads) anticipated:
 
@@ -577,7 +577,7 @@ dynamic,1    0.10946 s
 dynamic,1000 0.00045 s
 ```
 
-With chunks of one iteration the loop took 400 times longer than with the static schedule, about 100 ns per iteration, spent taking iterations from the queue and, as a side effect, writing neighboring elements of `y` from different threads into the same cache lines. With chunks of 1000 the overhead nearly vanished. A chunk should be large enough that one request, on the order of 100 ns here, is small against its work, and small enough that there are many more chunks than threads.
+With chunks of one iteration the loop took 400 times longer than with the static schedule, about 100 ns per iteration, spent taking iterations from the queue and, as a side effect, writing neighboring elements of `y` from different threads into the same cache lines. With chunks of 1000 the overhead nearly vanished. A chunk should be large enough that one request, which costs each thread several hundred nanoseconds here when all four contend, is small against its work, and small enough that there are many more chunks than threads.
 
 ### 6.5 The work-span view
 
@@ -661,12 +661,12 @@ Threads give a program several cores and one memory, and the measurements of thi
 
 ### References
 
-- S. V. Adve and K. Gharachorloo, "Shared memory consistency models: A tutorial," *IEEE Computer*, vol. 29, no. 12, pp. 66–76, 1996.
+- S. V. Adve and K. Gharachorloo, "Shared memory consistency models: A tutorial," *Computer*, vol. 29, no. 12, pp. 66–76, 1996.
 - J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017.
 - ISO/IEC 9899:2018, *Information technology – Programming languages – C*, International Organization for Standardization, 2018.
 - L. Lamport, "How to make a multiprocessor computer that correctly executes multiprocess programs," *IEEE Transactions on Computers*, vol. C-28, no. 9, pp. 690–691, 1979.
 - J. D. C. Little, "A proof for the queuing formula: L = λW," *Operations Research*, vol. 9, no. 3, pp. 383–387, 1961.
 - J. D. McCalpin, "Memory bandwidth and machine balance in current high performance computers," *IEEE Computer Society Technical Committee on Computer Architecture (TCCA) Newsletter*, pp. 19–25, December 1995.
-- OpenMP Architecture Review Board, *OpenMP Application Programming Interface*, Version 5.2, November 2021.
+- OpenMP Architecture Review Board, *OpenMP Application Programming Interface*, version 5.2, 2021.
 - P. Sewell, S. Sarkar, S. Owens, F. Zappa Nardelli and M. O. Myreen, "x86-TSO: A rigorous and usable programmer's model for x86 multiprocessors," *Communications of the ACM*, vol. 53, no. 7, pp. 89–97, 2010.
 - S. Williams, A. Waterman and D. Patterson, "Roofline: An insightful visual performance model for multicore architectures," *Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009.
