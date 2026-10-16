@@ -58,7 +58,7 @@ PAGESIZE                 4096
 | Registers | 32 vector registers of 64 bytes (AVX-512) | Named by instructions | One core |
 | L1 data cache | 48 KiB | 64-byte lines, 12-way, 64 sets | One core |
 | L2 cache | 2 MiB | 64-byte lines, 16-way, 2048 sets | One core |
-| L3 cache | 260 MiB as reported | 64-byte lines, 20-way | All cores of the processor |
+| L3 cache | 260 MiB as reported | 64-byte lines | All cores of the processor |
 | Main memory (DRAM) | 16 GiB in this virtual machine | Pages of 4 KiB (Section 6.1) | Everything |
 
 Each level is larger and slower than the one before it. The L3 figure is what the virtual processor reports; Section 1.3 shows that this virtual machine does not behave as if it had all of it.
@@ -333,7 +333,7 @@ stride 32 doubles (256 bytes):   10.9 ms total, 10.36 ns per element read
 stride 64 doubles (512 bytes):    5.7 ms total, 10.95 ns per element read
 ```
 
-The column order is 11 times slower than the row order on the same 128 MiB, with the same additions. The row order uses all eight doubles of each line it fetches. The column order uses one and moves on; when it returns for the next column, 4096 lines later, the line has long been evicted from L1 and L2, so the array is fetched from beyond the caches up to eight times over. Padding the rows made both orders somewhat faster; Section 3.3 shows how a power-of-two row length makes column access worse.
+The column order is 11 times slower than the row order on the same 128 MiB, with the same additions. The row order uses all eight doubles of each line it fetches. The column order uses one and moves on. When it returns for the next column, 4096 lines (256 KiB) later, the line has long been evicted from the 48 KiB L1. With rows of exactly 4096 doubles, a column also maps to only 4 of the 2048 L2 sets, so it is evicted from L2 as well (the mechanism of Section 3.3), and the array is fetched from beyond L2 up to eight times over. With padded rows the column fits in L2. In both cases each access lands on a different 4 KiB page, so address translation (Section 6.1) adds to the cost. Padding the rows made both orders somewhat faster in this run.
 
 The row-order time is not a memory limit: at `-O2`, without permission to reorder floating-point additions, each addition into the one accumulator waits for the previous one. This chain also makes the stride-1 sweep slower in total than the stride-8 sweep, which reads every line once. From stride 8 on, each element read is in a different line, and the cost per read grows from 4.2 ns to about 11 ns as the stride lengthens. One reading is that the prefetching of Section 6.2 hides less latency as the gaps between lines grow: reading one line in eight (stride 64) took a third of the time of reading every line, not an eighth. Bryant and O'Hallaron (2016, Chapter 6) plot the same two variables, working-set size and stride, as a surface they call the memory mountain.
 
@@ -552,7 +552,7 @@ $$
 I = \frac{2b^3}{24\,b^2 + 8\,b^2} = \frac{b}{16}\ \text{FLOP/byte},
 $$
 
-or $b/12$ without the write-backs. The figure depends on the order of the tile loops: with `kk` innermost instead, a $C$ tile stays in the cache for the whole sum over $k$, only $16b^2$ bytes move per tile product, and the intensity is $b/8$, as derived in [Section 5.2 of the first entry](/blog/performance-models-and-scaling-laws#52-intensity-of-three-kernels). Either way it grows in proportion to the tile size, which the cache limits: three tiles must fit in $M$ bytes, $24\,b^2 \le M$, so the traffic for the whole product is proportional to $n^3/\sqrt{M}$. Hong and Kung (1981) proved that this is optimal up to a constant factor: any evaluation of the $n^3$ products of the standard algorithm, with a fast memory of $M$ words, moves on the order of $n^3/\sqrt{M}$ words between fast and slow memory.
+or $b/12$ without the write-backs. The figure depends on the order of the tile loops: with `kk` innermost instead, a $C$ tile stays in the cache for the whole sum over $k$, only $16b^2$ bytes move per tile product, and the intensity is $b/8$, as derived in [Section 5.2 of the first entry](/blog/performance-models-and-scaling-laws#52-intensity-of-three-kernels). Either way it grows in proportion to the tile size, which the cache limits: three tiles must fit in $M$ bytes, $24\,b^2 \le M$, so the traffic for the whole product is proportional to $n^3/\sqrt{M}$. Hong and Kung (1981) proved that this is optimal up to a constant factor. Any evaluation of the $n^3$ products of the standard algorithm with a fast memory of $M$ bytes moves on the order of $n^3/\sqrt{M}$ bytes between fast and slow memory (they counted words, which changes only the constant).
 
 The condition "three tiles fit" ignores conflicts. Lam, Rothberg and Wolf (1991) showed that a tile can interfere with itself: its rows are $8n$ bytes apart, and for unlucky $n$ they map to few sets, so a tile that fits by capacity still thrashes. The miss rate of a blocked loop therefore varies strongly with the matrix dimension; they discussed choosing the tile size for the matrix at hand and copying tiles into contiguous storage as remedies.
 
@@ -577,9 +577,9 @@ The 1536 compulsory misses are the same in every case. The rest can be checked b
 - **ijk** misses on nearly every access to $B$: a column of 64 lines and a row of $A$ do not fit in 64 lines, so LRU evicts each line of $B$ just before it is needed again. The $64^3 = 262\,144$ accesses to $B$ account for most of the 271 744 misses.
 - **ikj** takes exactly $64 \times 528 = 33\,792$ misses: for each row $i$, the 512 lines of $B$ and the 8 lines of row $i$ of each of $A$ and $C$. That is eight times fewer than ijk.
 - **Blocked, padded, $b = 16$** takes exactly $64 \times 96 = 6144$ misses: 64 tile products, each loading three tiles of 32 lines. The three tiles do not fit together in 64 lines, but in ikj order only the $B$ tile must stay resident while rows of $A$ and $C$ stream past. That is 5.5 times fewer misses than ikj.
-- **Blocked, unpadded.** With rows of 64 doubles, the rows of a tile fall into two or four sets, the self-interference of Lam, Rothberg and Wolf: about 30 000 conflict misses, and most of the advantage over ikj is lost. The tile size was right; the addresses were wrong.
+- **Blocked, unpadded.** With rows of 64 doubles, the rows of a tile fall into two or four sets, the self-interference of Lam, Rothberg and Wolf: about 30 000 conflict misses, so the blocked loop takes more misses than ikj (38 216 and 36 864 against 33 792). The tile size was right; the addresses were wrong.
 
-The write-backs (dirty lines evicted during the run) of the blocked loops are one $C$ tile per tile product, the $8b^2$ term above.
+The write-backs (dirty lines evicted during the run) of the blocked loops are close to one $C$ tile per tile product (lines still dirty at the end of the run are not counted), the $8b^2$ term above.
 
 ### 4.5 Measured on the reference machine
 
@@ -608,7 +608,7 @@ n = 1024, NumPy a @ b:     34.8 ms,  61.69 GFLOP/s
 n = 2048, NumPy a @ b:    305.4 ms,  56.25 GFLOP/s
 ```
 
-It reached about two-thirds of the first entry's one-core microbenchmark rate. It blocks for registers and every cache level at once, packs tiles into contiguous buffers so that they cannot conflict, and keeps a block of $C$ in vector registers in a hand-written kernel (Goto and van de Geijn, 2008). Dense linear algebra belongs in such a library; this section's principles are for the loops no library provides, such as stencils.
+It reached about two-thirds of the first entry's one-core microbenchmark rate. It blocks for the registers, the caches and the translation lookaside buffer (Section 6.1), packs tiles into contiguous buffers so that they cannot conflict, and keeps a block of $C$ in vector registers in a hand-written kernel (Goto and van de Geijn, 2008). Dense linear algebra belongs in such a library; this section's principles are for the loops no library provides, such as stencils.
 
 ## 5. Data layout
 
@@ -655,16 +655,17 @@ AoS: x += vx*dt for 16777216 particles: 100.97 ms,  6.02 ns/particle
 SoA: x += vx*dt for 16777216 particles:  20.56 ms,  1.23 ns/particle
 ```
 
-The SoA loop is 4.9 times faster. In AoS each particle is one line: the loop reads all 1 GiB to use 16 bytes of each 64, and every line becomes dirty and is written back, about 2 GiB of traffic. SoA reads `x` and `vx` (256 MiB) and writes back `x` (128 MiB). The traffic ratio, $2048/384 = 5.3$, is close to the measured 4.9; both loops ran near 20 GB/s, the bandwidth limit.
+The SoA loop is 4.9 times faster. In AoS each particle is one line: the loop reads all 1 GiB to use 16 bytes of each 64, and every line becomes dirty and is written back, about 2 GiB of traffic. SoA reads `x` and `vx` (256 MiB) and writes back `x` (128 MiB). The traffic ratio, $2048/384 = 5.3$, is close to the measured 4.9. Counted this way, both loops moved about 20 GB/s (21.3 and 19.6 GB/s), somewhat more than the 17.9 GB/s that the one-core triad of Section 6.3 moved. How much one core sustains depends on the mix of reads and writes, but both loops were limited by memory bandwidth, not by arithmetic.
 
-Layout also decides whether the compiler can use **vector instructions**, which apply one operation to several adjacent values. GCC's report (`-fopt-info-vec-optimized`) says, for the SoA loop:
+Layout also decides how the compiler can use **vector instructions**, which apply one operation to several adjacent values. GCC's report (`-fopt-info-vec-optimized`) for the two loops is below. It was produced with GCC 13.3 and `-march=sapphirerapids` in place of `-march=native`, because the reference machine was no longer available when it was regenerated; the compiler's output does not depend on the host, and the report is the same for the other AVX-512 targets checked.
 
 ```text
+layout.c:29:26: optimized: loop vectorized using 32 byte vectors
 layout.c:35:26: optimized: loop vectorized using 32 byte vectors
 layout.c:35:26: optimized:  loop versioned for vectorization because of possible aliasing
 ```
 
-and nothing for the AoS loop, whose `x` values are 64 bytes apart. A vector load reads consecutive memory, so unit-stride fields are what vector units need, as [Section 2 of the fourth entry](/blog/data-parallelism-vector-units-and-gpus#2-vector-instructions-on-a-cpu) shows; here both loops were limited by bandwidth, so vectorization did not matter. A hybrid, the **array of structures of arrays**, stores small groups of particles field by field.
+Both loops were vectorized, but not in the same way. The SoA loop (line 35) loads four consecutive `x` and four consecutive `vx` with one instruction each. In the AoS loop (line 29) the `x` values are 64 bytes apart, so the compiler loads whole structures and gathers the fields into vectors with permute instructions, extra work that unit-stride fields avoid. A vector load reads consecutive memory, so unit-stride fields are what vector units need, as [Section 2 of the fourth entry](/blog/data-parallelism-vector-units-and-gpus#2-vector-instructions-on-a-cpu) shows; here both loops were limited by bandwidth, so the difference did not matter. A hybrid, the **array of structures of arrays**, stores small groups of particles field by field.
 
 ### 5.3 Layout and threads
 
@@ -690,7 +691,7 @@ The **reach** of a TLB is its number of entries times the page size. This virtua
 | 256 MiB | 222.16 | 174.76 |
 | 1024 MiB | 269.39 | 210.10 |
 
-Within L1 and L2 the page size makes little difference. From 32 MiB up, huge pages removed 34 to 59 ns per access, a fifth to a third of the latency, so part of the climb from 64 MiB to 1 GiB is translation, not DRAM. Huge pages cost coarser allocation and help mainly large, irregularly accessed working sets such as hash tables, graphs and sparse matrices; unit-stride loops use each TLB entry for 4096 consecutive bytes and gain little.
+Within L1 and L2 the page size makes little difference beyond the run-to-run spread. From 32 MiB up, huge pages removed 34 to 59 ns per access, about a fifth to a third of the latency, so part of the climb from 64 MiB to 1 GiB is translation, not DRAM. Huge pages cost coarser allocation and help mainly large, irregularly accessed working sets such as hash tables, graphs and sparse matrices; unit-stride loops use each TLB entry for 4096 consecutive bytes and gain little.
 
 ### 6.2 Hardware prefetching
 
@@ -714,7 +715,7 @@ Unit-stride and small-stride loops therefore get prefetching for free; pointer-b
 
 ### 6.3 Measuring sustainable bandwidth
 
-The bandwidth that belongs in the roofline is the **sustainable bandwidth**, measured with simple loops over arrays much larger than the caches, not a specification's peak. McCalpin's STREAM benchmark (McCalpin, 1995) is the standard of this kind; one of its kernels is the **triad** $a_i = b_i + s\,c_i$. The following STREAM-style triad is not the official benchmark but works in the same way: arrays of 1 GiB, each initialized by the threads that will use it, and bytes counted as STREAM counts them.
+The bandwidth that belongs in the roofline is the **sustainable bandwidth**, measured with simple loops over arrays much larger than the caches, not a specification's peak. McCalpin's STREAM benchmark (McCalpin, 1995) is the standard of this kind; one of its kernels is the **triad** $a_i = b_i + s\,c_i$. The following STREAM-style triad is not the official benchmark but works in the same way: arrays of 1 GiB, initialized with the same static schedule as the triad, and bytes counted as STREAM counts them.
 
 ```c
 /* C11 + OpenMP. A STREAM-style triad, a[i] = b[i] + s * c[i], on arrays of
@@ -741,7 +742,9 @@ int main(void) {
     for (int k = 0; k < 3; k++) {
         int p = counts[k];
         omp_set_num_threads(p);
-        /* First touch by the threads that will use the data. */
+        /* Initialized with the triad's schedule. (Pages are placed at their first
+           touch, in the 1-thread pass; this machine has one memory node, so
+           placement does not matter.) */
         #pragma omp parallel for schedule(static)
         for (long i = 0; i < n; i++) { a[i] = 0.0; b[i] = 1.0; c[i] = 2.0; }
         double t[10];
@@ -827,7 +830,7 @@ AoS: every line is read (64 bytes) and, being dirty, written back (64 bytes): 12
 | Blocking | Tiles of size $b$ raise the intensity of matrix multiply to $b/16$ to $b/8$ FLOP/byte, depending on the tile-loop order; traffic of order $n^3/\sqrt{M}$ is optimal (Hong and Kung). |
 | Conflicts | Power-of-two leading dimensions map columns and tiles to few sets; padding removed 3584 of 4096 simulated misses, and ijk ran eight times slower at $n = 1024$ than at $n = 1000$. |
 | Layout | Order structure members by size; SoA moved 5.3 times fewer bytes than AoS for a one-field update and ran 4.9 times faster. |
-| Translation | The TLB caches page translations; huge pages cut random-access latency beyond the caches by a fifth to a third. |
+| Translation | The TLB caches page translations; huge pages cut random-access latency beyond the caches by about a fifth to a third. |
 | Prefetching | Sequential access over 1 GiB ran 36 times faster than random access with the same dependent loads. |
 | Bandwidth | A STREAM-style triad sustained 13.4 GB/s on one core (17.9 GB/s counting write-allocate) and 45.6 GB/s on four; bandwidth is shared by all cores. |
 
@@ -837,12 +840,12 @@ The memory hierarchy rewards programs that use data soon after it was fetched an
 
 - R. E. Bryant and D. R. O'Hallaron, *Computer Systems: A Programmer's Perspective*, 3rd ed., Pearson, 2016.
 - U. Drepper, "What every programmer should know about memory," Red Hat, 2007.
-- K. Goto and R. A. van de Geijn, "Anatomy of high-performance matrix multiplication," *ACM Transactions on Mathematical Software*, vol. 34, no. 3, 2008.
+- K. Goto and R. A. van de Geijn, "Anatomy of high-performance matrix multiplication," *ACM Transactions on Mathematical Software*, vol. 34, no. 3, article 12, pp. 12:1–12:25, 2008.
 - J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017.
 - J.-W. Hong and H. T. Kung, "I/O complexity: The red-blue pebble game," in *Proceedings of the 13th Annual ACM Symposium on Theory of Computing*, pp. 326–333, 1981.
 - M. S. Lam, E. E. Rothberg and M. E. Wolf, "The cache performance and optimizations of blocked algorithms," in *Proceedings of the Fourth International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS IV)*, pp. 63–74, 1991.
 - J. D. C. Little, "A proof for the queuing formula: L = λW," *Operations Research*, vol. 9, no. 3, pp. 383–387, 1961.
-- J. D. McCalpin, "Memory bandwidth and machine balance in current high performance computers," *IEEE Computer Society Technical Committee on Computer Architecture (TCCA) Newsletter*, December 1995.
+- J. D. McCalpin, "Memory bandwidth and machine balance in current high performance computers," *IEEE Computer Society Technical Committee on Computer Architecture (TCCA) Newsletter*, pp. 19–25, December 1995.
 - D. A. Patterson, "Latency lags bandwidth," *Communications of the ACM*, vol. 47, no. 10, pp. 71–75, 2004.
 - S. Williams, A. Waterman and D. Patterson, "Roofline: An insightful visual performance model for multicore architectures," *Communications of the ACM*, vol. 52, no. 4, pp. 65–76, 2009.
 - W. A. Wulf and S. A. McKee, "Hitting the memory wall: Implications of the obvious," *ACM SIGARCH Computer Architecture News*, vol. 23, no. 1, pp. 20–24, 1995.
