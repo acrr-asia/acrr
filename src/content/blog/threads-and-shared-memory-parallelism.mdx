@@ -13,11 +13,11 @@ seriesOrder: 3
 
 [The first entry](/blog/performance-models-and-scaling-laws) defined the measures this entry uses to judge every result: speedup $S(p) = T_1/T_p$ and efficiency $E(p) = S(p)/p$. It also derived the bound of [Amdahl's law](/blog/performance-models-and-scaling-laws#2-amdahls-law-and-strong-scaling) and the [work and span](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism) of a computation. [The second entry](/blog/memory-hierarchy-and-locality) showed that memory moves in [64-byte cache lines](/blog/memory-hierarchy-and-locality#2-how-a-cache-works) and that the [bandwidth](/blog/memory-hierarchy-and-locality#6-translation-prefetching-and-bandwidth) of main memory often limits a loop before its arithmetic does. Apart from their bandwidth measurements, both entries treated one processor core. This entry puts several cores to work on one problem through threads that share one memory.
 
-Sharing memory makes parallel code easy to start and easy to get wrong. Sections 1 and 2 describe threads and parallelize loops with OpenMP. Sections 3 to 6 treat what goes wrong: data races, the order in which writes become visible, the cost of synchronization and false sharing, and uneven division of work.
+Sharing memory makes parallel code easy to start and easy to get wrong. One directive can make a loop run nearly four times faster on four cores, and the same directive on a slightly different loop can give a wrong result or a slower program without any warning. The entry first shows threads and OpenMP loops working as intended, then measures each way in which they fail: data races, writes that become visible out of order, the cost of synchronization and false sharing, and work divided unevenly among threads.
 
 **Conventions.** The code is C11, compiled with the GNU Compiler Collection (GCC) 13.3 using `-std=c11 -O2 -fopenmp`, plus `-fno-tree-vectorize` where stated. OpenMP is the directive-based interface for shared-memory programming maintained by the OpenMP Architecture Review Board (ARB); this entry cites its current specification, version 5.2. GCC 13 reports `_OPENMP` as `201511`, which denotes version 4.5, and every construct used here exists in 4.5 with the meaning given in 5.2. Two programs use C11 atomics with the threads of the Portable Operating System Interface (POSIX). One short model is written in Python 3.13.
 
-All measurements come from the series' reference machine, a virtual machine under the Linux Kernel-based Virtual Machine (KVM). It has four cores of an Intel Xeon processor at 2.1 GHz with one hardware thread per core, a 48 KiB level-1 (L1) data cache and a 2 MiB level-2 (L2) cache per core, a shared level-3 (L3) cache that `lscpu` reports as 260 MiB, and 16 GiB of memory. Threads are bound to cores with `OMP_PROC_BIND=close OMP_PLACES=cores`. Each time is the median of five or seven repetitions. The machine is shared with other jobs, so its timings are noisy: a difference of 10% between two runs is common, and speedups slightly above $p$ appear in some runs for that reason. The timings describe this machine only. Arithmetic rates are given in GFLOP/s, units of $10^9$ floating-point operations (FLOP) per second, and bandwidths in gigabytes per second (GB/s), units of $10^9$ bytes per second.
+All measurements come from the series' reference machine, a virtual machine under the Linux Kernel-based Virtual Machine (KVM). It has four cores of an Intel Xeon processor at 2.1 GHz, with one hardware thread per core, and 16 GiB of memory. Each core has a 48 KiB level-1 (L1) data cache and a 2 MiB level-2 (L2) cache, and the cores share a level-3 (L3) cache that `lscpu` reports as 260 MiB. Threads are bound to cores with `OMP_PROC_BIND=close OMP_PLACES=cores`. Each time is the median of five or seven repetitions. The machine is shared with other jobs, so its timings are noisy: a difference of 10% between two runs is common, and speedups slightly above $p$ appear in some runs for that reason. The timings describe this machine only. Arithmetic rates are given in units of $10^9$ floating-point operations (FLOP) per second, written GFLOP/s, and bandwidths in gigabytes per second (GB/s), units of $10^9$ bytes per second.
 
 ## 1. Threads and shared memory
 
@@ -82,7 +82,7 @@ The same property is the danger. Any thread can write any variable, and nothing 
 
 ### 2.1 The OpenMP model
 
-OpenMP adds parallelism to C, C++ and Fortran through **directives**, which in C are `#pragma omp` lines placed before a statement or block, a runtime library with functions such as `omp_get_thread_num`, and environment variables such as `OMP_NUM_THREADS`. A compiler that does not enable OpenMP ignores the directives, so a program that does not call the runtime library still compiles to its sequential version.
+OpenMP adds parallelism to C, C++ and Fortran through three means: **directives** (in C, `#pragma omp` lines placed before a statement or block), a runtime library (functions such as `omp_get_thread_num`) and environment variables (such as `OMP_NUM_THREADS`). A compiler that does not enable OpenMP ignores the directives, so a program that does not call the runtime library still compiles to its sequential version.
 
 The directive `#pragma omp parallel` forks a team, runs the following block in every thread and joins at its end; the block is a **parallel region**. Each thread gets its number, from 0 to the team size minus one, from `omp_get_thread_num()`.
 
@@ -135,11 +135,9 @@ The loop variable `i` is private automatically. The directive asserts that the i
 
 The clause `reduction(+ : s)` gives each thread a private copy of `s` initialized to 0, the identity of `+`, and adds the copies into `s` at the end of the loop. The order of combination is unspecified, so a floating-point sum can differ between runs in its last digits (see the insight [Floating-Point Rounding in Long Simulations](/insights/floating-point-in-long-simulations)).
 
-Times are taken with `omp_get_wtime()`, which returns the elapsed wall-clock time in seconds since an arbitrary fixed point in the past.
-
 ### 2.4 A compute-bound loop and a memory-bound loop
 
-The program `loops.c` times two loops, first without OpenMP to obtain $T_1$, then with 1, 2 and 4 threads. One evaluates a polynomial of degree 200 by Horner's rule at $2^{21}$ points; the other is the **triad** $a_i = b_i + q\,c_i$ of McCalpin's STREAM benchmark, on arrays of $2^{25}$ doubles (256 MiB each, far larger than any cache):
+The program `loops.c` times two loops, first without OpenMP to obtain $T_1$, then with 1, 2 and 4 threads. One evaluates a polynomial of degree 200 by Horner's rule at $2^{21}$ points; the other is the **triad** $a_i = b_i + q\,c_i$ of McCalpin's STREAM benchmark, on arrays of $2^{25}$ doubles (256 MiB each, far larger than any cache). Times are taken with `omp_get_wtime()`, which returns the elapsed wall-clock time in seconds since an arbitrary fixed point in the past:
 
 ```c
 /* Excerpt of loops.c (C11 + OpenMP). Each loop also exists without the
@@ -178,13 +176,11 @@ The flag `-fno-tree-vectorize` keeps both versions of each loop in scalar instru
 
 The polynomial behaves as a compute-bound loop should. Its **arithmetic intensity**, the quantity of the roofline model of Williams, Waterman and Patterson that [Section 5 of the first entry](/blog/performance-models-and-scaling-laws#5-the-roofline-bound) develops, is 400 FLOP for 16 bytes of memory traffic, $I = 25$ FLOP/byte. Each core adds its own arithmetic throughput, so $P_{\mathrm{peak}}$ in the roofline bound $P \le \min(P_{\mathrm{peak}}, B\,I)$ grows in proportion to $p$, and the speedup on four threads is 3.87 ($E = 0.97$). The rate itself is far below what the hardware can do, because each element's evaluation is one chain of dependent operations and vector instructions are off.
 
-The triad has $I = 2/24 \approx 0.083$ FLOP/byte, so its roofline bound is $B\,I$, and it is expected to stop scaling once the threads together draw all the bandwidth the memory system can deliver. On this machine that did not happen. The rate rose from 11.8 GB/s on one thread to 46.8 GB/s on four, a speedup of 4.28 (above 4 because the sequential reference ran slower than the one-thread loop in this run). The second entry measured 45.6 GB/s on four cores and drew the same conclusion: these four cores are a small part of a large server processor, and together they did not reach its memory system's limit.
+The triad has $I = 2/24 \approx 0.083$ FLOP/byte. The 24 bytes per element follow the STREAM convention; with write-allocate ([Section 2.3 of the second entry](/blog/memory-hierarchy-and-locality#23-writes)) the physical traffic is 32 bytes. Either way, its roofline bound is $B\,I$, and the loop is expected to stop scaling once the threads together draw all the bandwidth the memory system can deliver. On this machine that did not happen. The rate rose from 11.8 GB/s on one thread to 46.8 GB/s on four, a speedup of 4.28 (above 4 because the sequential reference ran slower than the one-thread loop in this run). The second entry measured 45.6 GB/s on four cores and drew the same conclusion: these four cores are a small part of a large server processor, and together they did not reach its memory system's limit.
 
 What limits a single core is the number of cache-line transfers it can keep in flight, as [Section 6.4 of the second entry](/blog/memory-hierarchy-and-locality#64-what-limits-one-core-and-what-limits-many) showed with Little's law. Each added core brings its own outstanding requests, and the total grows until it reaches the bandwidth of the memory controllers. On a machine whose sustainable bandwidth is an assumed $B = 25$ GB/s, a triad that draws 11.8 GB/s per core could never run more than $25/11.8 \approx 2.1$ times faster than on one core, however many cores it used.
 
-The lesson for the roofline is that $B$ is the bandwidth of the whole chip, reachable only with enough cores. A memory-bound loop scales until the threads saturate $B$ and then stops, at a thread count that depends on the machine; a compute-bound loop has no such shared limit.
-
-The 24 bytes per element follow the STREAM convention; with write-allocate ([Section 2.3 of the second entry](/blog/memory-hierarchy-and-locality#23-writes)) the physical traffic is 32 bytes.
+For the roofline, this means that $B$ is the bandwidth of the whole chip, reachable only with enough cores. A memory-bound loop scales until the threads saturate $B$ and then stops, at a thread count that depends on the machine; a compute-bound loop has no such shared limit.
 
 ## 3. Data races and how to remove them
 
@@ -418,7 +414,7 @@ A correct program states the ordering it needs, in C11 with **release** and **ac
 
 On x86-64, release and acquire cost nothing in the processor. In the compiled `litmus.c` the relaxed and release stores to `flag` are the same `movl` instruction, as are the relaxed and acquire loads; the difference is only that the compiler must not move other accesses across them. A sequentially consistent store costs a locked instruction, and it is what the store-buffering pattern needs, as in mutual-exclusion algorithms in which each thread sets its own flag and then reads the other's.
 
-For programs without data races, C11 restores the intuitive model: a program that avoids all data races and synchronizes only with mutexes and sequentially consistent atomics behaves as if its threads' operations were interleaved. OpenMP makes earlier writes visible at the barriers that end `parallel` and worksharing regions and at entry to and exit from `critical`. An `atomic` construct without a memory-order clause is relaxed in OpenMP 5.2: its own update is indivisible, but it orders no other access, which suffices for the counters of Section 3 because their results are read after the loop's implicit barrier.
+C11 restores the intuitive model for correctly synchronized code: a program that avoids all data races and synchronizes only with mutexes and sequentially consistent atomics behaves as if its threads' operations were interleaved. OpenMP makes earlier writes visible at the barriers that end `parallel` and worksharing regions and at entry to and exit from `critical`. An `atomic` construct without a memory-order clause is relaxed in OpenMP 5.2: its own update is indivisible, but it orders no other access, which suffices for the counters of Section 3 because their results are read after the loop's implicit barrier.
 
 ## 5. Synchronization cost and false sharing
 
@@ -433,7 +429,28 @@ empty parallel region, 4 threads: 2.081 us each
 
 A barrier took 0.85 µs, about 1800 clock cycles at 2.1 GHz, and an empty parallel region about 2.1 µs, the time of roughly 2900 FLOP per thread at the polynomial loop's 1.37 GFLOP/s. A parallel region pays off only when each thread's share is much longer than a few microseconds; a parallel loop inside an inner loop that runs millions of times can be slower than sequential code. The contended increments of Section 3.3, at about 53 and 240 ns, are the same cost on a smaller scale.
 
-### 5.2 False sharing
+### 5.2 A critical section as a serial fraction
+
+A critical section runs on one thread at a time, so it acts like a serial part of the program, but how much it limits speedup is less obvious than it looks. In the loop of `sync.c`, each iteration does $A$ units of work outside a critical section and $C$ units inside it, as one dependent chain, so $f = C/(A + C)$ is the fraction of the sequential time spent in the critical section. The program compares the measured speedup with Amdahl's $1/(f + (1 - f)/p)$ and with $\min(p, 1/f)$:
+
+```text
+f = 0.00: T1 = 0.749 s;  p = 2: S = 2.02 [Amdahl 2.00, min(p,1/f) 2.00]  p = 4: S = 3.77 [Amdahl 4.00, min(p,1/f) 4.00]
+f = 0.05: T1 = 0.703 s;  p = 2: S = 1.83 [Amdahl 1.90, min(p,1/f) 2.00]  p = 4: S = 3.25 [Amdahl 3.48, min(p,1/f) 4.00]
+f = 0.20: T1 = 0.768 s;  p = 2: S = 1.89 [Amdahl 1.67, min(p,1/f) 2.00]  p = 4: S = 2.70 [Amdahl 2.50, min(p,1/f) 4.00]
+f = 0.50: T1 = 0.746 s;  p = 2: S = 1.55 [Amdahl 1.33, min(p,1/f) 2.00]  p = 4: S = 1.53 [Amdahl 1.60, min(p,1/f) 2.00]
+```
+
+With $f = 0.2$ and two threads, the measured 1.89 exceeds Amdahl's bound of 1.67. That is not a contradiction. Amdahl's law assumes that the serial fraction runs while every other thread waits, as in a sequential phase between parallel regions; a critical section runs while the other threads do their parallel work and excludes only other executions of itself. The serialized time totals $f\,T_1$ and the parallel work needs at least $T_1/p$, so
+
+$$
+T_p \ge \max\!\left(\frac{T_1}{p},\ f\,T_1\right), \qquad S(p) \le \min\!\left(p,\ \frac{1}{f}\right).
+$$
+
+The same bound follows from the work-span view of [Section 4 of the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism): the critical sections form one chain, so the span is at least $f\,T_1$ and the parallelism at most $1/f$.
+
+The measurements stay below this bound, the more so the more threads compete: with $f = 0.5$, four threads (1.53) were no faster than two (1.55). Each lock handoff moves the lock's cache line and the protected data between cores, so the effective $f$ rises with contention. The remedies, from least to most restructuring, are keeping critical sections short, moving work out of them and accumulating privately (Section 3.3).
+
+### 5.3 False sharing
 
 Threads that write different variables in the same cache line also slow each other down. Coherence works on whole lines, so each write by one core invalidates the line in the others, and the line moves between cores as if the variables were shared. This is **false sharing**: the program shares nothing, but the hardware does.
 
@@ -467,32 +484,11 @@ With atomic increments the effect is large. One thread takes about 6 ns per incr
 
 With plain increments the effect was small on this machine: 0.47 against 0.33 ns per increment with four threads in this run, and no difference in some other runs. A likely explanation, consistent with Section 4.3 but not verified here, is that plain stores wait in the store buffer, and a core that obtains the line writes many of them before losing it, whereas each atomic read-modify-write must own the line by itself. The penalty depends on how the writes are made and on the processor, and only a measurement settles it for a given program.
 
-The remedies follow from the cause, and [Section 5.3 of the second entry](/blog/memory-hierarchy-and-locality#53-layout-and-threads) anticipated the layout one. There are three:
+Three remedies follow from the cause; the second, a change of layout, is the one [Section 5.3 of the second entry](/blog/memory-hierarchy-and-locality#53-layout-and-threads) anticipated:
 
 - accumulate in a local variable and write the shared location once at the end, as the partial sums of Section 3.3 did;
 - give each thread's data its own cache line, with `_Alignas(64)` or explicit padding, at the cost of memory;
 - arrange the data so that each thread writes a contiguous block much larger than a line, which a static schedule of a loop over an array does automatically; only the lines at the edges of the blocks are then shared, a negligible fraction of the whole.
-
-### 5.3 A critical section as a serial fraction
-
-A critical section runs on one thread at a time, so it acts like a serial part of the program, but how much it limits speedup is less obvious than it looks. In the loop of `sync.c`, each iteration does $A$ units of work outside a critical section and $C$ units inside it, as one dependent chain, so $f = C/(A + C)$ is the fraction of the sequential time spent in the critical section. The program compares the measured speedup with Amdahl's $1/(f + (1 - f)/p)$ and with $\min(p, 1/f)$:
-
-```text
-f = 0.00: T1 = 0.749 s;  p = 2: S = 2.02 [Amdahl 2.00, min(p,1/f) 2.00]  p = 4: S = 3.77 [Amdahl 4.00, min(p,1/f) 4.00]
-f = 0.05: T1 = 0.703 s;  p = 2: S = 1.83 [Amdahl 1.90, min(p,1/f) 2.00]  p = 4: S = 3.25 [Amdahl 3.48, min(p,1/f) 4.00]
-f = 0.20: T1 = 0.768 s;  p = 2: S = 1.89 [Amdahl 1.67, min(p,1/f) 2.00]  p = 4: S = 2.70 [Amdahl 2.50, min(p,1/f) 4.00]
-f = 0.50: T1 = 0.746 s;  p = 2: S = 1.55 [Amdahl 1.33, min(p,1/f) 2.00]  p = 4: S = 1.53 [Amdahl 1.60, min(p,1/f) 2.00]
-```
-
-With $f = 0.2$ and two threads, the measured 1.89 exceeds Amdahl's bound of 1.67. That is not a contradiction. Amdahl's law assumes that the serial fraction runs while every other thread waits, as in a sequential phase between parallel regions; a critical section runs while the other threads do their parallel work and excludes only other executions of itself. The serialized time totals $f\,T_1$ and the parallel work needs at least $T_1/p$, so
-
-$$
-T_p \ge \max\!\left(\frac{T_1}{p},\ f\,T_1\right), \qquad S(p) \le \min\!\left(p,\ \frac{1}{f}\right).
-$$
-
-The same bound follows from the work-span view of [Section 4 of the first entry](/blog/performance-models-and-scaling-laws#4-work-span-and-parallelism): the critical sections form one chain, so the span is at least $f\,T_1$ and the parallelism at most $1/f$.
-
-The measurements stay below this bound, the more so the more threads compete: with $f = 0.5$, four threads (1.53) were no faster than two (1.55). Each lock handoff moves the lock's cache line and the protected data between cores, so the effective $f$ rises with contention. The remedies, from least to most restructuring, are short critical sections, work moved out of them, and private accumulation (Section 3.3).
 
 ## 6. Load balance and scheduling
 
@@ -581,22 +577,22 @@ dynamic,1    0.10946 s
 dynamic,1000 0.00045 s
 ```
 
-With chunks of one iteration the loop took 400 times longer than with the static schedule, about 100 ns per iteration, spent taking iterations from the queue and, as a side effect, writing neighboring elements of `y` from different threads into the same cache lines. With chunks of 1000 the overhead nearly vanished. A chunk should be large enough that one request, of the order of 100 ns here, is small against its work, and small enough that there are many more chunks than threads.
+With chunks of one iteration the loop took 400 times longer than with the static schedule, about 100 ns per iteration, spent taking iterations from the queue and, as a side effect, writing neighboring elements of `y` from different threads into the same cache lines. With chunks of 1000 the overhead nearly vanished. A chunk should be large enough that one request, on the order of 100 ns here, is small against its work, and small enough that there are many more chunks than threads.
 
 ### 6.5 The work-span view
 
 For the triangular loop, the work is $W = n(n - 1)/2 \approx 2.0 \times 10^8$ units and the span is the longest row, $D = n - 1$, because each row is a dependent chain and the rows are independent. The parallelism $W/D = n/2 = 10^4$ is far larger than $p = 4$, so the greedy bound $T_p \le W/p + D$ of [Section 4.2 of the first entry](/blog/performance-models-and-scaling-laws#42-greedy-scheduling-and-brents-bound) exceeds the ideal $W/p$ by only 0.04%.
 
-The bound holds for a greedy scheduler, which never leaves a thread idle while work remains, and assumes that scheduling costs nothing. The static block schedule is not greedy: threads 0, 1 and 2 sit idle while thread 3 still has rows no one else may take. A dynamic schedule is greedy at the granularity of its chunks, which is why it approaches $W/p$, and the per-chunk cost of Section 6.4 is what the model leaves out. Load imbalance is not a lack of parallelism but a failure to use it, and the schedule decides whether the parallelism of the work-span analysis is used.
+The bound holds for a greedy scheduler, which never leaves a thread idle while work remains, and assumes that scheduling costs nothing. The static block schedule is not greedy: threads 0, 1 and 2 sit idle while thread 3 still has rows no one else may take. A dynamic schedule is greedy at the granularity of its chunks, which is why it approaches $W/p$, and the per-chunk cost of Section 6.4 is what the model leaves out. Load imbalance is not a lack of parallelism but a failure to use it, and the schedule is what decides whether it is used.
 
 ## 7. Exercises
 
-**Exercise 1.** A loop spends a fraction $f = 0.1$ of its sequential time in one critical section, executed in every iteration. What do Amdahl's law and the bound of Section 5.3 give for $p = 8$? If every pass of the lock from one thread to another adds time equal to half the length of the critical section, what does the bound become?
+**Exercise 1.** A loop spends a fraction $f = 0.1$ of its sequential time in one critical section, executed in every iteration. What do Amdahl's law and the bound of Section 5.2 give for $p = 8$? If every pass of the lock from one thread to another adds time equal to half the length of the critical section, what does the bound become?
 
 <details>
 <summary>Answer</summary>
 
-Amdahl's formula gives $1/(0.1 + 0.9/8) = 4.71$, but it assumes that all threads wait during the serial part. The bound of Section 5.3 is $\min(8, 1/0.1) = 8$. With the handoff, the serialized time per iteration grows from 0.1 to 0.15 of the sequential iteration time, so the bound becomes $\min(8, 1/0.15) = 6.7$. Measured speedups are lower still, because threads also queue for the lock.
+Amdahl's formula gives $1/(0.1 + 0.9/8) = 4.71$, but it assumes that all threads wait during the serial part. The bound of Section 5.2 is $\min(8, 1/0.1) = 8$. With the handoff, the serialized time per iteration grows from 0.1 to 0.15 of the sequential iteration time, so the bound becomes $\min(8, 1/0.15) = 6.7$. Measured speedups are lower still, because threads also queue for the lock.
 
 </details>
 
@@ -661,7 +657,7 @@ Each structure is 16 bytes, so if the array starts at a line boundary all four s
 | False sharing | Atomic per-thread counters in one line: 21 times slower than padded ones with four threads. Pad to 64 bytes or accumulate privately. |
 | Scheduling | Static blocks on a triangular loop: $S = 2.27$ (bound 2.29); round-robin, dynamic and guided: about 4. Chunks of one cheap iteration made a uniform loop 400 times slower. |
 
-Threads give a program several cores and one memory, and the measurements of this entry show both sides of that arrangement. Loops scaled nearly in proportion to the number of cores, and races, reorderings, contended lines and idle threads undid that gain wherever the threads shared data carelessly. Inside each core there is a further level of parallelism that threads do not use: a single instruction can operate on several numbers at once, and a graphics processor applies the same idea to thousands of lanes. [The fourth entry](/blog/data-parallelism-vector-units-and-gpus) turns to that data parallelism, starting with the vector instructions that this entry switched off.
+Threads give a program several cores and one memory, and the measurements of this entry show both sides of that arrangement. Loops scaled nearly in proportion to the number of cores. Races, reorderings and contended cache lines undid that gain wherever threads shared data carelessly, and idle threads undid it wherever the work was divided unevenly. Inside each core there is a further level of parallelism that threads do not use: a single instruction can operate on several numbers at once. A graphics processor applies the same idea to thousands of lanes. [The fourth entry](/blog/data-parallelism-vector-units-and-gpus) turns to that data parallelism, starting with the vector instructions that this entry switched off.
 
 ### References
 

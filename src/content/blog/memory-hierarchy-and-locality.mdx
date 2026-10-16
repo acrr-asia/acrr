@@ -11,9 +11,9 @@ series: parallel-and-high-performance-computing
 seriesOrder: 2
 ---
 
-[The first entry](/blog/performance-models-and-scaling-laws) ended with [the roofline bound](/blog/performance-models-and-scaling-laws#5-the-roofline-bound), $P \le \min(P_{\mathrm{peak}}, B\,I)$ of Williams, Waterman and Patterson (2009). It caps the attainable performance $P$ of a kernel by its peak arithmetic rate $P_{\mathrm{peak}}$ and by the product of the memory bandwidth $B$ and the arithmetic intensity $I$, the floating-point operations (FLOP) performed per byte moved. The insight [Compute-Bound or Memory-Bound?](/insights/compute-bound-or-memory-bound) showed that a kernel such as $y \leftarrow y + a x$ sits far below the ridge point $I^* = P_{\mathrm{peak}}/B$. Both treated $B$ and the bytes moved as given. This entry opens them up: where the bytes come from, why the same loop can move eight times more of them when written in a different order, and how a program can be restructured so that each byte fetched is used many times.
+[The first entry](/blog/performance-models-and-scaling-laws) ended with [the roofline bound](/blog/performance-models-and-scaling-laws#5-the-roofline-bound), $P \le \min(P_{\mathrm{peak}}, B\,I)$ of Williams, Waterman and Patterson (2009). It caps the attainable performance $P$ of a kernel by its peak arithmetic rate $P_{\mathrm{peak}}$ and by the product of the memory bandwidth $B$ and the arithmetic intensity $I$, the floating-point operations (FLOP) performed per byte moved. The insight [Compute-Bound or Memory-Bound?](/insights/compute-bound-or-memory-bound) showed that a kernel such as $y \leftarrow y + a x$ sits far below the ridge point $I^* = P_{\mathrm{peak}}/B$. Both treated $B$ and the bytes moved as given. This entry opens them up: where the bytes come from, why the same loop can move eight times as many of them when written in a different order, and how a program can be restructured so that each byte fetched is used many times.
 
-It treats the memory hierarchy, how a cache works, locality in loops, blocking, data layout and finally translation, prefetching and bandwidth. Each idea is measured on one machine or, where a timing would be too noisy, counted exactly with a small cache simulator that the reader can run.
+The entry assumes the roofline bound and the measurement practice of the first entry, and a reading knowledge of C and Python. Every program runs on one core except the bandwidth test at the end. Each effect is measured on one machine or, where a timing shows that order matters but not why, counted exactly with a small cache simulator that the reader can run.
 
 **Conventions.** The C programs are C11 compiled with the GNU Compiler Collection (GCC) 13.3 at the optimization level stated with each listing; the simulator and the matrix-multiply comparison use Python 3.13 and NumPy 2.5. The bandwidth test uses Open Multi-Processing (OpenMP) threads through `gcc -fopenmp`. The reference machine is a Kernel-based Virtual Machine (KVM) guest with four cores of an Intel Xeon processor rated at 2.1 GHz, with the 512-bit Advanced Vector Extensions (AVX-512), the cache sizes listed in Section 1.2 and 16 GiB of RAM, running Linux.
 
@@ -27,7 +27,7 @@ A modern core can start several arithmetic operations in every clock cycle of we
 
 The **memory hierarchy** is the engineering answer. Between the registers and DRAM sit several levels of **cache**: small memories built from fast **static RAM** (SRAM), close to the core, that hold copies of recently used data. They are numbered outward from the core, level 1 (L1), level 2 (L2) and level 3 (L3). A small memory is fast because signals travel short distances, so a small fast level in front of a large slow one gives an average access time close to the small level's whenever most accesses find their data there (Hennessy and Patterson, 2017, Chapter 2). Caches are managed by hardware: a program reads an address, and the hardware decides where the copy comes from. The program cannot see the hierarchy, but its speed depends on it.
 
-The $B$ of the roofline is the bandwidth of whichever level the data come from, and the bytes in $I$ are those that cross that level's boundary. On the reference machine one core completed about 90.6 GFLOP/s in the fused multiply-add microbenchmark of [Section 5.4 of the first entry](/blog/performance-models-and-scaling-laws#54-the-peak-arithmetic-rate) and sustained 13.4 GB/s from DRAM on the streaming loop of Section 6.3. The ridge point for one core is therefore about $90.6/13.4 = 6.8$ FLOP/byte, close to the 7.08 that the first entry found for four cores: a kernel that fetches every operand from DRAM needs about 54 operations per double before arithmetic can become the limit. Few loops do that much work per element. The ones that run fast do so because most of their operands come from a cache.
+The $B$ of the roofline is the bandwidth of whichever level the data come from, and the bytes in $I$ are those that cross that level's boundary. On the reference machine one core completed about 90.6 GFLOP/s in the fused multiply-add microbenchmark of [Section 5.4 of the first entry](/blog/performance-models-and-scaling-laws#54-the-peak-arithmetic-rate) and sustained 13.4 GB/s from DRAM on the streaming triad of Section 6.3 below. The ridge point for one core is therefore about $90.6/13.4 = 6.8$ FLOP/byte, close to the 7.08 that the first entry found for four cores: a kernel that fetches every operand from DRAM needs about 54 operations per double before arithmetic can become the limit. Few loops do that much work per element. The ones that run fast do so because most of their operands come from a cache.
 
 ### 1.2 The levels on the reference machine
 
@@ -173,7 +173,7 @@ mode rand, pages 4 KiB
 
 The output has plateaus and steps. Up to 32 KiB a load takes about 1.5 ns: the cycle fits in the 48 KiB L1. From 64 KiB to 512 KiB it takes about 5 ns, the L2 latency. At the 2 MiB size of L2 it jumps to 45 to 115 ns, and beyond 32 MiB it climbs from about 180 ns to 270 ns at 1 GiB, about 180 times the L1 latency.
 
-The steps are not sharp: a working set equal to the L2 size already misses, because the cache also holds other data. The time beyond L2 also includes address translation, since each step lands on a random 4 KiB page (Section 6.1 separates the two). And the step to DRAM-like latency appears between 32 and 64 MiB, far below the 260 MiB reported for L3. The L3 is shared with the cores of other virtual machines on the host; one plausible reading, which this measurement cannot confirm, is that this guest obtains only a few tens of MiB of it.
+The steps are not sharp: a working set equal to the L2 size already misses, because the cache also holds other data. The time beyond L2 also includes address translation, since each step lands on a random 4 KiB page (Section 6.1 separates the two). Finally, the step to DRAM-like latency appears between 32 and 64 MiB, far below the 260 MiB reported for L3. The L3 is shared with the cores of other virtual machines on the host; one plausible reading, which this measurement cannot confirm, is that this guest obtains only a few tens of MiB of it.
 
 The virtual machine hides the actual clock frequency, so the times are not converted to cycles. Repeated runs moved individual rows by up to about 50% (the 1 MiB row gave 6.25 ns in another run), but not the plateaus and steps.
 
@@ -181,9 +181,9 @@ The virtual machine hides the actual clock frequency, so the times are not conve
 
 ### 2.1 Lines, sets and tags
 
-A cache does not store individual bytes. It stores **cache lines** (also called blocks), aligned chunks of memory of fixed size, 64 bytes on the reference machine. When a load misses, the whole line containing the requested byte is brought in. This is the first reason that access order matters: a line fetched for one double also brings the seven doubles next to it, free of further cost if they are used soon.
+A cache does not store individual bytes. It stores **cache lines** (also called blocks), aligned chunks of memory of fixed size, 64 bytes on the reference machine. When a load misses, the whole line containing the requested byte is brought in. This granularity is the first reason that access order matters: a line fetched for one double also brings the seven doubles next to it, free of further cost if they are used soon.
 
-To find a line quickly, the cache is divided into **sets**, and each line address may live in only one set. A cache of capacity $C$ bytes, with line size $L$ bytes and **associativity** $W$ (the number of lines, or **ways**, per set) has
+To find a line quickly, the cache is divided into **sets**, and each line address may live in only one set. A cache of capacity $C$ bytes with line size $L$ bytes and **associativity** $W$ (the number of lines, or **ways**, per set) has
 
 $$
 S = \frac{C}{L\,W}
@@ -214,7 +214,7 @@ When a line must be brought into a full set, one line there is evicted. The **le
 
 A **write-through** cache sends every store to the next level at once. A **write-back** cache updates only its own copy and marks the line dirty; the line is written to the next level when it is evicted. Write-back saves traffic when a line is written several times, and it is the usual choice for the data caches of current processors (Hennessy and Patterson, 2017, Appendix B).
 
-A store that misses raises a second question. With **write-allocate**, the line is first read into the cache and then modified there; with **no-write-allocate**, the store bypasses the cache. Write-back caches normally write-allocate, so a loop that only writes an array, such as `a[i] = 0`, still reads every line of `a` before overwriting it and moves twice the bytes its source code suggests. **Non-temporal** (streaming) store instructions avoid this read for data that will not be reused soon (Drepper, 2007).
+A store that misses raises a second question. With **write-allocate**, the line is first read into the cache and then modified there; with **no-write-allocate**, the store bypasses the cache. Write-back caches normally write-allocate. A loop that only writes an array, such as `a[i] = 0`, therefore still reads every line of `a` before overwriting it, and moves twice the bytes its source code suggests. **Non-temporal** (streaming) store instructions avoid this read for data that will not be reused soon (Drepper, 2007).
 
 ### 2.4 Three kinds of misses
 
@@ -599,14 +599,16 @@ Four results stand out.
 - **Loop order alone gave a factor of 22** for $n = 1024$, with the same operations and compiler; GCC at `-O3` did not interchange the loops.
 - **The power of two made ijk eight times slower** than at $n = 1000$, for 7% more work. With rows of 8192 bytes, a column of $B$ maps to one L1 set (Section 2.1) and to 16 of the 2048 sets of L2, whose index repeats every 128 KiB; those hold 256 lines, against 1024 in a column.
 - **Blocking gained a further 31% to 43%** over ikj, which already streams rows that the prefetcher handles well. With $b = 64$ the three tiles (96 KiB) fit in L2 but not in L1, and the inner loop is probably limited by its instructions about as much as by memory. The gain grows at $n = 2048$, where one matrix (32 MiB) no longer stays in the caches.
-- **These loops are far from the machine's capability.** NumPy's `a @ b` calls the OpenBLAS implementation of the Basic Linear Algebra Subprograms (BLAS) bundled with NumPy, here restricted to one thread with `OPENBLAS_NUM_THREADS=1`:
+- **These loops are far from the machine's capability.** A tuned library multiplies the same matrices seven times faster than the blocked loop.
+
+The library in this comparison is the OpenBLAS implementation of the Basic Linear Algebra Subprograms (BLAS) bundled with NumPy, which NumPy's `a @ b` calls; here it was restricted to one thread with `OPENBLAS_NUM_THREADS=1`:
 
 ```text
 n = 1024, NumPy a @ b:     34.8 ms,  61.69 GFLOP/s
 n = 2048, NumPy a @ b:    305.4 ms,  56.25 GFLOP/s
 ```
 
-The library is seven times faster than the blocked loop and reached about two-thirds of the first entry's one-core microbenchmark rate. It blocks for registers and every cache level at once, packs tiles into contiguous buffers so that they cannot conflict, and keeps a block of $C$ in vector registers in a hand-written kernel (Goto and van de Geijn, 2008). Dense linear algebra belongs in such a library; this section's principles are for the loops no library provides, such as stencils.
+It reached about two-thirds of the first entry's one-core microbenchmark rate. It blocks for registers and every cache level at once, packs tiles into contiguous buffers so that they cannot conflict, and keeps a block of $C$ in vector registers in a hand-written kernel (Goto and van de Geijn, 2008). Dense linear algebra belongs in such a library; this section's principles are for the loops no library provides, such as stencils.
 
 ## 5. Data layout
 
@@ -674,7 +676,7 @@ With threads, layout has one more consequence. Coherence is maintained per line,
 
 Programs use **virtual addresses**, which the processor translates to physical addresses through page tables kept by the operating system, in **pages** of 4 KiB on the reference machine. To avoid walking the tables on every access, the processor caches recent translations in a **translation lookaside buffer** (TLB). A TLB miss triggers a **page walk**, several dependent memory accesses through the levels of the page table (Drepper, 2007).
 
-The **reach** of a TLB is its number of entries times the page size. This virtual processor does not report its TLB sizes; an assumed 2048 entries would cover 8 MiB with 4 KiB pages, beyond which a random pattern also misses in the TLB. **Huge pages** of 2 MiB (or 1 GiB where supported) multiply the reach by 512. Linux provides them as **transparent huge pages**, on the reference machine only for regions marked with `madvise(..., MADV_HUGEPAGE)`, as the latency program does when given the argument `huge`. The two random-order runs side by side (selected rows):
+The **reach** of a TLB is its number of entries times the page size. This virtual processor does not report its TLB sizes. An assumed 2048 entries would cover 8 MiB with 4 KiB pages; beyond that, a random pattern also misses in the TLB. **Huge pages** of 2 MiB (or 1 GiB where supported) multiply the reach by 512. Linux provides them as **transparent huge pages**, on the reference machine only for regions marked with `madvise(..., MADV_HUGEPAGE)`, as the latency program does when given the argument `huge`. The two random-order runs side by side (selected rows):
 
 | Working set | Random order, 4 KiB pages (ns) | Random order, 2 MiB pages (ns) |
 |---|---|---|
@@ -804,7 +806,7 @@ $24\,b^2 \le 2\,097\,152$ gives $b \le 295$; $b = 256$ uses 1.5 MiB for three ti
 
 </details>
 
-**Exercise 4.** A loop updates `p[i].vx += p[i].fx * dt` and `p[i].x += p[i].vx * dt` for particles stored as an array of 64-byte structures that also contain `fx` (assume one more field in place of `charge`), with $10^7$ particles that do not fit in any cache. Estimate the bytes moved per particle in AoS and in SoA layout, counting write-backs, and the time each takes at 20 GB/s.
+**Exercise 4.** A loop updates `p[i].vx += p[i].fx * dt` and `p[i].x += p[i].vx * dt` for particles stored as an array of 64-byte structures that also contain `fx` (assume one more field in place of `charge`), with $10^7$ particles that do not fit in any cache. Counting write-backs, estimate the bytes moved per particle in AoS and in SoA layout and the time each takes at 20 GB/s.
 
 <details>
 <summary>Answer</summary>
@@ -829,7 +831,7 @@ AoS: every line is read (64 bytes) and, being dirty, written back (64 bytes): 12
 | Prefetching | Sequential access over 1 GiB ran 36 times faster than random access with the same dependent loads. |
 | Bandwidth | A STREAM-style triad sustained 13.4 GB/s on one core (17.9 GB/s counting write-allocate) and 45.6 GB/s on four; bandwidth is shared by all cores. |
 
-The memory hierarchy rewards programs that use data soon after it was fetched and together with its neighbors. Loop order, blocking and data layout arrange this, and they change the bytes moved, the $I$ of the roofline, by factors that dwarf most arithmetic optimizations. Apart from the bandwidth test, everything here ran on one core. [The third entry](/blog/threads-and-shared-memory-parallelism) puts several cores to work through threads that share this hierarchy, and with them come races, synchronization costs and the false sharing anticipated in Section 5.3.
+The memory hierarchy rewards programs that use data soon after it was fetched and together with its neighbors. Loop order, blocking and data layout arrange this. They change the bytes moved, the $I$ of the roofline, and with them the run time: on the reference machine, loop order alone gave a factor of 22 for matrix multiply and the particle layout a factor of 4.9. Apart from the bandwidth test, everything here ran on one core. [The third entry](/blog/threads-and-shared-memory-parallelism) puts several cores to work through threads that share this hierarchy, and with them come races, synchronization costs and the false sharing anticipated in Section 5.3.
 
 ### References
 
