@@ -21,7 +21,7 @@ All 11 should-fix findings and six of the seven optional ones were applied by th
 | F2 | Entry 4, Section 2.3, now relates its 22.3 GB/s to the one-core triad figures of entry 2, Section 6.3, and explains the difference by the absence of write-allocate traffic. It also calls the one-core ridge point a rough figure. |
 | F3 | Entry 4, Section 2.2, no longer names the target that `-march=native` selected. It states that all four GCC 13.3 AVX-512 Xeon targets prefer 256-bit vectors. |
 | F4 | Entry 1 Conventions now says what OpenMP is and how the thread count is set, and links Section 2 of the third entry. |
-| F5 | Entry 2 uses $k$ for associativity and $N_{\mathrm{sets}}$ for the number of sets, in Section 2.1 and in the Summary. |
+| F5 | Entry 2 uses $N_{\mathrm{ways}}$ for associativity and $N_{\mathrm{sets}}$ for the number of sets, in Section 2.1 and in the Summary. The reviewer's $k$ was not used because entry 2 already uses $k$ as the matrix-multiply loop index in Section 4. |
 | F6 | Entry 5, Section 5.2, describes the row as "$N + 2$ values (the variable `W` in the code)". |
 | F7 | Entry 1, Section 2.2: the communication model is "built from the latency and bandwidth of each message, measured on the reference machine and assumed for a cluster". |
 | F8 | Entry 2 opening: "developed the roofline bound". |
@@ -40,7 +40,7 @@ Second pass. After the corrections, the whole series was checked again:
 - `npm run build:local` exits 0, `npm run check:links` reports that all internal links resolve, and `eos validate-site dist` reports no issues.
 - `eos lint` shows 0 errors and 0 warnings on all six files.
 - The two new links (to `#63-measuring-sustainable-bandwidth` and `#64-what-limits-one-core-and-what-limits-many` of entry 2) and the links to entry 1 `#52-intensity-of-three-kernels` and entry 3 `#2-parallel-loops-with-openmp` resolve, and their targets say what the linking text claims.
-- No symbol introduced by F5 collides with another symbol in entry 2: $k$ and $N_{\mathrm{sets}}$ appear nowhere else in it.
+- The F5 symbols do not collide with any other symbol in entry 2: $N_{\mathrm{ways}}$ and $N_{\mathrm{sets}}$ appear nowhere else in it.
 - The independent QA stage re-reads each item before its record is written; anything it finds is added below.
 
 ## Objectives coverage
