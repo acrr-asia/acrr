@@ -128,3 +128,164 @@ Length: about 5,650 words of prose (alphabetic words only, without code, display
 A scratch build (`astro build --outDir`, since deleted) rendered the page and the revised Mermaid diagram. At the time of the build, the link checker reported only the links to the third entry, which did not yet exist. The page shows no text glued to an inline element; the `m<span` matches are KaTeX exponents in units such as "m$^{-1}$".
 
 <!-- Later stages (fact-check, technical review, resolution, QA) append their sections below. -->
+
+## Fact-check
+
+Stage: EOS step 6.3, by a reviewer who did not write or revise the entry. Method: every reference was looked up with web search (library catalogues, DBLP and publisher listings, author repositories, reference lists in later papers). Direct fetches of DBLP, IEEE Xplore, arXiv and the NPS archive were refused by this session's network proxy. Every claim that rests only on search-result snippets or reference lists is marked as such. Earlier entries of the series cite Choset et al., Lynch and Park, Siciliano et al., Gat and Koenig and Likhachev in the same form (checked with grep), so the reference list is consistent across the series.
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| F1 | Should fix | `:101`, Section 3.1 | evidence | "The method was developed at Carnegie Mellon University for outdoor vehicles" could not be confirmed from Coulter's report or any other source. |
+| F2 | Should fix | `:458`, `:467`, Section 6.3 (D6) | evidence | "typically" and "fail rarely" have no source; common navigation software confirms the kinds of behaviors listed but not their order or a failure rate. |
+| F3 | Optional | `:545`, References (Gat) | evidence | The chapter's pages (195–210) are given by one secondary source only, so they are not added. |
+| F4 | Optional | `:344`, Section 5.2 | evidence | The 1992 paper gives an explicit formula for sphere worlds. The extension to "worlds that can be mapped onto them" is confirmed only from later papers, which attribute it to a diffeomorphism construction. |
+
+### F1. Origin of pure pursuit
+- **Where:** `src/content/blog/path-tracking-and-reactive-avoidance.mdx:101`, Section 3.1 "The geometry"
+- **Text:** "The method was developed at Carnegie Mellon University for outdoor vehicles; Coulter's 1992 report documents its implementation, derives the curvature formula and discusses the effect of the look-ahead distance."
+- **Problem:** The report exists: R. C. Coulter, CMU-RI-TR-92-01, Robotics Institute, January 1992 (CMU RI publication record; DTIC ADA255524). Its abstract confirms that it describes the implementation, gives a geometric derivation and discusses performance "as a function of its parameters". The search did not confirm who developed the method or where. The abstract only says the algorithm had "general success over the past few years". Standards 7.2: an unverified historical attribution is qualified or removed.
+- **Correction:** "Coulter's 1992 technical report from Carnegie Mellon University documents an implementation of the method, derives the curvature formula and examines how its performance depends on the look-ahead distance." (This drops the origin claim and keeps everything the source supports.)
+
+### F2. Recovery behaviors (settles D6)
+- **Where:** `:458` ("runs **recovery behaviors** in order of increasing cost, typically:") and `:467` ("they make a system built from methods with known failure modes fail rarely and visibly")
+- **Problem:** Widely used open-source navigation software confirms the kinds of behavior listed. The ROS 1 `move_base` defaults are a conservative costmap reset, a rotation in place and an aggressive costmap reset, followed by abort. The Nav2 default behavior tree uses clear costmaps, spin, wait and back up, plus replanning. Neither uses the article's order (both clear the costmap before waiting). "Typically" therefore claims more than these sources show. "Fail rarely" is a claim about failure frequency, and no source supports it. These sources were seen only through search results, not fetched, so they cannot be cited as they stand (standards 7.3: no URL that has not been fetched).
+- **Correction (D6 settled, apply both):** "...and runs **recovery behaviors**, roughly in order of increasing cost, for example:" and "...but they make a system built from methods with known failure modes fail visibly, and often recover from the failure." (The editor's wording for D6 is equally acceptable.)
+
+### F3. Gat chapter pages
+- **Where:** `:545`, References
+- **Problem:** Standards 7.3 asks for pages when they exist. The range 195–210 appears only in a Wikipedia reference. The chapter's existence, title, editors and AAAI Press/MIT Press imprint are confirmed by a hosted copy and reference lists. One later paper gives the year as 1997, but the catalogue year of the volume is 1998.
+- **Correction:** Leave the entry as it is unless the page range is confirmed from the book's contents page. Then add "pp. 195–210" before the year, in this entry and in `what-is-a-robot.mdx`.
+
+### F4. Scope of the navigation-function result
+- **Where:** `:344`
+- **Text:** "for worlds of spherical obstacles and worlds that can be mapped onto them"
+- **Problem:** The abstract in the Penn repository describes the explicit construction for (generalized) sphere worlds. Later papers attribute the extension to star worlds to a suitable diffeomorphism, which Rimon and Koditschek developed in related work. Whether the 1992 paper itself covers that extension was not confirmed.
+- **Correction (optional):** "...for worlds of spherical obstacles, and, through a change of coordinates, for worlds that can be mapped onto them."
+
+### Verification table
+
+| Claim or reference | Location | Status | Source |
+|---|---|---|---|
+| Brockett, "Asymptotic stability and feedback stabilization," in *Differential Geometric Control Theory*, eds. Brockett, Millman, Sussmann, Birkhäuser, pp. 181–191, 1983 | `:541` | Verified | Library catalogue (Kaiyodai OPAC: Birkhäuser, Boston, 1983, proceedings of the 1982 Michigan Tech conference); MaRDI/zbMATH Prog. Math. 27, 181–191 (Zbl 0528.93051). Optional addition: "Progress in Mathematics, vol. 27". |
+| Brockett's necessary condition fails for the unicycle; no smooth state feedback stabilizes a fixed pose | `:65`, `:530` | Verified | Theorem 1(iii) of the paper (image of $(x,u)\mapsto f(x,u)$ must contain a neighborhood of 0, for C¹ feedback), as cited by Kvalheim (arXiv 2205.07840). Checked directly: $(0, \varepsilon, 0)$ is not attained near the origin, since $v\cos\theta = 0$ and $v\sin\theta = \varepsilon$ with $\theta$ small has no solution |
+| Choset et al., *Principles of Robot Motion*, MIT Press, 2005 (seven authors, order as given) | `:542` | Verified | Google Books / Internet Archive record (ISBN 9780262033275); CMU RI publication record |
+| Attractive potential quadratic within $d^*$, conic beyond, "in the form given by Choset et al." | `:268`–`:276` | Verified in form | Choset's 16-735 course slides and a course page based on Chapter 4 describe this switch. The constant $-\tfrac12 k_a {d^*}^2$ follows from continuity at $d^*$ (checked: both branches equal $\tfrac12 k_a {d^*}^2$ there, and the gradient magnitude beyond is $k_a d^*$). The book's equation text was not seen |
+| Coulter, CMU-RI-TR-92-01, 1992; derives the curvature and discusses look-ahead | `:101`, `:543` | Verified | CMU RI publication record; DTIC ADA255524 |
+| Pure pursuit "developed at CMU for outdoor vehicles" | `:101` | Not verified | See F1 |
+| Fox, Burgard, Thrun, *IEEE RAM* 4(1):23–33, 1997; developed for synchro-drive robots; searches velocities that can be reached and from which the robot can stop | `:348`, `:544` | Verified | CMU RI record (March 1997); UW RSE abstract; DOI 10.1109/100.580977 |
+| Gat, "On Three-Layer Architectures," AAAI Press/MIT Press, 1998; three layers | `:39`, `:545` | Verified (pages: see F3) | Hosted copy (BIU course site); Wikipedia reference list |
+| Kanayama, Kimura, Miyazaki, Noguchi, ICRA 1990, pp. 384–389 | `:193`, `:546` | Verified | DBLP listing (ICRA 1990: 384–389) via search; DOI 10.1109/ROBOT.1990.126006 in reference lists. Not to be confused with the IROS 1991 paper "...for a non-holonomic mobile robot" |
+| The law $v = v_r\cos e_\theta + K_x e_x$, $\omega = \omega_r + v_r(K_y e_y + K_\theta \sin e_\theta)$ and the robot-frame error | `:175`–`:200` | Verified by derivation, with the paper's Lyapunov function | The paper's Lyapunov function, from the full-text OCR summarized in search results, is $V = \tfrac12(e_x^2+e_y^2) + (1-\cos e_\theta)/K_y$. With the law as written and the error dynamics of `:184`, $\dot V = -K_x e_x^2 - v_r K_\theta \sin^2 e_\theta / K_y \le 0$ (derived, Technical review log item 4). Only this law makes that $V$ work |
+| "stable for any positive gains when $v_r > 0$"; critical damping $K_\theta^2 = 4K_y$ | `:200`, `:208` | Verified | Paper abstract ("any set of positive parameters makes the system stable"; critical damping from linearization) and Corollary, via search results |
+| Khatib, *IJRR* 5(1):90–98, 1986; potential field for manipulators and mobile robots; FIRAS repulsion form | `:268`, `:278`, `:547` | Verified | SAGE DOI 10.1177/027836498600500106 (vol. 5, issue 1), March 1986 |
+| Koenig and Likhachev, "D* Lite," AAAI-02, pp. 476–483, 2002 | `:452`, `:548` | Verified | ML Anthology / BibTeX record, pp. 476–483. AAAI-02 is the Eighteenth National Conference |
+| Koren and Borenstein, ICRA 1991, pp. 1398–1404 | `:342`, `:549` | Verified | The paper's first page (author-hosted copy, Sacramento, April 7–12, 1991); DBLP; DOI 10.1109/ROBOT.1991.131810 |
+| Koren and Borenstein's list of inherent problems (traps, no passage between close obstacles, oscillations near obstacles and in narrow passages) | `:342` | Verified against the paper's known structure | Abstract confirmed ("systematic criticism of the inherent problems"). The four problems are the paper's own section topics, as recalled; the full text was not fetched (see Not verified) |
+| Lynch and Park, *Modern Robotics*, CUP, 2017; Siciliano et al., Springer, 2009; both derive the unicycle and wheel relations | `:53`, `:550`, `:552` | Verified | Standard textbooks, cited identically in four or five other entries of the site |
+| Rimon and Koditschek, *IEEE TRA* 8(5):501–518, 1992 | `:344`, `:551` | Verified | Reference lists giving 8(5):501–518 (Springer chapter; arXiv 2306.16160 via Semantic Scholar); ModelDB (vol. 8, 1992); Penn repository record |
+| Navigation functions: only minimum at the goal, convergence from almost every initial configuration, sphere worlds | `:344` | Verified (extension: F4) | Penn repository abstract |
+| Unicycle and nonholonomic definitions consistent with What Is a Robot? Section 2.2; layered architecture with its Section 5.3; occupancy grid with the second entry's Section 2.1; D* Lite with its Section 5.4; $q(t) = \sigma(s(t))$ with the fourth entry's Section 1.1 | `:17`–`:63`, `:448`, `:452`, `:168` | Verified | The cited sections, read in full |
+| Every internal link fragment (`#53-layered-hybrid-architectures`, `#4-loops-within-loops`, `#5-organizing-the-software`, `#22-degrees-of-freedom-and-mobility`, `#1-paths-and-trajectories`, `#3-obstacles-in-configuration-space`, `#2-from-a-map-to-a-graph`, `#5-faster-any-angle-and-incremental-search`, `#72-localization-and-mapping`) and the insight `closing-the-sim-to-real-gap` | throughout | Verified | Headings of the target files (slugs derived from the headings); the insight file exists. No site build was run at this stage |
+
+### Not verified
+
+- Pure pursuit's origin at CMU (`:101`): the sources were not reachable; recommended correction F1.
+- The exact wording of Choset et al.'s attractive potential (`:268`): the book's text was not seen. The form is confirmed by the author's course slides and by the continuity derivation, so no change is needed.
+- Gat chapter pages 195–210: only one secondary source (F3).
+- Whether Rimon and Koditschek (1992) itself covers worlds mapped onto sphere worlds (F4).
+- Koren and Borenstein's list of four problems (`:342`): taken from knowledge of the paper's section structure; the full text was not fetched. The risk is low and no change is recommended.
+- The Kanayama law and error definitions were not read in the original typeset paper; IEEE and NPS were unreachable. They are confirmed indirectly: the paper's Lyapunov function and its critical-damping corollary, seen through OCR excerpts in search results, hold exactly for the law and errors as written (derivation in the Technical review). The writer's open question is settled to that extent.
+
+**Verdict (fact-check): fail** until F1 and F2 are applied. Counts: 0 blocking, 2 should fix, 2 optional. Every reference exists, and its bibliographic details are confirmed, including the four items the writer could not confirm: Rimon and Koditschek issue 5 and pages 501–518; the Kanayama law, through its Lyapunov function and corollary; the attractive potential, in form; and Brockett 1983 (Birkhäuser, pp. 181–191, Progress in Mathematics 27).
+
+## Technical review
+
+Stage: EOS step 6.4, by a reviewer who did not write or revise the entry. Environment: Python 3.13.16, NumPy 2.5.3 (matches the stated Python 3.13 / NumPy 2.5). Scratch files are in `/tmp/claude-0/mp/review/path-tracking-and-reactive-avoidance/` (`out.txt`, `recompute.py`, `experiments.py`, `d5_zoh.py`, `exp2.py`).
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| T1 | Should fix | `:93`, Section 2.4 (D5) | accuracy | The 20 Hz sample-and-hold alone makes an aggressive gain unstable, with no lag and no limit. |
+| T2 | Should fix | `:156`, Section 3.3 | accuracy | The 0.258 m overshoot at $L_d = 0.15$ m comes mainly from the turn-rate limit, not the phase lag the text puts first. |
+| T3 | Should fix | `:264`, Section 5.1 (D8) | accuracy | "every method of this kind can be led into a situation it cannot escape" is false under the entry's own definition; Bug algorithms are a counterexample. |
+| T4 | Should fix | `:411`, `:426`, Section 5.3 | accuracy | "The closest approach, 0.054 m" is the clearance at the 0.25 s control instants only; along the path the closest approach is 0.050 m. |
+| T5 | Optional | `:392`, `:394`, `:516`–`:521` | consistency | One $s_{\mathrm{hit}}$ value is quoted from the program's 0.02 m sampling (1.26 m) and the other is computed analytically (0.35 m; the program uses 0.36 m). |
+| T6 | Optional | `:258`, Section 4.5 | accuracy | "as Brockett's result in Section 2.2 implies" attributes to Brockett a consequence of $v_r > 0$. |
+
+### T1. Sampling also limits the gain (settles D5)
+- **Where:** `:93`
+- **Text:** "Without the lag and the limit, a tracking controller could be made arbitrarily aggressive and would never oscillate."
+- **Problem:** Confirmed as D5 suspected. Linearized pure pursuit on a straight line, with no lag and no limit, is a double integrator $\dot e = v\theta$, $\dot\theta = v\kappa$. With $\kappa = -2e/L_d^2 - 2\theta/L_d$ applied through a zero-order hold at $T = 0.05$ s (exact discretization, `d5_zoh.py`), the largest closed-loop pole magnitude is 0.833 at $L_d = 0.15$ m, 0.375 at 0.04 m and 0.250 at 0.03 m. At $L_d = 0.02$ m it is **2.03**, so the loop is unstable. In the continuous-time model the damping stays at 0.707 for every $L_d$, so the instability comes from the sampling alone.
+- **Correction:** "Without the lag, the limit and the 20 Hz sampling, a tracking controller's gains could be raised without bound and the loop would stay stable; with them, aggressive gains overshoot, oscillate or go unstable."
+
+### T2. Cause of the overshoot at $L_d = 0.15$ m
+- **Where:** `:156`
+- **Text:** "At $L_d = 0.15$ m, $\omega_n = 4.7$ rad/s is no longer small compared with the drive's bandwidth ... so the extra phase lag reduces the damping; the 0.5 m initial error ... also saturates $\omega$. Both effects lie outside the linear model and produce the 0.258 m overshoot."
+- **Problem:** I re-ran the same simulation (`experiments.py`, same path, start and controller) with each effect switched off:
+
+  | Lag | Turn-rate limit | Overshoot (m) |
+  |---|---|---|
+  | none | none | 0.018 |
+  | 0.1 s | none | 0.029 |
+  | none | 1.5 rad/s | 0.166 |
+  | 0.1 s | 1.5 rad/s | 0.258 (the article's value, reproduced) |
+
+  The limit is active in 83 of the controller updates of the original run. The lag alone adds 0.011 m; the limit, together with its interaction with the lag, causes the rest. The text presents the lag first and the saturation as an addition, which misleads about the cause. Both effects are properties of the drive, so the closing sentence stays true.
+- **Correction:** "At $L_d = 0.15$ m the 0.5 m initial error, more than three times $L_d$, drives $\omega$ to its 1.5 rad/s limit, and the drive lag ($\omega_n = 4.7$ rad/s against a bandwidth of $1/0.1 = 10$ rad/s and the 20 Hz update) adds phase lag on top. Run separately, the lag alone gives an overshoot of 0.029 m and the limit alone 0.166 m; together they produce the 0.258 m. The look-ahead distance therefore has a lower limit set by the robot's drive, here mostly by its turn-rate limit."
+
+### T3. Universal claim about reactive methods (settles D8, raised to should fix)
+- **Where:** `:264`
+- **Text:** "The price is a local view: every method of this kind can be led into a situation it cannot escape on its own."
+- **Problem:** The entry defines a reactive method as one that "computes a command from the current readings and the robot's state, without searching the map". The Bug algorithms of Lumelsky and Stepanov (1987) fit that definition. They use only local sensing plus a few remembered values (the hit point and the distance to the goal), and they are guaranteed to reach the goal whenever it is reachable. They are slow, but they cannot be trapped. The claim is true for the two methods the section treats, which is all the entry demonstrates.
+- **Correction:** "The price is a local view: both methods of this section can be led into situations they cannot escape on their own (Sections 5.2 and 5.3)."
+
+### T4. DWA closest approach is sampled at the control instants
+- **Where:** `:411` (output) and `:426` ("The closest approach, 0.054 m, is set by the 0.05 m safety margin")
+- **Problem:** In `dwa.run`, the minimum clearance is measured only at the end of each 0.25 s period. When each executed arc is sampled every 0.005 s (`exp2.py`), the closest approach is **0.0499 m** in the wall run and 0.0508 m in the U trap. The argument gets stronger, since the margin sets the clearance exactly, but the quoted number is not the closest approach. The output line is real program output and can stay.
+- **Correction:** "The closest approach, about 0.050 m along the path (0.054 m at the control instants, where the program measures it), is set by the 0.05 m safety margin: ..."
+
+### T5. Two conventions for $s_{\mathrm{hit}}$ (optional)
+- **Where:** `:392` ("$s_{\mathrm{hit}} = 1.26$ m"), `:394` ("$s_{\mathrm{hit}} = 1.5 - 0.9 - 0.25 = 0.35$ m"), Exercise 5
+- **Problem:** `first_contact` samples the curve every 0.02 m. It returns 1.26 m (the analytic value is 1.25 m) and **0.36 m** (analytic 0.35 m). The first value is the program's; the second is analytic. With 0.36 m the speed bound is 0.488 m/s instead of 0.480 m/s. Both lie between 0.475 and 0.500, so no conclusion changes.
+- **Correction:** After "0.35 m" add "(0.36 m on the program's 0.02 m sampling, which moves the bound below to 0.488 m/s and changes nothing on the 0.025 m/s grid)". Alternatively, write "1.25 m analytically, 1.26 m as sampled" at `:392`.
+
+### T6. What Brockett's result implies (optional)
+- **Where:** `:258`
+- **Text:** "The law needs $v_r > 0$, so stopping at a pose needs a different controller in the last few centimeters, as Brockett's result in Section 2.2 implies."
+- **Problem:** The need for another controller follows from $v_r > 0$. Brockett's theorem adds that the other controller cannot be a smooth function of the state alone.
+- **Correction:** "The law needs $v_r > 0$, so stopping at a pose needs a different controller in the last few centimeters, and by Brockett's result (Section 2.2) that controller cannot be a smooth function of the state alone."
+
+### Log of checks and recomputations
+
+1. **Programs re-run.** `sh run.sh` (the writer's), output saved to `out.txt`. A diff against the writer's `outputs.txt` shows no difference. Every line of all nine `text` output blocks in the article occurs verbatim in the output (script check), including the Kanayama $K_y = 16$ block that the article omits. All programs are deterministic: no random numbers are drawn.
+2. **Listings against programs.** The four `python` blocks (`pure_pursuit`, `kanayama`, `descend`, `evaluate`) are verbatim substrings of `pure_pursuit.py`, `kanayama.py`, `potential_field.py` and `dwa.py`. The simulation setup described in Section 2.4 matches `common.py`: Euler step 0.01 s, control every fifth step, lag 0.1 s on $v$ and $\omega$, $|\omega| \le 1.5$ rad/s, $r = 0.05$ m, $b = 0.30$ m, and the path geometry.
+3. **Wheel relations and the pure pursuit example.** $v = 0.5$, $\omega = 0.5$ gives 11.50 and 8.50 rad/s, and $v/\omega = 1$ m. Goal point (0.5, 0.3): $L_d = 0.5831$ m, $\alpha = 0.5404$ rad, $\kappa = 1.7647$ m$^{-1}$, $R = 0.567$ m, $\omega = 0.8824$ rad/s. The arc derivation (circle tangent at the origin, center $(0,R)$) is correct. The diamond of reachable $(v,\omega)$ under wheel-speed limits is correct.
+4. **Derivations.** The pure pursuit linearization $y_g \approx -e - L_d\theta$ gives $\ddot e + (2v/L_d)\dot e + (2v^2/L_d^2)e = 0$, so $\zeta = 1/\sqrt2$ and $\omega_n = \sqrt2 v/L_d$ (correct). The overshoot of the initial-condition response equals the step overshoot $e^{-\pi} = 4.32\%$, which gives 0.0216 m. $L_d = kv$ gives $\omega_n = \sqrt2/k$ (correct). The robot-frame error, the error dynamics and the Kanayama law are dimensionally consistent ($K_x$ in 1/s, $v_r K_y e_y$ and $v_r K_\theta$ in 1/s). Lyapunov check: with $V = \tfrac12(e_x^2+e_y^2) + (1-\cos e_\theta)/K_y$, substituting the law gives $\dot V = -K_x e_x^2 - v_r K_\theta\sin^2 e_\theta/K_y$. Linearization: $\ddot e_y + v_rK_\theta\dot e_y + v_r^2K_y e_y = 0$, $\zeta = K_\theta/(2\sqrt{K_y})$, giving 1, 0.5 and 0.25 for $K_y$ = 4, 16 and 64, and a double pole at $-1$ s$^{-1}$ (all correct). The repulsive gradient $-k_r(1/\rho-1/\rho_0)\nabla\rho/\rho^2$ is correct. The attractive potential is continuous at $d^*$. The nonholonomic constraint and Brockett's condition for the unicycle were checked.
+5. **Numbers recomputed** (`recompute.py`). Bend times 12.0 s and 15.14 s. Exercise 1: 4.2 and 7.8 rad/s, radius 0.5 m. Exercise 2: 1.0198 m, −0.3846 m$^{-1}$, 2.6 m, −0.3077 rad/s. Exercise 3: 4 and 4. Exercise 4: real root of $2\rho^3+\rho-1$ is 0.5898, stop at 5.410 m. The minimum claim was also checked: on the axis the end wall's repulsion has no $y$ component and the attraction restores $y$. Exercise 5: 0.4797 and 0.5916 m/s. DWA: window [0.275, 0.525] × [−0.5, 0.5] and 121 candidates; stopping distance 0.4069 m; $G$ = 0.8135; curvatures 0.421 and 0.381 m$^{-1}$; $0.453 \times 3 = 1.36$ m. Scene C equilibrium at (4.37, 0): $\rho = 0.618$ m, total repulsion along $x$ 1.998 against an attraction of 2 (balanced). All match the text.
+6. **Statements drawn from the simulations** (`exp2.py`). Kanayama: the speed command reaches the 1.0 m/s limit during the first 0.2 s. For $K_y = 64$ the turn-rate limit is active from 0 to 0.85 s, which confirms "the turn rate limit dominates the first second". For $K_y = 4$, $e_y e^{t}$ at 2, 3 and 4 s is 1.00, 1.39 and 1.80, nearly linear in $t$ as a double pole at −1 predicts. Potential field: with $\rho_0 \le 0.6$ m scene C reaches the goal while scene B stays trapped for every $\rho_0$ tried (0.3 to 0.8 m), which confirms ":342". DWA U trap: the robot stands still ($v = 0$) for 137 of the 160 periods, and no period lacks an admissible command, which confirms "brakes in front of the closed end".
+7. **Sensitivity tests** (`experiments.py`, `d5_zoh.py`): see T1 and T2. The text's claims about trends are not based on a single lucky run: every program is deterministic, and the claims are about trends in parameter sweeps that the programs print.
+8. **Consistency with the series.** $\mathcal{C} = \mathbb{R}^2 \times S^1$ and angle wrapping to $(-\pi, \pi]$ agree with the first entry (Section 2.2). $q(t) = \sigma(s(t))$ agrees with the fourth entry (Section 1.1). D* Lite's backward search agrees with the second entry (Section 5.4). "Nonholonomic" is consistent with What Is a Robot? (Section 2.2). The units are SI and angles are in radians, as the series overview states.
+9. **Lint.** `npm run eos -- lint` reports 0 errors, 0 warnings and 5 suggestions, the same as the copy stage. No site build was run at this stage; the link fragments were checked against the target headings (Fact-check table).
+
+**Verdict (technical): fail** until T1 to T4 are applied. Counts: 0 blocking, 4 should fix, 2 optional. Every quoted output reproduces exactly, every listing matches its program, and every equation and worked number checks out. The findings concern three causal or universal statements and one mislabeled measurement.
+
+## Resolution
+
+Stage: EOS step 7, by the author. Every quoted number below comes from a program in `/tmp/claude-0/mp/path-tracking-and-reactive-avoidance/`, re-run with Python 3.13.16 and NumPy 2.5.3. `run.sh` now also runs `zoh.py`, and its output matches `outputs.txt`. Every line of every `text` block in the article occurs verbatim in that output (script check). The existing outputs are unchanged by the program edits: the defaults of `common.step` are unchanged, and the new lines are only appended or inserted. Final `npm run eos -- lint`: 0 errors, 0 warnings, 6 suggestions (one 46-word sentence at `:93`; the five reference-list acronyms kept under C7). A scratch build passed, and the link checker reports that all internal links resolve, including `#54-incremental-replanning-d-lite`.
+
+| ID | Action | Exact change |
+|---|---|---|
+| F1 | Applied | Section 3.1: "The method was developed at Carnegie Mellon University for outdoor vehicles; Coulter's 1992 report documents its implementation, derives the curvature formula and discusses the effect of the look-ahead distance." → "Coulter's 1992 technical report from Carnegie Mellon University documents an implementation of the method, derives the curvature formula and examines how its performance depends on the look-ahead distance." |
+| F2 (settles D6) | Applied | Section 6.3: "runs **recovery behaviors** in order of increasing cost, typically:" → "runs **recovery behaviors**, roughly in order of increasing cost, for example:"; "...fail rarely and visibly." → "...fail visibly, and often recover from the failure." |
+| F3 | Not applied | The page range 195–210 is still confirmed by one secondary source only, so the Gat reference is unchanged. |
+| F4 | Applied | Section 5.2: "for worlds of spherical obstacles and worlds that can be mapped onto them." → "for worlds of spherical obstacles, and, through a change of coordinates, for worlds that can be mapped onto them." |
+| T1 (settles D5) | Applied with changes | Section 2.4: the sentence "Without the lag and the limit, ... would never oscillate." becomes "Without the lag, the limit and the 20 Hz sampling, a tracking controller's gains could be raised without bound and the loop would stay stable; with them, aggressive gains overshoot, oscillate or go unstable. The sampling alone is enough. Take the linearized pure pursuit loop of Section 3.3 on a straight line, with each command held for 0.05 s and no lag or limit: the largest closed-loop pole has magnitude 0.833 at $L_d = 0.15$ m but 2.032 at $L_d = 0.02$ m, an unstable loop (program `zoh.py`)." The numbers come from the new program `zoh.py` (exact zero-order-hold discretization), which reproduces the reviewer's values. |
+| T2 | Applied with changes | Section 3.3: the cause is restated with the limit first. "At $L_d = 0.15$ m the 0.5 m initial error, more than three times $L_d$, drives $\omega$ to its 1.5 rad/s limit. The drive lag adds phase lag on top, since $\omega_n = 4.7$ rad/s is no longer small against the drive's bandwidth of $1/0.1 = 10$ rad/s and the 20 Hz update. The program `pure_pursuit.py` also reruns this case with each effect switched off. The overshoot is 0.018 m with neither, 0.029 m with the lag alone, 0.166 m with the limit alone and 0.258 m with both. The look-ahead distance therefore has a lower limit set by the robot's drive, here mostly by its turn-rate limit." `pure_pursuit.py` gained `tau` and `w_max` arguments and prints this sweep after its table (real output: 0.018, 0.029, 0.166, 0.258 m). In the Summary table, "Short $L_d$ overshoots against drive lag" → "Short $L_d$ overshoots against the turn-rate limit and drive lag". |
+| T3 (settles D8) | Applied | Section 5.1: "every method of this kind can be led into a situation it cannot escape on its own." → "both methods of this section can be led into situations they cannot escape on their own (Sections 5.2 and 5.3)." |
+| T4 | Applied with changes | `dwa_demo.py` now also samples each executed arc every 0.005 s and prints "wall: closest approach along the path 0.0499 m" and "U trap: closest approach along the path 0.0508 m". These lines are quoted in a new block after the closed-loop output, with the lead-in "The program measures this clearance at the control instants only. Sampling each executed arc every 0.005 s, it then prints the closest approach along the whole path:". "The closest approach, 0.054 m, is set by the 0.05 m safety margin:" → "The closest approach, 0.050 m along the path (0.054 m at the control instants), is set by the 0.05 m safety margin." (the sentence that follows starts afresh). "0.051 m from it" → "about 0.05 m from it". |
+| T5 | Applied | `dwa_demo.py` prints the sampled values: "s_hit of the straight arc as sampled: 0.36 m (at the origin: 1.26 m)". This line is added to the quoted block of the second decision. Text: "$s_{\mathrm{hit}} = 1.26$ m" → "$s_{\mathrm{hit}} = 1.26$ m as sampled (1.25 m analytically)". After the analytic 0.35 m and 0.480 m/s, added: "The program's 0.02 m sampling gives 0.36 m, which moves the bound to 0.488 m/s and changes nothing on the 0.025 m/s grid." Exercise 5 keeps the analytic 0.35 m. |
+| T6 | Applied | Section 4.5: "..., as Brockett's result in Section 2.2 implies." → "..., and by Brockett's result (Section 2.2) that controller cannot be a smooth function of the state alone." |
+| D7 | Applied | Section 6.2: the link now reads "[Section 5.4 of the second entry](/blog/graph-search-dijkstra-and-a-star#54-incremental-replanning-d-lite)"; the fragment was checked in the built page. |
+| D9 | Applied | Section 3.3, after "an error under 1 cm in the bend.": "The RMS column, which covers the bend and the final straight, follows the corner errors: it grows from 0.0035 m at $L_d = 0.3$ m to 0.0719 m at 1.2 m." (values from the quoted table). |
+| D1–D4, C1–C7 | Already applied by the editors | No author action needed; the re-read confirmed that their wording is consistent with the changes above. |
+
+No open blocking or should-fix finding remains.

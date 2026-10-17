@@ -277,3 +277,25 @@ Further checks: band extent of Section 3.2 on a $0.1^\circ$ grid, excluding pure
 
 **Technical verdict: fail** (T1 to T4 should fix open; no blocking finding). Counts: 0 blocking, 4 should fix, 3 optional.
 
+
+## Resolution
+
+Stage: author resolution, 2026-10-17. Role: author of the draft (not a reviewer of it). The file was re-read as left by the editors, and all corrections were made in `src/content/blog/configuration-space-and-the-planning-problem.mdx` only; entry 3 was read, not edited. Asymptotic optimality is now stated as in `sampling-based-planning-prm-and-rrt.mdx`, Section 4: RRT and the fixed-$k$ PRM are not asymptotically optimal, and the fixed-radius PRM is but is expensive. No quoted output, number or code listing changed, so `run.sh` was not re-run for this stage; its last output is unchanged. Lint after resolution: 0 errors, 0 warnings, 2 suggestions (C6, kept). Build under the lock (`flock`): exit 0, `check-links` reports that all internal links resolve (including `#5-narrow-passages-and-other-failure-modes` in entry 3), no KaTeX errors; the build directory was deleted.
+
+| ID | Action | Exact change |
+|---|---|---|
+| D1–D5 | Already applied by the editor; kept | None |
+| D6 | Settled by F1 | See F1 |
+| D7 | Settled by T1 | See T1 |
+| D8 | Not applied: the fact-check found the sentence accurate | None |
+| F1 | Applied with changes | Section 4.3: "Karaman and Frazzoli showed that the basic sampling-based planners are not asymptotically optimal and introduced variants that are (Karaman and Frazzoli, 2011); the third entry describes them." → "Karaman and Frazzoli showed that the rapidly-exploring random tree (RRT) and the probabilistic roadmap (PRM) that connects each sample to a fixed number of neighbors are not asymptotically optimal. A PRM that joins every pair within a fixed radius is asymptotically optimal but expensive, and they introduced variants that are asymptotically optimal at lower cost (Karaman and Frazzoli, 2011); Section 4 of the third entry describes them." The fixed-radius sentence was added so that this entry matches entry 3, Section 4. Because RRT and PRM now first appear here, their expansions moved here, and Section 6 now reads "The PRM builds ..." and "the RRT grows ..." |
+| T1 | Applied | Section 4.1: "A shortest path among obstacles touches them: around a polygon in the plane, it runs straight to a vertex and straight on. Because touching counts as collision here, no shortest path exists in the open set" → "When obstacles block the straight segment from start to goal, a shortest path touches them: for a point among polygons in the plane, it runs straight to a vertex and straight on. Because touching counts as collision here, no shortest path then exists in the open set" |
+| T2 | Applied | Section 3.3: "are the folded second link reaching the opposite disk." → "are the folded second link swinging back over the disk beside the first link, the same disk that makes the nearer wall." Checked by hand at $(-35^\circ, 155^\circ)$: the second link ends near $(0.47, 0.03)$ m, beside the disk at $(0.5, 0)$ m. |
+| T3 | Applied | Section 4.1: "this is the total joint rotation in radians" → "this is the Euclidean length of the path in joint space, in radians" |
+| T4 | Applied | Exercise 6 answer: "For a shoulder limited short of $\pm 180^\circ$, the square is right and the parts are disconnected." → "For a shoulder limited short of $\pm 180^\circ$, $\theta_1$ no longer wraps (the space is a cylinder, or the square if the elbow is limited too), and the parts are disconnected." |
+| T5 | Applied | Section 5.3: "a motion during which no point of the robot travels more than $c$ cannot cause a collision." → "a motion during which every point of the robot travels less than $c$ cannot cause a collision; at exactly $c$ it can at most reach contact, which the next check detects." |
+| T6 | Applied | Section 3.3: "$|\theta_1| < \arcsin(0.1/0.5) = 11.54^\circ$" → "$|\theta_1| \le \arcsin(0.1/0.5) = 11.54^\circ$"; Exercise 3 prompt: "$|\theta_1| < 11.54^\circ$" → "$|\theta_1| \le 11.54^\circ$" |
+| T7 | Applied | Section 4.3: "as Dijkstra's algorithm and A* do on a graph." → "as Dijkstra's algorithm and A* with an admissible heuristic do on a graph." |
+| C6 | Kept, as the editor recommended | None |
+
+**Resolution status:** no blocking or should-fix finding remains open.
