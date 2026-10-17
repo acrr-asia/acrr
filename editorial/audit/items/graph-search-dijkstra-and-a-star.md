@@ -295,3 +295,30 @@ From the series review `reviews/motion-planning.md` (2026-10-17), applied by the
 - F9: the link to the state estimation entry now says that it names such a grid as one form of map in simultaneous localization and mapping, not that it describes how the grid is built.
 - F14: the cheapest cost in the proof of Section 3.2 and in the answer to Exercise 3 is $g^*(\cdot)$ (as in Section 4.2) instead of $d(\cdot)$, which clashed with the dimension $d$.
 - No number, code or output changed.
+
+## QA
+
+Final gate (EOS step 10), by an independent QA editor who wrote and revised none of the entry. Record: `editorial/records/article/graph-search-dijkstra-and-a-star.json`. **Decision: publish, total 26/28.**
+
+| Dimension | Score | Justification (below 4) |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 4 | |
+| evidence | 3 | The ARA* theorem wording, Choset et al.'s plane sweep and the Theta*/D* Lite attributions rest on abstracts and secondary sources, not full texts; the text claims no more than they support. |
+| language | 4 | |
+| consistency | 3 | Series review F12 (optional, deferred) leaves in-text citation forms differing across the series; within the entry everything agrees. |
+| publishing | 4 | |
+
+Critical conditions C1-C9: none holds for the item. C9 note: `reviews/motion-planning.md` is current and resolved but not yet stamped (`series-pipeline status`: review-stale); `series-pipeline stamp motion-planning` is due once all the series records are written, and the series gate fails until then.
+
+Checks performed:
+- Every should-fix finding of the item report (D1-D6, D8-D10, C1-C6, F1, F2, T1, T2) and of the series review (F3, F5, F9; optional F14) is resolved in the text as the Resolution says; none re-opened. No blocking finding was raised.
+- `eos lint`: 0 errors, 0 warnings, 3 suggestions (C8, kept). `eos validate-site dist`: no issue on this page (the 26 site issues are on other pages); `dist/blog/graph-search-dijkstra-and-a-star.html` is newer than the source, has no `katex-error`, diagrams 407 px and 188 px. `npm run check:links`: all internal links resolve.
+- `run.sh` re-run in `/tmp/claude-0/mp/qa/gs/` (Python 3.13.16): output byte-identical to `all_output.txt`; every line of every quoted `text` block is in it; the Section 2.2 map equals `MAP` in `gridsearch.py`; the listing matches `gridsearch.py` apart from its header comment.
+- Recomputed independently: $10 + 12\sqrt{2} = 26.9706$; weighted A* ratios 1.0742, 1.1049, 1.2442; reductions 51.5% and 93.3%; 20.7%, 5.9%, 2.6%; 8-connected maximum 1.0824; Section 6.3 band 0.3673 to 0.7136 rad, center 1.1662 m; Section 4.6 13.5%; Section 6.4 and Exercise 5 memory figures (272 TB, 125 GB, 4.25 TB, 729 kB, 66.4 GB, 6.28 cm); Exercise 1 (8.2426, 7.6158, 31.3%, 8.23%, 23.2°). All agree. The proofs of Sections 3.2, 4.2, 4.3 and 5.1 and the Exercise 3 answer were read step by step.
+- References against the fact-check table: Dijkstra (1959), Fredman and Tarjan (1987), Hart et al. (1968), Moravec and Elfes (1985) and Koenig and Likhachev (2002) agree in every detail; the list is alphabetical, the two Koenig and Likhachev entries in date order.
+- Cross-references: each target exists and says what is claimed (first entry Sections 3, 3.3, 4 including the resolution-completeness definition, 5, and the map of methods in Section 6 listing grid and graph search second; Sensing and State Estimation Section 7.2; fifth entry Section 6; the fourth and third entries by title; arm lengths in the kinematics entry).
+- Opening states purpose, prerequisites, conventions and versions; the ending summarizes and leads to the third entry. Title 47 characters, description 149 characters, one sentence. No example content; `example` not set, correctly.
+
+Not verified: as listed in the fact-check (ARA* theorem wording, Choset et al. text); no full texts were re-read at this stage. No Vietnamese translation of the entry exists.

@@ -307,3 +307,72 @@ From the series review `reviews/motion-planning.md` (2026-10-17), applied by the
 - F2: Section 4.3 now links [Section 4 of the third entry](/blog/sampling-based-planning-prm-and-rrt#4-asymptotic-optimality-prm-and-rrt) and says that it describes the variants "including a later correction to the proof for RRT*".
 - F13: Section 4.3, "(second entry)" became "(Section 2.2 of the second entry)", linked to `#22-connectivity-and-edge-costs`.
 - No number, equation, code or output changed.
+
+## QA
+
+Stage: EOS step 10, 2026-10-17. Role: QA editor (independent agent). I did not write or revise this item. Inputs: this report, `reviews/motion-planning.md` (findings and Resolution), the article as it stands (52,753 bytes, modified 13:44) and `dist/blog/configuration-space-and-the-planning-problem.html` (built 13:48, contains the F2 text, no `katex-error`).
+
+**Decision: revise (not recorded).** One should-fix finding (Q1) is open, so no passing record was written. The review input is ready in `/tmp/claude-0/mp/qa/configuration-space-and-the-planning-problem.json`. Once Q1 is fixed, set `qa` to `pass`, `open` to 0 and remove the "NOT RECORDED" sentence from `notes`, then run `eos record`.
+
+| Dimension | Score | Reason when below 4 |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 3 | Q1: the Summary repeats the unqualified claim that T1 corrected |
+| evidence | 4 | |
+| language | 3 | Q3 (47-word sentence, "they" after "A PRM"); Q2 (loose comparison) |
+| consistency | 3 | Q1 (Summary against Section 4.1) |
+| publishing | 3 | two lint suggestions at `:318` added by the series-review edits are not yet resolved |
+| **Total** | **24** of 28 | |
+
+Critical conditions: C1 to C8 do not hold (Q1 is should fix, not blocking). C9 holds for now: `series-pipeline status` shows `motion-planning` as `review-stale`. The series review is resolved but has no stamp yet, so `series-pipeline stamp motion-planning` is needed after the QA records.
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Should fix | `:530`, Summary | accuracy | "Shortest paths touch obstacles" is still unqualified. T1 qualified the same claim in Section 4.1. |
+| Q2 | Optional | `:416`, Section 5.4 | language | "as the 0.45 m disk did in Section 3.1": in Section 3.1 the 0.45 m disk is the robot itself, and that robot does not fit the corridor. |
+| Q3 | Optional | `:318`, Section 4.3 | language | Paragraph of 181 words and sentence of 47 words (lint suggestions). "they" comes right after the subject "A PRM". |
+
+### Q1. Unqualified claim in the Summary (re-opens T1 at its second location)
+- **Where:** `src/content/blog/configuration-space-and-the-planning-problem.mdx:530`, Summary table, row "Feasibility and optimality".
+- **Text:** "Shortest paths touch obstacles; margins trade length for safety"
+- **Problem:** T1 established that a shortest path touches obstacles only when they block the straight segment, and Section 4.1 (`:304`) now says so. The Summary states the general form that T1 rejected, so the Summary and the body disagree.
+- **Correction:** "Shortest paths that bend around obstacles touch them; margins trade length for safety"
+
+### Q2. The 0.45 m disk comparison (optional)
+- **Where:** `:416`.
+- **Text:** "can close a passage that the real robot fits through, as the 0.45 m disk did in Section 3.1."
+- **Correction:** "can close a passage that the real robot fits through, as growing the disk of Section 3.1 from 0.25 m to 0.45 m closed the corridor."
+
+### Q3. Section 4.3 paragraph and sentence length (optional)
+- **Where:** `:318`.
+- **Correction:** Start a new paragraph at "It is **asymptotically optimal** if" and change those words to "A planner is **asymptotically optimal** if". Then replace "A PRM that joins every pair within a fixed radius is asymptotically optimal but expensive, and they introduced variants that are asymptotically optimal at lower cost (Karaman and Frazzoli, 2011); [Section 4 of the third entry](/blog/sampling-based-planning-prm-and-rrt#4-asymptotic-optimality-prm-and-rrt) describes them, including a later correction to the proof for RRT*." with "A PRM that joins every pair within a fixed radius is asymptotically optimal but expensive. The same paper introduced variants that are asymptotically optimal at lower cost (Karaman and Frazzoli, 2011); [Section 4 of the third entry](/blog/sampling-based-planning-prm-and-rrt#4-asymptotic-optimality-prm-and-rrt) describes them, including a later correction to the proof for RRT*." No heading or fragment changes. Entry 3 links to `#43-optimality-guarantees`, which is unaffected.
+
+### Checks performed
+- Earlier findings: D1 to D5, C1 to C5, F1 (D6), T1 (D7), T2 to T7, and series findings F2 and F13 were each confirmed in the current text. D8 and C6 were kept for the reasons given. T1 is resolved at `:304`, but its claim survives at `:530` (Q1).
+- `eos lint`: 0 errors, 0 warnings, 4 suggestions (MIT and ACM kept as in C6; paragraph-length and sentence-length at `:318`, see Q3). `eos validate-site dist`: no issue for this page. The 26 issues reported are on other pages: glued spans in entry 5 and Vietnamese meta descriptions of another series.
+- Programs: I copied `run.sh` and its scripts to a scratch directory and ran them with Python 3.13.16. Exit 0. The output is identical (`diff`) to `run_output.txt`. All 7 `text` blocks of the article match the output line by line, in order, apart from trailing spaces that the program prints and the article drops.
+- Recomputed with Python: grown-square area 6.07617 m², Exercise 2 2.48274 m², $\arcsin 0.2 = 11.537^\circ$, contact window 8.958° to 11.042° (0.03637 rad), $D = 3.56047$, fixed-step check counts 12/22/43/106/211, 0.05 rad samples at 8.571° and 11.429°, first 0.02 rad hit at check 62 ($9.714^\circ$), Exercise 4 ($D = 1.13$, step 0.04425, 1.268° and −1.014°), $36^6$ and $36^7$, IK of (1.3, 0.2) m giving (−22.88°, 80.13°) and (40.37°, −80.13°), and the F13 tip bound 0.03677 m. All agree with the text. I also checked by hand the Exercise 3 answer (0.5|sin θ₁|, nearest point 1.1 m) and the region labels in Section 3.3 (`a` has θ₁ < 0, so the first link is below the axis).
+- References checked against the fact-check table: Karaman and Frazzoli (IJRR 30(7), 846–894), Lozano-Pérez (IEEE TC C-32(2), 108–120), Khatib (IJRR 5(1), 90–98, same journal form as entry 5 after F4) and Gilbert et al. (4(2), 193–203) all agree.
+- Cross-references: all 10 fragment links resolve in `dist`. I read each target: entry 3 §4.1 (fixed-k PRM and RRT not optimal, fixed-radius PRM optimal with quadratic edges) and §4.3 (Solovey et al. correction); entry 3 §5 (narrow passages); entry 2 §2.2 (8-connected excess 8.24%), §6 (limits of grids) and visibility graph (`:86`); entry 4 §6 (checking a trajectory); entry 3 §6 (smoothing); entry 5 §5 (potential fields, dynamic window). Each says what the linking text claims. The opening states the purpose, prerequisites, conventions and versions. The ending summarizes and leads to the second entry, linked.
+- Not verified: as listed under the fact-check (the LaValle section for positive clearance, the full Karaman and Frazzoli text, the original statement of Reif's theorem).
+
+### QA second pass (after Q1 to Q3)
+
+The author side applied Q1, Q2 and Q3 with the wording given above, and I verified each one in the text. Q1 is at `:532`: "Shortest paths that bend around obstacles touch them; margins trade length for safety". Q2 is at `:418`: "as growing the disk of Section 3.1 from 0.25 m to 0.45 m closed the corridor". Q3 is at `:318` to `:320`: Section 4.3 is now two paragraphs, the second beginning "A planner is **asymptotically optimal** if", and "they" became "The same paper". Nothing else changed.
+
+Lint: 0 errors, 0 warnings, 3 suggestions. The 48-word sentence at `:418` (the Q2 text) is kept. It is one statement (claim, colon, contrast, example), and splitting it would separate the example from the claim. MIT and ACM are kept as in C6. Rebuilt with `flock /tmp/claude-0/build.lock npm run build:local`: exit 0. `check:links`: all internal links resolve. `validate-site` reports nothing for this page, there is no `katex-error`, and the built page contains all three new texts.
+
+**Decision: publish** (`eos record`, `editorial/records/article/configuration-space-and-the-planning-problem.json`). **Total: 27 of 28.**
+
+| Dimension | Score | Reason when below 4 |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 4 | |
+| evidence | 4 | |
+| language | 4 | |
+| consistency | 3 | in-text citations are "(Author, year)" here while entries 2 to 5 name the authors in the prose (series F12, optional, deferred) |
+| publishing | 4 | |
+
+Critical conditions: none for the item. The series still needs `series-pipeline stamp motion-planning` once all QA records are written (C9 at the series level). Not verified: as listed under the fact-check.

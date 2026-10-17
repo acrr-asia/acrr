@@ -344,3 +344,30 @@ From the series review `reviews/motion-planning.md` (2026-10-17), applied by the
 - F13: Section 5.3 identifies the 0.037 m tip bound with the bound $D$ of Section 5.3 of the first entry, linked.
 - F15: Section 4.4 says that the printed radii are capped at $\eta = 1.0$ m and that the formula gives 1.306 m at $n = 500$ (recomputed: $11.71 \times (\ln 500/500)^{1/2} = 1.3055$ m).
 - No program was changed and no quoted output changed.
+
+## QA
+
+- Stage: final QA gate (EOS step 10), 2026-10-17. Reviewer: qa-editor role (independent agent; wrote and revised none of this item).
+- **Decision: publish, total 26/28** (`eos record`, record `editorial/records/article/sampling-based-planning-prm-and-rrt.json`, hash `sha256:5a4f2d16…7852`).
+- Scores: purpose 4, structure 4, accuracy 4, evidence 3, language 3, consistency 4, publishing 4.
+  - Evidence 3: three supporting claims rest on secondary sources or excerpts (Hsu, Latombe and Motwani 1999 decay rate; Hsu et al. 2003 hybrid; LaValle 2006 as a pointer), all attributed; Q2 below.
+  - Language 3: Q1 below.
+- Critical conditions C1–C9: none holds. C9 note: `reviews/motion-planning.md` is resolved and its second pass covers the current text, but `series-pipeline status` shows `review-stale` until `node scripts/series-pipeline.mjs stamp motion-planning` is run after all QA records, as the review's Resolution says. That must happen before the series gate passes.
+- Findings confirmed resolved in the text: D1–D6, C1–C4, F1, T1–T6 (item report) and series F1 (blocking), F6, F7, F8, F10 (should fix), plus the optional F13 and F15. Each was checked against the current source. The PRM diagram is now `flowchart TB`, and the built figure is `min-width:143px`. The caption "Everything before the query box" still holds.
+- Deterministic checks: `eos lint` gives 0 errors, 0 warnings and 4 suggestions. MIT and TR were kept with reasons (C5). Paragraph-length and sentence-length at `:470` are Q1. `eos validate-site dist` reports nothing for this page. The page in `dist/` is newer than the source and has no `katex-error`.
+- Cross-references: all 10 fragment links resolve. Each target says what is claimed: E1 §4, §4.2, §4.3, §5, §5.1 (configuration check), §5.3 (bound $D$); E2 §6, §2.3, §6.3 (marking at the cell's center configuration), §6.4 ($N^d$, $10^{12}$ at 100 cells per joint). The kinematics and next-entry links also resolve.
+- Recomputed in Python: $\gamma = 11.7102$ m; $r_n$ = 1.3055, 0.9733, 0.7219, 0.5332 m; $k(n)$ = 31, 34, 38, 42; $C^* = 12.3023$ m through the three corners; tip bound 0.03677 m; door shares 1.11% and 0.141%, and 0.42 expected samples; all the percentages and ratios in Sections 2.3, 3.5, 4.4, 5.1, 5.2 and 6.1 match the text.
+- Programs re-run at QA (Python 3.13.16, NumPy 2.5.3): `show_maps.py`, `optimal_plane.py` and `exp_plane.py` are byte-identical to `out_show_maps.txt`, `out_optimal_plane.txt` and `out_exp_plane.txt`. A script check found that every line of the nine `text` blocks occurs in the eight `out_*.txt` files.
+- References spot-checked against the fact-check table: Karaman and Frazzoli (2011), Kavraki et al. (1996), Kleinbort et al. (2019), Geraerts and Overmars (2007) and Solovey et al. (2020). All agree.
+- Opening and ending: the opening states what the entry builds on (linked), its scope and its conventions. The ending summarizes the results and leads to the next entry.
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Optional | `:470`, Exercise 4 answer | language | After series F10 the answer is a 180-word paragraph containing a 66-word sentence (lint suggestions). |
+| Q2 | Optional | `:502`, References | evidence | Hsu, Jiang, Reif and Sun (2003) omits "vol. 3", which the fact-check table records; Kuffner and LaValle (2000) gives its volume. |
+
+- **Q1 correction:** replace "A search on a coarse grid also counts, provided its cells are marked blocked only when every configuration in them is in collision (a test over the whole cell, unlike the center test of [Section 6.3 of the second entry](/blog/graph-search-dijkstra-and-a-star#63-a-grid-over-the-arms-configuration-space)) and it may move between any two cells that touch, even at a single corner; a failure of that search proves that no path exists." with "A search on a coarse grid also counts if it meets two conditions. Its cells are marked blocked only when every configuration in them is in collision, a test over the whole cell, unlike the center test of [Section 6.3 of the second entry](/blog/graph-search-dijkstra-and-a-star#63-a-grid-over-the-arms-configuration-space). And it may move between any two cells that touch, even at a single corner. A failure of such a search proves that no path exists." Optionally, start a new paragraph at "If infeasibility is suspected".
+- **Q2 correction:** "... in *Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)*, vol. 3, pp. 4420–4426, 2003."
+- Neither finding blocks publication. Applying either one changes the file hash and requires `eos record` again.
+- Not verified: the four fact-check items listed above (secondary sources only). At QA, five of the eight programs were not re-run; the technical review ran the full `run.sh`, and all eight outputs were byte-identical.
+- Re-record after Q1 and Q2 (2026-10-17): the author side applied both. Q1 is in the QA wording at `:470` and Q2 adds "vol. 3" at `:502`; the diff shows nothing else changed in the file. `eos lint` gives 0 errors, 0 warnings and 3 suggestions: MIT and TR (C5), plus paragraph-length at `:470`, a 185-word paragraph. Splitting it before "If infeasibility is suspected" is optional. **Decision: publish, total 26/28** (hash `sha256:ee7f8a76…081b`). Scores are unchanged: evidence 3 (secondary-source items remain), language 3 (the long paragraph remains).

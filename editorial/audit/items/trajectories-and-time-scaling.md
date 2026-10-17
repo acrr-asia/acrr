@@ -356,3 +356,38 @@ By the author. The final `eos lint` reports 0 errors, 0 warnings and 0 suggestio
 | Lint | Applied | Two paragraph-length suggestions caused by the new text were removed by splitting the paragraphs in Sections 4.1 and 4.3 before "Bobrow et al. compute it" and "A practical implementation". |
 
 Still not verified: the Pham page range (not checked against IEEE Xplore), and Kunz and Stilman beyond their abstract (they are cited only for its stated scope).
+
+## QA
+
+Stage: EOS step 10, by an independent QA editor who wrote and revised none of the entry. Record: `editorial/records/article/trajectories-and-time-scaling.json`. **Decision: publish, total 26/28.**
+
+| Dimension | Score | Justification |
+|---|---|---|
+| purpose | 4 | Opening states what the entry builds on (linked), what it covers, versions, conventions and illustrative limits. |
+| structure | 4 | Concepts before mechanics in every section; the running example ties Sections 2, 3 and 5; the ending leads to the fifth entry. |
+| accuracy | 3 | All numbers recomputed or reproduced; two qualifications could be sharper (Q1, Q2). |
+| evidence | 3 | Pham page range and Kunz and Stilman beyond the abstract not checked at the primary source; claims are worded to what was verified. |
+| language | 4 | House style throughout; lint 0/0/0. |
+| consistency | 4 | Series notation and arm data agree; series F14 ($D$) left with a recorded reason. |
+| publishing | 4 | Page clean in `validate-site`; no KaTeX error; all links and fragments resolve. |
+
+Critical conditions C1–C9: none holds. C9: the series review `reviews/motion-planning.md` is resolved and this entry is unchanged since its reviewed commit 9b1c7ed; its content-hash stamp is still to be written (`node scripts/series-pipeline.mjs stamp motion-planning`) before the series gate passes.
+
+What was checked:
+- Every blocking and should-fix finding (D1–D4, D8–D10, C1, C7, C8, F1–F5, T1–T6) was found applied in the current text; the series review raises nothing for this entry except optional F14, answered with a reason.
+- `eos lint`: 0 errors, 0 warnings, 0 suggestions. `eos validate-site dist`: no issue for this page (the 26 issues are on other pages). `check-links`: all internal links resolve. `dist/blog/trajectories-and-time-scaling.html` is newer than the source.
+- `run.sh` rerun (Python 3.13.16, NumPy 2.5.3): output identical to `output.txt`, and all five `text` blocks in the article occur verbatim in it.
+- Recomputed by hand: S-curve cases ($v_p = 0.6$ from the quadratic, $v_p = 0.1842$ and $T = 0.5429$ s, 72% over the triangle), Exercises 2, 3, 4 and 6, the quintic end jerk $60/T^3$, the 20.8% speed-up of the time-optimal scaling, the line's distance from the base (1.1314 to 1.4142 m), the clamped end equations.
+- References against the fact-check table: Bobrow et al. (IJRR 4(3) 3–17), Flash and Hogan (J. Neurosci. 5(7) 1688–1703), Shin and McKay (IEEE TAC AC-30(6) 531–541) match; Pham completed per F1; list in alphabetical order.
+- Cross-references: third entry Section 6 (shortening and smoothing); first entry Sections 3.2 (clearance defined in bold), 4, 5 (edge checks and the resolution weakness) and 5.3 (the bound $(l_1+l_2)|\dot\theta_1| + l_2|\dot\theta_2|$); `what-is-a-robot` Section 4 (the planner assumes the trajectory sent is followed); `planar-arm-kinematics` Section 5 (Jacobian); the fifth entry (differential-drive robot, tracking controllers, reactive methods). Each target says what is claimed.
+
+Optional findings (left to the author; not a condition of publication):
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Optional | `:208`, Section 4.1 | accuracy | "with only one joint, this happens only where $\sigma_i'(s) = 0$, as in Exercise 4" reads as a one-joint robot, but Exercise 4 has two joints. Suggested: "a single joint's constraint can empty the interval on its own only where $\sigma_i'(s) = 0$, as joint 2's does in Exercise 4." |
+| Q2 | Optional | `:283`, Section 4.3 | accuracy | On the stretch the output labels `max decel`, $\dot s$ first rises slightly (0.8372 at $s = 0.235$, 0.8382 at $s = 0.30$, recomputed with `time_optimal`) before falling to 0.8209, so $L$ is briefly positive. "falls only from 0.84 to 0.82" is correct to two decimals; adding "(after a slight rise)" or "stays between 0.82 and 0.84 s⁻¹" would be exact. |
+
+Not verified: as listed in the record (Pham page range at IEEE Xplore; Kunz and Stilman beyond the abstract; Shin and McKay's procedure; the text of de Boor). No Vietnamese translation exists.
+
+QA follow-up: Q1 and Q2 were applied by the author side with the suggested wording (Section 4.1, `:208`; Section 4.3, `:283`, "stays between 0.82 and 0.84 s⁻¹", consistent with the recomputed 0.8209 to 0.8382). Verified in the file: only those two lines changed, `eos lint` 0/0/0. Accuracy raised to 4; re-recorded: **decision publish, total 27/28** (evidence 3, as above). `dist/` was not rebuilt for these two prose-only edits.

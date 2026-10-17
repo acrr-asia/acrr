@@ -298,3 +298,62 @@ From the series review `reviews/motion-planning.md` (2026-10-17), applied by the
 - F14: the answer to Exercise 3 writes the characteristic polynomial in $\lambda$ instead of $s$ (the series' path parameter, and the unit symbol beside it).
 - F3 needed no change here: the second entry now cites the same 2002 paper.
 - No number, code or output changed.
+
+## QA
+
+Stage: EOS step 10, by an independent QA editor who did not write or revise the entry. Recorded with `eos record`: **decision revise, total 24/28** (`editorial/records/article/path-tracking-and-reactive-avoidance.json`).
+
+| Dimension | Score | Reason when below 4 |
+|---|---|---|
+| purpose | 4 | |
+| structure | 4 | |
+| accuracy | 4 | |
+| evidence | 3 | Gat (1998) has no page range (F3), and several bibliographic details were confirmed from search results, not fetched sources. |
+| language | 4 | |
+| consistency | 3 | Units with exponents differ from entry 4 and the rest of the site (Q1); the link text names the insight by an outdated title (Q2). |
+| publishing | 2 | `eos validate-site dist` exits 1 with 22 `glued-inline` issues on this page, so the publication gate and deploy fail (Q1). |
+
+Critical conditions: C8 (Q1 is open and blocking). C9: the series review is resolved but not yet stamped (`series-pipeline status`: review-stale). That is expected until every record is written.
+
+Confirmed resolved in the text: D1–D9, C1–C7, F1, F2, F4, T1–T6, series F3, F4 and F14. F3 (Gat pages) is deliberately unchanged.
+
+Independent checks:
+- `sh run.sh` output is identical to `outputs.txt`, and every line of the ten `text` blocks occurs verbatim in it.
+- Recomputed independently: the ZOH pole magnitudes (0.833, 0.375, 0.250, 2.032), the pure pursuit example (0.5831 m, 0.5404 rad, 1.7647 m⁻¹, 0.567 m, 0.8824 rad/s), $e^{-\pi} = 4.32\%$ (0.0216 m), Exercise 4 ($\rho = 0.5898$ m), Exercise 5 (0.4797, 0.5916 m/s, and 0.4879 m/s with 0.36 m) and the DWA stopping distance (0.4069 m) and curvatures (0.421, 0.381 m⁻¹).
+- Checked against the fact-check table: Kanayama et al., Fox et al., Rimon and Koditschek, Khatib, and Koenig and Likhachev. The list is in alphabetical order.
+- Every fragment resolves (`check:links`: all internal links resolve). Each target says what the text claims (What Is a Robot? §2.2, §4, §5, §5.3; entry 2 §2.1 and §5.4; entry 4 §1; Sensing and State Estimation §7.2), except the insight title (Q2).
+- `eos lint`: 0 errors, 0 warnings, 6 suggestions. These are kept with reasons: C7, and one 46-word sentence at `:93`.
+
+| ID | Severity | Location | Dimension | Finding |
+|---|---|---|---|---|
+| Q1 | Blocking | `:95`, `:115`, `:200`, `:208`, `:226`, `:254`, `:354`, `:392`, `:502`, `:506`, `:511`, `:524` | publishing | 22 units written as text plus a KaTeX exponent fail `eos validate-site`, and so CI. |
+| Q2 | Should fix | `:484`, Section 6.4 | consistency | The link text "Closing the Sim-to-Real Gap" is not the insight's title. |
+
+### Q1. Unit exponents in KaTeX fail validate-site
+- **Where:** 22 occurrences. Lines 95, 115, 392 and 502: `m$^{-1}$`. Line 200: `1/m$^2$`. Line 208: `m$^{-1}$`, `m$^{-2}$` (×2) and `s$^{-1}$`. Line 226: `s$^{-1}$`, `m$^{-1}$` and `m$^{-2}$`. Line 254: `m$^{-2}$` (×2) and `s$^{-1}$`. Line 354: `m/s$^2$` and `rad/s$^2$`. Line 506: `s$^{-1}$`. Line 511: `s$^{-1}$`, `m$^{-1}$` and `m$^{-2}$`. Line 524: `m/s$^2$`.
+- **Problem:** Each one renders as a letter glued to `<span class="katex">`. These are exactly the 22 `glued-inline` issues that make `eos validate-site dist` exit 1. That command is a blocking step in `publication-gate.yml` and `deploy.yml`, and the acceptance checklist requires validate-site to be clean for the page. This is the only page on the site that writes units this way. Entry 4 and the other articles use Unicode superscripts (rad/s², m/s², s⁻¹).
+- **Correction:** Replace in prose only (not inside `$...$` formulas) as follows:
+  - `m$^{-1}$` → `m⁻¹`
+  - `m$^{-2}$` → `m⁻²`
+  - `s$^{-1}$` → `s⁻¹`
+  - `m/s$^2$` → `m/s²`
+  - `rad/s$^2$` → `rad/s²`
+  - `1/m$^2$` → `1/m²`
+
+  Then rebuild and confirm that `eos validate-site dist` reports no issue for this page.
+
+### Q2. Outdated title of the linked insight
+- **Where:** `:484`, Section 6.4, "Tuning and verification".
+- **Text:** "the insight [Closing the Sim-to-Real Gap](/insights/closing-the-sim-to-real-gap) discusses the gap between simulated and real behavior."
+- **Problem:** The insight's title is "Is the Sim-to-Real Gap Something to Close or to Measure?" (`src/content/insights/closing-the-sim-to-real-gap.md:2`). Its argument is that the gap may be better measured than closed, so the old name misstates it.
+- **Correction:** "the insight [Is the Sim-to-Real Gap Something to Close or to Measure?](/insights/closing-the-sim-to-real-gap) discusses the gap between simulated and real behavior."
+
+Not verified: the items under the fact-check's "Not verified", unchanged. Outside this item: `validate-site` also reports 4 `meta-description` issues on Vietnamese pages (`vi/blog/data-parallelism-vector-units-and-gpus.html`, `memory-hierarchy-and-locality.html`, `performance-models-and-scaling-laws.html`, `threads-and-shared-memory-parallelism.html`). These also make the command exit 1.
+
+After Q1 and Q2 are applied, QA must be re-run and recorded again, because the edit changes the content hash.
+
+**QA follow-up (re-record):**
+- The author applied Q1 and Q2 exactly. The diff touches only the 12 lines with units and line 484.
+- After a rebuild with `npm run build:local`, `eos validate-site dist` reports "No issues" and exits 0 (the four Vietnamese descriptions were also shortened), and `check:links` reports that every internal link resolves.
+- Re-recorded: **decision publish, total 27/28**. Scores: purpose 4, structure 4, accuracy 4, evidence 3 (Gat pages; search-result confirmations), language 4, consistency 4, publishing 4.
+- No critical condition holds. Open findings: 0.

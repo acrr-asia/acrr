@@ -4,6 +4,7 @@
 - Reviewed commit: 9b1c7ed
 - Date: 2026-10-17
 - Reviewer: independent Series Editor (EOS step 8); I did not write or revise any of the entries or the series file.
+- Content hash: sha256:98f575b1dc4c4249982700875e3c034e1e01e1bedb68ce9b6791cf544371cc8b
 
 ## Summary
 
@@ -43,6 +44,35 @@ Second pass. After the corrections, the overview and all five entries were re-re
 - A further full pass found nothing blocking or should-fix.
 - `npm run build:local` exits 0, `npm run check:links` reports that all internal links resolve, `eos lint` shows 0 errors and 0 warnings on all six files, and the five built pages have no `katex-error` and no letter glued to `<a `, `<strong>` or `<code`.
 - The edits make the review records of the overview and of entries 1, 2, 3 and 5 stale; they need the QA stage and `eos record` again before `eos gate` passes, and the series needs `series-pipeline stamp` after that.
+
+## QA
+
+Independent QA editor (EOS step 10); I did not write or revise the overview or any entry. Item: `src/content/series/motion-planning.md`. Record: `editorial/records/series/motion-planning.json`, decision **publish**, total 28/28 (27/28 before Q1 was applied).
+
+| Dimension | Score | Note |
+|---|---|---|
+| purpose | 4 | Reader, prerequisites, scope (F11) and five checkable objectives stated |
+| structure | 4 | Reader, sequence rationale, scope, conventions, in that order |
+| accuracy | 4 | After Q1 was applied (3 before). Q1 (optional): "Dijkstra's algorithm and A*, which give optimal answers when the space has few dimensions" ties optimality to dimension; entry 1, Section 6, says grid search is "resolution optimal" and suited to "$d$ up to about 3 or 4" |
+| evidence | 4 | Every claim checked against the entries it summarizes |
+| language | 4 | No contractions, no serial comma, lint 0/0/0 |
+| consistency | 4 | Notation and versions agree with all five Conventions paragraphs |
+| publishing | 4 | Description 157 characters, title 26; built page current, no KaTeX error; validate-site reports nothing for the page |
+
+Stages: developmental, copy and series pass (this review); factCheck pass (the series review's cross-entry checks, repeated at QA for the overview's claims); technical n/a (the overview has no code, derivations or computed numbers); publishing and qa pass. Critical conditions C1-C9: none holds (C9: this review is resolved; the stamp is still to be recorded). Findings for the overview: 0 blocking, 1 should fix (F11, applied), 2 optional (F16 and Q1 applied), 0 open.
+
+Checks made:
+- F11 and F16 are in the text as the Resolution says.
+- Objectives against entries: O1 entry 1 Sections 1-3; O2 entry 2 Sections 3-4 (4.2 admissibility, 4.3 consistency, 4.6 overestimation); O3 entry 3 Sections 1.3 and 2-4 (3.6 completeness, 4.5 asymptotic optimality); O4 entry 4 Sections 2-4 and 6; O5 entry 5 Sections 3-5. All met.
+- Each entry sentence of the sequence paragraph matches its entry; the scope paragraph matches entry 1 Section 6 (trajectory optimization "Mentioned here"), entry 4 Section 1.1 (kinodynamic planning) and entry 5 Section 6.4 (moving obstacles).
+- Conventions against the entries: SI, radians, right-handed frames, $q$, $\mathcal{C}$, $\mathcal{C}_{\mathrm{free}}$, $\mathcal{C}_{\mathrm{obs}}$, $d$, $\sigma$, $q(t) = \sigma(s(t))$, $l_1 = 1.0$ m, $l_2 = 0.7$ m, Python 3.13 and NumPy 2.5 (entry 2 "where a random map or the arm needs it"), seeds stated where sampling is random (entry 2's one random map, entry 3 per experiment; entries 1, 4, 5 deterministic). All agree.
+- Links and claims: Introduction to Robotics ends with Sensing and State Estimation (order 4), which names motion planning at line 269; Foundations of Control Systems supplies feedback, linked in entry 5's opening.
+
+Q1 correction (optional; since applied), `src/content/series/motion-planning.md:16`: replace "which give optimal answers when the space has few dimensions" with "which find the cheapest path on that graph and are practical when the space has few dimensions".
+
+Q1 applied: the author side applied Q1 with the wording above (the diff changes only that phrase); I re-verified it against entry 1 Section 6 and re-ran lint (0/0/0); accuracy is now 4 and the record was re-recorded (decision publish, 28/28).
+
+Not verified: no Vietnamese overview exists yet, so there was nothing to compare. Outside this item: `eos validate-site dist` reports glued-inline text in `blog/path-tracking-and-reactive-avoidance.html` (for example "0.38 m<span class"), which belongs to entry 5's QA.
 
 ## Objectives coverage
 
