@@ -1,0 +1,528 @@
+---
+title: "Từ đường đi đến quỹ đạo: tham số hóa thời gian và biên dạng vận tốc"
+description: "Cách biến một đường đi hình học thành quỹ đạo có thời gian bằng biên dạng đa thức, hình thang và chữ S, bằng spline và các phép kiểm tra theo giới hạn khớp."
+publishedAt: "2026-10-17"
+category: "Robotics and Control"
+tags:
+  - robotics
+  - motion planning
+  - trajectory generation
+series: motion-planning
+seriesOrder: 4
+---
+
+Ba bài đầu trả lời một câu hỏi hình học: chuỗi cấu hình nào đưa robot từ điểm xuất phát đến đích mà không va chạm. [Bài thứ ba](/vi/blog/sampling-based-planning-prm-and-rrt) đã tìm những đường đi như vậy bằng các bộ lập kế hoạch dựa trên lấy mẫu và, ở Mục 6 của bài đó, đã rút ngắn và làm trơn chúng; một đường đi loại đó chính là đầu vào của bài này. Một đường đi cho biết robot đi qua đâu nhưng không cho biết khi nào. Tuy vậy, động cơ được ra lệnh bằng vị trí, vận tốc và gia tốc tại những thời điểm xác định, và mỗi đại lượng ấy động cơ chỉ đáp ứng được đến một mức nhất định. Bài thứ tư này của loạt bài [Lập kế hoạch chuyển động cho robot](/vi/series/motion-planning) bổ sung thời gian: nó biến một đường đi (path) thành một **quỹ đạo** (trajectory), tức một chuyển động có lịch trình, tôn trọng các giới hạn vận tốc, gia tốc và độ giật (jerk) của robot.
+
+Bài này dựa trên không gian cấu hình (configuration space) và đường đi của [bài thứ nhất](/vi/blog/configuration-space-and-the-planning-problem) (mục 4 của bài đó), cùng với cánh tay hai khâu, động học ngược và ma trận Jacobi (Jacobian) của nó trong bài [Động học thuận và động học ngược của cánh tay phẳng](/vi/blog/planar-arm-kinematics) (Mục 5 của bài đó). Bài cho thấy lịch trình dọc theo một đường đi quyết định vận tốc và gia tốc của các khớp như thế nào, rồi suy ra các biên dạng vận tốc (velocity profile) tiêu chuẩn và lịch trình nhanh nhất dọc theo một đường đi cố định. Sau đó bài dẫn một quỹ đạo qua các điểm trung gian bằng spline và kết thúc bằng những phép kiểm tra mà một quỹ đạo phải vượt qua trước khi được gửi đến robot. Người đọc cần biết giải tích đến đạo hàm cấp hai và đọc được Python.
+
+**Quy ước.** Các quy ước này theo loạt bài. Một cấu hình là $q$, không gian cấu hình là $\mathcal{C}$ và phần tự do của nó là $\mathcal{C}_{\mathrm{free}}$. Một đường đi là một ánh xạ liên tục $\sigma : [0, 1] \to \mathcal{C}_{\mathrm{free}}$ với $\sigma(0) = q_{\mathrm{start}}$ và $\sigma(1) = q_{\mathrm{goal}}$; một quỹ đạo là $q(t)$ với $t \in [0, T]$, có thời lượng $T$; và một phép **tham số hóa thời gian** (time scaling) là một hàm $s(t)$ từ $[0, T]$ lên $[0, 1]$ sao cho $q(t) = \sigma(s(t))$. Dấu chấm chỉ đạo hàm theo thời gian ($\dot s = ds/dt$) và dấu phẩy trên chỉ đạo hàm theo tham số đường đi ($\sigma'(s) = d\sigma/ds$). Khớp $i$ có giới hạn tốc độ $v_{\max,i}$ tính bằng rad/s, giới hạn gia tốc $a_{\max,i}$ tính bằng rad/s² và, khi cần, giới hạn độ giật $j_{\max,i}$ tính bằng rad/s³. Cánh tay có các góc khớp $\theta_1, \theta_2$ và chiều dài khâu $l_1 = 1.0$ m và $l_2 = 0.7$ m. Mọi ví dụ đều dùng các giới hạn $v_{\max} = 1.0$ rad/s, $a_{\max} = 2.0$ rad/s² và $j_{\max} = 10$ rad/s³ cho cả hai khớp: đây là những giá trị tròn được chọn để minh họa, không phải số liệu của một cánh tay thực. Góc tính bằng radian. Mã nguồn là Python 3.13 với NumPy 2.5 (không dùng SciPy), và mọi phép tính đều tất định, nên chạy lại các chương trình sẽ tái tạo chính xác mọi con số được trích dẫn.
+
+## 1. Đường đi và quỹ đạo
+
+### 1.1 Tách hình học khỏi thời gian
+
+Đường đi $\sigma(s)$ cố định phần hình học: các cấu hình mà robot đi qua và thứ tự của chúng. Quỹ đạo $q(t)$ cố định đồng thời cả hình học lẫn thời gian. Viết $q(t) = \sigma(s(t))$ tách bài toán thành hai bước: một bộ lập kế hoạch (planner) tìm một $\sigma$ không va chạm, và một bước tham số hóa thời gian chọn tốc độ di chuyển dọc theo nó. Cách tách này có hiệu quả vì, khi vật cản không chuyển động, va chạm chỉ phụ thuộc vào hình học, còn các giới hạn của động cơ phụ thuộc vào thời gian; khi đó có thể chọn thời gian mà không phải lặp lại phép tìm kiếm hình học.
+
+Cách tách có cái giá của nó: cố định hình học trước sẽ loại bỏ những chuyển động có thể nhanh hơn trên một đường đi hơi khác, chẳng hạn một cung rộng hơn khi qua góc. Lập kế hoạch đồng thời hình học và thời gian, trong không gian của vị trí và vận tốc, được gọi là **lập kế hoạch động học – động lực học** (kinodynamic planning); bài toán này khó hơn, và bài này không đề cập. Lynch và Park trình bày việc sinh quỹ đạo dưới dạng tách rời này, như một đường đi kết hợp với một phép tham số hóa thời gian, và loạt bài này làm theo; các giới hạn của nó được nêu ở những chỗ chúng có ý nghĩa.
+
+### 1.2 Quy tắc dây chuyền
+
+Lấy đạo hàm $q(t) = \sigma(s(t))$ một lần và hai lần theo thời gian cho vận tốc và gia tốc khớp:
+
+$$
+\dot q = \sigma'(s)\,\dot s, \qquad
+\ddot q = \sigma'(s)\,\ddot s + \sigma''(s)\,\dot s^2 .
+$$
+
+Vận tốc là tiếp tuyến $\sigma'(s)$ của đường đi nhân với **tốc độ trên đường đi** (path speed) $\dot s$. Gia tốc có hai số hạng. Số hạng thứ nhất, $\sigma'(s)\,\ddot s$, hướng theo tiếp tuyến và đến từ việc tăng tốc hay giảm tốc. Số hạng thứ hai, $\sigma''(s)\,\dot s^2$, đến từ độ cong của đường đi và tăng theo bình phương tốc độ: ngay cả khi tốc độ trên đường đi không đổi, một đường đi cong vẫn đòi hỏi gia tốc. Số hạng này buộc robot phải chạy chậm lại ở những khúc cong gắt, và nó gây ra phần lớn khó khăn ở Mục 4.
+
+Đạo hàm cấp ba cho **độ giật**, tức tốc độ thay đổi của gia tốc. Giới hạn độ giật chủ yếu đến từ kết cấu chứ không phải từ động cơ: một thay đổi gia tốc đột ngột kích thích dao động trong các khâu, hộp số và tải. Một gia tốc nhảy bậc có độ giật vô hạn tại điểm nhảy.
+
+### 1.3 Đường thẳng trong không gian khớp
+
+Đường đi đơn giản nhất là một đường thẳng trong không gian khớp,
+
+$$
+\sigma(s) = q_{\mathrm{start}} + s\,(q_{\mathrm{goal}} - q_{\mathrm{start}}), \qquad
+\sigma'(s) = \Delta q, \qquad \sigma''(s) = 0,
+$$
+
+với $\Delta q = q_{\mathrm{goal}} - q_{\mathrm{start}}$. Số hạng độ cong bằng không, nên $\dot q = \Delta q\,\dot s$ và $\ddot q = \Delta q\,\ddot s$: mọi khớp chuyển động theo cùng tỉ lệ, bắt đầu và dừng cùng lúc, và các giới hạn khớp trở thành giới hạn chỉ trên $\dot s$ và $\ddot s$,
+
+$$
+|\dot s| \le \min_i \frac{v_{\max,i}}{|\Delta q_i|}, \qquad
+|\ddot s| \le \min_i \frac{a_{\max,i}}{|\Delta q_i|}.
+$$
+
+Khớp có tỉ số giữa độ dịch chuyển và giới hạn lớn nhất quyết định nhịp độ, còn các khớp khác chuyển động dưới giới hạn của chúng. Ví dụ xuyên suốt của Mục 2 và Mục 3 di chuyển cánh tay từ $q_{\mathrm{start}} = (-0.5, 1.8)$ đến $q_{\mathrm{goal}} = (1.0, 0.6)$, nên $\Delta q = (1.5, -1.2)$ rad. Một đường thẳng trong không gian khớp không phải là một đường thẳng của tay kẹp: động học thuận của cánh tay uốn nó thành một đường cong trong mặt phẳng. Mục 4 xét trường hợp ngược lại, một đường thẳng của tay kẹp, vốn là đường cong trong không gian khớp.
+
+## 2. Tham số hóa thời gian bằng đa thức
+
+### 2.1 Đa thức bậc ba
+
+Một phép tham số hóa thời gian cho chuyển động bắt đầu và kết thúc ở trạng thái đứng yên phải thỏa mãn bốn điều kiện: $s(0) = 0$, $s(T) = 1$, $\dot s(0) = 0$ và $\dot s(T) = 0$. Một đa thức bậc ba (cubic polynomial) có bốn hệ số, nên nó có thể đáp ứng cả bốn. Với thời gian chuẩn hóa $\tau = t/T$ và $s = c_0 + c_1 \tau + c_2 \tau^2 + c_3 \tau^3$, các điều kiện tại $\tau = 0$ cho $c_0 = c_1 = 0$, còn các điều kiện tại $\tau = 1$ cho $c_2 + c_3 = 1$ và $2c_2 + 3c_3 = 0$, nên $c_2 = 3$ và $c_3 = -2$:
+
+$$
+s(t) = 3\left(\frac{t}{T}\right)^2 - 2\left(\frac{t}{T}\right)^3 .
+$$
+
+Các đạo hàm của nó là $\dot s = (6\tau - 6\tau^2)/T$ và $\ddot s = (6 - 12\tau)/T^2$. Tốc độ trên đường đi đạt đỉnh tại $\tau = 1/2$ với $\dot s_{\max} = 3/(2T)$, còn gia tốc có độ lớn cực đại ở hai đầu, $|\ddot s|_{\max} = 6/T^2$. Hai đầu đó là điểm yếu của đa thức bậc ba: gia tốc nhảy từ không lên $6/T^2$ tại $t = 0$ và từ $-6/T^2$ về không tại $t = T$, nên độ giật tại đó là vô hạn.
+
+### 2.2 Đa thức bậc năm
+
+Thêm các điều kiện $\ddot s(0) = \ddot s(T) = 0$ cho sáu điều kiện, mà một đa thức bậc năm (quintic polynomial) có thể đáp ứng. Cùng quy trình đó, giờ với $c_0 = c_1 = c_2 = 0$ và ba phương trình tại $\tau = 1$, cho
+
+$$
+s(t) = 10\tau^3 - 15\tau^4 + 6\tau^5, \qquad \tau = t/T .
+$$
+
+Tốc độ trên đường đi là $\dot s = 30\tau^2(1 - \tau)^2/T$, với đỉnh $\dot s_{\max} = 15/(8T)$ tại $\tau = 1/2$. Gia tốc là $\ddot s = 60\,\tau(1 - \tau)(1 - 2\tau)/T^2$; cho đạo hàm của nó bằng không ta được $\tau^2 - \tau + 1/6 = 0$, nên các đỉnh nằm tại $\tau = 1/2 \pm \sqrt{3}/6 \approx 0.2113$ và $0.7887$. Tại đó $\tau(1 - \tau) = 1/6$ và $1 - 2\tau = \pm\sqrt{3}/3$, từ đó
+
+$$
+|\ddot s|_{\max} = \frac{10}{\sqrt{3}\,T^2} \approx \frac{5.7735}{T^2}.
+$$
+
+Đa thức bậc năm bắt đầu và kết thúc với gia tốc bằng không, nên gia tốc của nó liên tục và độ giật hữu hạn ($60/T^3$ ở hai đầu). Trong mọi chuyển động từ đứng yên đến đứng yên có thời lượng $T$ mà cũng bắt đầu và kết thúc với gia tốc bằng không, đa thức bậc năm là chuyển động làm cực tiểu tích phân của bình phương độ giật; Flash và Hogan đã dùng biên dạng **độ giật cực tiểu** (minimum-jerk) này để mô hình hóa các cử động với tay của con người. Cái giá phải trả là tốc độ đỉnh cao hơn: $15/8 = 1.875$ so với $1.5$ của đa thức bậc ba.
+
+### 2.3 Thời lượng ngắn nhất dưới các giới hạn khớp
+
+Trên đường thẳng của Mục 1.3, vận tốc khớp là $\Delta q_i\,\dot s$ và gia tốc khớp là $\Delta q_i\,\ddot s$, nên một phép tham số hóa có thời lượng $T$ tôn trọng các giới hạn của khớp $i$ nếu
+
+$$
+\frac{c_v\,|\Delta q_i|}{T} \le v_{\max,i} \quad\text{and}\quad
+\frac{c_a\,|\Delta q_i|}{T^2} \le a_{\max,i},
+$$
+
+trong đó $c_v = 3/2$ và $c_a = 6$ với đa thức bậc ba, còn $c_v = 15/8$ và $c_a = 10/\sqrt{3}$ với đa thức bậc năm. Thời lượng chấp nhận được ngắn nhất là giá trị lớn nhất trong các cận $c_v|\Delta q_i|/v_{\max,i}$ và $\sqrt{c_a|\Delta q_i|/a_{\max,i}}$ trên mọi khớp. Chương trình dưới đây kiểm tra các giá trị đỉnh trên một lưới mịn của $\tau$ và tính các cận cho ví dụ xuyên suốt:
+
+```python
+# Two-link arm, straight line in joint space, limits per joint (assumed values).
+q_start = np.array([-0.5, 1.8])        # rad
+q_goal = np.array([1.0, 0.6])          # rad
+v_max = np.array([1.0, 1.0])           # rad/s
+a_max = np.array([2.0, 2.0])           # rad/s^2
+dq = np.abs(q_goal - q_start)
+for name, sd, sdd in [("cubic", 1.5, 6.0), ("quintic", 15/8, 10/np.sqrt(3))]:
+    T_v = np.max(sd * dq / v_max)
+    T_a = np.max(np.sqrt(sdd * dq / a_max))
+    print(f"{name:8s} T_v = {T_v:.4f} s  T_a = {T_a:.4f} s  ->  T = {max(T_v, T_a):.4f} s")
+```
+
+```text
+cubic    max ds/dtau = 1.5000   max |d2s/dtau2| = 6.0000 at tau = 0.0000
+quintic  max ds/dtau = 1.8750   max |d2s/dtau2| = 5.7735 at tau = 0.2113
+cubic    T_v = 2.2500 s  T_a = 2.1213 s  ->  T = 2.2500 s
+quintic  T_v = 2.8125 s  T_a = 2.0809 s  ->  T = 2.8125 s
+```
+
+Hai dòng đầu đến từ phần chương trình mà đoạn mã trên lược bỏ, phần này lấy mẫu $\tau$ tại 100,001 điểm và xác nhận các đỉnh đã suy ra. Với cả hai đa thức, giới hạn tốc độ của khớp 1, khớp dịch chuyển 1.5 rad, quyết định thời lượng. Đa thức bậc ba cần 2.25 s và đa thức bậc năm cần 2.81 s, vì khởi đầu êm hơn của đa thức bậc năm buộc tốc độ đỉnh phải cao hơn cho cùng một quãng đường.
+
+Các phép tham số hóa bằng đa thức dễ tính và cho chuyển động trơn, nhưng chúng lãng phí thời gian: khớp chỉ chạm giới hạn tốc độ tại một thời điểm và giới hạn gia tốc tại một hoặc hai thời điểm, còn trong phần còn lại của chuyển động nó chạy dưới cả hai giới hạn. Các biên dạng ở mục tiếp theo dành càng nhiều phần của chuyển động càng tốt ở một giới hạn.
+
+## 3. Biên dạng hình thang và biên dạng chữ S
+
+### 3.1 Biên dạng hình thang
+
+Một **biên dạng vận tốc hình thang** (trapezoidal velocity profile) tăng tốc với gia tốc giới hạn $a$ cho đến khi đạt giới hạn tốc độ $v$, chạy đều ở $v$, rồi giảm tốc với $a$ cho đến khi dừng. Đồ thị vận tốc theo thời gian của nó là một hình thang, do đó có tên gọi này. Tăng tốc từ đứng yên lên $v$ mất $v/a$ giây và đi được $v^2/(2a)$; giảm tốc cũng như vậy. Nếu quãng đường $D$ ít nhất bằng $v^2/a$, pha chạy đều đi hết phần còn lại $D - v^2/a$ với tốc độ $v$, và tổng thời lượng là
+
+$$
+T = \frac{D - v^2/a}{v} + 2\,\frac{v}{a} = \frac{D}{v} + \frac{v}{a} \qquad (D \ge v^2/a).
+$$
+
+Nếu $D < v^2/a$, robot phải bắt đầu hãm trước khi đạt $v$, và biên dạng trở thành một **biên dạng tam giác** (triangular profile): tăng tốc trên nửa quãng đường và giảm tốc trên nửa còn lại. Mỗi nửa đi được $D/2 = v_p^2/(2a)$, nên tốc độ đỉnh là $v_p = \sqrt{a D}$ và
+
+$$
+T = 2\sqrt{D/a} \qquad (D < v^2/a).
+$$
+
+Với một trục đơn có các giới hạn vận tốc và gia tốc đối xứng, biên dạng này là chuyển động từ đứng yên đến đứng yên có thời gian ngắn nhất. Ở mọi thời điểm nó tăng tốc mạnh nhất mức cho phép, chạy đều ở giới hạn tốc độ hoặc hãm mạnh nhất mức cho phép, và việc hãm bắt đầu vào thời điểm muộn nhất vẫn còn cho phép dừng tại đích. Một biên dạng loại này (tăng tốc tối đa, tốc độ không đổi, giảm tốc tối đa) được gọi là **bang-coast-bang**; khi không có pha tốc độ không đổi, nó là **bang-bang**. Với khớp 1 của ví dụ xuyên suốt, $D = 1.5$ rad và $v^2/a = 0.5$ rad, nên $T = 1.5 + 0.5 = 2.0$ s, so với 2.25 s của đa thức bậc ba.
+
+Nhiều khớp chuyển động dọc theo đường thẳng của Mục 1.3 được đồng bộ bằng cách áp dụng biên dạng cho chính $s$, với các giới hạn của $\dot s$ và $\ddot s$ từ mục đó: $\dot s_{\max} = \min(1.0/1.5, 1.0/1.2) = 0.6667$ s⁻¹ và $\ddot s_{\max} = \min(2.0/1.5, 2.0/1.2) = 1.3333$ s⁻². Quãng đường theo $s$ là 1, và $\dot s_{\max}^2/\ddot s_{\max} = 0.3333 \le 1$, nên biên dạng có pha chạy đều và $T = 1/0.6667 + 0.6667/1.3333 = 2.0$ s, đúng bằng thời lượng của riêng khớp 1. Khớp 2 chạy theo với tốc độ đỉnh $1.2 \times 0.6667 = 0.8$ rad/s, dưới giới hạn của nó.
+
+### 3.2 Biên dạng chữ S
+
+Gia tốc của biên dạng hình thang nhảy giữa $-a$, 0 và $+a$, nên độ giật của nó vô hạn tại bốn thời điểm. Một **biên dạng chữ S** (S-curve profile), còn gọi là biên dạng giới hạn độ giật hay biên dạng bảy đoạn, giới hạn độ giật ở $j$ bằng cách tăng và giảm gia tốc theo dốc. Pha tăng tốc của nó có ba đoạn: độ giật $+j$ cho đến khi gia tốc đạt $a$, gia tốc không đổi $a$, rồi độ giật $-j$ cho đến khi gia tốc trở về không ở tốc độ $v$. Khi đó đường cong vận tốc của nó có hình chữ S đã đặt tên cho nó. Pha giảm tốc là ảnh đối xứng của pha tăng tốc, và giữa chúng là một pha chạy đều ở $v$, tổng cộng bảy đoạn.
+
+Thời lượng tối thiểu suy ra từ một nhận xét: pha tăng tốc đối xứng qua điểm giữa của nó, nên tốc độ trung bình của nó là $v/2$. Nếu đạt được giới hạn gia tốc ($v \ge a^2/j$), pha tăng tốc kéo dài $t_a = v/a + a/j$, phần thêm $a/j$ là thời gian mất đi ở hai dốc độ giật. Nó đi được $v\,t_a/2$, và pha giảm tốc cũng đi được như vậy. Khi đủ quãng đường cho một pha chạy đều ($D \ge v\,t_a$),
+
+$$
+T = \frac{D - v\,t_a}{v} + 2\,t_a = \frac{D}{v} + \frac{v}{a} + \frac{a}{j}.
+$$
+
+So với biên dạng hình thang, giới hạn độ giật tốn đúng $a/j$ giây. Nếu $v < a^2/j$, gia tốc không bao giờ đạt $a$, pha tăng tốc gồm hai dốc độ giật kéo dài tổng cộng $t_a = 2\sqrt{v/j}$, và cùng công thức $T = D/v + t_a$ vẫn đúng. Với quãng đường ngắn hơn, giới hạn tốc độ không đạt được và phải giải tìm tốc độ đỉnh $v_p$. Nếu $a$ vẫn đạt được, $D = v_p(v_p/a + a/j)$, một phương trình bậc hai theo $v_p$; nếu không giới hạn nào đạt được, $D = 2 v_p \sqrt{v_p/j}$, cho $v_p = (D^2 j/4)^{1/3}$ và $T = 4\,(D/(2j))^{1/3}$. Hàm dưới đây cài đặt các trường hợp:
+
+```python
+def scurve_time(D, v, a, j):
+    """Minimum time and peak speed for a symmetric jerk-limited profile."""
+    def accel_time(vp):                     # time to go from 0 to vp
+        return vp/a + a/j if vp >= a*a/j else 2*np.sqrt(vp/j)
+    if D >= v*accel_time(v):                # cruise at v
+        return D/v + accel_time(v), v
+    vp = (-a*a/j + np.sqrt((a*a/j)**2 + 4*a*D)) / 2   # a reached, v not
+    if vp >= a*a/j:
+        return 2*accel_time(vp), vp
+    vp = (D*D*j/4)**(1/3)                   # neither a nor v reached
+    return 4*np.sqrt(vp/j), vp
+```
+
+Chương trình cũng cài đặt biên dạng hình thang của Mục 3.1 và, để kiểm tra, dựng bảy đoạn từ tốc độ đỉnh đã tính rồi tích phân chính xác độ giật hằng số từng khúc, từng bước một, để xác nhận rằng mỗi biên dạng đi hết quãng đường $D$ và kết thúc ở trạng thái đứng yên. Với ba quãng đường, nó in ra:
+
+```text
+limits v = 1.0 rad/s, a = 2.0 rad/s^2, j = 10.0 rad/s^3
+D = 1.50 rad  trapezoid T = 2.0000 s (peak 1.0000)  S-curve T = 2.2000 s (peak 1.0000)  simulated x = 1.500000, v_end = -1.4e-16
+D = 0.30 rad  trapezoid T = 0.7746 s (peak 0.7746)  S-curve T = 1.0000 s (peak 0.6000)  simulated x = 0.300000, v_end = 3.1e-17
+D = 0.05 rad  trapezoid T = 0.3162 s (peak 0.3162)  S-curve T = 0.5429 s (peak 0.1842)  simulated x = 0.050000, v_end = 3.2e-17
+```
+
+### 3.3 Ví dụ tính toán
+
+Với khớp 1, $D = 1.5$ rad, và $a^2/j = 0.4$ rad/s nhỏ hơn $v = 1.0$ rad/s, nên biên dạng chữ S đạt được giới hạn gia tốc. Pha tăng tốc của nó kéo dài $t_a = 1.0/2.0 + 2.0/10 = 0.7$ s và đi được $0.35$ rad, nên với 0.8 rad còn lại cho pha chạy đều, $T = 1.5 + 0.5 + 0.2 = 2.2$ s: dài hơn biên dạng hình thang 0.2 s, đó là cái giá của gia tốc trơn. Với $D = 0.3$ rad thì không còn chỗ cho pha chạy đều ($v\,t_a = 0.7$ rad lớn hơn 0.3 rad); phương trình bậc hai cho $v_p = 0.6$ rad/s, lớn hơn $a^2/j = 0.4$, nên giới hạn gia tốc vẫn đạt được và $T = 2(0.6/2.0 + 0.2) = 1.0$ s, so với 0.7746 s của biên dạng tam giác. Với $D = 0.05$ rad không giới hạn nào đạt được, $v_p = 0.1842$ rad/s và $T = 0.5429$ s, dài hơn biên dạng tam giác khoảng 72%. Chi phí tương đối của giới hạn độ giật tăng lên khi chuyển động ngắn lại, vì các dốc độ giật, có thời lượng không co lại theo tỉ lệ với quãng đường, chiếm một phần lớn hơn của một chuyển động ngắn.
+
+Bảng dưới đây so sánh bốn biên dạng của Mục 2 và Mục 3 cho cùng một chuyển động của ví dụ xuyên suốt.
+
+| Biên dạng | Thời lượng $T$ (s) | Giới hạn quyết định $T$ | Gia tốc liên tục |
+|---|---|---|---|
+| Bậc ba | 2.2500 | Tốc độ của khớp 1 | Không (nhảy ở cả hai đầu) |
+| Bậc năm | 2.8125 | Tốc độ của khớp 1 | Có |
+| Hình thang | 2.0000 | Tốc độ và gia tốc của khớp 1 | Không (bốn lần nhảy) |
+| Chữ S | 2.2000 | Tốc độ, gia tốc và độ giật của khớp 1 | Có |
+
+Lynch và Park suy ra các phép tham số hóa đa thức và hình thang, và mô tả biên dạng chữ S theo cùng cách đó.
+
+## 4. Tham số hóa tối ưu thời gian dọc theo một đường đi
+
+### 4.1 Mặt phẳng pha
+
+Các biên dạng của Mục 3 giả định các giới hạn không đổi trên $\dot s$ và $\ddot s$, điều này đúng trên một đường thẳng trong không gian khớp. Trên một đường đi cong, quy tắc dây chuyền của Mục 1.2 ràng buộc hai đại lượng này với nhau. Với mỗi khớp, ràng buộc gia tốc có dạng
+
+$$
+-a_{\max,i} \le \sigma_i'(s)\,\ddot s + \sigma_i''(s)\,\dot s^2 \le a_{\max,i},
+$$
+
+nên khoảng giá trị cho phép của $\ddot s$ phụ thuộc vào vị trí của robot trên đường đi ($s$) và tốc độ nó đang chạy tại đó ($\dot s$). Vì vậy, nơi tự nhiên để nghiên cứu bài toán là **mặt phẳng pha** (phase plane) của $(s, \dot s)$. Một phép tham số hóa thời gian là một đường cong trong mặt phẳng này từ $(0, 0)$ đến $(1, 0)$, và thời lượng của chuyển động là
+
+$$
+T = \int_0^1 \frac{ds}{\dot s},
+$$
+
+nên một phép tham số hóa nhanh hơn là phép có đường cong nằm cao hơn. Tại mỗi điểm của mặt phẳng, các ràng buộc cho phép một khoảng gia tốc $[L(s, \dot s), U(s, \dot s)]$. Phía trên một độ cao nhất định, gọi là **đường giới hạn vận tốc** (velocity limit curve), không phép tham số hóa chấp nhận được nào có thể đi qua: hoặc một khớp sẽ vượt giới hạn tốc độ $|\sigma_i'(s)|\,\dot s \le v_{\max,i}$ của nó, hoặc khoảng $[L, U]$ trở thành rỗng. Ở tốc độ đó, số hạng độ cong $\sigma''(s)\,\dot s^2$ đòi hỏi những gia tốc mà không một giá trị $\ddot s$ duy nhất nào có thể giữ trong giới hạn của mọi khớp cùng lúc; ràng buộc của riêng một khớp chỉ có thể tự làm rỗng khoảng này ở những chỗ $\sigma_i'(s) = 0$, như ràng buộc của khớp 2 trong Bài tập 4.
+
+Bobrow, Dubowsky và Gibson, và độc lập với họ là Shin và McKay, đã xét bài toán này vào năm 1985 cho một tay máy có động lực học đã biết và có giới hạn trên mô-men khớp. Họ chỉ ra rằng phép tham số hóa tối ưu thời gian bám theo biên của miền cho phép: tại mọi điểm nó dùng gia tốc lớn nhất $U$ hoặc nhỏ nhất $L$, hoặc nó chạy dọc theo đường giới hạn vận tốc. Nó chuyển từ giảm tốc sang tăng tốc chỉ tại các điểm của đường giới hạn vận tốc, và từ tăng tốc sang giảm tốc tại nơi một đường cong tiến với gia tốc cực đại gặp một đường cong lùi với giảm tốc cực đại.
+
+Bobrow và các cộng sự tính nó bằng cách tích phân tiến từ điểm xuất phát với gia tốc cực đại và tích phân lùi từ đích với giảm tốc cực đại, và bằng cách tìm các điểm chuyển mạch (switching point) nối những đường cong này. Ràng buộc gia tốc khớp của bài này là một trường hợp riêng của ràng buộc mô-men của họ: với một robot có quán tính đơn vị và không có các số hạng phụ thuộc vận tốc hay trọng lực, cận mô-men trở thành bất đẳng thức ở trên. Giới hạn tốc độ khớp bổ sung thêm một biên nữa, mà phép tham số hóa có thể chạy dọc theo; Kunz và Stilman xét việc bám đường đi tối ưu thời gian với gia tốc và vận tốc bị chặn. Tìm các điểm chuyển mạch một cách tin cậy là phần tinh tế. Pham mô tả các trường hợp kỳ dị mà các cài đặt trước đó thất bại và đưa ra một cài đặt xử lý được chúng.
+
+Trên đường thẳng của Mục 1.3, $\sigma'' = 0$ và khoảng $[L, U]$ là khoảng hằng $[-\ddot s_{\max}, \ddot s_{\max}]$, còn đường giới hạn vận tốc là đường nằm ngang $\dot s = \dot s_{\max}$. Khi đó đường cong tối ưu thời gian tăng tốc với $\ddot s_{\max}$ cho đến khi gặp đường đó, chạy dọc theo nó và giảm tốc vào thời điểm muộn nhất: đó chính là biên dạng hình thang của Mục 3.1. Vì vậy, biên dạng hình thang là phép tham số hóa tối ưu thời gian của một đoạn thẳng trong không gian khớp dưới các giới hạn vận tốc và gia tốc.
+
+### 4.2 Một lượt quét tiến – lùi rời rạc hóa
+
+Chương trình dưới đây áp dụng ý tưởng này trên một lưới gồm $N + 1$ giá trị của $s$, làm việc với $x = \dot s^2$, mà theo quy tắc dây chuyền thì $dx/ds = 2\ddot s$. Đầu tiên nó tính đường giới hạn vận tốc tại mọi điểm lưới. Sau đó một lượt quét lùi từ đích, nơi $x = 0$, tính tốc độ nhanh nhất mà từ đó robot vẫn còn dừng kịp, dùng gia tốc nhỏ nhất chấp nhận được. Một lượt quét tiến từ điểm xuất phát, nơi $x = 0$, tăng tốc mạnh nhất mức cho phép nhưng không bao giờ vượt lên trên kết quả của lượt quét lùi. Mỗi lượt quét đều chặn $x$ ở đường giới hạn vận tốc.
+
+```python
+def accel_bounds(qp, qpp, x):
+    """Interval [lo, hi] of s'' allowed at s'^2 = x by |qp*s'' + qpp*x| <= A."""
+    lo, hi = -np.inf, np.inf
+    for i in range(len(A)):
+        if abs(qp[i]) < 1e-12:
+            if abs(qpp[i])*x > A[i]:
+                return np.inf, -np.inf               # empty
+            continue
+        b1, b2 = (-A[i] - qpp[i]*x)/qp[i], (A[i] - qpp[i]*x)/qp[i]
+        lo, hi = max(lo, min(b1, b2)), min(hi, max(b1, b2))
+    return lo, hi
+
+def time_optimal(path, N=2000):
+    s = np.linspace(0.0, 1.0, N + 1)
+    ds = s[1] - s[0]
+    geo = [path(si) for si in s]
+    xlim = np.array([x_limit(qp, qpp) for _, qp, qpp in geo])
+    x = np.empty(N + 1)
+    x[N] = 0.0                                       # backward pass: maximum deceleration
+    for k in range(N - 1, -1, -1):
+        lo, _ = accel_bounds(geo[k+1][1], geo[k+1][2], x[k+1])
+        x[k] = min(xlim[k], x[k+1] - 2*ds*lo)
+    x[0] = 0.0                                       # forward pass: maximum acceleration
+    for k in range(N):
+        _, hi = accel_bounds(geo[k][1], geo[k][2], x[k])
+        x[k+1] = min(x[k+1], x[k] + 2*ds*hi)
+    sd = np.sqrt(np.maximum(x, 0.0))
+    dt = 2*ds/(sd[:-1] + sd[1:])                     # time for each step in s
+    return s, sd, xlim, np.concatenate([[0.0], np.cumsum(dt)]), geo
+```
+
+Đoạn mã lược bỏ ba hàm phụ trợ: `x_limit`, hàm tìm đường giới hạn vận tốc tại một điểm từ các giới hạn tốc độ và, bằng phương pháp chia đôi, từ điều kiện $[L, U]$ không rỗng; động học ngược của cánh tay; và hàm `path`, trả về $\sigma(s)$, $\sigma'(s)$ và $\sigma''(s)$. Với một đường thẳng của tay kẹp, $\sigma'$ là nghiệm của $J(q)\,\sigma' = p_1 - p_0$ với ma trận Jacobi $J$ của cánh tay, còn $\sigma''$ suy ra bằng cách lấy đạo hàm động học thuận hai lần theo $s$ và cho $d^2p/ds^2$, đạo hàm cấp hai của vị trí tay kẹp dọc theo đường thẳng, bằng không. Thời gian của mỗi bước giả định rằng $\ddot s$ không đổi giữa các điểm lưới, để $x = \dot s^2$ biến thiên tuyến tính theo $s$ và bước đó mất $2\,\Delta s/(\dot s_k + \dot s_{k+1})$.
+
+Đường đi là một đường thẳng của tay kẹp từ $p_0 = (1.4, 0.2)$ m đến $p_1 = (0.4, 1.2)$ m, với nghiệm khuỷu có $\sin\theta_2 > 0$ trên toàn bộ đường đi. Đường thẳng này luôn cách đế từ 1.13 m đến 1.42 m, nằm hẳn bên trong vành khuyên với tới được $0.3 \le r \le 1.7$ m, nên cánh tay tránh xa các cấu hình kỳ dị của nó. Chương trình in ra:
+
+```text
+gripper line [1.4 0.2] -> [0.4 1.2], length 1.4142 m
+q_start = [-0.3372  1.1979]  q_goal = [0.6647 1.4921]
+time-optimal T = 1.8180 s
+on the speed limit curve for 25.3% of the grid points
+peak |joint speed| = [1.     0.9376] rad/s
+  s = 0.00  t = 0.0000 s  s_dot = 0.0000 1/s  q_dot = [0. 0.]
+  s = 0.25  t = 0.6099 s  s_dot = 0.8377 1/s  q_dot = [0.6    0.8379]
+  s = 0.50  t = 0.9089 s  s_dot = 0.8320 1/s  q_dot = [0.951  0.2399]
+  s = 0.75  t = 1.2257 s  s_dot = 0.7461 1/s  q_dot = [ 1.    -0.322]
+  s = 1.00  t = 1.8180 s  s_dot = 0.0000 1/s  q_dot = [ 0. -0.]
+fastest quintic scaling: T = max(2.2962, sqrt(5.0918)) = 2.2962 s
+  grid N =  250: T = 1.8207 s  peak |q_ddot| at interval start [2.     2.0155], at interval end [2.0626 2.    ] rad/s^2
+  grid N =  500: T = 1.8192 s  peak |q_ddot| at interval start [2.     2.0094], at interval end [2.0311 2.    ] rad/s^2
+  grid N = 1000: T = 1.8184 s  peak |q_ddot| at interval start [2.     2.0047], at interval end [2.0158 2.    ] rad/s^2
+  grid N = 2000: T = 1.8180 s  peak |q_ddot| at interval start [2.     2.0023], at interval end [2.0079 2.    ] rad/s^2
+  grid N = 4000: T = 1.8178 s  peak |q_ddot| at interval start [2.     2.0012], at interval end [2.004 2.   ] rad/s^2
+  max accel   s in [0.000, 0.235]
+  max decel   s in [0.235, 0.566]
+  speed limit s in [0.566, 0.818]
+  max decel   s in [0.819, 1.000]
+```
+
+### 4.3 Đọc kết quả
+
+Phép tham số hóa tối ưu thời gian mất 1.818 s. Phép tham số hóa bậc năm nhanh nhất cho cùng đường đi, tìm được bằng cách tính tốc độ và gia tốc khớp đỉnh của một đa thức bậc năm rồi kéo giãn nó cho đến khi cả hai đều nằm trong giới hạn, mất 2.296 s, nên phép tham số hóa tối ưu thời gian nhanh hơn khoảng 21%. Đa thức bậc năm bị giới hạn bởi tốc độ khớp (2.2962 s so với $\sqrt{5.0918} = 2.2565$ s cho gia tốc).
+
+Bốn dòng cuối cho thấy ràng buộc nào đang tích cực dọc theo đường đi, và chúng có đúng cấu trúc mà lý thuyết dự đoán. Đến $s = 0.235$, phép tham số hóa tăng tốc mạnh nhất mức các khớp cho phép. Từ đó đến $s = 0.566$, cận dưới $L$ tích cực, và khớp 2 ở giới hạn gia tốc $-2.0$ rad/s² của nó. Robot không hãm mạnh: tốc độ trên đường đi giữ trong khoảng 0.82 đến 0.84 s⁻¹ trên đoạn này. Số hạng độ cong $\sigma_2''\,\dot s^2$ chiếm gần hết ngân sách gia tốc của khớp 2. Từ $s = 0.566$ đến $0.818$, khớp 1 chạy ở giới hạn tốc độ 1.0 rad/s của nó, và phép tham số hóa chạy dọc theo đường giới hạn vận tốc mà cả $U$ lẫn $L$ đều không tích cực. Đoạn cuối là giảm tốc cực đại đến khi dừng. Khớp 2 đổi chiều gần $s = 0.6$, nơi vận tốc của nó đổi dấu.
+
+Phép kiểm tra gia tốc trong kết quả in ra đặt kết luận này vào giới hạn của nó. Các gia tốc khớp suy ra từ biên dạng rời rạc hóa vượt giới hạn một chút, vì mỗi lượt quét tính các cận gia tốc tại một đầu của khoảng lưới và giả định rằng chúng đúng trên toàn khoảng. Với 2000 khoảng, khi tính tại đầu mỗi khoảng, khớp 2 đạt 2.0023 rad/s² (cao hơn giới hạn 0.12%); khi tính tại cuối khoảng, khớp 1 đạt 2.0079 rad/s² (0.39%). Làm mịn lưới thu nhỏ cả sai số về thời lượng (1.8207 s với 250 khoảng, 1.8178 s với 4000) lẫn mức vi phạm, vốn giảm một nửa mỗi khi số khoảng lưới tăng gấp đôi, nhưng mức vi phạm vẫn còn ở mọi độ phân giải hữu hạn.
+
+Một cài đặt thực tế hoặc thu hẹp các giới hạn đi một biên nhỏ trước khi lập kế hoạch, hoặc kiểm tra kết quả và hiệu chỉnh nó, như Mục 6.3 làm với spline. Tổng quát hơn, lượt quét tiến – lùi này là một phép xấp xỉ của các thuật toán điểm chuyển mạch, không phải là thứ thay thế chúng: nó dựa vào việc lưới đủ mịn để phân giải đường giới hạn vận tốc, và nó không cho bảo đảm nào gần những điểm mà đường đó có cực tiểu nhọn.
+
+Tham số hóa tối ưu thời gian còn có những cái giá khác. Một biên dạng chạy sát các giới hạn không để lại dự trữ nào cho bộ điều khiển phản hồi hiệu chỉnh sai số bám, nên các hệ thống thực tế lập kế hoạch với các giới hạn thấp hơn giới hạn thật. Gia tốc của nó chuyển đổi đột ngột, nên độ giật của nó không bị chặn trừ khi bổ sung giới hạn độ giật. Và nó chỉ tối ưu cho đường đi đã cho.
+
+## 5. Quỹ đạo qua các điểm trung gian
+
+### 5.1 Vì sao dùng spline
+
+Một bộ lập kế hoạch thường trả về một dãy **điểm trung gian** (waypoint), tức các cấu hình $q_0, q_1, \dots, q_n$ mà robot phải đi qua, thay vì một đường cong liên tục; ví dụ là các đỉnh của một đường đi đã rút ngắn từ một bộ lập kế hoạch dựa trên lấy mẫu (sampling-based planning) và các tư thế do người vận hành dạy. Nối các điểm trung gian bằng các đoạn thẳng và định thời mỗi đoạn bằng một biên dạng hình thang khiến robot dừng tại mọi điểm trung gian, vì vận tốc trên một đoạn thẳng chỉ có thể đổi hướng khi tốc độ bằng không. Để đi qua các điểm trung gian mà không dừng, quỹ đạo phải cong ở gần chúng.
+
+Một **spline bậc ba** (cubic spline) là một hàm có dạng đa thức bậc ba giữa các điểm trung gian liên tiếp, ở đây gọi là các **nút** (knot), và có giá trị, đạo hàm cấp một và đạo hàm cấp hai liên tục tại mọi nút. Với một quỹ đạo, điều đó có nghĩa là vị trí, vận tốc và gia tốc liên tục. Một spline bậc ba được khớp riêng cho từng khớp, với cùng các thời điểm nút $t_0 < t_1 < \dots < t_n$ cho mọi khớp, nên các khớp cùng đi qua các điểm trung gian một lúc. Các thời điểm nút là đầu vào: chúng đến từ một ước lượng về thời gian mỗi đoạn cần, và Mục 6 cho thấy cách kiểm tra và hiệu chỉnh chúng.
+
+### 5.2 Hệ ba đường chéo
+
+Cách suy dẫn tiêu chuẩn viết mỗi đa thức bậc ba theo các gia tốc chưa biết $M_k = \ddot q(t_k)$ tại các nút. Trên khoảng từ $t_k$ đến $t_{k+1}$, có độ dài $h_k = t_{k+1} - t_k$, gia tốc của một đa thức bậc ba tuyến tính theo thời gian, nên nó được xác định bởi $M_k$ và $M_{k+1}$. Tích phân hai lần và khớp hai giá trị điểm trung gian $y_k$ và $y_{k+1}$ của một khớp cho vị trí trên khoảng đó; tính liên tục của gia tốc khi đó đã có sẵn. Còn lại phải áp đặt tính liên tục của vận tốc tại mỗi nút trong $t_k$, và điều này cho một phương trình tuyến tính với $k = 1, \dots, n - 1$:
+
+$$
+h_{k-1} M_{k-1} + 2\,(h_{k-1} + h_k)\,M_k + h_k M_{k+1}
+= 6\left(\frac{y_{k+1} - y_k}{h_k} - \frac{y_k - y_{k-1}}{h_{k-1}}\right).
+$$
+
+Đây là $n - 1$ phương trình cho $n + 1$ ẩn, nên cần hai điều kiện biên. **Spline tự nhiên** (natural spline) đặt $M_0 = M_n = 0$, gia tốc bằng không ở cả hai đầu. **Spline kẹp biên** (clamped spline) quy định trước các vận tốc ở hai đầu $v_0$ và $v_n$, từ đó
+
+$$
+2h_0 M_0 + h_0 M_1 = 6\left(\frac{y_1 - y_0}{h_0} - v_0\right), \qquad
+h_{n-1} M_{n-1} + 2h_{n-1} M_n = 6\left(v_n - \frac{y_n - y_{n-1}}{h_{n-1}}\right).
+$$
+
+Mỗi phương trình chỉ chứa ba ẩn kề nhau, nên ma trận là **ma trận ba đường chéo** (tridiagonal), chỉ có các phần tử khác không trên đường chéo chính và hai đường chéo sát nó. Phần tử đường chéo của nó lớn hơn hẳn tổng hai phần tử còn lại trên mỗi hàng, điều này bảo đảm nghiệm duy nhất và cho phép **thuật toán Thomas** (Thomas algorithm), tức phép khử Gauss chuyên biệt cho ma trận ba đường chéo, giải nó với $O(n)$ phép tính mà không cần chọn phần tử trụ. Sách của de Boor trình bày chi tiết phép nội suy spline bậc ba và các điều kiện biên của nó. Cài đặt như sau:
+
+```python
+def thomas(sub, diag, sup, rhs):
+    """Solve a tridiagonal system; sub[0] and sup[-1] are unused."""
+    n = len(diag)
+    c, d = np.zeros(n), np.zeros(n)
+    c[0], d[0] = sup[0]/diag[0], rhs[0]/diag[0]
+    for i in range(1, n):
+        m = diag[i] - sub[i]*c[i-1]
+        c[i] = sup[i]/m if i < n - 1 else 0.0
+        d[i] = (rhs[i] - sub[i]*d[i-1])/m
+    x = np.zeros(n)
+    x[-1] = d[-1]
+    for i in range(n - 2, -1, -1):
+        x[i] = d[i] - c[i]*x[i+1]
+    return x
+
+def spline_moments(t, y, v0=None, vn=None):
+    """Second derivatives M_k at the knots. v0, vn = None gives a natural spline
+    (M_0 = M_n = 0); numbers give a clamped spline with those end velocities."""
+    n = len(t) - 1
+    h = np.diff(t)
+    slope = np.diff(y)/h
+    sub, diag, sup, rhs = np.zeros(n+1), np.zeros(n+1), np.zeros(n+1), np.zeros(n+1)
+    for k in range(1, n):
+        sub[k], diag[k], sup[k] = h[k-1], 2*(h[k-1] + h[k]), h[k]
+        rhs[k] = 6*(slope[k] - slope[k-1])
+    if v0 is None:
+        diag[0], diag[n] = 1.0, 1.0                  # M_0 = 0, M_n = 0
+    else:
+        diag[0], sup[0], rhs[0] = 2*h[0], h[0], 6*(slope[0] - v0)
+        sub[n], diag[n], rhs[n] = h[n-1], 2*h[n-1], 6*(vn - slope[n-1])
+    return thomas(sub, diag, sup, rhs)
+```
+
+Hàm tính giá trị, được lược bỏ ở đây, tính vị trí, vận tốc và gia tốc trên mỗi khoảng từ các gia tốc tại nút.
+
+### 5.3 Một ví dụ số cho cánh tay
+
+Cánh tay di chuyển từ $q_{\mathrm{start}} = (-0.5, 1.8)$ đến $q_{\mathrm{goal}} = (1.0, 0.6)$, như ở Mục 2, nhưng giờ đi qua hai điểm trung gian $(0.0, 1.9)$ và $(0.6, 1.2)$, tại các thời điểm nút 0, 0.8, 1.6 và 2.8 s. Theo động học thuận, tay kẹp đi qua $(1.065, 0.195)$, $(0.774, 0.662)$, $(0.666, 1.246)$ và $(0.520, 1.541)$ m. Chương trình khớp cả hai loại spline cho cả hai khớp, lấy mẫu chúng mỗi mili giây và kiểm tra tính liên tục tại các nút trong bằng cách tính giá trị của các đa thức bậc ba ở hai bên tại nút:
+
+```text
+natural spline
+  joint 1: knot accelerations [ 0.      0.4112 -0.7072  0.    ] rad/s^2
+           knot velocities    [0.5702 0.7346 0.6162 0.1919] rad/s
+           peak |v| = 0.7951 rad/s, peak |a| = 0.7072 rad/s^2
+  joint 2: knot accelerations [ 0.     -2.1217  0.9868  0.    ] rad/s^2
+           knot velocities    [ 0.4079 -0.4408 -0.8947 -0.3026] rad/s
+           peak |v| = 1.0201 rad/s, peak |a| = 2.1217 rad/s^2
+clamped spline
+  joint 1: knot accelerations [ 2.4916 -0.2956 -0.3716 -0.6475] rad/s^2
+           knot velocities    [-0.      0.8784  0.6115 -0.    ] rad/s
+           peak |v| = 0.8909 rad/s, peak |a| = 2.4916 rad/s^2
+  joint 2: knot accelerations [ 1.723  -2.5084  0.8108  0.8446] rad/s^2
+           knot velocities    [-0.     -0.3142 -0.9932  0.    ] rad/s
+           peak |v| = 1.0725 rad/s, peak |a| = 2.5084 rad/s^2
+  joint 1 at t = 0.8: |jump| in q, v, a = 0.0e+00, 0.0e+00, 0.0e+00
+  joint 1 at t = 1.6: |jump| in q, v, a = 0.0e+00, 0.0e+00, 0.0e+00
+  joint 2 at t = 0.8: |jump| in q, v, a = 0.0e+00, 2.2e-16, 0.0e+00
+  joint 2 at t = 1.6: |jump| in q, v, a = 2.2e-16, 1.1e-16, 0.0e+00
+```
+
+Hai điều kiện biên đánh đổi những khuyết điểm khác nhau. Spline tự nhiên có gia tốc bằng không ở cả hai đầu nhưng vận tốc khác không: nó sẽ khởi động khớp 1 ở 0.5702 rad/s từ một robot đang đứng yên, một bước nhảy vận tốc mà không động cơ nào tạo ra được. Spline kẹp biên với $v_0 = v_n = 0$ bắt đầu và kết thúc ở trạng thái đứng yên, đúng như một chuyển động điểm – điểm cần, nhưng gia tốc của nó nhảy từ không lên 2.4916 rad/s² tại $t = 0$ ở khớp 1. Bước nhảy đó cũng là khuyết điểm của phép tham số hóa thời gian bậc ba ở Mục 2.1, và các cách khắc phục thông thường là dùng một đoạn bậc năm ở mỗi đầu hoặc một spline bậc cao hơn cố định thêm cả gia tốc ở hai đầu. Bên trong quỹ đạo, cả hai spline đều liên tục về vị trí, vận tốc và gia tốc: các bước nhảy tại các nút trong bằng không trong phạm vi sai số làm tròn (nhiều nhất là $2.2 \times 10^{-16}$).
+
+Kết quả in ra cũng cho thấy cách định thời này quá nhanh. Spline kẹp biên đạt 1.0725 rad/s và 2.5084 rad/s² ở khớp 2, vượt cả hai giới hạn. Chọn thời điểm nút là một phỏng đoán, và phỏng đoán đó phải được kiểm tra.
+
+## 6. Kiểm tra một quỹ đạo
+
+### 6.1 Cần kiểm tra những gì
+
+Một quỹ đạo được kiểm tra trước khi gửi đến robot, vì một vi phạm phát hiện sau đó là do phần cứng phát hiện: một bộ truyền động báo lỗi quá dòng, một khớp chạy trễ so với lệnh của nó, hoặc một khâu đâm vào vật cản. Như [bài thứ nhất của loạt bài Nhập môn robot học](/vi/blog/what-is-a-robot) đã lưu ý ở Mục 4 của bài đó, bộ lập kế hoạch giả định rằng quỹ đạo mà nó gửi đi chính là quỹ đạo các khớp bám theo, một giả định chỉ đúng với những quỹ đạo mà các bộ điều khiển khớp có thể bám theo. Các phép kiểm tra thuộc bốn loại:
+
+- các **giới hạn động**: tốc độ, gia tốc và, khi được quy định, độ giật của khớp, tại mọi thời điểm;
+- các **giới hạn khớp**: mọi khớp nằm trong hành trình của nó, kể cả giữa các điểm trung gian, nơi một spline có thể vọt lố;
+- **va chạm**: robot, khi di chuyển theo quỹ đạo có thời gian, không bao giờ chạm vật cản;
+- **tính liên tục**: quỹ đạo bắt đầu tại trạng thái hiện thời của robot và kết thúc ở trạng thái đứng yên, hoặc ở trạng thái mà đoạn tiếp theo mong đợi.
+
+Phần lớn các tính chất này không thể kiểm tra dưới dạng biểu thức đóng cho một quỹ đạo tổng quát, nên chúng được kiểm tra bằng **lấy mẫu**: tính giá trị quỹ đạo tại một bước thời gian đều đặn và kiểm tra từng mẫu. Các phép kiểm tra cạnh của [bài thứ nhất](/vi/blog/configuration-space-and-the-planning-problem) dựa trên cùng ý tưởng và có cùng điểm yếu. Một phép kiểm tra tại các mẫu không nói gì về chuyển động giữa chúng, trừ khi khoảng cách giữa các mẫu được gắn với một cận về quãng đường robot có thể di chuyển.
+
+### 6.2 Lấy mẫu, và những gì nó chứng minh được
+
+Bộ kiểm tra dưới đây lấy mẫu spline kẹp biên của Mục 5.3. Nó tính tỉ số lớn nhất giữa tốc độ và gia tốc của mỗi khớp với giới hạn của khớp đó, và kiểm tra các hành trình khớp $-\pi \le \theta_1 \le \pi$ và $-2.5 \le \theta_2 \le 2.5$ rad. Vật cản là một hình tròn bán kính 0.15 m có tâm tại $(0.95, 1.0)$ m. Bộ kiểm tra tính khoảng hở an toàn (clearance) của cánh tay đến vật cản như ở Mục 3.2 của [bài thứ nhất](/vi/blog/configuration-space-and-the-planning-problem), với cả hai khâu được coi là các đoạn thẳng. Để khoảng hở an toàn tại các mẫu nói được điều gì đó về toàn bộ chuyển động, nó chặn trên quãng đường mà một điểm bất kỳ của cánh tay có thể di chuyển trong một khoảng lấy mẫu. Mục 5.3 của bài thứ nhất đã chỉ ra rằng không điểm nào của cánh tay di chuyển nhanh hơn $(l_1 + l_2)|\dot\theta_1| + l_2|\dot\theta_2|$. Trong một khoảng $\Delta t$, mỗi khớp thay đổi nhiều nhất bằng tốc độ đỉnh của nó nhân với $\Delta t$:
+
+```python
+def check(t, Q, dt):
+    tq = np.arange(0.0, t[-1] + dt/2, dt)
+    q, v, a = (np.stack(z, axis=-1) for z in zip(
+        *[spline_eval(t, Q[:, j], spline_moments(t, Q[:, j], 0.0, 0.0), tq) for j in range(2)]))
+    rv, ra = np.abs(v).max(axis=0)/V, np.abs(a).max(axis=0)/A
+    c = clearance(q)
+    # Within one sample interval a point of the arm moves at most
+    # ((l1 + l2) max|theta1_dot| + l2 max|theta2_dot|) dt.
+    vmax = np.abs(v).max(axis=0)
+    step = ((L1 + L2)*vmax[0] + L2*vmax[1])*dt
+    i2 = np.argmax(q[:, 1])
+    ...                                      # printing omitted
+    return max(rv.max(), np.sqrt(ra.max()))
+```
+
+Các dòng bị lược bỏ in kết quả; hàm `clearance` tính khoảng cách từ tâm vật cản đến cả hai đoạn khâu rồi trừ đi bán kính. Chương trình kiểm tra spline ở bước 1 ms và 100 ms, sau đó kéo giãn thời gian và kiểm tra lại:
+
+```text
+waypoint times [0.  0.8 1.6 2.8] s
+  dt =   1.0 ms: |v|/v_max = [0.8909 1.0725], |a|/a_max = [1.2458 1.2542]
+     largest theta2 = 1.9219 rad at t = 0.651 s
+     joint range ok: True, min clearance 0.0672 m at t = 1.512 s, motion bound per sample 0.0023 m
+  dt = 100.0 ms: |v|/v_max = [0.8905 1.0724], |a|/a_max = [1.2458 1.2542]
+     largest theta2 = 1.9198 rad at t = 0.700 s
+     joint range ok: True, min clearance 0.0673 m at t = 1.500 s, motion bound per sample 0.2265 m
+stretch factor k = 1.1199; new waypoint times [0.     0.8959 1.7919 3.1358] s
+  dt =   1.0 ms: |v|/v_max = [0.7955 0.9576], |a|/a_max = [0.9933 0.9999]
+     largest theta2 = 1.9219 rad at t = 0.730 s
+     joint range ok: True, min clearance 0.0672 m at t = 1.693 s, motion bound per sample 0.0020 m
+```
+
+Ở bước 1 ms, các mẫu đến gần vật cản trong phạm vi 0.0672 m, và không điểm nào của cánh tay di chuyển quá 0.0023 m trong một khoảng. Do đó mọi điểm của cánh tay tại mọi thời điểm đều nằm trong phạm vi 0.0023 m so với vị trí của nó tại mẫu liền trước, nên khoảng hở an toàn của nó không bao giờ xuống dưới $0.0672 - 0.0023 = 0.0649$ m: chuyển động được chứng minh là không va chạm. Ở bước 100 ms, các mẫu báo cáo khoảng hở an toàn gần như bằng nhau, 0.0673 m, nhưng cận chuyển động là 0.2265 m, lớn hơn khoảng hở an toàn, nên phép kiểm tra thô không chứng minh được gì: một vật cản nhỏ hơn quãng chuyển động giữa hai mẫu có thể nằm trọn giữa chúng. Các giới hạn động cho thấy cùng hiệu ứng đó. Các mẫu 100 ms chỉ bỏ lỡ tốc độ đỉnh của khớp 2 một chút (1.0724 so với 1.0725), nhưng một lưới thô có thể bỏ lỡ hoàn toàn một đỉnh ngắn, nên khoảng lấy mẫu phải ngắn so với khoảng thời gian mà các đạo hàm thay đổi.
+
+Các hành trình khớp được tôn trọng, nhưng spline vọt lố qua các điểm trung gian của nó: $\theta_2$ đạt 1.9219 rad tại $t = 0.651$ s, cao hơn cả hai giá trị điểm trung gian mà nó nằm giữa (1.8 rad tại $t = 0$ và 1.9 rad tại $t = 0.8$ s). Ở đây hành trình kết thúc ở 2.5 rad và phần vọt lố là vô hại, nhưng một điểm trung gian đặt gần giới hạn khớp có thể được tôn trọng tại nút mà vẫn bị vi phạm giữa các nút.
+
+### 6.3 Sửa một cách định thời quá nhanh
+
+Phép kiểm tra cho thấy tốc độ của khớp 2 cao hơn giới hạn 7.25% và gia tốc của cả hai khớp cao hơn giới hạn khoảng 25%. Với một phép kéo giãn thời gian đều, thay $q(t)$ bằng $q(t/k)$ với hệ số $k > 1$, mọi vận tốc được chia cho $k$ và mọi gia tốc chia cho $k^2$, trong khi đường đi giữ nguyên. Vì vậy, hệ số nhỏ nhất thỏa mãn mọi giới hạn là
+
+$$
+k = \max\left(\max_i \frac{\max_t |\dot q_i|}{v_{\max,i}},\; \sqrt{\max_i \frac{\max_t |\ddot q_i|}{a_{\max,i}}}\right) = \max(1.0725,\ \sqrt{1.2542}) = 1.1199 .
+$$
+
+Spline kẹp biên với vận tốc hai đầu bằng không co giãn đúng theo cách này: nhân mọi thời điểm nút với $k$ cho ra quỹ đạo đã kéo giãn. Phép kiểm tra lại xác nhận rằng cả bốn tỉ số giờ đều không quá 1, với gia tốc của khớp 2 ở mức 0.9999 giới hạn của nó (phần 0.0001 còn lại là do phép lấy mẫu vừa trượt qua đỉnh tại nút). Khoảng hở an toàn không đổi, 0.0672 m, và chỉ đạt được vào một thời điểm khác, 1.693 s thay vì 1.512 s. Đó chính là sự tách rời của Mục 1.1 đang phát huy tác dụng: với các vật cản không chuyển động, va chạm là một tính chất của đường đi, và định thời lại không thể tạo ra hay loại bỏ một va chạm.
+
+Có hai trường hợp phá vỡ quy tắc đó. Nếu một vật cản chuyển động, va chạm phụ thuộc vào vị trí của robot khi vật cản đi qua, nên phép kiểm tra phải dùng đồng thời quỹ đạo có thời gian và chuyển động dự đoán của vật cản, và việc chạy chậm lại có thể gây ra va chạm cũng dễ như ngăn ngừa nó. Và robot không bao giờ bám quỹ đạo của nó một cách chính xác: một sai số bám vài milimét có thể biến một khoảng hở an toàn nhỏ thành một lần tiếp xúc. Một biên an toàn, được thêm vào bằng cách phình to vật cản hoặc các khâu, bù cho sai số bám dự kiến. [Bài tiếp theo](/vi/blog/path-tracking-and-reactive-avoidance) trình bày các bộ điều khiển giữ cho sai số đó nhỏ.
+
+Một phép kéo giãn đều làm chậm toàn bộ chuyển động để sửa một vi phạm ở một chỗ. Các cách hiệu chỉnh tinh hơn chỉ kéo dài những khoảng nút gần chỗ vi phạm rồi khớp lại spline, hoặc áp dụng phép tham số hóa tối ưu thời gian của Mục 4 cho đường cong mà spline vạch ra; mỗi cách đều cần cùng phép kiểm tra đó sau khi thực hiện.
+
+## 7. Bài tập
+
+**Bài tập 1.** Hãy suy ra phép tham số hóa thời gian bậc ba cho một chuyển động bắt đầu ở trạng thái đứng yên tại $s = 0$ và phải đến $s = 1$ với tốc độ trên đường đi $\dot s(T) = \dot s_T$, không dừng lại. Kiểm tra rằng $\dot s_T = 0$ cho đa thức bậc ba của Mục 2.1.
+
+<details>
+<summary>Đáp án</summary>
+
+Với $\tau = t/T$ và $s = c_2\tau^2 + c_3\tau^3$ (các điều kiện tại $t = 0$ loại bỏ $c_0$ và $c_1$), các điều kiện cuối là $c_2 + c_3 = 1$ và $(2c_2 + 3c_3)/T = \dot s_T$. Đặt $w = \dot s_T T$, chúng cho $c_3 = w - 2$ và $c_2 = 3 - w$, nên $s = (3 - w)\tau^2 + (w - 2)\tau^3$. Với $\dot s_T = 0$, $w = 0$ và $s = 3\tau^2 - 2\tau^3$.
+
+</details>
+
+**Bài tập 2.** Một khớp đơn với $v_{\max} = 1.0$ rad/s và $a_{\max} = 2.0$ rad/s² phải quay 0.4 rad, từ đứng yên đến đứng yên. Trường hợp hình thang nào áp dụng, tốc độ đỉnh là bao nhiêu và chuyển động mất bao lâu? Một phép tham số hóa thời gian bậc ba dưới cùng các giới hạn sẽ mất bao lâu?
+
+<details>
+<summary>Đáp án</summary>
+
+$v^2/a = 0.5$ rad lớn hơn 0.4 rad, nên biên dạng là tam giác: $v_p = \sqrt{2.0 \times 0.4} = 0.894$ rad/s và $T = 2\sqrt{0.4/2.0} = 0.894$ s. Với đa thức bậc ba, cận tốc độ là $1.5 \times 0.4/1.0 = 0.6$ s và cận gia tốc là $\sqrt{6 \times 0.4/2.0} = 1.095$ s, nên $T = 1.095$ s, do gia tốc ở hai đầu quyết định.
+
+</details>
+
+**Bài tập 3.** Với biên dạng chữ S của Mục 3.3 ($D = 1.5$ rad, $v = 1.0$ rad/s, $a = 2.0$ rad/s²), giới hạn độ giật $j$ nào làm chuyển động mất 2.5 s? Hình dạng biên dạng thay đổi thế nào nếu $j$ xuống dưới 4 rad/s³?
+
+<details>
+<summary>Đáp án</summary>
+
+$T = D/v + v/a + a/j = 2.0 + 2.0/j = 2.5$ s cho $j = 4$ rad/s³. Tại $j = 4$, $a^2/j = 1.0$ rad/s bằng $v$, nên gia tốc chỉ chạm $a$ trong một khoảnh khắc. Với $j$ nhỏ hơn, giới hạn gia tốc không còn đạt được, đoạn gia tốc không đổi biến mất và $t_a = 2\sqrt{v/j}$; biên dạng có năm đoạn thay vì bảy, và thời lượng là $D/v + 2\sqrt{v/j}$, miễn là $D \ge v\,t_a$.
+
+</details>
+
+**Bài tập 4.** Trên một đường đi có $\sigma'(s) = (0.5, 0)$ và $\sigma''(s) = (0, 2.0)$ tại một giá trị $s$ nào đó, với cả hai khớp bị giới hạn ở $a_{\max} = 2.0$ rad/s² và $v_{\max} = 1.0$ rad/s, giá trị $\dot s$ lớn nhất mà robot có thể đi qua điểm này là bao nhiêu? Giới hạn nào quyết định nó?
+
+<details>
+<summary>Đáp án</summary>
+
+Các giới hạn tốc độ cho $\dot s \le 1.0/0.5 = 2.0$ s⁻¹ (khớp 2 có $\sigma_2' = 0$ và không có ràng buộc tốc độ). Gia tốc của khớp 2 là $\sigma_2''\dot s^2 = 2.0\,\dot s^2$, bất kể $\ddot s$ bằng bao nhiêu, nên $2.0\,\dot s^2 \le 2.0$ đòi hỏi $\dot s \le 1.0$ s⁻¹. Giới hạn gia tốc quyết định: tại điểm này, đường giới hạn vận tốc được xác định bởi số hạng độ cong, không phải bởi tốc độ khớp.
+
+</details>
+
+**Bài tập 5.** Một spline bậc ba kẹp biên với vận tốc hai đầu bằng không đi qua ba nút của một khớp: $y = (0, 1, 0)$ rad tại $t = (0, 1, 2)$ s. Hãy giải tìm các gia tốc tại nút $M_0, M_1, M_2$ và cho biết vận tốc tại $t = 1$ s.
+
+<details>
+<summary>Đáp án</summary>
+
+Ở đây $h_0 = h_1 = 1$ và các độ dốc là $+1$ và $-1$. Ba phương trình là $2M_0 + M_1 = 6(1 - 0) = 6$, $M_0 + 4M_1 + M_2 = 6(-1 - 1) = -12$ và $M_1 + 2M_2 = 6(0 - (-1)) = 6$. Do đối xứng, $M_0 = M_2$, nên $2M_0 + M_1 = 6$ và $2M_0 + 4M_1 = -12$, từ đó $M_1 = -6$ và $M_0 = M_2 = 6$ rad/s². Do đối xứng, vận tốc tại $t = 1$ s bằng không: khớp đạt 1 rad rồi quay ngược lại.
+
+</details>
+
+**Bài tập 6.** Một quỹ đạo được kiểm tra bằng cách lấy mẫu mỗi 10 ms. Tốc độ khớp đỉnh của cánh tay là 0.9 và 1.1 rad/s, và khoảng hở an toàn nhỏ nhất tại các mẫu là 0.02 m. Dùng cận của Mục 6.2, có thể kết luận chuyển động không va chạm không? Cần khoảng lấy mẫu bao nhiêu để chứng minh điều đó với biên an toàn ít nhất 0.01 m?
+
+<details>
+<summary>Đáp án</summary>
+
+Cận chuyển động trong mỗi khoảng là $(1.7 \times 0.9 + 0.7 \times 1.1) \times 0.01 = 2.30 \times 0.01 = 0.023$ m, lớn hơn khoảng hở an toàn 0.02 m, nên phép kiểm tra không chứng minh được gì. Một biên an toàn 0.01 m cần $2.30\,\Delta t \le 0.02 - 0.01$, nên $\Delta t \le 4.3$ ms, với giả định rằng khoảng hở an toàn nhỏ nhất tại các mẫu không giảm khi làm mịn phép lấy mẫu (điều này phải được xác nhận bằng cách chạy lại phép kiểm tra).
+
+</details>
+
+## 8. Tóm tắt
+
+| Khái niệm | Kết quả | Hạn chế chính |
+|---|---|---|
+| Đường đi và quỹ đạo | $q(t) = \sigma(s(t))$; $\dot q = \sigma'\dot s$, $\ddot q = \sigma'\ddot s + \sigma''\dot s^2$ | Cố định đường đi trước có thể loại trừ các chuyển động nhanh hơn |
+| Tham số hóa thời gian bậc ba | $s = 3\tau^2 - 2\tau^3$; $\dot s_{\max} = 3/(2T)$, $\lvert\ddot s\rvert_{\max} = 6/T^2$ | Gia tốc nhảy ở cả hai đầu |
+| Tham số hóa thời gian bậc năm | $s = 10\tau^3 - 15\tau^4 + 6\tau^5$; $\dot s_{\max} = 15/(8T)$, $\lvert\ddot s\rvert_{\max} = 10/(\sqrt{3}\,T^2)$ | Chậm nhất với một giới hạn tốc độ cho trước |
+| Biên dạng hình thang | $T = D/v + v/a$, hoặc $2\sqrt{D/a}$ khi $D < v^2/a$ | Độ giật không bị chặn |
+| Biên dạng chữ S | $T = D/v + v/a + a/j$ khi mọi giới hạn đều đạt được | Tốn thêm $a/j$ so với hình thang; nhiều hơn với chuyển động ngắn |
+| Tham số hóa tối ưu thời gian | Gia tốc cực đại, giảm tốc cực đại hoặc đường giới hạn vận tốc tại mọi điểm của mặt phẳng $(s, \dot s)$; là một hình thang trên đường thẳng trong không gian khớp | Không để lại biên cho điều khiển; chỉ tối ưu cho đường đi đã cho |
+| Spline bậc ba | Hệ ba đường chéo cho gia tốc tại nút, giải trong $O(n)$; biên tự nhiên hoặc kẹp biên | Thời điểm nút là phỏng đoán; vọt lố giữa các nút |
+| Kiểm tra | Lấy mẫu các giới hạn, hành trình khớp và khoảng hở an toàn; khoảng hở an toàn chỉ được chứng minh nếu lớn hơn quãng chuyển động mỗi mẫu | Vật cản chuyển động và sai số bám đòi hỏi tính đến thời gian và một biên an toàn |
+
+Một quỹ đạo là một đường đi có lịch trình, và lịch trình bị chặn bởi những gì động cơ và kết cấu có thể đáp ứng. Một biên dạng càng nhanh thì càng dành nhiều phần của chuyển động ở một giới hạn, và mọi biên dạng chỉ đáng tin cậy đến mức phép kiểm tra đi sau nó. [Bài tiếp theo](/vi/blog/path-tracking-and-reactive-avoidance) gửi quỹ đạo đến robot: nó lấy một robot di động dẫn động vi sai (differential-drive robot), làm cho robot bám theo một đường đi đã lập kế hoạch bằng các bộ điều khiển bám, và bổ sung các phương pháp phản ứng cho những vật cản mà không kế hoạch nào lường trước.
+
+### Tài liệu tham khảo
+
+- J. E. Bobrow, S. Dubowsky and J. S. Gibson, "Time-optimal control of robotic manipulators along specified paths," *International Journal of Robotics Research*, vol. 4, no. 3, pp. 3–17, 1985.
+- C. de Boor, *A Practical Guide to Splines*, revised ed., Springer, 2001.
+- T. Flash and N. Hogan, "The coordination of arm movements: An experimentally confirmed mathematical model," *Journal of Neuroscience*, vol. 5, no. 7, pp. 1688–1703, 1985.
+- T. Kunz and M. Stilman, "Time-optimal trajectory generation for path following with bounded acceleration and velocity," in *Robotics: Science and Systems VIII*, 2012.
+- K. M. Lynch and F. C. Park, *Modern Robotics: Mechanics, Planning, and Control*, Cambridge University Press, 2017.
+- Q.-C. Pham, "A general, fast, and robust implementation of the time-optimal path parameterization algorithm," *IEEE Transactions on Robotics*, vol. 30, no. 6, pp. 1533–1540, 2014.
+- K. G. Shin and N. D. McKay, "Minimum-time control of robotic manipulators with geometric path constraints," *IEEE Transactions on Automatic Control*, vol. AC-30, no. 6, pp. 531–541, 1985.
