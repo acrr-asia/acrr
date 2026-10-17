@@ -1,0 +1,489 @@
+---
+title: "Song song dữ liệu: đơn vị vector và GPU"
+description: "Lệnh vector và GPU áp dụng một phép toán cho nhiều phần tử dữ liệu ra sao, điều gì cản vector hóa, và khi nào chuyển việc sang GPU bù được chi phí truyền."
+publishedAt: "2026-10-16"
+category: "Computing Systems"
+tags:
+  - parallel computing
+  - performance
+  - GPU
+series: parallel-and-high-performance-computing
+seriesOrder: 4
+---
+
+[Bài thứ ba](/vi/blog/threads-and-shared-memory-parallelism) đã chia một vòng lặp cho các luồng (thread), mỗi luồng chạy dòng lệnh riêng của nó trên lõi (core) riêng của nó. Bài này chuyển sang một kiểu song song khác, có ngay bên trong một lõi và, với quy mô lớn hơn nhiều, bên trong một bộ xử lý đồ họa (graphics processing unit, GPU): một lệnh được áp dụng đồng thời cho nhiều phần tử dữ liệu. Bài dựa trên ba kết quả trước đó. Cận roofline của [bài thứ nhất](/vi/blog/performance-models-and-scaling-laws) (mục 5) quyết định liệu phép tính số học rộng hơn có giúp được một kernel hay không. Cách bố trí dữ liệu của [bài thứ hai](/vi/blog/memory-hierarchy-and-locality) (mục 5) quyết định liệu các phần tử mà một lệnh vector cần có nằm cạnh nhau trong bộ nhớ hay không. Và các luồng cùng các tranh chấp dữ liệu của [bài thứ ba](/vi/blog/threads-and-shared-memory-parallelism) (mục 3) xuất hiện trở lại, dưới một dạng mới, trên GPU.
+
+Cùng một lập luận roofline xuyên suốt cả hai nửa của bài. Trên CPU, báo cáo của trình biên dịch và các phép đo thời gian cho thấy những vòng lặp nào được lợi từ lệnh vector và những đặc điểm nào của chương trình ngăn trình biên dịch dùng chúng. Trên GPU, mô hình thực thi, hệ thống bộ nhớ và các giới hạn giải thích phần cứng giữ cho hàng nghìn làn bận rộn như thế nào, và một mô hình chi phí quyết định khi nào việc chuyển một phép tính sang GPU bù được chi phí chuyển dữ liệu của nó.
+
+**Quy ước.** Mã C là C11, biên dịch bằng GNU Compiler Collection (GCC) 13.3 với lệnh `gcc -std=c11 -O3 -march=native` trừ khi ghi rõ khác; các mô hình viết bằng Python 3.13. Số đo lấy từ máy tham chiếu của loạt bài: một máy ảo khách Kernel-based Virtual Machine (KVM) với bốn lõi của một bộ xử lý Intel Xeon hỗ trợ các phần mở rộng vector 512 bit, được báo cáo ở 2.1 GHz (Mục 5.4 của bài thứ nhất suy ra rằng các lõi đã chạy nhanh hơn). Mỗi lõi có 48 KiB bộ nhớ đệm (cache) dữ liệu mức 1 (L1) và 2 MiB bộ nhớ đệm mức 2 (L2), còn bộ nhớ đệm mức 3 (L3) dùng chung được `lscpu` báo cáo là 260 MiB. Mọi phép đo thời gian đều dùng một luồng, báo cáo trung vị của 7 lần lặp, được thực hiện khi không có phép đo hiệu năng nào khác đang chạy, và chỉ mô tả máy này; đây là một máy ảo dùng chung nên thời gian đo có nhiễu, và các chênh lệch vài phần trăm không được diễn giải.
+
+Máy tham chiếu không có GPU: mọi đoạn mã GPU ở đây là minh họa chưa được biên dịch hay chạy, và mọi số liệu GPU đều được ghi rõ là giả định hoặc dẫn từ một nguồn được trích. Tốc độ tính bằng tỉ phép toán dấu phẩy động (floating-point operation, FLOP) mỗi giây (GFLOP/s) và gigabyte mỗi giây (GB/s, $10^9$ byte mỗi giây); dữ liệu là số double 8 byte.
+
+## 1. Song song dữ liệu
+
+### 1.1 Một phép toán trên nhiều phần tử
+
+Một phép tính là **song song dữ liệu** (data-parallel) khi nó áp dụng cùng một phép toán một cách độc lập cho nhiều phần tử dữ liệu. Phép cập nhật $y_i \leftarrow a\,x_i + y_i$ với $i = 0, \dots, n-1$ (gọi là **axpy**, viết tắt của "$a$ nhân $x$ cộng $y$") là ví dụ tiêu chuẩn: mỗi phần tử chỉ cần $x_i$ và $y_i$ của riêng nó, nên $n$ phép cập nhật có thể diễn ra theo bất kỳ thứ tự nào, hoặc tất cả cùng lúc. Theo ngôn ngữ khối lượng công việc – độ dài đường găng của [bài thứ nhất](/vi/blog/performance-models-and-scaling-laws) (mục 4), khối lượng công việc (work) là $W = 2n$ phép toán và độ dài đường găng (span) là $D = 2$ phép toán (một phép nhân, rồi phép cộng dùng kết quả của nó), nên độ song song (parallelism) $W/D = n$ tăng theo $n$. Phép tính số học từng phần tử trên mảng, stencil trên lưới và phép nhân ma trận đều có dạng này.
+
+Song song dữ liệu là một tính chất của phép tính, không phải của phần cứng. Các luồng có thể khai thác nó, mỗi luồng nhận một đoạn giá trị của $i$. Phần cứng thực thi một lệnh trên nhiều phần tử cùng lúc cũng vậy, và cách này rẻ hơn, vì chỉ một lệnh được nạp, giải mã và lập lịch cho nhiều phần tử. Phần cứng mà bài này mô tả được xây dựng cho cách thứ hai.
+
+### 1.2 Phân loại của Flynn
+
+Flynn (1966) phân loại các tổ chức máy tính theo số dòng lệnh và số dòng dữ liệu mà chúng xử lý cùng lúc, và phát triển cách phân loại này trong một bài báo sau đó (Flynn, 1972). Bốn lớp là:
+
+- **một dòng lệnh, một dòng dữ liệu** (single instruction stream, single data stream, SISD), bộ xử lý tuần tự cổ điển;
+- **một dòng lệnh, nhiều dòng dữ liệu** (single instruction stream, multiple data streams, SIMD), trong đó một lệnh tác động lên nhiều phần tử dữ liệu;
+- **nhiều dòng lệnh, một dòng dữ liệu** (multiple instruction streams, single data stream, MISD), một lớp có ít ví dụ thực tế;
+- **nhiều dòng lệnh, nhiều dòng dữ liệu** (multiple instruction streams, multiple data streams, MIMD), trong đó các bộ xử lý độc lập, mỗi bộ chạy chương trình riêng trên dữ liệu riêng.
+
+Một bộ xử lý đa lõi chạy các luồng của bài thứ ba là MIMD; các đơn vị vector bên trong mỗi lõi của nó là SIMD. GPU nằm giữa hai loại: nó chạy nhiều nhóm luồng độc lập, như một máy MIMD, nhưng mỗi nhóm thực thi theo kiểu SIMD (Mục 3).
+
+### 1.3 Song song tác vụ và song song dữ liệu
+
+Đối lập với nó là **song song tác vụ** (task parallelism), trong đó các phép toán khác nhau chạy cùng lúc: một luồng đọc đầu vào trong khi một luồng khác tính toán và luồng thứ ba ghi kết quả. Song song tác vụ cần phần cứng MIMD, vì các tác vụ chạy mã khác nhau. Song song dữ liệu có thể dùng cả hai loại, và các mức song song nhân với nhau: một vòng lặp có thể được chia cho 4 luồng và, bên trong mỗi luồng, được thực thi mỗi lần 4 hoặc 8 phần tử bằng lệnh vector.
+
+## 2. Lệnh vector trên CPU
+
+### 2.1 Thanh ghi và làn
+
+Một **thanh ghi vector** (vector register, còn gọi là thanh ghi SIMD) chứa nhiều giá trị cùng kiểu đặt cạnh nhau; mỗi vị trí là một **làn** (lane). Một lệnh vector (vector instruction) tác động lên mọi làn cùng lúc: phép cộng vector cộng làn 0 của một thanh ghi với làn 0 của thanh ghi kia, làn 1 với làn 1, và cứ thế. Kiến trúc x86 đã bổ sung các phần mở rộng vector với độ rộng tăng dần, mỗi phần mở rộng được mô tả trong sổ tay kiến trúc của Intel (Intel, 2024):
+
+| Phần mở rộng | Độ rộng thanh ghi | Thanh ghi | Số làn double | Số làn float 32 bit |
+|---|---|---|---|---|
+| Streaming SIMD Extensions (SSE, SSE2) | 128 bit | `xmm` | 2 | 4 |
+| Advanced Vector Extensions (AVX, AVX2) | 256 bit | `ymm` | 4 | 8 |
+| AVX-512 | 512 bit | `zmm` | 8 | 16 |
+
+Độ rộng giới hạn mức lợi: một vòng lặp có phần số học được thực hiện bằng lệnh 256 bit làm được nhiều nhất gấp 4 lần số phép toán độ chính xác kép trên mỗi lệnh so với phiên bản vô hướng của nó. AVX-512 còn bổ sung các **thanh ghi mặt nạ** (mask register), dùng để chọn những làn mà một lệnh tác động lên và giữ nguyên các làn còn lại (Intel, 2024). Các kiến trúc vector, SIMD và GPU được so sánh chi tiết trong chương 4 của Hennessy và Patterson (2017).
+
+### 2.2 Tự động vector hóa
+
+Lập trình viên hiếm khi tự viết lệnh vector bằng tay. Ở mức `-O3`, **bộ tự động vector hóa** (auto-vectorizer) của GCC tìm những vòng lặp mà nhiều lần lặp (iteration) có thể được thực thi cùng một lúc, và viết lại chúng để mỗi lần lặp xử lý số phần tử vừa một thanh ghi, kèm một vòng lặp vô hướng hoặc hẹp hơn cho các phần tử còn dư. Cờ `-march=native` cho phép nó dùng mọi lệnh mà máy biên dịch hỗ trợ; `-fopt-info-vec` báo cáo từng vòng lặp đã được vector hóa, `-fopt-info-vec-missed` từng vòng lặp không được vector hóa, và `-fno-tree-vectorize` tắt nó đi, cho ra một phiên bản vô hướng làm mốc so sánh (Stallman và cộng đồng nhà phát triển GCC, 2024).
+
+Chương trình thử `kernels.c` chứa hai vòng lặp. Vòng thứ nhất tính một đa thức bậc 8 theo quy tắc Horner, 8 phép nhân và 8 phép cộng cho mỗi phần tử, trên các mảng 2048 số double (mỗi mảng 16 KiB, nên cả hai vừa trong bộ nhớ đệm L1), quét $10^5$ lần. Vì dữ liệu nằm yên trong bộ nhớ đệm, vòng này bị giới hạn bởi phép tính số học. Vòng thứ hai là axpy trên các mảng $2^{26}$ số double (mỗi mảng 512 MiB, lớn hơn L3), nên mọi phần tử đều đến từ bộ nhớ chính:
+
+```c
+void poly(long n, const double *restrict x, double *restrict y) {
+    for (long i = 0; i < n; i++) {
+        double v = x[i], p = 0.5;
+        p = p * v + 0.25; p = p * v + 0.125; p = p * v + 0.0625;
+        p = p * v + 0.03125; p = p * v + 0.015625; p = p * v + 0.0078125;
+        p = p * v + 0.00390625; p = p * v + 0.001953125;
+        y[i] = p;
+    }
+}
+
+void axpy(long n, double a, const double *restrict x, double *restrict y) {
+    for (long i = 0; i < n; i++) y[i] = a * x[i] + y[i];
+}
+```
+
+GCC báo cáo cả hai vòng lặp đều đã được vector hóa (dòng 31 là vòng lặp đa thức, dòng 41 là vòng lặp axpy; các báo cáo cho những bản sao được nội tuyến vào `main` và cho các vòng lặp khởi tạo đã được lược bỏ):
+
+```text
+$ gcc -std=c11 -O3 -march=native -fopt-info-vec kernels.c -o kernels_vec
+kernels.c:31:24: optimized: loop vectorized using 32 byte vectors
+kernels.c:31:24: optimized: loop vectorized using 16 byte vectors
+kernels.c:41:24: optimized: loop vectorized using 32 byte vectors
+kernels.c:41:24: optimized: loop vectorized using 16 byte vectors
+...
+```
+
+Các vòng lặp chính dùng vector 32 byte (256 bit), 4 số double mỗi lệnh; các phiên bản 16 byte xử lý một phần phần dư. Hai giá trị mặc định của trình biên dịch, đã được nêu ở [mục 6 của bài thứ nhất](/vi/blog/performance-models-and-scaling-laws), định hình các vòng lặp này. GCC chọn 256 bit dù bộ xử lý hỗ trợ 512: các cấu hình đích (target) của GCC 13.3 cho bộ xử lý Xeon có AVX-512 (`skylake-avx512`, `cascadelake`, `icelake-server`, `sapphirerapids`) đều đặt độ rộng vector ưu tiên mặc định là 256 bit, và `-mprefer-vector-width=512` ghi đè giá trị này. Ngoài ra, trong một chế độ ISO nghiêm ngặt như `-std=c11`, GCC không gộp một phép nhân và một phép cộng thành một lệnh nhân – cộng hợp nhất (fused multiply-add, FMA) trừ khi được yêu cầu bằng `-ffp-contract=fast` (Stallman và cộng đồng nhà phát triển GCC, 2024). Mã hợp ngữ dịch ngược xác nhận có 8 lệnh `vmulpd` và 8 lệnh `vaddpd` trên các thanh ghi `ymm` 256 bit trong vòng lặp đa thức chính, mỗi bước Horner một lệnh, thêm 8 lệnh mỗi loại trên các thanh ghi `xmm` 128 bit trong vòng lặp phần dư, và các dạng vô hướng `vmulsd` và `vaddsd` của chúng trong bản biên dịch vô hướng.
+
+### 2.3 Vòng lặp bị giới hạn bởi tính toán được lợi, vòng lặp bị giới hạn bởi bộ nhớ thì không
+
+Cùng một mã nguồn được biên dịch theo ba cách và chạy khi không có phép đo hiệu năng nào khác trên máy:
+
+```text
+--- scalar (-fno-tree-vectorize)
+poly: 0.421 s, 7.79 GFLOP/s (check 0.994632)
+axpy: 0.112 s, 1.20 GFLOP/s, 14.4 GB/s (check 2.000000)
+--- 256-bit (default)
+poly: 0.115 s, 28.40 GFLOP/s (check 0.994632)
+axpy: 0.072 s, 1.86 GFLOP/s, 22.3 GB/s (check 2.000000)
+--- 512-bit (-mprefer-vector-width=512)
+poly: 0.109 s, 30.14 GFLOP/s (check 0.994632)
+axpy: 0.077 s, 1.75 GFLOP/s, 21.0 GB/s (check 2.000000)
+```
+
+Vòng lặp đa thức chạy nhanh hơn $28.40/7.79 = 3.6$ lần với vector 4 làn (3.3 đến 3.6 lần trong các lần chạy trước với cùng các bản biên dịch), gần với hệ số 4 mà độ rộng cho phép. Với 8 làn, nó chỉ được lợi thêm một chút, $30.14/7.79 = 3.9$. Trong mọi lần chạy, bản 512 bit đều nhanh hơn bản 256 bit, nhưng kém xa hệ số 2 mà độ rộng gợi ý; bài này không xác định được nguyên nhân. Một thanh ghi rộng hơn không bảo đảm mức lợi tỉ lệ tương ứng.
+
+Vòng lặp axpy hành xử khác. Cường độ số học (arithmetic intensity) của nó, khi mỗi toán hạng đi qua giao diện bộ nhớ một lần, là $I = 2/24 \approx 0.083$ FLOP/byte, giá trị đã được tính trong [bài góc nhìn về roofline](/vi/insights/compute-bound-or-memory-bound); hai tốc độ được in ra là cùng một phép đo biểu diễn theo hai cách ($22.3 \times 0.083 = 1.86$). Ở cường độ này, cận roofline $P \le \min(P_{\mathrm{peak}}, B\,I)$ chỉ phụ thuộc vào băng thông. Vector hóa làm vòng lặp nhanh hơn bản vô hướng từ 1.4 đến 1.6 lần qua các lần chạy lặp lại (1.56 với bản 256 bit trong lần chạy được trình bày).
+
+Điều này gợi ý rằng vòng lặp vô hướng đã không giữ đủ số yêu cầu bộ nhớ đang thực hiện dở. Con số 22.3 GB/s của vòng lặp đã vector hóa cao hơn hẳn 13.4 GB/s mà một lõi duy trì được trên phép triad ở [mục 6.3 của bài thứ hai](/vi/blog/memory-hierarchy-and-locality), hay 17.9 GB/s nếu tính cả lượt đọc do cấp phát khi ghi (write-allocate). Axpy đọc chính mảng mà nó ghi, nên nó không gây lưu lượng cấp phát khi ghi. Như [mục 5.2 của bài thứ hai](/vi/blog/memory-hierarchy-and-locality) đã chỉ ra, mức băng thông mà một lõi duy trì được phụ thuộc vào tỉ lệ giữa đọc và ghi, nên điểm gãy (ridge point) một lõi khoảng 6.8 FLOP/byte mà [mục 1.1 của bài thứ hai](/vi/blog/memory-hierarchy-and-locality) suy ra từ phép triad chỉ là một con số ước chừng.
+
+Tuy vậy, việc đi từ 4 làn lên 8 làn không thay đổi gì vượt quá mức nhiễu, đúng như dự đoán với một vòng lặp bị giới hạn bởi băng thông chứ không phải bởi số lệnh. Độ rộng vector nâng $P_{\mathrm{peak}}$, điều chỉ giúp được các kernel nằm dưới phần nằm ngang của mái; với một kernel bị giới hạn bởi bộ nhớ (memory-bound), những thay đổi có ích là các thay đổi của [bài thứ hai](/vi/blog/memory-hierarchy-and-locality), vốn làm giảm số byte phải di chuyển.
+
+### 2.4 Điều gì cản trở vector hóa
+
+Để vector hóa một vòng lặp, trình biên dịch phải chứng minh được rằng thực thi nhiều lần lặp cùng lúc cho cùng kết quả như thực thi chúng theo thứ tự. Có năm trở ngại thường gặp. Tệp `blockers.c` chứa một vòng lặp cho mỗi trở ngại, và `-fopt-info-vec-all` báo cáo (đã rút gọn còn các dòng nêu quyết định):
+
+```text
+blockers.c:6:24: optimized:  loop versioned for vectorization because of possible aliasing
+blockers.c:6:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:11:24: missed: couldn't vectorize loop
+blockers.c:16:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:22:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:29:24: optimized: loop vectorized using 32 byte vectors
+blockers.c:34:24: optimized: loop vectorized using 32 byte vectors
+...
+```
+
+**Phụ thuộc mang qua vòng lặp.** Một **phụ thuộc mang qua vòng lặp** (loop-carried dependence) tồn tại khi một lần lặp dùng một giá trị do một lần lặp trước đó tạo ra. Phép tổng tiền tố ở dòng 11,
+
+```c
+for (long i = 1; i < n; i++) y[i] = y[i - 1] + y[i];
+```
+
+cần giá trị cuối cùng của $y_{i-1}$ trước khi tính được $y_i$, nên các lần lặp liên tiếp không thể dùng chung một lệnh vector, và GCC báo cáo `couldn't vectorize loop`. Phụ thuộc này thuộc về thuật toán như nó được viết; có tồn tại phép tổng tiền tố song song, nhưng đó là một thuật toán khác với khối lượng công việc lớn hơn. Không phải phụ thuộc nào cũng cấm vector hóa: nếu một lần lặp chỉ đọc một phần tử mà một lần lặp *sau đó* ghi đè, như trong `a[i] = a[i + 4] + b[i]`, thì việc nạp các giá trị cũ trước mọi lệnh ghi vẫn giữ nguyên kết quả tuần tự (Bài tập 2).
+
+**Khả năng trùng địa chỉ.** Hai con trỏ **trùng địa chỉ** (alias) khi chúng trỏ tới vùng nhớ chồng lấn nhau. Trong hàm axpy ở dòng 6, viết không có `restrict`, không có gì cho trình biên dịch biết rằng `x` và `y` không chồng lấn; nếu `y` bắt đầu sau `x` một phần tử, vòng lặp sẽ mang một phụ thuộc. GCC **tạo nhiều phiên bản** (version) cho vòng lặp: một phép kiểm tra địa chỉ lúc chạy chọn vòng lặp đã vector hóa khi các mảng không chồng lấn và vòng lặp vô hướng khi chúng chồng lấn. Với các vòng lặp phức tạp hơn, trình biên dịch có thể bỏ cuộc thay vì làm vậy. Từ khóa `restrict` của C99 là lời cam kết của lập trình viên rằng, trong suốt lời gọi hàm, vùng nhớ truy cập qua con trỏ đó không bị truy cập qua bất kỳ con trỏ nào khác; nó loại bỏ câu hỏi này, và một lời gọi vi phạm lời cam kết có hành vi không xác định.
+
+**Rẽ nhánh.** Một lệnh vector thực hiện cùng một phép toán ở mọi làn, nên các làn không thể đi theo các nhánh khác nhau của một câu lệnh `if`. Các nhánh đơn giản được chuyển thành việc tính cả hai kết quả rồi chọn theo từng làn, gọi là **chuyển đổi if** (if-conversion) hay che mặt nạ (masking): vòng lặp chặn giá trị ở dòng 16, `y[i] = x[i] > 1.0 ? 1.0 : x[i]`, trở thành một phép so sánh ghi vào thanh ghi mặt nạ và một lệnh di chuyển có mặt nạ, trộn hai kết quả lại. Khi đó cả hai nhánh đều được tính cho mọi phần tử, nên một nhánh tốn kém nhưng hiếm gặp phải trả giá ở khắp nơi. Sự đánh đổi này quay lại trên GPU (Mục 5.1).
+
+**Bước nhảy khác một và cách bố trí dữ liệu.** Một lệnh nạp vector đọc vùng nhớ liên tiếp, nên một vòng lặp chạm tới mỗi số double thứ ba phải nạp cả vector rồi sắp xếp lại, hoặc dùng các lệnh gom (gather) chậm hơn. Dòng 29 cập nhật tọa độ `x` của các hạt được lưu dưới dạng **mảng cấu trúc** (array of structures, AoS), `struct particle { double x, y, z; }`, nên các giá trị `x` liên tiếp cách nhau 24 byte. Dòng 34 thực hiện cùng phép cập nhật trên một **cấu trúc mảng** (structure of arrays, SoA), với mọi giá trị `x` nằm trong một mảng liên tục (các cách bố trí của [bài thứ hai](/vi/blog/memory-hierarchy-and-locality)). Cả hai đều được vector hóa, nhưng vòng lặp AoS cần ba lệnh nạp vector và hai phép hoán vị (`vpermt2pd`) để gom bốn giá trị `x`, rồi bốn lệnh ghi vô hướng. Hai vòng lặp được đo thời gian trên 1024 hạt. Số hạt đủ nhỏ để nằm trong bộ nhớ đệm L1 hoặc L2, nên chênh lệch đến từ số lệnh chứ không phải từ lưu lượng bộ nhớ:
+
+```text
+AoS: 0.129 s, 0.32 ns per element
+SoA: 0.056 s, 0.14 ns per element (check 2.800 2.800)
+```
+
+Vòng lặp SoA chạy nhanh hơn khoảng 2.3 lần (2.3 đến 2.5 lần qua các lần chạy lặp lại). Với các mảng quá lớn so với bộ nhớ đệm, cách bố trí AoS còn di chuyển nhiều byte hơn cho mỗi giá trị `x` hữu ích, hiệu ứng mà bài thứ hai đã đo.
+
+**Phép rút gọn.** Một **phép rút gọn** (reduction) kết hợp nhiều phần tử thành một giá trị, như trong một phép tính tổng. Phép tính tổng ở dòng 22 được báo cáo là đã vector hóa, nhưng mã dịch ngược cho thấy bốn phép cộng vô hướng (`vaddsd`) mỗi lần lặp vào cùng một thanh ghi, theo đúng thứ tự trong mã nguồn:
+
+```text
+ 240:	c5 fb 58 00          	vaddsd (%rax),%xmm0,%xmm0
+ 248:	c5 fb 58 40 e8       	vaddsd -0x18(%rax),%xmm0,%xmm0
+ 24d:	c5 fb 58 40 f0       	vaddsd -0x10(%rax),%xmm0,%xmm0
+ 252:	c5 fb 58 40 f8       	vaddsd -0x8(%rax),%xmm0,%xmm0
+```
+
+GCC đã tạo ra một phép rút gọn *giữ thứ tự*, vì lý do mà Mục 2.5 trình bày.
+
+### 2.5 Phép rút gọn và việc kết hợp lại phép toán dấu phẩy động
+
+Một phép tính tổng vector giữ một tổng riêng phần cho mỗi làn, $s_0$ gom $x_0 + x_4 + x_8 + \dots$, $s_1$ gom $x_1 + x_5 + \dots$, và cứ thế, rồi cộng các tổng riêng phần ở cuối. Đó là một thứ tự khác với mã nguồn, và trong số học dấu phẩy động thứ tự có ý nghĩa, vì mỗi phép cộng đều được làm tròn và phép cộng dấu phẩy động không có tính kết hợp ([bài góc nhìn về làm tròn dấu phẩy động](/vi/insights/floating-point-in-long-simulations) đưa ra một ví dụ hai dòng). Khi không được phép đổi thứ tự, GCC giữ thứ tự của mã nguồn, nên mỗi phép cộng phải chờ phép cộng trước đó; [mục 6.3 của bài thứ nhất](/vi/blog/performance-models-and-scaling-laws) đã đo cùng hiệu ứng này trong một phép tích vô hướng.
+
+Có thể cấp quyền này cho cả một tệp bằng `-fassociative-math`, cờ mà GCC chỉ chấp nhận khi đi cùng `-fno-signed-zeros` và `-fno-trapping-math` và được bao gồm trong `-ffast-math` (Stallman và cộng đồng nhà phát triển GCC, 2024), hoặc cho một vòng lặp bằng chỉ thị `#pragma omp simd reduction(+:s)` biên dịch với `-fopenmp-simd` (OpenMP Architecture Review Board, 2021). Chương trình `reduce.c` tính tổng 2048 số double có độ lớn chênh lệch rất nhiều, lặp $2 \times 10^5$ lần, được biên dịch theo cả hai cách:
+
+```text
+$ gcc -std=c11 -O3 -march=native reduce.c -o reduce_ordered
+$ gcc -std=c11 -O3 -march=native -fassociative-math -fno-signed-zeros \
+      -fno-trapping-math reduce.c -o reduce_reassoc
+$ ./reduce_ordered
+sum = 517024.43791358318  time 0.237 s  1.73 GFLOP/s
+$ ./reduce_reassoc
+sum = 517024.43791358295  time 0.051 s  8.03 GFLOP/s
+```
+
+Phép tính tổng đã đổi thứ tự chạy nhanh hơn 4.6 lần (4.3 đến 5.9 lần ở các lần chạy khác). Mã dịch ngược cho thấy một bộ tích lũy 256 bit duy nhất (`vaddpd (%rax),%ymm0,%ymm0`), nên các phép cộng vẫn tạo thành một chuỗi phụ thuộc, giờ là một phép cộng vector cho mỗi bốn phần tử: bốn làn giải thích được hệ số khoảng 4, và bài này không xác định được nguồn gốc của phần còn lại. Hai kết quả khác nhau ở hai chữ số cuối. Chương trình `exact_sum.py` tính tổng được làm tròn đúng của cùng các giá trị bằng `math.fsum` của Python:
+
+```text
+exact (rounded) = 517024.43791358318
+517024.43791358318: error +0 ulp
+517024.43791358295: error -4 ulp
+```
+
+Với dữ liệu này, tổng giữ thứ tự tình cờ được làm tròn đúng, còn tổng đã đổi thứ tự nhỏ hơn 4 đơn vị ở vị trí cuối (unit in the last place, ulp). Đó không phải là một phán quyết nghiêng về thứ tự của mã nguồn: bốn tổng riêng phần, mỗi tổng $n/4$ số hạng, có cận sai số trong trường hợp xấu nhất nhỏ hơn một chuỗi $n$ phép cộng. Điều thay đổi là khả năng tái lập, vì kết quả giờ phụ thuộc vào độ rộng vector và các cờ biên dịch. Mã phải tái lập kết quả chính xác đến từng bit thì phải cố định thứ tự của các phép rút gọn; mã chỉ cần độ chính xác thì có thể chấp nhận việc đổi thứ tự và nên so sánh kết quả với một dung sai.
+
+## 3. Mô hình thực thi của GPU
+
+### 3.1 Nhiều lõi đơn giản
+
+Một lõi CPU dành phần lớn diện tích cho việc làm một dòng lệnh chạy nhanh: bộ nhớ đệm lớn, dự đoán rẽ nhánh và thực thi không theo thứ tự. Một GPU dành diện tích cho nhiều **bộ đa xử lý luồng** (streaming multiprocessor, SM, thuật ngữ mà NVIDIA dùng), mỗi bộ có nhiều đơn vị số học đơn giản, một tệp thanh ghi lớn và một bộ nhớ nhỏ nhưng nhanh. Nó dựa vào việc chạy nhiều luồng hơn hẳn số đơn vị số học mà nó có (Lindholm và cộng sự, 2008; Hwu, Kirk và El Hajj, 2022). Thiết kế này xuất phát từ đồ họa, nơi mỗi điểm ảnh được xử lý độc lập; kiến trúc Tesla năm 2006 đã hợp nhất đường ống đồ họa thành một mảng bộ xử lý lập trình được, cũng có thể được lập trình cho tính toán tổng quát (Lindholm và cộng sự, 2008).
+
+Mục này dùng thuật ngữ của Compute Unified Device Architecture (CUDA) của NVIDIA, mô hình lập trình được Lindholm và cộng sự mô tả cho Tesla và được Hwu, Kirk và El Hajj (2022) giảng giải chi tiết. Các hãng khác dùng những mô hình tương tự dưới các tên gọi khác.
+
+### 3.2 Luồng, khối và lưới
+
+Một chương trình GPU, hay **kernel**, là một hàm được viết cho một luồng. Nó được khởi chạy trên một **lưới** (grid) gồm các **khối luồng** (thread block), mỗi khối chứa số luồng tối đa bằng một giới hạn phần cứng. Mỗi luồng xác định vị trí của mình từ các chỉ số dựng sẵn: `blockIdx` (khối nào), `blockDim` (số luồng mỗi khối) và `threadIdx` (luồng nào trong khối). Các luồng của một khối chạy trên một SM, dùng chung bộ nhớ nhanh trên chip của nó và có thể đồng bộ với nhau; các luồng ở những khối khác nhau không làm được điều nào trong hai điều đó (Hwu, Kirk và El Hajj, 2022). Các khối độc lập với nhau, nên phần cứng có thể chạy chúng theo bất kỳ thứ tự nào trên bất kỳ SM nào.
+
+Axpy viết dưới dạng một kernel CUDA cho thấy khuôn mẫu này. Đoạn mã, viết bằng CUDA C++, là minh họa chưa được biên dịch hay chạy (xem phần Quy ước):
+
+```cpp
+// CUDA C++. Illustration only: not compiled or run for this entry.
+__global__ void axpy(int n, double a, const double *x, double *y) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;   // global element index
+    if (i < n)                                        // last block may be partial
+        y[i] = a * x[i] + y[i];
+}
+
+// Host code (abbreviated): allocate device arrays d_x and d_y, copy x and y
+// to them, launch one thread per element in blocks of 256 threads, copy y back.
+//   int threads = 256, blocks = (n + threads - 1) / threads;
+//   axpy<<<blocks, threads>>>(n, a, d_x, d_y);
+//   cudaMemcpy(y, d_y, n * sizeof(double), cudaMemcpyDeviceToHost);
+```
+
+Vòng lặp của phiên bản C đã trở thành lưới: với $n = 10^8$, lệnh khởi chạy tạo ra 390 625 khối, mỗi khối 256 luồng, một luồng cho mỗi phần tử. Điều kiện bảo vệ `if (i < n)` là cần thiết vì khối cuối cùng vượt quá cuối mảng mỗi khi $n$ không phải là bội của 256. Các mảng thiết bị nằm trong bộ nhớ riêng của GPU, nên dữ liệu phải được sao chép sang đó và ngược lại, một chi phí mà Mục 6 lượng hóa bằng con số.
+
+### 3.3 Warp gồm 32 luồng
+
+SM gom các luồng của một khối thành các **warp** gồm 32 luồng liên tiếp và phát mỗi lần một lệnh cho cả warp, cả 32 luồng cùng thực thi lệnh đó trên dữ liệu riêng của mình. Lindholm và cộng sự (2008) gọi đây là kiểu thực thi **một lệnh, nhiều luồng** (single instruction, multiple threads, SIMT). Bên dưới nó vẫn là phần cứng SIMD, với warp là vector và mỗi luồng là một làn, nhưng lập trình viên viết mã của một luồng vô hướng và phần cứng tự lắp ráp các vector. Khác biệt lộ ra khi các luồng của một warp không thống nhất tại một lệnh rẽ nhánh (Mục 5.1). Các thành phần tạo thành một phân cấp:
+
+```mermaid
+flowchart LR
+  G["Lưới: một lần khởi chạy kernel"] --> B["Khối luồng: mỗi khối chạy trên một SM"]
+  B --> W["Warp: 32 luồng, mỗi lần một lệnh"]
+  W --> T["Luồng: mỗi luồng một phần tử"]
+```
+
+### 3.4 Che giấu độ trễ và độ lấp đầy
+
+Một lệnh nạp từ bộ nhớ GPU mất hàng trăm chu kỳ. Một lõi CPU che giấu độ trễ (latency) như vậy bằng bộ nhớ đệm và thực thi không theo thứ tự; một GPU che giấu nó bằng cách chuyển đổi. Mỗi SM giữ nhiều warp **thường trú** (resident) cùng lúc, thanh ghi của chúng được giữ cố định trong tệp thanh ghi của SM, nên việc chuyển giữa các warp không tốn gì. Trong khi một warp chờ bộ nhớ, SM phát lệnh từ một warp khác đã sẵn sàng (Hwu, Kirk và El Hajj, 2022).
+
+Số warp cần thiết suy ra từ **định luật Little** (Little's law) (Little, 1961), mà [mục 6.4 của bài thứ hai](/vi/blog/memory-hierarchy-and-locality) đã áp dụng cho một lõi CPU: số byte đang trên đường truyền bằng băng thông nhân độ trễ. GPU giữ chúng trên đường truyền bằng các warp thay vì bằng các bộ theo dõi trượt cache. Với các số tròn giả định $B = 1000$ GB/s và độ trễ 0.5 µs, một GPU cần $1000 \times 10^9 \times 0.5 \times 10^{-6} = 5 \times 10^5$ byte đang trên đường truyền, tức 62 500 lệnh nạp 8 byte chưa hoàn tất, mỗi lệnh do một luồng nào đó phát ra. Đó là lý do các chương trình GPU khởi chạy hàng chục nghìn luồng hoặc nhiều hơn.
+
+Tỉ lệ các khe warp của một SM đang được lấp đầy là **độ lấp đầy** (occupancy) của nó. Các warp thường trú dùng chung thanh ghi và bộ nhớ trên chip của SM, nên một kernel có các luồng cần nhiều thanh ghi sẽ chứa được ít warp hơn. Ví dụ với các giới hạn giả định: nếu một SM chứa tối đa 64 warp và có 65 536 thanh ghi, một kernel cần 64 thanh ghi mỗi luồng có thể giữ $65\,536/64 = 1024$ luồng, tức 32 warp, thường trú, độ lấp đầy 50%. Độ lấp đầy chỉ hữu ích trong chừng mực nó cung cấp đủ công việc độc lập để che giấu độ trễ; một kernel có nhiều công việc độc lập bên trong mỗi luồng có thể chạy tốt ở độ lấp đầy thấp (Hwu, Kirk và El Hajj, 2022).
+
+## 4. Bộ nhớ GPU và gộp truy cập
+
+### 4.1 Bộ nhớ toàn cục và bộ nhớ dùng chung
+
+**Bộ nhớ toàn cục** (global memory) là bộ nhớ lớn trên bo mạch GPU, mọi luồng của mọi khối đều nhìn thấy được, với băng thông cao và độ trễ dài. **Bộ nhớ dùng chung** (shared memory) là một bộ nhớ nhỏ trên mỗi SM với độ trễ thấp hơn nhiều. Nó được cấp phát cho từng khối và chỉ các luồng của khối đó nhìn thấy, và chương trình quản lý nó một cách tường minh, tự nạp dữ liệu vào và đọc ra (Hwu, Kirk và El Hajj, 2022). Mỗi luồng còn có các thanh ghi riêng, nơi lưu trữ nhanh nhất. Phần lớn công việc lập trình GPU là sắp xếp sao cho mỗi giá trị lấy từ bộ nhớ toàn cục được dùng nhiều lần từ bộ nhớ dùng chung hoặc thanh ghi, dạng GPU của kỹ thuật chia khối (blocking) ở [bài thứ hai](/vi/blog/memory-hierarchy-and-locality).
+
+### 4.2 Truy cập gộp và truy cập theo bước nhảy
+
+Khi 32 luồng của một warp thực thi một lệnh nạp, phần cứng kết hợp các địa chỉ của chúng thành càng ít giao dịch bộ nhớ càng tốt. Nếu các luồng đọc các phần tử liên tiếp, 32 số double của warp chiếm 256 byte liên tiếp và đến trong một vài giao dịch lớn; đây là một truy cập **gộp** (coalesced) (Hwu, Kirk và El Hajj, 2022). Nếu chúng đọc các phần tử cách xa nhau, mỗi địa chỉ có thể cần một giao dịch riêng, và phần lớn số byte được di chuyển bị bỏ đi. Kernel axpy có truy cập gộp, vì luồng $i$ đọc phần tử $i$. Một kernel trong đó luồng $i$ đọc phần tử $s\,i$ với bước nhảy $s$ thì không:
+
+```cpp
+// Illustration only, not run. Thread i reads x[i * stride]: for stride > 1
+// the warp's 32 addresses spread over 32 * stride * 8 bytes of memory.
+__global__ void strided_copy(int n, int stride, const double *x, double *y) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i * stride < n) y[i] = x[i * stride];
+}
+```
+
+Với bước nhảy 16 số double (128 byte), phần tử của mỗi luồng nằm trong một khối bộ nhớ 128 byte khác nhau. Nếu bộ nhớ được đọc theo từng đoạn 128 byte nguyên vẹn và được căn lề (một giả định cho ví dụ này), warp di chuyển 4096 byte để dùng 256 byte trong số đó, tức 1/16 (Bài tập 3). Đây là vấn đề AoS của Mục 2.4 ở dạng nghiêm trọng hơn, với cùng cách chữa: bố trí dữ liệu sao cho các luồng liên tiếp đọc các địa chỉ liên tiếp.
+
+### 4.3 Chia khối trong bộ nhớ dùng chung
+
+Phép nhân ma trận $C = AB$ với các ma trận $n \times n$ cho thấy bộ nhớ dùng chung mang lại gì. Một kernel trực tiếp gán một phần tử $c_{ij}$ cho mỗi luồng, luồng này đọc hàng $i$ của $A$ và cột $j$ của $B$ từ bộ nhớ toàn cục: $2n$ lệnh nạp cho $2n$ phép toán, cường độ $2n/(8 \cdot 2n) = 1/8$ FLOP/byte nếu không có gì được dùng lại. Thế nhưng mỗi phần tử của $A$ đều được cần đến bởi $n$ luồng tính hàng $i$ của $C$.
+
+**Chia khối** (tiling) khai thác sự dùng lại đó. Mỗi khối gồm $T \times T$ luồng tính một ô $T \times T$ của $C$, đi dọc theo chiều chung với bước $T$. Ở mỗi bước, khối nạp một ô $T \times T$ của $A$ và một ô của $B$ vào bộ nhớ dùng chung, mỗi luồng một phần tử, rồi mỗi luồng thực hiện $T$ bước nhân – cộng từ bộ nhớ dùng chung. Mỗi bước, khối nạp $2T^2$ số double ($16T^2$ byte) từ bộ nhớ toàn cục và thực hiện $2T^3$ phép toán, nên cường độ đối với bộ nhớ toàn cục tăng lên
+
+$$
+I = \frac{2T^3}{16T^2} = \frac{T}{8}\ \text{FLOP/byte},
+$$
+
+tốt hơn kernel trực tiếp một hệ số $T$: 2 FLOP/byte với $T = 16$. Phác thảo của kernel, cũng là minh họa chưa được biên dịch hay chạy, với giả định $n$ là bội của $T$:
+
+```cpp
+// CUDA C++. Illustration only: not compiled or run for this entry.
+// Launched with blocks of T x T threads and an (n/T) x (n/T) grid.
+#define T 16
+__global__ void matmul_tiled(int n, const double *A, const double *B, double *C) {
+    __shared__ double As[T][T], Bs[T][T];
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int row = blockIdx.y * T + ty, col = blockIdx.x * T + tx;
+    double acc = 0.0;
+    for (int k0 = 0; k0 < n; k0 += T) {
+        As[ty][tx] = A[row * n + k0 + tx];      // consecutive tx: coalesced
+        Bs[ty][tx] = B[(k0 + ty) * n + col];    // consecutive tx: coalesced
+        __syncthreads();                        // wait until both tiles are loaded
+        for (int k = 0; k < T; k++)
+            acc += As[ty][k] * Bs[k][tx];
+        __syncthreads();                        // wait until all threads are done
+    }
+    C[row * n + col] = acc;
+}
+```
+
+Cả hai lệnh nạp từ bộ nhớ toàn cục đều được gộp, vì các giá trị liên tiếp của `tx` đọc các địa chỉ liên tiếp.
+
+### 4.4 Đồng bộ trong một khối
+
+Mỗi lời gọi `__syncthreads()` là một **rào chắn** (barrier): không luồng nào của khối đi tiếp qua nó cho đến khi mọi luồng của khối đều đã đến đó (Hwu, Kirk và El Hajj, 2022). Cả hai rào chắn đều ngăn một tranh chấp dữ liệu (data race) thuộc loại đã được định nghĩa trong [bài thứ ba](/vi/blog/threads-and-shared-memory-parallelism). Không có rào chắn thứ nhất, một luồng có thể đọc `As[ty][k]` trước khi luồng phụ trách phần tử đó ghi nó. Không có rào chắn thứ hai, một luồng nhanh có thể ghi đè `As` bằng ô tiếp theo trong khi một luồng chậm hơn vẫn đang đọc ô hiện tại. Một rào chắn trong khối có chi phí thấp, vì các luồng của một khối dùng chung một SM; đồng bộ giữa các khối là chuyện khác (Mục 5.3).
+
+## 5. Phân kỳ và các giới hạn khác
+
+### 5.1 Phân kỳ rẽ nhánh
+
+Vì một warp phát mỗi lần một lệnh cho mọi luồng của nó, các luồng đi theo hai phía khác nhau của một lệnh rẽ nhánh không thể chạy cùng lúc. Khi chúng không thống nhất, warp bị **phân kỳ** (divergence): phần cứng thực thi một nhánh trong khi các luồng còn lại bị che đi, rồi đến nhánh kia (Hwu, Kirk và El Hajj, 2022). Trong mô hình SIMT cổ điển, các luồng hội tụ lại sau lệnh rẽ nhánh; các GPU NVIDIA từ thế hệ Volta lập lịch cho từng luồng một cách độc lập và không bảo đảm hội tụ lại tại điểm đó. Dù thế nào thì kết quả vẫn đúng, nhưng warp mất thời gian bằng cả hai nhánh cộng lại: đây chính là việc che mặt nạ của Mục 2.4, do phần cứng thực hiện.
+
+Chi phí phụ thuộc vào việc các luồng của *cùng một* warp có không thống nhất hay không. Một lệnh rẽ nhánh theo `threadIdx.x % 2` chia mỗi warp làm đôi. Một lệnh rẽ nhánh theo `blockIdx.x`, hoặc theo `threadIdx.x / 32`, cho cùng một kết quả với cả 32 luồng của một warp và không tốn thêm gì. Các thuật toán có luồng điều khiển phụ thuộc dữ liệu, như số lần lặp khác nhau cho từng phần tử hay việc duyệt một cây không đều, mất hiệu suất tỉ lệ với mức độ không thống nhất giữa các luồng của một warp; một cách khắc phục thường gặp là gom các công việc giống nhau vào cùng các warp.
+
+### 5.2 Thao tác nguyên tử
+
+Trong một **biểu đồ tần suất** (histogram), mỗi luồng đọc một phần tử và tăng bộ đếm của ngăn tương ứng, và nhiều luồng có thể cùng rơi vào một ngăn, nên một phép tăng thông thường sẽ gây tranh chấp. Một **thao tác nguyên tử** (atomic operation), như `atomicAdd` của CUDA, thực hiện việc đọc, phép cộng và việc ghi như một bước không thể chia cắt (Hwu, Kirk và El Hajj, 2022). Các thao tác nguyên tử tuần tự hóa những luồng va chạm trên cùng một địa chỉ, nên một biểu đồ tần suất có ít ngăn dành phần lớn thời gian để chờ. Thiết kế thông thường làm theo từng giai đoạn: mỗi khối xây dựng một biểu đồ tần suất riêng trong bộ nhớ dùng chung và cộng nó vào biểu đồ toàn cục ở cuối, một thao tác nguyên tử cho mỗi ngăn của mỗi khối thay vì một thao tác cho mỗi phần tử. Một phép tính tổng toàn cục được xây dựng theo cùng cách, từ các phép rút gọn theo khối. Với giá trị dấu phẩy động, thứ tự của các phép cộng nguyên tử thay đổi giữa các lần chạy, nên câu hỏi về khả năng tái lập của Mục 2.5 quay lại, lần này giữa các lần chạy của cùng một tệp thực thi.
+
+### 5.3 Đồng bộ giữa các khối
+
+Không có rào chắn nào giữa các khối của một lần khởi chạy kernel thông thường. Các khối chạy theo thứ tự do phần cứng chọn, và một lưới có thể có nhiều khối hơn số mà GPU chứa được cùng lúc. Khi đó, một khối quay vòng chờ một khối khác có thể đang chờ một khối không thể bắt đầu cho đến khi chính nó kết thúc, tức một bế tắc (deadlock) (Hwu, Kirk và El Hajj, 2022). Rào chắn toàn cục thông thường là điểm kết thúc của một kernel: các kernel được khởi chạy lần lượt trong cùng một dòng công việc chạy theo thứ tự. Cái giá phải trả là một lần khởi chạy và việc mất mọi thứ đang giữ trong thanh ghi và bộ nhớ dùng chung. Một bộ giải lặp cần một phép tích vô hướng toàn cục ở mỗi bước lặp phải trả cái giá này ở mỗi bước, và với các bài toán nhỏ, các lần khởi chạy có thể chiếm phần lớn thời gian chạy.
+
+### 5.4 Độ chính xác số
+
+Thông lượng của phép tính độ chính xác kép (FP64) so với độ chính xác đơn (FP32) khác nhau rất nhiều giữa các sản phẩm GPU, và thấp hơn nhiều trên các sản phẩm thiết kế chủ yếu cho đồ họa so với các sản phẩm thiết kế cho tính toán khoa học. Một chương trình cần độ chính xác kép nên kiểm tra con số này cho sản phẩm cụ thể trong tài liệu của nhà sản xuất; bài này không trích dẫn con số nào. Độ chính xác trước hết là một câu hỏi số học: một bộ giải mất độ chính xác ở độ chính xác đơn không trở nên đúng chỉ vì nó chạy nhanh hơn.
+
+### 5.5 Các dạng lỗi
+
+Những cách thường gặp khiến một chương trình GPU chạy sai là:
+
+- **Luồng vượt biên.** Thiếu điều kiện bảo vệ `if (i < n)` khiến khối cuối cùng đọc và ghi vượt quá cuối mảng.
+- **Thiếu hoặc đặt sai rào chắn.** Thiếu `__syncthreads()` tạo ra một tranh chấp có thể chỉ lộ ra với một số đầu vào; một rào chắn bên trong một nhánh mà không phải mọi luồng của khối đều đi vào là không được phép và có thể làm treo khối (Hwu, Kirk và El Hajj, 2022).
+- **Lỗi không được kiểm tra.** Một lần khởi chạy kernel không trả về giá trị; một lần khởi chạy thất bại hay một kernel gặp lỗi chỉ được báo qua một truy vấn lỗi sau đó, và mã không bao giờ kiểm tra sẽ tiếp tục với dữ liệu sai.
+- **Đo thời gian sai thời điểm.** Các lần khởi chạy là bất đồng bộ, nên một bộ đếm thời gian được đọc ngay sau lần khởi chạy đo thời gian khởi chạy chứ không phải kernel, trừ khi host (bộ xử lý trung tâm điều khiển GPU) chờ GPU trước. Các quy tắc của [bài thứ nhất](/vi/blog/performance-models-and-scaling-laws) (mục 6) vẫn áp dụng, cộng thêm cái bẫy này.
+- **Truyền dữ liệu tốn hơn cả kernel**, chủ đề của Mục 6.
+- **Độ lấp đầy thấp và truy cập không gộp**, khiến một kernel đúng chỉ đạt một phần nhỏ những gì phần cứng cho phép.
+
+## 6. Khi nào chuyển tải tính toán có lợi
+
+### 6.1 Một mô hình chi phí
+
+Chuyển một phép tính từ CPU sang GPU, tức **chuyển tải tính toán** (offloading), chỉ có lợi nếu thời gian của GPU kể cả việc truyền dữ liệu ngắn hơn thời gian của CPU. Với $Q_{\mathrm{link}}$ là số byte phải đi qua đường kết nối giữa host và GPU và $B_{\mathrm{link}}$ là băng thông của đường kết nối,
+
+$$
+T_{\mathrm{gpu}} = T_{\mathrm{transfer}} + T_{\mathrm{kernel}} = \frac{Q_{\mathrm{link}}}{B_{\mathrm{link}}} + T_{\mathrm{kernel}},
+$$
+
+được so sánh với $T_{\mathrm{cpu}}$. Cả hai thời gian kernel đều được lấy bằng cận roofline viết dưới dạng thời gian, $\max(W/P_{\mathrm{peak}},\ Q/B)$, trong đó $W$ là số phép toán và $Q$ là số byte di chuyển giữa bộ xử lý và bộ nhớ riêng của nó. Mọi số liệu máy đều là số tròn giả định, không phải số đo và không phải thông số của bất kỳ sản phẩm nào: một CPU với $P_{\mathrm{peak}} = 500$ GFLOP/s và $B = 100$ GB/s, một GPU với $P_{\mathrm{peak}} = 10\,000$ GFLOP/s và $B = 1000$ GB/s, và một đường kết nối với host có $B_{\mathrm{link}} = 25$ GB/s, trong đó việc truyền dữ liệu không chồng lấp với tính toán. Chương trình `offload.py` tính mô hình này:
+
+```python
+# Python 3. Every machine figure here is ASSUMED for illustration.
+P_CPU, B_CPU = 500e9, 100e9      # assumed CPU: 500 GFLOP/s, 100 GB/s
+P_GPU, B_GPU = 10e12, 1000e9     # assumed GPU: 10 000 GFLOP/s, 1000 GB/s
+B_LINK = 25e9                    # assumed host link: 25 GB/s, no overlap
+
+def roofline_time(W, Q, P, B):
+    return max(W / P, Q / B)
+
+def compare(name, W, Q_mem, Q_link):
+    t_cpu = roofline_time(W, Q_mem, P_CPU, B_CPU)
+    t_xfer = Q_link / B_LINK
+    t_kern = roofline_time(W, Q_mem, P_GPU, B_GPU)
+    t_gpu = t_xfer + t_kern
+    print(f"{name:<16} {t_cpu*1e3:9.4f} {t_xfer*1e3:9.4f} {t_kern*1e3:9.4f}"
+          f" {t_gpu*1e3:9.4f} {t_cpu/t_gpu:8.2f}")
+
+...
+for n in (10**6, 10**8):         # axpy: 2n FLOP, 24n bytes in memory and over the link
+    compare(f"axpy n={n:.0e}", 2 * n, 24 * n, 24 * n)
+for n in (128, 512, 1024, 4096): # matmul: 2n^3 FLOP, 24n^2 bytes
+    compare(f"matmul n={n}", 2 * n**3, 24 * n**2, 24 * n**2)
+...
+```
+
+```text
+kernel               T_cpu    T_xfer    T_kern     T_gpu T_cpu/T_gpu   (times in ms)
+axpy n=1e+06        0.2400    0.9600    0.0240    0.9840     0.24
+axpy n=1e+08       24.0000   96.0000    2.4000   98.4000     0.24
+matmul n=128        0.0084    0.0157    0.0004    0.0161     0.52
+matmul n=512        0.5369    0.2517    0.0268    0.2785     1.93
+matmul n=1024       4.2950    1.0066    0.2147    1.2214     3.52
+matmul n=4096     274.8779   16.1061   13.7439   29.8500     9.21
+matmul break-even: n = 253, intensity over the link 21.1 FLOP/byte
+```
+
+Các số byte là giá trị tối thiểu. Với axpy, $x$ và $y$ được gửi đi và $y$ được trả về, 24 byte cho mỗi phần tử. Với phép nhân ma trận, $A$ và $B$ được gửi đi và $C$ được trả về, $24n^2$ byte, và mỗi ma trận được giả định đi qua giao diện bộ nhớ của mỗi bộ xử lý một lần, điều mà kỹ thuật chia khối tiến gần tới nhưng không đạt được.
+
+### 6.2 Đọc kết quả
+
+Axpy không bao giờ có lợi, ở bất kỳ kích thước nào. Kernel GPU của nó nhanh hơn của CPU 10 lần, nhưng việc truyền dữ liệu mất thời gian gấp 40 lần kernel GPU, và cả thời gian truyền lẫn thời gian CPU đều tăng tỉ lệ với $n$. Vì vậy tỉ số là cố định: $T_{\mathrm{cpu}}/T_{\mathrm{gpu}} \approx (24n/B)/(24n/B_{\mathrm{link}}) = B_{\mathrm{link}}/B = 0.25$, với $B$ là băng thông bộ nhớ của CPU. Chuyển một byte qua đường kết nối tốn hơn thời gian CPU bỏ ra để đọc nó từ bộ nhớ của chính mình, và axpy làm quá ít việc với mỗi byte để bù lại chênh lệch đó.
+
+Phép nhân ma trận có lợi từ các kích thước vừa phải trở lên. Nó thực hiện $2n^3$ phép toán trên $24n^2$ byte được truyền, một **cường độ qua đường kết nối** (intensity over the link) bằng $W/Q_{\mathrm{link}} = n/12$ FLOP/byte, tăng theo $n$. Với $n$ lớn, cả hai bộ xử lý đều bị giới hạn bởi tính toán (compute-bound), và với $P_{\mathrm{cpu}}$ và $P_{\mathrm{gpu}}$ là hai tốc độ đỉnh, chuyển tải tính toán có lợi khi
+
+$$
+\frac{24n^2}{B_{\mathrm{link}}} + \frac{2n^3}{P_{\mathrm{gpu}}} < \frac{2n^3}{P_{\mathrm{cpu}}}.
+$$
+
+Chia cho $2n^2$, ta được
+
+$$
+n > \frac{12}{B_{\mathrm{link}} \left( 1/P_{\mathrm{cpu}} - 1/P_{\mathrm{gpu}} \right)} = \frac{12}{25 \times 10^9 \times (2 \times 10^{-12} - 10^{-13})} \approx 252.6,
+$$
+
+khớp với kết quả tìm kiếm của chương trình, $n = 253$. Ở kích thước đó, cường độ qua đường kết nối khoảng 21 FLOP/byte, gần với $P_{\mathrm{cpu}}/B_{\mathrm{link}} = 20$ FLOP/byte: chuyển tải tính toán cần xấp xỉ số phép toán trên mỗi byte được truyền bằng số phép toán mà CPU thực hiện được trong thời gian một byte đi qua đường kết nối.
+
+Đây là mô hình roofline áp dụng cho đường kết nối: đường kết nối với host đóng vai trò thêm một mức của phân cấp bộ nhớ (memory hierarchy), và điều quan trọng là cường độ của công việc được chuyển tải đối với nó. Các kernel có cường độ thấp, như các phép cập nhật từng phần tử hay các phép nhân ma trận – vector của [các bộ giải hệ tuyến tính lặp](/blog/solving-large-linear-systems#4-stationary-iterative-methods), tự chúng không bù được một lần truyền dữ liệu. Chúng có lợi khi dữ liệu *ở lại* trên GPU qua nhiều kernel: một bộ giải lặp sao chép ma trận của nó một lần và chạy hàng trăm bước lặp trên đó có cường độ của cả quá trình giải, chứ không phải của một bước lặp (Bài tập 5).
+
+### 6.3 Giới hạn của mô hình
+
+Giống như mô hình roofline, mô hình này lạc quan. Nó giả định cả hai bộ xử lý đều đạt tới mái của mình; một mức hụt bằng nhau ở cả hai phía sẽ không làm thay đổi kết luận, nhưng một mức hụt không bằng nhau thì có. Nó bỏ qua các chi phí cố định của việc bắt đầu một lần truyền và khởi chạy một kernel, những chi phí khiến các bài toán nhỏ bất lợi cho GPU hơn so với bảng cho thấy. Nó giả định việc truyền không chồng lấp với tính toán, điều mà các mô hình lập trình GPU cho phép khi công việc được chia thành nhiều phần. Và các số liệu của nó là tự đặt ra: kích thước hòa vốn tỉ lệ với $P_{\mathrm{cpu}}/B_{\mathrm{link}}$, nên nó phải được tính lại với số liệu đo được hoặc được công bố trước khi dùng để quyết định bất cứ điều gì.
+
+## 7. Bài tập
+
+**Bài tập 1.** Một thanh ghi AVX-512 có bao nhiêu làn cho số double và cho số float 32 bit? Với vòng lặp đa thức của Mục 2.3 và với axpy trên các mảng lớn hơn bộ nhớ đệm, độ rộng vector đặt ra cận nào cho hệ số tăng tốc (speedup) so với bản biên dịch vô hướng, và vòng lặp nào trong hai có thể tiến gần tới cận đó?
+
+<details>
+<summary>Đáp án</summary>
+
+8 số double hoặc 16 số float, nên mức lợi từ phép tính số học bị giới hạn ở 8 với số double. Vòng lặp đa thức, bị giới hạn bởi phép tính số học, có thể tiến gần tới cận đó (nó đạt 3.3 đến 3.6 với 4 làn và 3.9 với 8 làn trên máy tham chiếu). Axpy trên các mảng lớn bị giới hạn bởi $B\,I$ với $I \approx 0.083$ FLOP/byte; độ rộng không xuất hiện trong cận này, nên một khi vòng lặp chạm tới mái băng thông, vector rộng hơn không mang lại gì, như các bản biên dịch 256 bit và 512 bit đã cho thấy.
+
+</details>
+
+**Bài tập 2.** Vòng lặp nào trong các vòng lặp sau có thể được vector hóa với vector 8 làn mà không làm thay đổi kết quả? (a) `a[i] = a[i + 4] + b[i]`; (b) `a[i] = a[i - 4] + b[i]`; (c) `a[i] = a[i - 8] + b[i]`.
+
+<details>
+<summary>Đáp án</summary>
+
+(a) Có. Một lần lặp vector bao gồm $i, \dots, i+7$ nạp $a_{i+4}, \dots, a_{i+11}$ trước khi ghi $a_i, \dots, a_{i+7}$, nên nó đọc các giá trị cũ, như vòng lặp tuần tự. (b) Không. Lần lặp $i$ cần $a_{i-4}$ do lần lặp $i-4$ tính ra, nên các làn 4 đến 7 cần kết quả của các làn 0 đến 3 của cùng một lệnh; khoảng cách phụ thuộc 4 chỉ cho phép tối đa 4 làn. (c) Có: khoảng cách bằng độ dài vector, nên mỗi vector chỉ phụ thuộc vào vector trước đó, vốn đã được ghi.
+
+</details>
+
+**Bài tập 3.** Giả sử bộ nhớ GPU được đọc theo các đoạn 128 byte được căn lề và một warp gồm 32 luồng nạp mỗi luồng một số double. Có bao nhiêu đoạn được đọc, và tỉ lệ số byte được di chuyển thực sự được dùng là bao nhiêu, với các bước nhảy 1, 2 và 16 số double?
+
+<details>
+<summary>Đáp án</summary>
+
+Bước nhảy 1: 256 byte trong 2 đoạn, dùng hết (100%). Bước nhảy 2: 512 byte trong 4 đoạn, dùng 256 byte (50%). Bước nhảy 16: mỗi số double nằm trong đoạn riêng của nó, 32 đoạn hay 4096 byte cho 256 byte hữu ích, $256/4096 = 6.25\%$. Lãng phí tăng theo bước nhảy cho đến khi mỗi phần tử cần một đoạn riêng.
+
+</details>
+
+**Bài tập 4.** Trong một warp, các luồng có `threadIdx.x % 4 == 0` thực thi một nhánh mất 120 chu kỳ và các luồng còn lại một nhánh thay thế mất 40 chu kỳ. Warp mất bao lâu cho vùng rẽ nhánh này? Nếu điều kiện là `threadIdx.x / 32 % 4 == 0` thì sao?
+
+<details>
+<summary>Đáp án</summary>
+
+Với `threadIdx.x % 4`, mỗi warp chứa cả hai loại luồng (8 và 24), nên mỗi warp thực thi cả hai nhánh: $120 + 40 = 160$ chu kỳ. Với `threadIdx.x / 32 % 4`, điều kiện như nhau với cả 32 luồng của một warp, nên mỗi warp thực thi một nhánh: 120 chu kỳ với một trong bốn warp và 40 chu kỳ với các warp còn lại, không có phân kỳ.
+
+</details>
+
+**Bài tập 5.** Một bộ giải lặp thực hiện 500 bước lặp, mỗi bước lặp đọc 1 GB dữ liệu với cường độ 0.1 FLOP/byte. Với máy giả định của Mục 6.1, hãy so sánh thời gian CPU với thời gian GPU trong hai trường hợp. Ở (a), 1 GB được sao chép sang GPU một lần và chỉ một kết quả nhỏ được trả về. Ở (b), dữ liệu được sao chép sang GPU và trở về ở mỗi bước lặp (2 GB mỗi bước lặp).
+
+<details>
+<summary>Đáp án</summary>
+
+Mỗi bước lặp thực hiện $10^8$ phép toán trên $10^9$ byte, nên nó bị giới hạn bởi bộ nhớ trên cả hai bộ xử lý. CPU: $10^9/(100 \times 10^9) = 10$ ms mỗi bước lặp, tổng cộng 5 s. (a) GPU: một lần truyền $10^9/(25 \times 10^9) = 40$ ms cộng $500 \times 1$ ms $= 0.5$ s, khoảng 0.54 s, nhanh hơn CPU khoảng 9 lần. (b) GPU: $500 \times (80 + 1)$ ms $= 40.5$ s, chậm hơn CPU khoảng 8 lần. Kernel vẫn như cũ; chỉ có vị trí đặt dữ liệu là khác.
+
+</details>
+
+**Bài tập 6.** Với phép nhân ma trận chia khối của Mục 4.3 và $T = 32$, cường độ đối với bộ nhớ toàn cục là bao nhiêu, và mỗi khối cần bao nhiêu bộ nhớ dùng chung?
+
+<details>
+<summary>Đáp án</summary>
+
+$I = T/8 = 4$ FLOP/byte. Hai ô $32 \times 32$ số double chiếm $2 \times 1024 \times 8 = 16\,384$ byte, tức 16 KiB. Đi từ $T = 16$ lên $T = 32$ làm cường độ tăng gấp đôi (từ 2 lên 4 FLOP/byte) nhưng làm bộ nhớ dùng chung tăng gấp bốn (từ 4 KiB lên 16 KiB) và số luồng mỗi khối cũng vậy (từ 256 lên 1024), điều này giới hạn số khối mà một SM chứa được: kích thước ô đánh đổi giữa sự dùng lại và độ lấp đầy.
+
+</details>
+
+## 8. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| Song song dữ liệu là gì? | Cùng một phép toán áp dụng độc lập cho nhiều phần tử; phần cứng SIMD khai thác nó bằng một lệnh cho nhiều phần tử. |
+| Thanh ghi vector x86 rộng bao nhiêu? | 128 bit (SSE), 256 bit (AVX, AVX2) và 512 bit (AVX-512): 2, 4 và 8 số double. |
+| Vòng lặp nào được lợi từ vector hóa? | Vòng lặp bị giới hạn bởi tính toán, với hệ số tối đa bằng số làn (3.3 đến 3.6 với 4 làn trên máy tham chiếu); vòng lặp bị giới hạn bởi bộ nhớ dừng ở mái băng thông (axpy nhanh hơn 1.4 đến 1.6 lần, và không được thêm gì từ 8 làn). |
+| Điều gì cản trở vector hóa? | Phụ thuộc mang qua vòng lặp, khả năng trùng địa chỉ (cách chữa: `restrict`), rẽ nhánh (xử lý bằng che mặt nạ), bước nhảy khác một và cách bố trí AoS, và các phép rút gọn dấu phẩy động giữ thứ tự. |
+| Vì sao một tổng đã vector hóa có thể khác? | Nó cộng theo thứ tự khác, và phép cộng dấu phẩy động không có tính kết hợp; kết quả thay đổi ở các bit cuối. |
+| GPU thực thi một kernel như thế nào? | Dưới dạng một lưới các khối luồng, mỗi khối trên một SM, được thực thi theo các warp 32 luồng dùng chung một lệnh (SIMT). |
+| GPU che giấu độ trễ bộ nhớ như thế nào? | Bằng cách giữ nhiều warp thường trú và chuyển đổi giữa chúng; số byte đang trên đường truyền phải bằng băng thông nhân độ trễ. |
+| Điều gì làm truy cập bộ nhớ GPU hiệu quả? | Truy cập gộp bởi các luồng liên tiếp, và dùng lại dữ liệu qua các ô trong bộ nhớ dùng chung, làm cường độ tăng một hệ số $T$. |
+| GPU còn bị giới hạn bởi gì nữa? | Phân kỳ trong warp, cạnh tranh (contention) trên các thao tác nguyên tử, đồng bộ toàn cục chỉ ở ranh giới giữa các kernel, và thông lượng FP64 trên một số sản phẩm. |
+| Khi nào chuyển tải tính toán có lợi? | Khi công việc được chuyển tải có cường độ cao đối với đường kết nối với host, hoặc khi dữ liệu ở lại trên GPU qua nhiều kernel. |
+
+Bài này vẫn ở bên trong một máy duy nhất, nơi các làn vector và các luồng GPU dùng chung một bộ nhớ hoặc đến được nó qua một đường kết nối duy nhất. Bài cuối cùng, [Bộ nhớ phân tán và truyền thông điệp](/vi/blog/distributed-memory-and-message-passing), loại bỏ bộ nhớ dùng chung đó: các tiến trình (process) trên các nút (node) riêng biệt chỉ phối hợp với nhau bằng cách gửi thông điệp, và chi phí của mỗi thông điệp, gồm một độ trễ cộng với một thời gian cho mỗi byte, đóng vai trò mà đường kết nối với host đã đóng ở Mục 6. Khi đó, cùng một câu hỏi, mỗi byte được truyền phải đổi lấy bao nhiêu công việc, quyết định một phép tính mở rộng được tới đâu trên nhiều nút.
+
+### Tài liệu tham khảo
+
+- M. J. Flynn, "Very high-speed computing systems," *Proceedings of the IEEE*, vol. 54, no. 12, pp. 1901–1909, 1966.
+- M. J. Flynn, "Some computer organizations and their effectiveness," *IEEE Transactions on Computers*, vol. C-21, no. 9, pp. 948–960, 1972.
+- J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017.
+- W.-m. W. Hwu, D. B. Kirk and I. El Hajj, *Programming Massively Parallel Processors: A Hands-on Approach*, 4th ed., Morgan Kaufmann, 2022.
+- Intel Corporation, *Intel 64 and IA-32 Architectures Software Developer's Manual*, 2024.
+- E. Lindholm, J. Nickolls, S. Oberman and J. Montrym, "NVIDIA Tesla: A unified graphics and computing architecture," *IEEE Micro*, vol. 28, no. 2, pp. 39–55, 2008.
+- J. D. C. Little, "A proof for the queuing formula: L = λW," *Operations Research*, vol. 9, no. 3, pp. 383–387, 1961.
+- OpenMP Architecture Review Board, *OpenMP Application Programming Interface*, version 5.2, 2021.
+- R. M. Stallman and the GCC Developer Community, *Using the GNU Compiler Collection*, for GCC version 13.3, Free Software Foundation, 2024.

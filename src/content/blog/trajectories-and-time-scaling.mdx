@@ -1,0 +1,528 @@
+---
+title: "From Paths to Trajectories: Time Scaling and Velocity Profiles"
+description: "Learn to turn a geometric path into a timed trajectory with polynomial, trapezoidal and S-curve profiles, splines and checks against joint limits."
+publishedAt: "2026-10-17"
+category: "Robotics and Control"
+tags:
+  - robotics
+  - motion planning
+  - trajectory generation
+series: motion-planning
+seriesOrder: 4
+---
+
+The first three entries answer a geometric question: which sequence of configurations takes the robot from start to goal without collision. The [third entry](/blog/sampling-based-planning-prm-and-rrt) found such paths with sampling-based planners and, in its Section 6, shortened and smoothed them; a path of that kind is the input here. A path says where the robot goes but not when. Motors, however, are commanded with positions, velocities and accelerations at given times, and they can deliver only so much of each. This fourth entry of [Motion Planning for Robots](/series/motion-planning) adds time: it turns a path into a **trajectory**, a motion with a schedule, that respects the robot's velocity, acceleration and jerk limits.
+
+The entry builds on the configuration space and the path of the [first entry](/blog/configuration-space-and-the-planning-problem#4-paths-cost-and-what-a-planner-guarantees), and on the two-link arm, its inverse kinematics and its Jacobian from [Forward and Inverse Kinematics of a Planar Arm](/blog/planar-arm-kinematics#5-velocities-and-the-jacobian). It shows how the schedule along a path sets the joint velocities and accelerations, and derives the standard velocity profiles and the fastest schedule along a fixed path. It then carries a trajectory through waypoints with splines and ends with the checks a trajectory must pass before it is sent to a robot. It assumes calculus up to the second derivative and the ability to read Python.
+
+**Conventions.** These follow the series. A configuration is $q$, the configuration space $\mathcal{C}$ and its free part $\mathcal{C}_{\mathrm{free}}$. A path is a continuous map $\sigma : [0, 1] \to \mathcal{C}_{\mathrm{free}}$ with $\sigma(0) = q_{\mathrm{start}}$ and $\sigma(1) = q_{\mathrm{goal}}$; a trajectory is $q(t)$ for $t \in [0, T]$, with duration $T$; and a **time scaling** is a function $s(t)$ from $[0, T]$ onto $[0, 1]$ with $q(t) = \sigma(s(t))$. A dot is a derivative with respect to time ($\dot s = ds/dt$) and a prime a derivative with respect to the path parameter ($\sigma'(s) = d\sigma/ds$). Joint $i$ has a speed limit $v_{\max,i}$ in rad/s, an acceleration limit $a_{\max,i}$ in rad/s² and, where it matters, a jerk limit $j_{\max,i}$ in rad/s³. The arm has joint angles $\theta_1, \theta_2$ and link lengths $l_1 = 1.0$ m and $l_2 = 0.7$ m. Every example uses the limits $v_{\max} = 1.0$ rad/s, $a_{\max} = 2.0$ rad/s² and $j_{\max} = 10$ rad/s³ for both joints: these are round values chosen for illustration, not the data of a real arm. Angles are in radians. The code is Python 3.13 with NumPy 2.5 (no SciPy), and all computations are deterministic, so rerunning the programs reproduces every quoted number exactly.
+
+## 1. Paths and trajectories
+
+### 1.1 Separating geometry from timing
+
+The path $\sigma(s)$ fixes the geometry: the configurations the robot passes through and their order. The trajectory $q(t)$ fixes the geometry and the timing together. Writing $q(t) = \sigma(s(t))$ splits the problem into two steps: a planner finds a collision-free $\sigma$, and a time-scaling step chooses how fast to move along it. The split works because, when obstacles do not move, collision depends only on the geometry, while the motor limits depend on the timing; the timing can then be chosen without repeating the geometric search.
+
+The split has a cost: fixing the geometry first rules out motions that would be faster on a slightly different path, such as a wider arc through a corner. Planning geometry and timing together, in the space of positions and velocities, is called **kinodynamic planning**; it is harder, and this entry does not treat it. Lynch and Park present trajectory generation in this decoupled form, as a path combined with a time scaling, and this series follows it; its limits are stated where they matter.
+
+### 1.2 The chain rule
+
+Differentiating $q(t) = \sigma(s(t))$ once and twice with respect to time gives the joint velocity and acceleration:
+
+$$
+\dot q = \sigma'(s)\,\dot s, \qquad
+\ddot q = \sigma'(s)\,\ddot s + \sigma''(s)\,\dot s^2 .
+$$
+
+The velocity is the path's tangent $\sigma'(s)$ scaled by the **path speed** $\dot s$. The acceleration has two terms. The first, $\sigma'(s)\,\ddot s$, is along the tangent and comes from speeding up or slowing down. The second, $\sigma''(s)\,\dot s^2$, comes from the curvature of the path and grows with the square of the speed: even at constant path speed a curved path demands acceleration. This term forces a robot to slow down on tight curves, and it causes most of the difficulty in Section 4.
+
+A third derivative gives the **jerk**, the rate of change of acceleration. Jerk limits come mainly from the structure rather than the motor: a sudden change of acceleration excites vibration in the links, gearboxes and payload. An acceleration that jumps has infinite jerk at the jump.
+
+### 1.3 The straight line in joint space
+
+The simplest path is a straight line in joint space,
+
+$$
+\sigma(s) = q_{\mathrm{start}} + s\,(q_{\mathrm{goal}} - q_{\mathrm{start}}), \qquad
+\sigma'(s) = \Delta q, \qquad \sigma''(s) = 0,
+$$
+
+with $\Delta q = q_{\mathrm{goal}} - q_{\mathrm{start}}$. The curvature term vanishes, so $\dot q = \Delta q\,\dot s$ and $\ddot q = \Delta q\,\ddot s$: every joint moves in proportion, starts and stops at the same time, and the joint limits become limits on $\dot s$ and $\ddot s$ alone,
+
+$$
+|\dot s| \le \min_i \frac{v_{\max,i}}{|\Delta q_i|}, \qquad
+|\ddot s| \le \min_i \frac{a_{\max,i}}{|\Delta q_i|}.
+$$
+
+The joint with the largest ratio of displacement to limit sets the pace, and the others move below their limits. The running example of Sections 2 and 3 moves the arm from $q_{\mathrm{start}} = (-0.5, 1.8)$ to $q_{\mathrm{goal}} = (1.0, 0.6)$, so $\Delta q = (1.5, -1.2)$ rad. A straight line in joint space is not a straight line of the gripper: the forward kinematics of the arm bends it into a curve in the plane. Section 4 treats the opposite case, a straight line of the gripper, which is curved in joint space.
+
+## 2. Polynomial time scaling
+
+### 2.1 The cubic
+
+A time scaling for a motion that starts and ends at rest must satisfy four conditions: $s(0) = 0$, $s(T) = 1$, $\dot s(0) = 0$ and $\dot s(T) = 0$. A cubic polynomial has four coefficients, so it can meet all four. With the normalized time $\tau = t/T$ and $s = c_0 + c_1 \tau + c_2 \tau^2 + c_3 \tau^3$, the conditions at $\tau = 0$ give $c_0 = c_1 = 0$, and those at $\tau = 1$ give $c_2 + c_3 = 1$ and $2c_2 + 3c_3 = 0$, so $c_2 = 3$ and $c_3 = -2$:
+
+$$
+s(t) = 3\left(\frac{t}{T}\right)^2 - 2\left(\frac{t}{T}\right)^3 .
+$$
+
+Its derivatives are $\dot s = (6\tau - 6\tau^2)/T$ and $\ddot s = (6 - 12\tau)/T^2$. The path speed peaks at $\tau = 1/2$ with $\dot s_{\max} = 3/(2T)$, and the acceleration has its largest magnitude at the two ends, $|\ddot s|_{\max} = 6/T^2$. Those ends are the weakness of the cubic: the acceleration jumps from zero to $6/T^2$ at $t = 0$ and from $-6/T^2$ back to zero at $t = T$, so the jerk is infinite there.
+
+### 2.2 The quintic
+
+Adding the conditions $\ddot s(0) = \ddot s(T) = 0$ gives six conditions, which a fifth-degree polynomial can meet. The same procedure, now with $c_0 = c_1 = c_2 = 0$ and three equations at $\tau = 1$, gives
+
+$$
+s(t) = 10\tau^3 - 15\tau^4 + 6\tau^5, \qquad \tau = t/T .
+$$
+
+The path speed is $\dot s = 30\tau^2(1 - \tau)^2/T$, with its peak $\dot s_{\max} = 15/(8T)$ at $\tau = 1/2$. The acceleration is $\ddot s = 60\,\tau(1 - \tau)(1 - 2\tau)/T^2$; setting its derivative to zero gives $\tau^2 - \tau + 1/6 = 0$, so the peaks lie at $\tau = 1/2 \pm \sqrt{3}/6 \approx 0.2113$ and $0.7887$. There $\tau(1 - \tau) = 1/6$ and $1 - 2\tau = \pm\sqrt{3}/3$, which gives
+
+$$
+|\ddot s|_{\max} = \frac{10}{\sqrt{3}\,T^2} \approx \frac{5.7735}{T^2}.
+$$
+
+The quintic starts and ends with zero acceleration, so its acceleration is continuous and its jerk finite ($60/T^3$ at the ends). Among all rest-to-rest motions of duration $T$ that also start and end with zero acceleration, the quintic is the one that minimizes the integral of the squared jerk; Flash and Hogan used this **minimum-jerk** profile to model human reaching movements. The price is a higher peak speed: $15/8 = 1.875$ against the cubic's $1.5$.
+
+### 2.3 The shortest duration under joint limits
+
+On the straight line of Section 1.3 the joint velocity is $\Delta q_i\,\dot s$ and the joint acceleration $\Delta q_i\,\ddot s$, so a scaling of duration $T$ respects the limits of joint $i$ if
+
+$$
+\frac{c_v\,|\Delta q_i|}{T} \le v_{\max,i} \quad\text{and}\quad
+\frac{c_a\,|\Delta q_i|}{T^2} \le a_{\max,i},
+$$
+
+where $c_v = 3/2$ and $c_a = 6$ for the cubic, and $c_v = 15/8$ and $c_a = 10/\sqrt{3}$ for the quintic. The shortest admissible duration is the largest of the bounds $c_v|\Delta q_i|/v_{\max,i}$ and $\sqrt{c_a|\Delta q_i|/a_{\max,i}}$ over all joints. The program below checks the peak values on a fine grid of $\tau$ and evaluates the bounds for the running example:
+
+```python
+# Two-link arm, straight line in joint space, limits per joint (assumed values).
+q_start = np.array([-0.5, 1.8])        # rad
+q_goal = np.array([1.0, 0.6])          # rad
+v_max = np.array([1.0, 1.0])           # rad/s
+a_max = np.array([2.0, 2.0])           # rad/s^2
+dq = np.abs(q_goal - q_start)
+for name, sd, sdd in [("cubic", 1.5, 6.0), ("quintic", 15/8, 10/np.sqrt(3))]:
+    T_v = np.max(sd * dq / v_max)
+    T_a = np.max(np.sqrt(sdd * dq / a_max))
+    print(f"{name:8s} T_v = {T_v:.4f} s  T_a = {T_a:.4f} s  ->  T = {max(T_v, T_a):.4f} s")
+```
+
+```text
+cubic    max ds/dtau = 1.5000   max |d2s/dtau2| = 6.0000 at tau = 0.0000
+quintic  max ds/dtau = 1.8750   max |d2s/dtau2| = 5.7735 at tau = 0.2113
+cubic    T_v = 2.2500 s  T_a = 2.1213 s  ->  T = 2.2500 s
+quintic  T_v = 2.8125 s  T_a = 2.0809 s  ->  T = 2.8125 s
+```
+
+The first two lines come from the part of the program that the listing omits, which samples $\tau$ at 100,001 points and confirms the derived peaks. For both polynomials the speed limit of joint 1, which moves 1.5 rad, decides the duration. The cubic needs 2.25 s and the quintic 2.81 s, because the quintic's smoother start forces a higher peak speed for the same distance.
+
+Polynomial scalings are simple to compute and give smooth motion, but they waste time: the joint reaches its speed limit only at one instant and its acceleration limit at one or two instants, and for the rest of the motion it moves below both. The profiles of the next section spend as much of the motion as possible at a limit.
+
+## 3. Trapezoidal and S-curve profiles
+
+### 3.1 The trapezoidal profile
+
+A **trapezoidal velocity profile** accelerates at the limit $a$ until it reaches the speed limit $v$, cruises at $v$, then decelerates at $a$ to rest. Its velocity plotted against time is a trapezoid, hence the name. Speeding up from rest to $v$ takes $v/a$ seconds and covers $v^2/(2a)$; slowing down takes the same. If the distance $D$ is at least $v^2/a$, the cruise phase covers the remaining $D - v^2/a$ at speed $v$, and the total duration is
+
+$$
+T = \frac{D - v^2/a}{v} + 2\,\frac{v}{a} = \frac{D}{v} + \frac{v}{a} \qquad (D \ge v^2/a).
+$$
+
+If $D < v^2/a$, the robot must start braking before it reaches $v$, and the profile becomes a **triangular profile**: accelerate for half the distance and decelerate for the other half. Each half covers $D/2 = v_p^2/(2a)$, so the peak speed is $v_p = \sqrt{a D}$ and
+
+$$
+T = 2\sqrt{D/a} \qquad (D < v^2/a).
+$$
+
+For a single axis with symmetric velocity and acceleration limits, this profile is the minimum-time rest-to-rest motion. At every instant it accelerates as hard as allowed, cruises at the speed limit or brakes as hard as allowed, and braking starts at the last moment that still allows a stop at the goal. A profile of this kind (full acceleration, constant speed, full deceleration) is called **bang-coast-bang**; without the constant-speed phase it is **bang-bang**. For joint 1 of the running example, $D = 1.5$ rad and $v^2/a = 0.5$ rad, so $T = 1.5 + 0.5 = 2.0$ s, against 2.25 s for the cubic.
+
+Several joints moving along the straight line of Section 1.3 are synchronized by applying the profile to $s$ itself, with the limits of $\dot s$ and $\ddot s$ from that section: $\dot s_{\max} = \min(1.0/1.5, 1.0/1.2) = 0.6667$ s⁻¹ and $\ddot s_{\max} = \min(2.0/1.5, 2.0/1.2) = 1.3333$ s⁻². The distance in $s$ is 1, and $\dot s_{\max}^2/\ddot s_{\max} = 0.3333 \le 1$, so the profile has a cruise phase and $T = 1/0.6667 + 0.6667/1.3333 = 2.0$ s, the duration of joint 1 alone. Joint 2 follows with peak speed $1.2 \times 0.6667 = 0.8$ rad/s, below its limit.
+
+### 3.2 The S-curve profile
+
+The trapezoid's acceleration jumps between $-a$, 0 and $+a$, so its jerk is infinite at four instants. An **S-curve profile** (also called a jerk-limited or seven-segment profile) limits the jerk to $j$ by ramping the acceleration up and down. Its acceleration phase has three segments: jerk $+j$ until the acceleration reaches $a$, constant acceleration $a$, then jerk $-j$ until the acceleration returns to zero at speed $v$. Its velocity curve then has the S shape that names it. The deceleration phase mirrors the acceleration phase, and a cruise at $v$ lies between them, making seven segments in all.
+
+The minimum duration follows from one observation: the acceleration phase is symmetric about its midpoint, so its average speed is $v/2$. If the acceleration limit is reached ($v \ge a^2/j$), the acceleration phase takes $t_a = v/a + a/j$, the extra $a/j$ being the time lost in the two jerk ramps. It covers $v\,t_a/2$, and the deceleration phase covers the same. With enough distance for a cruise ($D \ge v\,t_a$),
+
+$$
+T = \frac{D - v\,t_a}{v} + 2\,t_a = \frac{D}{v} + \frac{v}{a} + \frac{a}{j}.
+$$
+
+Compared with the trapezoid, the jerk limit costs exactly $a/j$ seconds. If $v < a^2/j$, the acceleration never reaches $a$, the acceleration phase is two jerk ramps lasting $t_a = 2\sqrt{v/j}$ in total, and the same formula $T = D/v + t_a$ holds. For shorter distances the speed limit is not reached and the peak speed $v_p$ must be solved for. If $a$ is still reached, $D = v_p(v_p/a + a/j)$, a quadratic in $v_p$; if neither limit is reached, $D = 2 v_p \sqrt{v_p/j}$, which gives $v_p = (D^2 j/4)^{1/3}$ and $T = 4\,(D/(2j))^{1/3}$. The function below implements the cases:
+
+```python
+def scurve_time(D, v, a, j):
+    """Minimum time and peak speed for a symmetric jerk-limited profile."""
+    def accel_time(vp):                     # time to go from 0 to vp
+        return vp/a + a/j if vp >= a*a/j else 2*np.sqrt(vp/j)
+    if D >= v*accel_time(v):                # cruise at v
+        return D/v + accel_time(v), v
+    vp = (-a*a/j + np.sqrt((a*a/j)**2 + 4*a*D)) / 2   # a reached, v not
+    if vp >= a*a/j:
+        return 2*accel_time(vp), vp
+    vp = (D*D*j/4)**(1/3)                   # neither a nor v reached
+    return 4*np.sqrt(vp/j), vp
+```
+
+The program also implements the trapezoid of Section 3.1 and, as a check, builds the seven segments from the computed peak speed and integrates the piecewise-constant jerk exactly, step by step, to confirm that each profile covers the distance $D$ and ends at rest. For three distances it printed:
+
+```text
+limits v = 1.0 rad/s, a = 2.0 rad/s^2, j = 10.0 rad/s^3
+D = 1.50 rad  trapezoid T = 2.0000 s (peak 1.0000)  S-curve T = 2.2000 s (peak 1.0000)  simulated x = 1.500000, v_end = -1.4e-16
+D = 0.30 rad  trapezoid T = 0.7746 s (peak 0.7746)  S-curve T = 1.0000 s (peak 0.6000)  simulated x = 0.300000, v_end = 3.1e-17
+D = 0.05 rad  trapezoid T = 0.3162 s (peak 0.3162)  S-curve T = 0.5429 s (peak 0.1842)  simulated x = 0.050000, v_end = 3.2e-17
+```
+
+### 3.3 The worked example
+
+For joint 1, $D = 1.5$ rad, and $a^2/j = 0.4$ rad/s is below $v = 1.0$ rad/s, so the S-curve reaches the acceleration limit. Its acceleration phase lasts $t_a = 1.0/2.0 + 2.0/10 = 0.7$ s and covers $0.35$ rad, so with 0.8 rad left for the cruise, $T = 1.5 + 0.5 + 0.2 = 2.2$ s: 0.2 s longer than the trapezoid, which is the price of smooth acceleration. For $D = 0.3$ rad there is no room for a cruise ($v\,t_a = 0.7$ rad exceeds 0.3 rad); the quadratic gives $v_p = 0.6$ rad/s, which is above $a^2/j = 0.4$, so the acceleration limit is still reached and $T = 2(0.6/2.0 + 0.2) = 1.0$ s, against 0.7746 s for the triangular profile. For $D = 0.05$ rad neither limit is reached, $v_p = 0.1842$ rad/s and $T = 0.5429$ s, about 72% longer than the triangle. The relative cost of the jerk limit grows as the move gets shorter, because the jerk ramps, whose duration does not shrink in proportion to the distance, take up a larger part of a short motion.
+
+The table compares the four profiles of Sections 2 and 3 for the same move of the running example.
+
+| Profile | Duration $T$ (s) | Limit that decides $T$ | Acceleration continuous |
+|---|---|---|---|
+| Cubic | 2.2500 | Speed of joint 1 | No (jumps at both ends) |
+| Quintic | 2.8125 | Speed of joint 1 | Yes |
+| Trapezoidal | 2.0000 | Speed and acceleration of joint 1 | No (four jumps) |
+| S-curve | 2.2000 | Speed, acceleration and jerk of joint 1 | Yes |
+
+Lynch and Park derive the polynomial and trapezoidal scalings and describe the S-curve in the same terms.
+
+## 4. Time-optimal scaling along a path
+
+### 4.1 The phase plane
+
+The profiles of Section 3 assume constant limits on $\dot s$ and $\ddot s$, which holds on a straight line in joint space. On a curved path the chain rule of Section 1.2 couples the two. For each joint the acceleration constraint reads
+
+$$
+-a_{\max,i} \le \sigma_i'(s)\,\ddot s + \sigma_i''(s)\,\dot s^2 \le a_{\max,i},
+$$
+
+so the allowed range of $\ddot s$ depends on where the robot is on the path ($s$) and how fast it is moving there ($\dot s$). The natural place to study the problem is therefore the **phase plane** of $(s, \dot s)$. A time scaling is a curve in this plane from $(0, 0)$ to $(1, 0)$, and the duration of the motion is
+
+$$
+T = \int_0^1 \frac{ds}{\dot s},
+$$
+
+so a faster scaling is one whose curve lies higher. At each point of the plane the constraints allow an interval of accelerations $[L(s, \dot s), U(s, \dot s)]$. Above a certain height, the **velocity limit curve**, no admissible scaling can pass: either a joint would exceed its speed limit $|\sigma_i'(s)|\,\dot s \le v_{\max,i}$, or the interval $[L, U]$ becomes empty. At that speed the curvature term $\sigma''(s)\,\dot s^2$ demands accelerations that no single value of $\ddot s$ can keep within the limits of all joints at once; a single joint's constraint can empty the interval on its own only where $\sigma_i'(s) = 0$, as joint 2's does in Exercise 4.
+
+Bobrow, Dubowsky and Gibson and, independently, Shin and McKay treated this problem in 1985 for a manipulator with known dynamics and limits on its joint torques. They showed that the time-optimal scaling follows the boundary of what is allowed: at every point it uses the largest acceleration $U$ or the smallest $L$, or it runs along the velocity limit curve. It switches from deceleration to acceleration only at points of the velocity limit curve, and from acceleration to deceleration where a forward curve of maximum acceleration meets a backward curve of maximum deceleration.
+
+Bobrow et al. compute it by integrating forward from the start with maximum acceleration and backward from the goal with maximum deceleration, and by finding the switching points that join these curves. The joint acceleration constraint of this entry is a special case of their torque constraint: for a robot with identity inertia and no velocity-dependent or gravity terms, the torque bound becomes the inequality above. Joint speed limits add one more boundary, which the scaling may follow; Kunz and Stilman treat time-optimal path following with bounded acceleration and velocity. Finding the switching points reliably is the delicate part. Pham describes the singular cases in which earlier implementations failed and gives an implementation that handles them.
+
+On the straight line of Section 1.3, $\sigma'' = 0$ and the interval $[L, U]$ is the constant interval $[-\ddot s_{\max}, \ddot s_{\max}]$, while the velocity limit curve is the horizontal line $\dot s = \dot s_{\max}$. The time-optimal curve then accelerates at $\ddot s_{\max}$ until it meets that line, runs along it and decelerates at the last moment: it is the trapezoidal profile of Section 3.1. The trapezoid is therefore the time-optimal scaling of a straight segment in joint space under velocity and acceleration limits.
+
+### 4.2 A discretized forward-backward pass
+
+The program below applies the idea on a grid of $N + 1$ values of $s$, working with $x = \dot s^2$, for which the chain rule gives $dx/ds = 2\ddot s$. It first computes the velocity limit curve at every grid point. A backward pass from the goal, where $x = 0$, then computes the fastest speed from which the robot can still stop in time, using the smallest admissible acceleration. A forward pass from the start, where $x = 0$, accelerates as hard as allowed but never rises above the backward result. Each pass caps $x$ at the velocity limit curve.
+
+```python
+def accel_bounds(qp, qpp, x):
+    """Interval [lo, hi] of s'' allowed at s'^2 = x by |qp*s'' + qpp*x| <= A."""
+    lo, hi = -np.inf, np.inf
+    for i in range(len(A)):
+        if abs(qp[i]) < 1e-12:
+            if abs(qpp[i])*x > A[i]:
+                return np.inf, -np.inf               # empty
+            continue
+        b1, b2 = (-A[i] - qpp[i]*x)/qp[i], (A[i] - qpp[i]*x)/qp[i]
+        lo, hi = max(lo, min(b1, b2)), min(hi, max(b1, b2))
+    return lo, hi
+
+def time_optimal(path, N=2000):
+    s = np.linspace(0.0, 1.0, N + 1)
+    ds = s[1] - s[0]
+    geo = [path(si) for si in s]
+    xlim = np.array([x_limit(qp, qpp) for _, qp, qpp in geo])
+    x = np.empty(N + 1)
+    x[N] = 0.0                                       # backward pass: maximum deceleration
+    for k in range(N - 1, -1, -1):
+        lo, _ = accel_bounds(geo[k+1][1], geo[k+1][2], x[k+1])
+        x[k] = min(xlim[k], x[k+1] - 2*ds*lo)
+    x[0] = 0.0                                       # forward pass: maximum acceleration
+    for k in range(N):
+        _, hi = accel_bounds(geo[k][1], geo[k][2], x[k])
+        x[k+1] = min(x[k+1], x[k] + 2*ds*hi)
+    sd = np.sqrt(np.maximum(x, 0.0))
+    dt = 2*ds/(sd[:-1] + sd[1:])                     # time for each step in s
+    return s, sd, xlim, np.concatenate([[0.0], np.cumsum(dt)]), geo
+```
+
+The listing omits three helpers: `x_limit`, which finds the velocity limit curve at one point from the speed limits and, by bisection, from the condition that $[L, U]$ is not empty; the arm's inverse kinematics; and the function `path`, which returns $\sigma(s)$, $\sigma'(s)$ and $\sigma''(s)$. For a straight line of the gripper, $\sigma'$ solves $J(q)\,\sigma' = p_1 - p_0$ with the Jacobian $J$ of the arm, and $\sigma''$ follows from differentiating the forward kinematics twice with respect to $s$ and setting $d^2p/ds^2$, the second derivative of the gripper position along the line, to zero. The time of each step assumes that $\ddot s$ is constant between grid points, so that $x = \dot s^2$ varies linearly in $s$ and the step takes $2\,\Delta s/(\dot s_k + \dot s_{k+1})$.
+
+The path is a straight line of the gripper from $p_0 = (1.4, 0.2)$ m to $p_1 = (0.4, 1.2)$ m, with the elbow solution that has $\sin\theta_2 > 0$ throughout. The line stays between 1.13 m and 1.42 m from the base, well inside the reachable ring $0.3 \le r \le 1.7$ m, so the arm stays away from its singular configurations. The program printed:
+
+```text
+gripper line [1.4 0.2] -> [0.4 1.2], length 1.4142 m
+q_start = [-0.3372  1.1979]  q_goal = [0.6647 1.4921]
+time-optimal T = 1.8180 s
+on the speed limit curve for 25.3% of the grid points
+peak |joint speed| = [1.     0.9376] rad/s
+  s = 0.00  t = 0.0000 s  s_dot = 0.0000 1/s  q_dot = [0. 0.]
+  s = 0.25  t = 0.6099 s  s_dot = 0.8377 1/s  q_dot = [0.6    0.8379]
+  s = 0.50  t = 0.9089 s  s_dot = 0.8320 1/s  q_dot = [0.951  0.2399]
+  s = 0.75  t = 1.2257 s  s_dot = 0.7461 1/s  q_dot = [ 1.    -0.322]
+  s = 1.00  t = 1.8180 s  s_dot = 0.0000 1/s  q_dot = [ 0. -0.]
+fastest quintic scaling: T = max(2.2962, sqrt(5.0918)) = 2.2962 s
+  grid N =  250: T = 1.8207 s  peak |q_ddot| at interval start [2.     2.0155], at interval end [2.0626 2.    ] rad/s^2
+  grid N =  500: T = 1.8192 s  peak |q_ddot| at interval start [2.     2.0094], at interval end [2.0311 2.    ] rad/s^2
+  grid N = 1000: T = 1.8184 s  peak |q_ddot| at interval start [2.     2.0047], at interval end [2.0158 2.    ] rad/s^2
+  grid N = 2000: T = 1.8180 s  peak |q_ddot| at interval start [2.     2.0023], at interval end [2.0079 2.    ] rad/s^2
+  grid N = 4000: T = 1.8178 s  peak |q_ddot| at interval start [2.     2.0012], at interval end [2.004 2.   ] rad/s^2
+  max accel   s in [0.000, 0.235]
+  max decel   s in [0.235, 0.566]
+  speed limit s in [0.566, 0.818]
+  max decel   s in [0.819, 1.000]
+```
+
+### 4.3 Reading the result
+
+The time-optimal scaling takes 1.818 s. The fastest quintic scaling of the same path, found by evaluating the peak joint speed and acceleration of a quintic and stretching it until both fit, takes 2.296 s, so the time-optimal scaling is about 21% faster. The quintic is limited by joint speed (2.2962 s against $\sqrt{5.0918} = 2.2565$ s for acceleration).
+
+The last four lines show which constraint is active along the path, and they have the structure that the theory predicts. Up to $s = 0.235$ the scaling accelerates as hard as the joints allow. From there to $s = 0.566$ the lower bound $L$ is active, and joint 2 is at its acceleration limit of $-2.0$ rad/s². The robot is not braking hard: the path speed stays between 0.82 and 0.84 s⁻¹ over this stretch. The curvature term $\sigma_2''\,\dot s^2$ takes nearly all of joint 2's acceleration budget. From $s = 0.566$ to $0.818$ joint 1 runs at its speed limit of 1.0 rad/s, and the scaling follows the velocity limit curve with neither $U$ nor $L$ active. The final stretch is maximum deceleration to rest. Joint 2 reverses direction near $s = 0.6$, where its velocity changes sign.
+
+The acceleration check in the output qualifies this result. The joint accelerations implied by the discretized profile exceed the limit slightly, because each pass evaluates the acceleration bounds at one end of a grid interval and assumes they hold across it. With 2000 intervals, evaluated at the start of each interval, joint 2 reaches 2.0023 rad/s² (0.12% above the limit); evaluated at the end, joint 1 reaches 2.0079 rad/s² (0.39%). Refining the grid shrinks both the error in the duration (1.8207 s with 250 intervals, 1.8178 s with 4000) and the violation, which halves with each doubling of the grid, but the violation remains at every finite resolution.
+
+A practical implementation either tightens the limits by a small margin before planning or checks the result and corrects it, as Section 6.3 does for splines. More generally, this forward-backward pass is an approximation of the switching-point algorithms, not a substitute for them: it relies on the grid being fine enough to resolve the velocity limit curve, and it gives no guarantee near points where that curve has a sharp minimum.
+
+Time-optimal scaling has other costs. A profile that rides its limits leaves no reserve for a feedback controller to correct tracking errors, so practical systems plan with limits below the true ones. Its accelerations switch abruptly, so its jerk is unbounded unless jerk limits are added. And it is optimal only for the given path.
+
+## 5. Trajectories through waypoints
+
+### 5.1 Why splines
+
+A planner often returns a sequence of **waypoints**, configurations $q_0, q_1, \dots, q_n$ that the robot must pass through, rather than one continuous curve; examples are the vertices of a shortened path from a sampling-based planner and poses taught by an operator. Joining the waypoints with straight segments and timing each with a trapezoid makes the robot stop at every waypoint, since the velocity on a straight segment can change direction only at zero speed. To pass through the waypoints without stopping, the trajectory must be curved near them.
+
+A **cubic spline** is a function that is a cubic polynomial between consecutive waypoints, called **knots** here, and whose value, first derivative and second derivative are continuous at every knot. For a trajectory, that means continuous position, velocity and acceleration. A cubic spline is fitted to each joint separately, with the same knot times $t_0 < t_1 < \dots < t_n$ for all joints, so the joints pass the waypoints together. The knot times are an input: they come from an estimate of how long each segment should take, and Section 6 shows how to check and correct them.
+
+### 5.2 The tridiagonal system
+
+The standard derivation writes each cubic in terms of the unknown accelerations $M_k = \ddot q(t_k)$ at the knots. On the interval from $t_k$ to $t_{k+1}$, of length $h_k = t_{k+1} - t_k$, the acceleration of a cubic is linear in time, so it is fixed by $M_k$ and $M_{k+1}$. Integrating twice and fitting the two waypoint values $y_k$ and $y_{k+1}$ of one joint gives the position on the interval; continuity of the acceleration is then built in. Continuity of the velocity at each interior knot $t_k$ remains to be imposed, and it gives one linear equation for $k = 1, \dots, n - 1$:
+
+$$
+h_{k-1} M_{k-1} + 2\,(h_{k-1} + h_k)\,M_k + h_k M_{k+1}
+= 6\left(\frac{y_{k+1} - y_k}{h_k} - \frac{y_k - y_{k-1}}{h_{k-1}}\right).
+$$
+
+These are $n - 1$ equations for $n + 1$ unknowns, so two end conditions are needed. The **natural spline** sets $M_0 = M_n = 0$, zero acceleration at both ends. The **clamped spline** prescribes the end velocities $v_0$ and $v_n$, which gives
+
+$$
+2h_0 M_0 + h_0 M_1 = 6\left(\frac{y_1 - y_0}{h_0} - v_0\right), \qquad
+h_{n-1} M_{n-1} + 2h_{n-1} M_n = 6\left(v_n - \frac{y_n - y_{n-1}}{h_{n-1}}\right).
+$$
+
+Each equation involves only three neighboring unknowns, so the matrix is **tridiagonal**, with nonzero entries only on the main diagonal and the two next to it. Its diagonal is strictly larger than the sum of the other two entries in each row, which guarantees a unique solution and lets the **Thomas algorithm**, Gaussian elimination specialized to tridiagonal matrices, solve it in $O(n)$ operations without pivoting. De Boor's book treats cubic spline interpolation and its end conditions in detail. The implementation:
+
+```python
+def thomas(sub, diag, sup, rhs):
+    """Solve a tridiagonal system; sub[0] and sup[-1] are unused."""
+    n = len(diag)
+    c, d = np.zeros(n), np.zeros(n)
+    c[0], d[0] = sup[0]/diag[0], rhs[0]/diag[0]
+    for i in range(1, n):
+        m = diag[i] - sub[i]*c[i-1]
+        c[i] = sup[i]/m if i < n - 1 else 0.0
+        d[i] = (rhs[i] - sub[i]*d[i-1])/m
+    x = np.zeros(n)
+    x[-1] = d[-1]
+    for i in range(n - 2, -1, -1):
+        x[i] = d[i] - c[i]*x[i+1]
+    return x
+
+def spline_moments(t, y, v0=None, vn=None):
+    """Second derivatives M_k at the knots. v0, vn = None gives a natural spline
+    (M_0 = M_n = 0); numbers give a clamped spline with those end velocities."""
+    n = len(t) - 1
+    h = np.diff(t)
+    slope = np.diff(y)/h
+    sub, diag, sup, rhs = np.zeros(n+1), np.zeros(n+1), np.zeros(n+1), np.zeros(n+1)
+    for k in range(1, n):
+        sub[k], diag[k], sup[k] = h[k-1], 2*(h[k-1] + h[k]), h[k]
+        rhs[k] = 6*(slope[k] - slope[k-1])
+    if v0 is None:
+        diag[0], diag[n] = 1.0, 1.0                  # M_0 = 0, M_n = 0
+    else:
+        diag[0], sup[0], rhs[0] = 2*h[0], h[0], 6*(slope[0] - v0)
+        sub[n], diag[n], rhs[n] = h[n-1], 2*h[n-1], 6*(vn - slope[n-1])
+    return thomas(sub, diag, sup, rhs)
+```
+
+The evaluation function, omitted here, computes the position, velocity and acceleration on each interval from the knot accelerations.
+
+### 5.3 A numerical example for the arm
+
+The arm moves from $q_{\mathrm{start}} = (-0.5, 1.8)$ to $q_{\mathrm{goal}} = (1.0, 0.6)$, as in Section 2, but now through two intermediate waypoints $(0.0, 1.9)$ and $(0.6, 1.2)$, at the knot times 0, 0.8, 1.6 and 2.8 s. By the forward kinematics, the gripper passes through $(1.065, 0.195)$, $(0.774, 0.662)$, $(0.666, 1.246)$ and $(0.520, 1.541)$ m. The program fits both kinds of spline to both joints, samples them every millisecond and checks continuity at the interior knots by evaluating the cubics on either side at the knot:
+
+```text
+natural spline
+  joint 1: knot accelerations [ 0.      0.4112 -0.7072  0.    ] rad/s^2
+           knot velocities    [0.5702 0.7346 0.6162 0.1919] rad/s
+           peak |v| = 0.7951 rad/s, peak |a| = 0.7072 rad/s^2
+  joint 2: knot accelerations [ 0.     -2.1217  0.9868  0.    ] rad/s^2
+           knot velocities    [ 0.4079 -0.4408 -0.8947 -0.3026] rad/s
+           peak |v| = 1.0201 rad/s, peak |a| = 2.1217 rad/s^2
+clamped spline
+  joint 1: knot accelerations [ 2.4916 -0.2956 -0.3716 -0.6475] rad/s^2
+           knot velocities    [-0.      0.8784  0.6115 -0.    ] rad/s
+           peak |v| = 0.8909 rad/s, peak |a| = 2.4916 rad/s^2
+  joint 2: knot accelerations [ 1.723  -2.5084  0.8108  0.8446] rad/s^2
+           knot velocities    [-0.     -0.3142 -0.9932  0.    ] rad/s
+           peak |v| = 1.0725 rad/s, peak |a| = 2.5084 rad/s^2
+  joint 1 at t = 0.8: |jump| in q, v, a = 0.0e+00, 0.0e+00, 0.0e+00
+  joint 1 at t = 1.6: |jump| in q, v, a = 0.0e+00, 0.0e+00, 0.0e+00
+  joint 2 at t = 0.8: |jump| in q, v, a = 0.0e+00, 2.2e-16, 0.0e+00
+  joint 2 at t = 1.6: |jump| in q, v, a = 2.2e-16, 1.1e-16, 0.0e+00
+```
+
+The two end conditions trade different defects. The natural spline has zero acceleration at both ends but nonzero velocity: it would start joint 1 at 0.5702 rad/s from a robot at rest, a step in velocity that no motor can produce. The clamped spline with $v_0 = v_n = 0$ starts and ends at rest, which is what a point-to-point move needs, but its acceleration jumps from zero to 2.4916 rad/s² at $t = 0$ on joint 1. That jump is the same defect as the cubic time scaling of Section 2.1, and the usual remedies are a quintic segment at each end or a spline of higher degree that also fixes the end accelerations. Inside the trajectory both splines are continuous in position, velocity and acceleration: the jumps at the interior knots are zero to within rounding (at most $2.2 \times 10^{-16}$).
+
+The output also shows that this timing is too fast. The clamped spline reaches 1.0725 rad/s and 2.5084 rad/s² on joint 2, above both limits. Choosing knot times is a guess, and the guess must be checked.
+
+## 6. Checking a trajectory
+
+### 6.1 What to check
+
+A trajectory is checked before it is sent to the robot, because a violation found afterwards is found by the hardware: a drive that faults on an overcurrent, a joint that lags behind its command or a link that hits an obstacle. As [Section 4 of the first Introduction to Robotics entry](/blog/what-is-a-robot#4-loops-within-loops) notes, the planner assumes that the trajectory it sends is the trajectory the joints follow, an assumption that holds only for trajectories the joint controllers can follow. The checks are of four kinds:
+
+- the **dynamic limits**: joint speed, acceleration and, where specified, jerk, at every instant;
+- the **joint limits**: every joint stays inside its range of travel, including between waypoints, where a spline can overshoot;
+- **collision**: the robot, moving along the timed trajectory, never meets an obstacle;
+- **continuity**: the trajectory starts at the robot's current state and ends at rest, or at the state the next segment expects.
+
+Most of these properties cannot be checked in closed form for a general trajectory, so they are checked by **sampling**: evaluating the trajectory at a regular time step and testing each sample. The edge checks of the [first entry](/blog/configuration-space-and-the-planning-problem#5-collision-checking) rest on the same idea and share its weakness. A test at the samples says nothing about the motion between them unless the sample spacing is tied to a bound on how far the robot can move.
+
+### 6.2 Sampling, and what it proves
+
+The checker below samples the clamped spline of Section 5.3. It computes the largest ratio of each joint's speed and acceleration to its limit and tests the joint ranges $-\pi \le \theta_1 \le \pi$ and $-2.5 \le \theta_2 \le 2.5$ rad. The obstacle is a disk of radius 0.15 m centered at $(0.95, 1.0)$ m. The checker computes the arm's clearance to it as in [Section 3.2 of the first entry](/blog/configuration-space-and-the-planning-problem#32-the-two-link-arm-and-one-obstacle), with both links treated as line segments. To make the clearance at the samples say something about the whole motion, it bounds how far any point of the arm can move within one sample interval. [Section 5.3 of the first entry](/blog/configuration-space-and-the-planning-problem#53-a-check-that-cannot-miss) showed that no point of the arm moves faster than $(l_1 + l_2)|\dot\theta_1| + l_2|\dot\theta_2|$. Within an interval $\Delta t$, each joint changes by at most its peak speed times $\Delta t$:
+
+```python
+def check(t, Q, dt):
+    tq = np.arange(0.0, t[-1] + dt/2, dt)
+    q, v, a = (np.stack(z, axis=-1) for z in zip(
+        *[spline_eval(t, Q[:, j], spline_moments(t, Q[:, j], 0.0, 0.0), tq) for j in range(2)]))
+    rv, ra = np.abs(v).max(axis=0)/V, np.abs(a).max(axis=0)/A
+    c = clearance(q)
+    # Within one sample interval a point of the arm moves at most
+    # ((l1 + l2) max|theta1_dot| + l2 max|theta2_dot|) dt.
+    vmax = np.abs(v).max(axis=0)
+    step = ((L1 + L2)*vmax[0] + L2*vmax[1])*dt
+    i2 = np.argmax(q[:, 1])
+    ...                                      # printing omitted
+    return max(rv.max(), np.sqrt(ra.max()))
+```
+
+The omitted lines print the results; the function `clearance` computes the distance from the obstacle's center to both link segments and subtracts the radius. The program checks the spline at 1 ms and at 100 ms, then stretches the timing and checks again:
+
+```text
+waypoint times [0.  0.8 1.6 2.8] s
+  dt =   1.0 ms: |v|/v_max = [0.8909 1.0725], |a|/a_max = [1.2458 1.2542]
+     largest theta2 = 1.9219 rad at t = 0.651 s
+     joint range ok: True, min clearance 0.0672 m at t = 1.512 s, motion bound per sample 0.0023 m
+  dt = 100.0 ms: |v|/v_max = [0.8905 1.0724], |a|/a_max = [1.2458 1.2542]
+     largest theta2 = 1.9198 rad at t = 0.700 s
+     joint range ok: True, min clearance 0.0673 m at t = 1.500 s, motion bound per sample 0.2265 m
+stretch factor k = 1.1199; new waypoint times [0.     0.8959 1.7919 3.1358] s
+  dt =   1.0 ms: |v|/v_max = [0.7955 0.9576], |a|/a_max = [0.9933 0.9999]
+     largest theta2 = 1.9219 rad at t = 0.730 s
+     joint range ok: True, min clearance 0.0672 m at t = 1.693 s, motion bound per sample 0.0020 m
+```
+
+At 1 ms the samples come within 0.0672 m of the obstacle, and no point of the arm moves more than 0.0023 m within one interval. Every point of the arm at any instant is therefore within 0.0023 m of where it was at the preceding sample, so its clearance never falls below $0.0672 - 0.0023 = 0.0649$ m: the motion is proven collision-free. At 100 ms the samples report almost the same clearance, 0.0673 m, but the motion bound is 0.2265 m, larger than the clearance, so the coarse check proves nothing: an obstacle smaller than the motion between two samples could lie entirely between them. The dynamic limits show the same effect. The 100 ms samples miss the peak speed of joint 2 only slightly (1.0724 against 1.0725), but a coarse grid can miss a short peak entirely, so the interval must be short compared with the time over which the derivatives change.
+
+The joint ranges are respected, but the spline overshoots its waypoints: $\theta_2$ reaches 1.9219 rad at $t = 0.651$ s, above both of the waypoint values it lies between (1.8 rad at $t = 0$ and 1.9 rad at $t = 0.8$ s). Here the range ends at 2.5 rad and the overshoot is harmless, but a waypoint placed close to a joint limit can be respected at the knot and violated between knots.
+
+### 6.3 Fixing a timing that is too fast
+
+The check found joint 2's speed 7.25% above its limit and the accelerations of both joints about 25% above theirs. For a uniform stretch of time, replacing $q(t)$ with $q(t/k)$ for a factor $k > 1$, every velocity is divided by $k$ and every acceleration by $k^2$, while the path stays the same. The smallest factor that satisfies all the limits is therefore
+
+$$
+k = \max\left(\max_i \frac{\max_t |\dot q_i|}{v_{\max,i}},\; \sqrt{\max_i \frac{\max_t |\ddot q_i|}{a_{\max,i}}}\right) = \max(1.0725,\ \sqrt{1.2542}) = 1.1199 .
+$$
+
+The clamped spline with zero end velocities scales exactly in this way: multiplying all knot times by $k$ gives the stretched trajectory. The recheck confirms that all four ratios are now at most 1, with the acceleration of joint 2 at 0.9999 of its limit (the remaining 0.0001 is the sampling just missing the peak at the knot). The clearance is unchanged at 0.0672 m and is only reached at a different time, 1.693 s instead of 1.512 s. That is the decoupling of Section 1.1 at work: for obstacles that do not move, collision is a property of the path, and retiming cannot create or remove a collision.
+
+Two cases break that rule. If an obstacle moves, collision depends on where the robot is when the obstacle passes, so the check must use the timed trajectory and the obstacle's predicted motion together, and slowing down can cause a collision as easily as prevent one. And the robot never follows its trajectory exactly: a tracking error of a few millimeters can turn a small clearance into a contact. A margin, added by inflating the obstacles or the links, covers the expected tracking error. The [next entry](/blog/path-tracking-and-reactive-avoidance) treats the controllers that keep that error small.
+
+A uniform stretch slows the whole motion to fix a violation in one place. Finer corrections lengthen only the knot intervals near a violation and refit the spline, or apply the time-optimal scaling of Section 4 to the curve that the spline traces; each needs the same check afterwards.
+
+## 7. Exercises
+
+**Exercise 1.** Derive the cubic time scaling for a motion that starts at rest at $s = 0$ and must arrive at $s = 1$ with path speed $\dot s(T) = \dot s_T$, without stopping. Check that $\dot s_T = 0$ gives the cubic of Section 2.1.
+
+<details>
+<summary>Answer</summary>
+
+With $\tau = t/T$ and $s = c_2\tau^2 + c_3\tau^3$ (the conditions at $t = 0$ remove $c_0$ and $c_1$), the end conditions are $c_2 + c_3 = 1$ and $(2c_2 + 3c_3)/T = \dot s_T$. Writing $w = \dot s_T T$, they give $c_3 = w - 2$ and $c_2 = 3 - w$, so $s = (3 - w)\tau^2 + (w - 2)\tau^3$. For $\dot s_T = 0$, $w = 0$ and $s = 3\tau^2 - 2\tau^3$.
+
+</details>
+
+**Exercise 2.** A single joint with $v_{\max} = 1.0$ rad/s and $a_{\max} = 2.0$ rad/s² must turn by 0.4 rad, from rest to rest. Which trapezoidal case applies, what is the peak speed and how long does the move take? How long would a cubic time scaling take under the same limits?
+
+<details>
+<summary>Answer</summary>
+
+$v^2/a = 0.5$ rad exceeds 0.4 rad, so the profile is triangular: $v_p = \sqrt{2.0 \times 0.4} = 0.894$ rad/s and $T = 2\sqrt{0.4/2.0} = 0.894$ s. For the cubic, the speed bound is $1.5 \times 0.4/1.0 = 0.6$ s and the acceleration bound $\sqrt{6 \times 0.4/2.0} = 1.095$ s, so $T = 1.095$ s, decided by the acceleration at the ends.
+
+</details>
+
+**Exercise 3.** For the S-curve of Section 3.3 ($D = 1.5$ rad, $v = 1.0$ rad/s, $a = 2.0$ rad/s²), what jerk limit $j$ makes the move take 2.5 s? What happens to the profile shape if $j$ falls below 4 rad/s³?
+
+<details>
+<summary>Answer</summary>
+
+$T = D/v + v/a + a/j = 2.0 + 2.0/j = 2.5$ s gives $j = 4$ rad/s³. At $j = 4$, $a^2/j = 1.0$ rad/s equals $v$, so the acceleration only touches $a$ for an instant. For smaller $j$ the acceleration limit is no longer reached, the constant-acceleration segment disappears and $t_a = 2\sqrt{v/j}$; the profile has five segments instead of seven, and the duration is $D/v + 2\sqrt{v/j}$, as long as $D \ge v\,t_a$.
+
+</details>
+
+**Exercise 4.** On a path with $\sigma'(s) = (0.5, 0)$ and $\sigma''(s) = (0, 2.0)$ at some $s$, with both joints limited to $a_{\max} = 2.0$ rad/s² and $v_{\max} = 1.0$ rad/s, what is the largest $\dot s$ at which the robot can pass this point? Which limit decides it?
+
+<details>
+<summary>Answer</summary>
+
+The speed limits give $\dot s \le 1.0/0.5 = 2.0$ s⁻¹ (joint 2 has $\sigma_2' = 0$ and no speed constraint). Joint 2's acceleration is $\sigma_2''\dot s^2 = 2.0\,\dot s^2$, whatever $\ddot s$ is, so $2.0\,\dot s^2 \le 2.0$ requires $\dot s \le 1.0$ s⁻¹. The acceleration limit decides: at this point the velocity limit curve is set by the curvature term, not by joint speed.
+
+</details>
+
+**Exercise 5.** A clamped cubic spline with zero end velocities passes through three knots for one joint: $y = (0, 1, 0)$ rad at $t = (0, 1, 2)$ s. Solve for the knot accelerations $M_0, M_1, M_2$ and give the velocity at $t = 1$ s.
+
+<details>
+<summary>Answer</summary>
+
+Here $h_0 = h_1 = 1$ and the slopes are $+1$ and $-1$. The three equations are $2M_0 + M_1 = 6(1 - 0) = 6$, $M_0 + 4M_1 + M_2 = 6(-1 - 1) = -12$ and $M_1 + 2M_2 = 6(0 - (-1)) = 6$. By symmetry $M_0 = M_2$, so $2M_0 + M_1 = 6$ and $2M_0 + 4M_1 = -12$, which give $M_1 = -6$ and $M_0 = M_2 = 6$ rad/s². By symmetry the velocity at $t = 1$ s is zero: the joint reaches 1 rad and turns back.
+
+</details>
+
+**Exercise 6.** A trajectory is checked by sampling every 10 ms. The arm's peak joint speeds are 0.9 and 1.1 rad/s, and the smallest clearance at the samples is 0.02 m. Using the bound of Section 6.2, can the motion be declared collision-free? What sampling interval would be needed to prove it with a margin of at least 0.01 m?
+
+<details>
+<summary>Answer</summary>
+
+The motion bound per interval is $(1.7 \times 0.9 + 0.7 \times 1.1) \times 0.01 = 2.30 \times 0.01 = 0.023$ m, which exceeds the 0.02 m clearance, so the check proves nothing. A margin of 0.01 m needs $2.30\,\Delta t \le 0.02 - 0.01$, so $\Delta t \le 4.3$ ms, assuming the smallest sampled clearance does not fall when the sampling is refined (which must be confirmed by rerunning the check).
+
+</details>
+
+## 8. Summary
+
+| Concept | Result | Main limit |
+|---|---|---|
+| Path and trajectory | $q(t) = \sigma(s(t))$; $\dot q = \sigma'\dot s$, $\ddot q = \sigma'\ddot s + \sigma''\dot s^2$ | Fixing the path first can exclude faster motions |
+| Cubic time scaling | $s = 3\tau^2 - 2\tau^3$; $\dot s_{\max} = 3/(2T)$, $\lvert\ddot s\rvert_{\max} = 6/T^2$ | Acceleration jumps at both ends |
+| Quintic time scaling | $s = 10\tau^3 - 15\tau^4 + 6\tau^5$; $\dot s_{\max} = 15/(8T)$, $\lvert\ddot s\rvert_{\max} = 10/(\sqrt{3}\,T^2)$ | Slowest for a given speed limit |
+| Trapezoidal profile | $T = D/v + v/a$, or $2\sqrt{D/a}$ when $D < v^2/a$ | Unbounded jerk |
+| S-curve profile | $T = D/v + v/a + a/j$ with all limits reached | Costs $a/j$ over the trapezoid; more for short moves |
+| Time-optimal scaling | Maximum acceleration, maximum deceleration or the velocity limit curve at every point of the $(s, \dot s)$ plane; a trapezoid on a straight joint-space line | Leaves no control margin; optimal only for the given path |
+| Cubic splines | Tridiagonal system for knot accelerations, solved in $O(n)$; natural or clamped ends | Knot times are guessed; overshoot between knots |
+| Checking | Sample limits, joint ranges and clearance; clearance is proven only if larger than the motion per sample | Moving obstacles and tracking errors need the timing and a margin |
+
+A trajectory is a path with a schedule, and the schedule is bounded by what the motors and the structure can deliver. The faster a profile, the more of the motion it spends at a limit, and every profile is only as trustworthy as the check that follows it. The [next entry](/blog/path-tracking-and-reactive-avoidance) sends trajectories to a robot: it takes a differential-drive mobile robot, makes it follow a planned path with tracking controllers and adds reactive methods for the obstacles that no plan anticipated.
+
+### References
+
+- J. E. Bobrow, S. Dubowsky and J. S. Gibson, "Time-optimal control of robotic manipulators along specified paths," *International Journal of Robotics Research*, vol. 4, no. 3, pp. 3–17, 1985.
+- C. de Boor, *A Practical Guide to Splines*, revised ed., Springer, 2001.
+- T. Flash and N. Hogan, "The coordination of arm movements: An experimentally confirmed mathematical model," *Journal of Neuroscience*, vol. 5, no. 7, pp. 1688–1703, 1985.
+- T. Kunz and M. Stilman, "Time-optimal trajectory generation for path following with bounded acceleration and velocity," in *Robotics: Science and Systems VIII*, 2012.
+- K. M. Lynch and F. C. Park, *Modern Robotics: Mechanics, Planning, and Control*, Cambridge University Press, 2017.
+- Q.-C. Pham, "A general, fast, and robust implementation of the time-optimal path parameterization algorithm," *IEEE Transactions on Robotics*, vol. 30, no. 6, pp. 1533–1540, 2014.
+- K. G. Shin and N. D. McKay, "Minimum-time control of robotic manipulators with geometric path constraints," *IEEE Transactions on Automatic Control*, vol. AC-30, no. 6, pp. 531–541, 1985.

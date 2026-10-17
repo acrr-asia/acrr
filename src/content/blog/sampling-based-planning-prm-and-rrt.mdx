@@ -1,0 +1,511 @@
+---
+title: "Sampling-Based Planning: Probabilistic Roadmaps and RRT"
+description: "Learn how probabilistic roadmaps and rapidly-exploring random trees plan in many dimensions, what their guarantees mean and where they fail."
+publishedAt: "2026-10-17"
+category: "Robotics and Control"
+tags:
+  - robotics
+  - motion planning
+  - sampling-based planning
+  - algorithms
+series: motion-planning
+seriesOrder: 3
+---
+
+The [previous entry](/blog/graph-search-dijkstra-and-a-star) turned the configuration space into a grid and searched it with Dijkstra's algorithm and A*. Those searches are optimal on the grid, but [Section 6 of that entry](/blog/graph-search-dijkstra-and-a-star#6-the-limits-of-grids) showed their price. The number of cells grows as the resolution raised to the power of the dimension, so a grid that is fine for a mobile robot in the plane becomes impossible for an arm with six or seven joints. This third entry of [Motion Planning for Robots](/series/motion-planning) describes the methods that replaced the grid in high-dimensional planning. They place configurations at random, keep the ones that are free, join them with short collision-free motions and search the graph that results. The two families covered are **probabilistic roadmaps**, which build a reusable graph of the free space, and **rapidly-exploring random trees**, which grow a tree from the start toward the goal.
+
+The entry builds on the configuration space, the obstacle region and the collision checker of the [first entry](/blog/configuration-space-and-the-planning-problem), and on the guarantees defined in [its Section 4](/blog/configuration-space-and-the-planning-problem#4-paths-cost-and-what-a-planner-guarantees). It uses Dijkstra's algorithm from the second entry as a subroutine. It explains how the two families work and what their guarantees mean, which variants converge to optimal paths, where sampling fails and how a sampled path is shortened before a robot uses it.
+
+**Conventions.** The notation is that of the series. A configuration is $q$, the configuration space $\mathcal{C}$ has dimension $d$, its free part is $\mathcal{C}_{\mathrm{free}}$ and its obstacle region $\mathcal{C}_{\mathrm{obs}}$; a query asks for a path from $q_{\mathrm{start}}$ to $q_{\mathrm{goal}}$. A planner draws $n$ samples and joins each to the samples within a connection radius $r_n$ or to its $k$ nearest neighbors; a random tree advances by at most a step size $\eta$ per iteration. The cost of a path is its length, and $C^*$ is the optimal cost. Logarithms are natural. Lengths are in meters for the planar examples and in radians for the arm, whose joint angles $\theta_1, \theta_2$ and link lengths $l_1 = 1.0$ m and $l_2 = 0.7$ m are those of [Forward and Inverse Kinematics of a Planar Arm](/blog/planar-arm-kinematics). The code is Python 3.13 with NumPy 2.5. Every random choice is drawn from `numpy.random.default_rng(seed)` with the seed stated, and results are reported as the median, minimum and maximum over 10 or 20 seeds rather than as one run, because a single run of a randomized planner can be unusually lucky or unlucky.
+
+## 1. Why sample
+
+### 1.1 The cost of covering a space
+
+A grid with $N$ cells per axis has $N^d$ cells, and [Section 6.4 of the second entry](/blog/graph-search-dijkstra-and-a-star#64-the-curse-of-dimensionality) showed what that means: $10^{12}$ cells for an arm with six joints at 100 cells per joint, each of which needs a collision check. No refinement of A* changes this count, because the grid spends the same effort on every region of the space, whether or not a path could pass there.
+
+Most of that effort is wasted. A planner needs only enough of the free space to connect the start to the goal. In many practical problems the free space is large and well connected: an arm reaching into a shelf has a few awkward regions near the shelf and a great deal of open space elsewhere. A method that places a modest number of configurations where they help, and connects them with straight segments, can answer such a query with thousands of collision checks instead of billions.
+
+### 1.2 The collision checker as the only geometry
+
+The methods of this entry share one design decision: they never build $\mathcal{C}_{\mathrm{obs}}$ explicitly. The first entry showed that even for a two-link arm and a disk the obstacle region has a curved and nonconvex shape, and in higher dimensions it has no usable closed form. Sampling-based planners replace it with two queries:
+
+- a **point check** (the configuration check of [Section 5.1 of the first entry](/blog/configuration-space-and-the-planning-problem#51-the-collision-checker-as-an-oracle)), which asks whether a single configuration $q$ is free, by placing the robot's geometry at $q$ and testing it against the obstacles in the workspace;
+- an **edge check**, which asks whether the straight segment between two configurations is free, by running point checks at configurations spaced at most a resolution apart along it, as in [Section 5 of the first entry](/blog/configuration-space-and-the-planning-problem#5-collision-checking).
+
+Everything the planner knows about the obstacles comes through these two calls, which is why the same planner code works for a point robot in the plane and for a seven-joint arm: only the collision checker and the distance function change. It also means that collision checks are the natural measure of a planner's cost, and that the planner inherits the checker's weaknesses. An edge check at resolution $\varepsilon$ can miss an obstacle thinner than $\varepsilon$, so a path returned by any planner of this entry is collision-free only up to the resolution of its checker, unless the checker is exact or conservative.
+
+### 1.3 Probabilistic completeness
+
+Giving up the grid also gives up the grid's guarantee. A grid search is resolution complete: it finds a path if one exists at the grid's resolution. A sampling-based planner is at best **probabilistically complete**, in the sense of [Section 4.2 of the first entry](/blog/configuration-space-and-the-planning-problem#42-completeness): if a path exists, the probability that the planner finds one tends to 1 as the number of samples grows. The textbooks of LaValle and of Choset et al. treat this notion and the planners of this entry at greater length. The definition says nothing about how fast the probability approaches 1, and that rate depends on the geometry of the free space, as Section 5 shows. Nor can a sampling-based planner prove that no path exists. When it fails after $n$ samples, the failure means only that $n$ was not enough or that there is no path, and the planner cannot tell which.
+
+### 1.4 The test problems
+
+Two problems run through the entry. The first is a point robot in a square room of 10 m by 10 m, with a wall that has a door of width 1.0 m and three rectangular boxes. A robot with a disk shape reduces to this case by inflating the obstacles by its radius, as in the first entry. The program `show_maps.py` prints it on a grid of cells 0.25 m wide and 0.5 m tall (only for display; the planners work with continuous coordinates):
+
+```text
+Plane map, x right, y up, 0 to 10 m; S start, G goal, # obstacle
+..................####....######........
+..................####....######....G...
+..................####....######........
+..................####....######........
+..................####....######........
+..................####....######........
+........######....####....######........
+........######....####....######........
+........######....####..................
+........######..........................
+........######..........................
+........######....####..................
+........######....####....##########....
+........######....####....##########....
+........######....####....##########....
+........######....####....##########....
+..................####....##########....
+....S.............####....##########....
+..................####..................
+..................####..................
+free area 71.80 m^2 of 100 m^2
+```
+
+The start is $q_{\mathrm{start}} = (1, 1)$ m and the goal $q_{\mathrm{goal}} = (9, 9)$ m. Because the obstacles are polygons and the robot is a point, the optimal path bends only at obstacle corners, and a search of the visibility graph (the graph whose edges join mutually visible corners, [Section 2.3 of the second entry](/blog/graph-search-dijkstra-and-a-star#23-visibility-graphs)) gives the exact optimum. The program `optimal_plane.py` finds $C^* = 12.30$ m, through the corners $(3.5, 2.0)$, $(4.6, 4.5)$ and $(8.0, 6.0)$. Every planner's cost below can be compared with this number.
+
+The second problem is the two-link arm among three disk obstacles in the workspace, centered at $(1.1, 0.8)$, $(-0.6, 1.1)$ and $(-0.9, -0.9)$ m with radii 0.25, 0.2 and 0.25 m. The links are treated as line segments, and a configuration collides when either link comes within a disk's radius of its center. The configuration space is the torus of the first entry: both angles run from $-\pi$ to $\pi$ and wrap around, so the distance between two configurations takes the shorter way around each angle. The same program prints it with cells of 10°:
+
+```text
+Arm C-space, theta1 right, theta2 up, both from -pi to pi
+....................................
+....................................
+....................................
+....................................
+....................................
+....................................
+....................................
+#...................................
+###..............##......###........
+####.............###......###.......
+.###..............##......###.......
+.####.............###......###......
+..###..............##......###......
+..###..............###......##......
+..###..............###......##G.....
+...##...............##......##......
+...##..........S....##.......##.....
+...###..............###......##.....
+...###...............##......##.....
+....##...............##......##.....
+....##...............##......##.....
+....###..............###......##....
+....###...............##......##....
+....###...............###.....##....
+....####..............###.....###...
+.....###...............###.....###..
+.....####..............###.....###..
+......###...............##......##..
+........#...........................
+....................................
+....................................
+....................................
+....................................
+....................................
+....................................
+....................................
+free cells 1136 of 1296 (87.7%)
+```
+
+The start is $(\theta_1, \theta_2) = (-0.5, 0.2)$ rad and the goal $(2.2, 0.6)$ rad. Each disk becomes a curved band of configurations in which the forearm touches it; all three disks lie beyond the reach of the upper arm. The bands separate the start from the goal at small elbow angles, in both directions around $\theta_1$, so every solution must bend the elbow strongly to slip the folded arm past the obstacles. In the printed grid the bands reach an elbow angle of about 1.8 rad in magnitude. The same program repeats the computation on a finer grid of 720 by 720 cells (0.5°), marked at the cell centers, and then finds the smallest bound on $|\theta_2|$ under which free cells still join the start to the goal:
+
+```text
+Fine grid 720 x 720: free fraction 0.879, largest |theta2| in C_obs 1.889 rad
+smallest elbow bound joining start and goal: |theta2| <= 1.854 rad
+```
+
+A path from the start to the goal must therefore bend the elbow to at least about 1.85 rad, to the grid's resolution. The arm problem is two-dimensional so that it can be printed, but the planners never use the picture: they see only the collision checker.
+
+## 2. Probabilistic roadmaps
+
+### 2.1 A graph of random free configurations
+
+A **probabilistic roadmap** (PRM), introduced by Kavraki, Švestka, Latombe and Overmars in 1996, is a graph whose vertices are random free configurations and whose edges are collision-free straight segments between nearby vertices. The method has two phases. In the **construction phase** (which the original paper calls the learning phase) it samples configurations uniformly in $\mathcal{C}$, keeps those that pass the point check and tries to connect each to its neighbors with edge checks. In the **query phase** it connects $q_{\mathrm{start}}$ and $q_{\mathrm{goal}}$ to nearby roadmap vertices and searches the graph, for example with Dijkstra's algorithm.
+
+The split into phases is the point of the method. The construction phase is expensive and does not depend on the query, so its result can be stored and reused. A robot that works in a fixed cell, such as an arm at a workstation, can build one roadmap and answer many queries from it, each costing only a few edge checks and a graph search. A PRM is therefore called a **multi-query** planner. The original paper was written for robots with many degrees of freedom, as its title says.
+
+```mermaid
+flowchart TB
+  A[Sample q uniformly] --> B{Point check}
+  B -- in collision --> A
+  B -- free --> C[Add vertex]
+  C --> D[Neighbors within r or k nearest]
+  D --> E{Edge check}
+  E -- free --> F[Add edge]
+  F --> G[Roadmap]
+  E -- blocked --> G
+  G --> H[Query: join start and goal, search]
+```
+
+*The two phases of a probabilistic roadmap. Everything before the query box is done once; each query then costs a few edge checks and a graph search.*
+
+### 2.2 Choosing neighbors
+
+The construction phase must decide which pairs of vertices to try. Two rules are common: join each vertex to all vertices within a **connection radius** $r$, or to its **$k$ nearest neighbors**. A larger neighborhood gives a better-connected graph and shorter paths, but every candidate edge costs an edge check, and edge checks dominate the cost of construction. Finding the neighbors is a nearest-neighbor query; the programs here compute all distances with NumPy, which is adequate for a few thousand vertices, while larger planners use spatial data structures such as k-d trees.
+
+The listing below is the construction phase used in this entry. It omits the query phase (`prm_query`), which joins the start and goal to their $k$ nearest vertices and runs Dijkstra's algorithm, and the collision checker and distance functions, which are methods of the `space` object; all are in `mp.py`, the module that the programs of this entry share.
+
+```python
+def sample_free(space, rng, n):
+    pts = []
+    while len(pts) < n:
+        q = space.sample(rng)
+        if space.point_free(q):
+            pts.append(q)
+    return np.array(pts)
+
+
+def prm_build(space, rng, n, radius=None, k=None):
+    """Roadmap on n free samples. Each sample is joined to every sample
+    within `radius` or to its k nearest neighbors, if the edge is free."""
+    V = sample_free(space, rng, n)
+    adj = {i: [] for i in range(n)}
+    seen = set()
+    for i in range(n):
+        dd = space.dists(V, V[i])
+        if radius is not None:
+            nbrs = [j for j in np.nonzero(dd <= radius)[0] if j != i]
+        else:
+            nbrs = [j for j in np.argsort(dd)[1:k + 1]]
+        for j in nbrs:
+            e = (min(i, j), max(i, j))
+            if e in seen:
+                continue
+            seen.add(e)
+            if space.edge_free(V[i], V[j]):
+                w = float(dd[j])
+                adj[i].append((j, w))
+                adj[j].append((i, w))
+    return V, adj
+```
+
+This version tries every neighbor, even one that is already reachable through the graph. Some formulations skip a neighbor that lies in the same connected component, which keeps the roadmap a forest and saves edge checks; Karaman and Frazzoli showed that this economy prevents the roadmap's paths from improving as samples are added, a point Section 4 returns to.
+
+### 2.3 Results on the plane map
+
+The program `exp_plane.py` builds roadmaps of 200 and 1000 vertices with $k = 10$ on the plane map, for seeds 0 to 9, with edges checked every 0.05 m. "Checks" counts every point check of the construction phase, including the rejected samples; "query" counts the checks spent joining the start and goal.
+
+```text
+optimal cost C* = 12.30 m
+PRM n=200 k=10: solved 8/10
+  edges      median   1093.00   min   1055.00   max   1129.00
+  checks     median  22979.50   min  22179.00   max  23505.00
+  query      median    354.50   min    277.00   max    410.00
+  cost       median     13.88   min     13.01   max     18.31
+PRM n=1000 k=10: solved 10/10
+  edges      median   5787.00   min   5744.00   max   5856.00
+  checks     median  54752.00   min  54118.00   max  55311.00
+  query      median    154.50   min    141.00   max    171.00
+  cost       median     13.15   min     12.86   max     13.53
+...
+```
+
+The results show three effects. First, with 200 vertices the roadmap failed in two of ten seeds: in those runs no sample landed near enough to the door for an edge to pass through it, so the two rooms formed separate components. This is the narrow-passage problem of Section 5 in its mildest form. Second, construction cost about 23,000 point checks for 200 vertices and 55,000 for 1000, while a query cost only a few hundred, which is the multi-query trade in numbers. Third, the paths are 7% to 13% longer than $C^*$ in the median: a roadmap path follows its edges, which point in random directions, so it zigzags.
+
+On the arm's torus, `exp_arm.py` built roadmaps of 300 vertices with $k = 10$ for seeds 0 to 9. All ten solved the query, with a median of about 42,000 point checks and a median joint-space path length of 5.29 rad (minimum 5.05, maximum 6.41). Nothing in the planner changed except the space object, which now computes distances the short way around each angle and places the two links to check them against the disks.
+
+## 3. Rapidly-exploring random trees
+
+### 3.1 Growing a tree from the start
+
+Many queries are asked once: a mobile robot in a building that changes, an arm picking objects whose positions differ each time. Building a roadmap of the whole space for one query wastes most of its edge checks. A **rapidly-exploring random tree** (RRT), introduced by LaValle in a 1998 technical report and developed with Kuffner in later papers, is a **single-query** planner: it grows a tree from $q_{\mathrm{start}}$ until a branch reaches $q_{\mathrm{goal}}$.
+
+Each iteration draws a random configuration $q_{\mathrm{rand}}$, finds the tree vertex $q_{\mathrm{near}}$ nearest to it, and moves from $q_{\mathrm{near}}$ toward $q_{\mathrm{rand}}$ by at most the step size $\eta$, giving $q_{\mathrm{new}}$. If the segment from $q_{\mathrm{near}}$ to $q_{\mathrm{new}}$ is free, $q_{\mathrm{new}}$ joins the tree as a child of $q_{\mathrm{near}}$. When the random sample lies farther than $\eta$ from the tree, it is only a direction to grow in: it is not added and is never checked itself. When it lies within $\eta$, $q_{\mathrm{new}}$ is the sample.
+
+### 3.2 The Voronoi bias
+
+The rule explores well because of the way it selects the vertex to extend. A vertex is selected when the random sample falls closer to it than to any other vertex, that is, inside its **Voronoi region**, the set of points nearer to it than to every other vertex. Vertices on the frontier of the tree, next to unexplored space, have large Voronoi regions; vertices in the interior, surrounded by other vertices, have small ones. For a uniform sample, the probability that a vertex is selected for extension is proportional to the volume of its Voronoi region within $\mathcal{C}$, so the tree is pulled toward the largest unexplored parts of the space. Kuffner and LaValle described this **Voronoi bias** as what makes the tree explore rapidly, the property the method is named for. As the tree fills the space, the regions shrink and even out, and the extensions become more uniform.
+
+The bias has a cost near obstacles. A frontier vertex facing a wall keeps a large Voronoi region, so it keeps being selected, and its extensions keep failing the edge check. Such failed iterations add collision checks without adding vertices, which is visible in the gap between iterations and vertices in the results below.
+
+### 3.3 Goal bias and the stopping rule
+
+Uniform samples ignore the goal. A common refinement, the **goal bias**, replaces the random sample by $q_{\mathrm{goal}}$ with a small probability, here 0.05, so that the tree occasionally tries to grow straight at the goal. A larger value speeds up easy problems and slows down hard ones, because an extension toward the goal that is blocked by an obstacle fails every time it is tried. After each new vertex, the planner checks whether the goal lies within $\eta$ and the segment to it is free; if so, it adds the goal and reads the path back through the parent pointers. The listing is the complete planner as run; `steer` moves from one configuration toward another by at most $\eta$, and `space.interp` interpolates (on the torus, the short way around).
+
+```python
+def steer(space, a, b, eta):
+    d = space.dist(a, b)
+    if d <= eta:
+        return b.copy()
+    return space.interp(a, b, eta / d)
+
+
+def rrt(space, rng, qs, qg, eta, goal_bias=0.05, max_iter=20000):
+    """Basic RRT. Returns (path or None, tree size, iterations)."""
+    V = [qs.copy()]
+    parent = [-1]
+    for it in range(1, max_iter + 1):
+        qr = qg if rng.random() < goal_bias else space.sample(rng)
+        i = int(np.argmin(space.dists(np.array(V), qr)))
+        qn = steer(space, V[i], qr, eta)
+        if not space.edge_free(V[i], qn):
+            continue
+        V.append(qn)
+        parent.append(i)
+        if space.dist(qn, qg) <= eta and space.edge_free(qn, qg):
+            V.append(qg.copy())
+            parent.append(len(V) - 2)
+            path = [len(V) - 1]
+            while parent[path[-1]] != -1:
+                path.append(parent[path[-1]])
+            return [V[j] for j in path[::-1]], len(V), it
+    return None, len(V), max_iter
+```
+
+### 3.4 RRT-Connect
+
+Kuffner and LaValle's **RRT-Connect** (2000) grows two trees, one from the start and one from the goal, and makes them meet. Each iteration extends one tree by one step toward a random sample, exactly as above. Then it tries to connect the other tree to the new vertex greedily: it steps toward it repeatedly, by $\eta$ each time, until it reaches the vertex or hits an obstacle. Then the two trees swap roles. When the greedy connection reaches the new vertex, the two branches form a path. The greedy step makes the method fast in open space, where one connection attempt often covers a long distance, while the random extensions keep it exploring when the greedy step is blocked. The original paper reported it on planning problems for a seven-degree-of-freedom human arm model.
+
+### 3.5 Results
+
+The same program ran both planners on the plane map with $\eta = 0.5$ m:
+
+```text
+RRT (goal bias 0.05) eta=0.5: solved 10/10
+  vertices   median    191.00   min    114.00   max    363.00
+  iters      median    330.00   min    185.00   max    768.00
+  checks     median   2456.00   min   1553.00   max   4655.00
+  cost       median     16.91   min     15.97   max     20.26
+RRT-Connect eta=0.5: solved 10/10
+  vertices   median     63.50   min     33.00   max    121.00
+  iters      median     94.00   min     39.00   max    227.00
+  checks     median   1158.50   min    625.00   max   2193.00
+  cost       median     16.29   min     14.24   max     21.96
+```
+
+RRT solved every seed with a median of 2,456 point checks, about a tenth of what the smaller roadmap spent on construction, and RRT-Connect halved that again. The spread is wide: the slowest RRT run needed three times the checks of the fastest. That is typical of randomized planners and is the reason for reporting several seeds. The price is path quality: the median RRT path is 16.91 m against $C^* = 12.30$ m, 37% longer, because each branch wanders wherever the random samples pulled it, and the planner stops at the first path it finds.
+
+On the arm (`exp_arm.py`, $\eta = 0.3$ rad, joint-space resolution 0.02 rad), RRT-Connect again needs fewer checks than RRT, and the two path lengths are similar:
+
+```text
+RRT eta=0.3 rad, goal bias 0.05: solved 10/10
+  vertices       median    121.50   min     75.00   max    477.00
+  checks         median   2105.00   min   1395.00   max   6536.00
+  cost           median      6.34   min      5.41   max      8.85
+RRT-Connect eta=0.3 rad: solved 10/10
+  vertices       median     61.50   min     38.00   max     71.00
+  checks         median   1469.50   min    904.00   max   1739.00
+  cost           median      6.47   min      5.98   max      8.39
+...
+largest |theta2| on each RRT-Connect path, rad: 2.54 2.04 2.37 2.37 1.91 1.99 2.27 2.29 1.99 2.13
+```
+
+Every RRT-Connect path bends the elbow past 1.9 rad at some point, beyond the 1.85 rad that the configuration space requires. The trees found that fold without any representation of the bands: it emerged from point and edge checks alone.
+
+### 3.6 Completeness of roadmaps and trees
+
+A PRM that joins vertices within a connection radius, and RRT, are both probabilistically complete under mild conditions; a PRM with a fixed number $k$ of nearest neighbors, like the one in this entry, need not be (Karaman and Frazzoli show that it is not for $k = 1$). For roadmaps, the analysis by Hsu, Latombe and Motwani introduced **expansiveness**, a measure of how much of the free space each region can see by straight segments. In a space that is expansive in their sense, the probability that a uniformly sampled roadmap fails to connect two configurations that lie in one component of the free space decreases exponentially in the number of samples. The constants in that bound depend on the expansiveness parameters, and a narrow passage makes them poor.
+
+For RRT the question was settled carefully only later: Kleinbort, Solovey, Littlefield, Bekris and Halperin gave a proof for geometric planning that requires only that some solution path keep a positive clearance from the obstacles. A path that touches an obstacle, or squeezes through a gap of zero width, is a solution that no sampling-based planner can be expected to find.
+
+## 4. Asymptotic optimality: PRM* and RRT*
+
+### 4.1 Why the basic planners do not converge
+
+The results above show that PRM and RRT find paths of mediocre quality. A natural hope is that running them longer helps. Karaman and Frazzoli examined this question in 2011. A planner is **asymptotically optimal**, as [Section 4.3 of the first entry](/blog/configuration-space-and-the-planning-problem#43-optimality-guarantees) defined it, if the cost of its solution converges to $C^*$, almost surely, as the number of samples grows. They proved that, under mild technical conditions, RRT is not: the probability that its solution converges to the optimal cost is zero. The reason is that the tree never changes a vertex's parent, so a branch that starts in a bad direction stays bad. A PRM with a fixed number of neighbors $k$ is not asymptotically optimal either, nor is the variant that skips neighbors in the same component (Section 2.2). A PRM that joins every pair within a fixed radius is asymptotically optimal, but its number of edges grows quadratically with $n$, which makes it expensive for large $n$.
+
+### 4.2 The connection radius
+
+The remedy is to let the neighborhood shrink as samples are added, but more slowly than the typical spacing between samples. In a $d$-dimensional space, $n$ uniform samples are spaced roughly $(\mu(\mathcal{C}_{\mathrm{free}})/n)^{1/d}$ apart, where $\mu(\mathcal{C}_{\mathrm{free}})$ is the volume of the free space; this length is proportional to $n^{-1/d}$. Karaman and Frazzoli's **PRM*** joins each vertex to all vertices within
+
+$$
+r_n = \gamma_{\mathrm{PRM}} \left( \frac{\log n}{n} \right)^{1/d},
+\qquad
+\gamma_{\mathrm{PRM}} > 2 \left( 1 + \frac{1}{d} \right)^{1/d} \left( \frac{\mu(\mathcal{C}_{\mathrm{free}})}{\zeta_d} \right)^{1/d},
+$$
+
+where $\zeta_d$ is the volume of the unit ball in $d$ dimensions ($\zeta_2 = \pi$). The extra factor $(\log n)^{1/d}$ over the sample spacing makes each vertex see, on average, a number of neighbors that grows like $\log n$: enough for the graph to stay connected and for its paths to approach the optimum, few enough that the number of edges grows only as $n \log n$. They showed that the computational cost of PRM* and of RRT* (Section 4.3) is within a constant factor of that of PRM and RRT.
+
+The same idea works with nearest neighbors. The $k$-nearest version of PRM* joins each vertex to its $k(n) = k_{\mathrm{PRM}} \log n$ nearest neighbors with $k_{\mathrm{PRM}} > e\,(1 + 1/d)$; since this bound never exceeds $2e$, the value $k_{\mathrm{PRM}} = 2e$ works in every dimension $d \ge 2$ and needs no knowledge of the free volume. That makes the $k$-nearest form the easier one to use. The radius form needs $\mu(\mathcal{C}_{\mathrm{free}})$, which is rarely known; the volume of the whole of $\mathcal{C}$ is a safe overestimate.
+
+For the plane map, $d = 2$ and $\mu(\mathcal{C}_{\mathrm{free}}) = 71.80$ m², so the threshold is $2 \times 1.5^{1/2} \times (71.80/\pi)^{1/2} = 11.71$ m. With $n = 1000$, $r_n = 11.71 \times (\log 1000 / 1000)^{1/2} = 0.973$ m, and $k(1000) = \lceil 2e \log 1000 \rceil = 38$.
+
+### 4.3 RRT*
+
+**RRT*** changes how a new vertex joins the tree. After steering to $q_{\mathrm{new}}$ as in RRT, it looks at all tree vertices within a radius $r_n$ of the same form, capped at $\eta$, and does two things. It chooses as the parent of $q_{\mathrm{new}}$ the vertex in that set through which the cost from the start is lowest and whose edge is free, rather than the nearest vertex. Then it **rewires**: for each vertex in the set, if reaching it through $q_{\mathrm{new}}$ is cheaper than its current route, its parent becomes $q_{\mathrm{new}}$, and the saving propagates to its descendants. The tree thus keeps repairing itself, and the branches straighten as samples accumulate. The extra work per iteration is a set of edge checks to the vertices within $r_n$, about $\log n$ of them.
+
+The original proof of RRT*'s asymptotic optimality used a radius of the form above with its own lower bound on the constant. Solovey, Janson, Schmerling, Frazzoli and Pavone later found a gap in that proof, and showed asymptotic optimality for a radius that shrinks as $(\log n / n)^{1/(d+1)}$, slightly more slowly. The program here uses the exponent $1/d$ with $\gamma = 11.71$ m, the PRM* threshold for this map, and caps the radius at $\eta$; that is a practical choice for a demonstration, not a parameter that carries a proof.
+
+### 4.4 Measured convergence
+
+The program `exp_optimal.py` measures both effects on the plane map over seeds 0 to 9. Part (a) compares a PRM with $k = 10$ against the $k$-nearest PRM* with $k = \lceil 2e \log n \rceil$. Part (b) runs RRT* with $\eta = 1.0$ m for 4000 iterations, recording the best cost found so far, and compares it with an RRT that keeps growing after its first solution and keeps the best path to the goal, without rewiring.
+
+```text
+C* = 12.30 m
+n      k_PRM*  PRM k=10 cost: median [min, max]   PRM* cost: median [min, max]
+250    31       13.83 [ 12.97,  14.49] 2 failed    12.83 [ 12.67,  13.87]
+500    34       13.64 [ 13.02,  13.95] 1 failed    12.76 [ 12.62,  13.11]
+1000   38       13.15 [ 12.86,  13.53]             12.58 [ 12.49,  12.89]
+2000   42       13.10 [ 12.81,  13.34]             12.49 [ 12.42,  12.55]
+free area 71.80 m^2, gamma = 11.71 m
+  r_n at n = 500: 1.000 m
+  r_n at n = 1000: 0.973 m
+  r_n at n = 2000: 0.722 m
+  r_n at n = 4000: 0.533 m
+iterations  RRT cost: median [min, max]      RRT* cost: median [min, max]
+500          17.79 [ 13.99,  24.36]            13.51 [ 13.25,  19.45]
+1000         17.79 [ 13.99,  24.36]            13.04 [ 12.59,  13.41]
+2000         17.79 [ 13.99,  24.36]            12.61 [ 12.46,  12.76]
+4000         17.70 [ 13.99,  24.36]            12.46 [ 12.37,  12.50]
+```
+
+The "failed" counts are seeds in which the roadmap did not connect the start to the goal; the cost columns summarize the seeds that succeeded. The radii are those for a tree of $n$ vertices, capped at $\eta = 1.0$ m (the formula gives 1.306 m at $n = 500$); the tree of RRT* has slightly fewer vertices than iterations, because blocked extensions add none.
+
+Between 1000 and 2000 samples, the PRM with $k = 10$ improved its median cost by 0.05 m and stayed 6.5% above $C^*$; PRM* improved by 0.09 m to 1.5% above, and its spread narrowed from 0.40 m to 0.13 m.
+
+The difference between the RRT that keeps growing and RRT* is starker. The plain tree's median cost hardly changed between 500 and 4000 iterations (17.79 m to 17.70 m), and its worst seed stayed at 24.36 m throughout, because a vertex's route to the start never changes. RRT* fell from 13.51 m to 12.46 m, 1.3% above the optimum, and all ten seeds ended within 0.13 m of each other.
+
+### 4.5 What asymptotic optimality promises
+
+The guarantee is a limit: the cost converges to $C^*$ as $n \to \infty$. It does not say how many samples bring the cost within 1% of the optimum; that number depends on the problem and is not known in advance. It does not make a planner find its first solution faster; RRT* spends more checks per iteration than RRT, so it is best used as an **anytime planner**, one that returns its first path early and keeps improving it while time remains. It concerns convergence to the optimum among paths that keep some clearance, so an optimal path that grazes an obstacle corner, as the one here does at $(4.6, 4.5)$, is approached from the free side but never reached. And it is a statement about cost alone: the optimal path in length still has corners, which a robot cannot follow at speed, a problem for the next entry.
+
+## 5. Narrow passages and other failure modes
+
+### 5.1 Why narrow passages are hard
+
+A uniform sample that passes the point check, as every roadmap vertex does, lands in a region with probability equal to the region's share of the volume of $\mathcal{C}_{\mathrm{free}}$. A passage that is narrow in one or more directions has a small volume, so it receives few samples, even though every path must go through it. The plane map makes this measurable: the door is 0.8 m deep (the wall's thickness), so a door of width $w$ occupies $0.8\,w$ m² of a free area of about 71 m². With $w = 1.0$ m, a uniform sample lands in the door with probability about 1.1%; with $w = 0.125$ m, about 0.14%. In $d$ dimensions the effect compounds, because a passage that is narrow in several directions has a volume that shrinks as the product of its widths.
+
+The program `exp_narrow.py` narrows the door while keeping everything else fixed. It runs a PRM with $n = 300$ and $k = 10$ for 20 seeds, and RRT-Connect for 10 seeds:
+
+```text
+PRM n=300 k=10, 20 seeds: solved, median point checks
+door 1.000 m: uniform 19/20 (28753 checks)   hybrid 18/20 (418991 checks)
+door 0.500 m: uniform 14/20 (28740 checks)   hybrid 18/20 (277642 checks)
+door 0.250 m: uniform  9/20 (28690 checks)   hybrid 18/20 (240839 checks)
+door 0.125 m: uniform  2/20 (28715 checks)   hybrid 16/20 (259604 checks)
+RRT-Connect eta=0.5, 10 seeds: iterations to solve, median [min, max]
+door 1.000 m: median    94.0 [39, 227]
+door 0.500 m: median   114.5 [41, 1440]
+door 0.250 m: median   321.5 [43, 1440]
+door 0.125 m: median   518.5 [48, 3277]
+```
+
+With uniform sampling, the roadmap's success rate fell from 19 of 20 to 2 of 20 as the door narrowed from 1.0 m to 0.125 m, with the same number of checks. RRT-Connect solved every run within its limit of 20,000 iterations, but its median number of iterations grew more than fivefold and its worst run more than fourteenfold. The tree has to wait for a sample whose direction, seen from a vertex near the door, threads the opening.
+
+Section 3.6 described Hsu, Latombe and Motwani's expansiveness as the quantity that governs the success rate of a roadmap. A narrow passage is the typical cause of poor expansiveness: from inside one room, only a small part of the other is visible through the door. The guarantee of probabilistic completeness still holds, but the number of samples needed to make failure unlikely can be impractically large.
+
+### 5.2 Sampling where it matters
+
+Since uniform sampling wastes samples in open space, several strategies concentrate samples near obstacles or inside passages. Two influential ones use only point checks:
+
+- **Gaussian sampling** (Boor, Overmars and van der Stappen, 1999) draws a configuration $q_1$ uniformly and a second configuration $q_2$ from a normal distribution centered on $q_1$; if exactly one of the two is free, it keeps the free one. The samples cluster near the boundary of $\mathcal{C}_{\mathrm{obs}}$, where passages are.
+- The **bridge test** (Hsu, Jiang, Reif and Sun, 2003) draws $q_1$ and a nearby $q_2$ as above, and keeps their midpoint only if both $q_1$ and $q_2$ are in collision and the midpoint is free. Such a "bridge" spans a gap between two obstacles, so its midpoint tends to lie in a narrow passage. Because it rejects most candidates, the authors combined it with uniform sampling in a hybrid strategy.
+
+The "hybrid" column above draws half the samples uniformly and half by the bridge test with a standard deviation of 0.5 m. It solved 16 to 18 of 20 queries at every door width, including 16 of 20 at 0.125 m, where uniform sampling solved 2. It paid with collision checks: most bridge candidates are rejected, and the median run used 8 to 15 times as many point checks as uniform sampling. At the widest door the hybrid did slightly worse than uniform sampling (18 against 19 of 20), probably because it had only 150 uniform samples to cover the open rooms. Whether that trade pays depends on how expensive a point check is compared with an edge check and on how narrow the passages of the actual problem are, so such strategies are tuned per application rather than chosen once.
+
+### 5.3 Other failure modes
+
+Narrow passages are the best-known failure, but not the only one.
+
+- **The distance function.** Nearest neighbors, steering and connection radii all depend on the metric on $\mathcal{C}$. On the arm's torus, a metric that ignored the wrap-around would see $\theta_1 = 3.1$ and $\theta_1 = -3.1$ as 6.2 rad apart instead of 0.08 rad, and would miss short paths. For a robot that translates and rotates, the metric must weigh meters against radians, and a poor weighting makes the nearest vertex a poor choice for extension.
+- **Checking resolution.** As Section 1.2 noted, an edge checked at resolution $\varepsilon$ can pass through an obstacle thinner than $\varepsilon$ in configuration space. For the arm, a joint-space step of 0.02 rad moves the tip of the arm by at most $0.02 \times \sqrt{1.7^2 + 0.7^2} = 0.037$ m between checks (1.7 m is the lever arm of the shoulder, 0.7 m that of the elbow); this is the bound $D$ of [Section 5.3 of the first entry](/blog/configuration-space-and-the-planning-problem#53-a-check-that-cannot-miss) for the worst direction of the step. A thinner obstacle can slip between two checks unnoticed.
+- **Differential constraints.** The planners here join configurations by straight segments, which assumes the robot can move in any direction of $\mathcal{C}$. A car-like robot cannot move sideways, so a straight segment in $(x, y, \theta)$ is not a motion it can execute. LaValle and Kuffner's 2001 paper adapted RRT to such systems by growing the tree with applied controls instead of straight segments; the topic is beyond this entry.
+
+## 6. Shortening and smoothing paths
+
+### 6.1 Shortcutting
+
+The paths of PRM and RRT are feasible but wasteful, and a cheap post-processing step recovers much of the waste. **Random shortcutting** repeats a simple move: pick two points at random along the path, which may lie in the middle of segments. If the straight segment between them is free, it replaces the part of the path between them. No successful move lengthens the path, by the triangle inequality, and a move shortens it unless the replaced piece is already straight; the result stays collision-free up to the checker's resolution, because every new segment was checked. The program uses 100 such attempts on each RRT-Connect path of the arm problem (the seed of the shortcut generator is the planner's seed plus 100):
+
+```text
+RRT-Connect eta=0.3 rad: solved 10/10
+  ...
+  cost           median      6.47   min      5.98   max      8.39
+  shortcut_cost  median      4.87   min      4.79   max      6.23
+  shortcut_checks median   3371.00   min   2373.00   max   4188.00
+```
+
+The median path length fell from 6.47 rad to 4.87 rad, a reduction of 25%, at the cost of about 3,400 extra point checks, more than the planner itself used. For comparison, `ref_arm.py` ran a $k$-nearest PRM* with 3000 samples on the same problem for seeds 0 to 2 and shortcut each result 300 times; the best path found was 4.671 rad. That number is an upper bound on $C^*$ for the arm problem, not the optimum itself, but it shows that RRT-Connect followed by 100 shortcuts came within about 4% of it in the median.
+
+Shortcutting cannot do everything. It is a local improvement: it straightens the route the path already takes, and it cannot find a different route that the path never comes near. Two paths that can be deformed into each other without crossing an obstacle belong to the same **homotopy class**, and a shortcut changes the class only when an obstacle happens to lie between a piece of the path and the free segment that replaces it.
+
+The program `probe_shortcut.py` shows the effect on the arm. Nine of the ten shortcut paths bend the elbow to a positive angle and end with lengths from 4.79 to 5.35 rad. Within them two routes appear, one turning the shoulder forward by a net 2.70 rad and one turning it backward by 3.58 rad, with similar lengths. The tenth path, from seed 8, bends the elbow to a negative angle, past the other end of the bands, and stays at 6.23 rad after shortcutting, a sixth longer than the next longest.
+
+Shortcuts also pull the path tight against obstacles, leaving no **clearance**, the distance between the robot and the nearest obstacle. Geraerts and Overmars addressed both limits: they proposed a partial shortcut that interpolates one degree of freedom at a time, which can shorten paths that an ordinary shortcut cannot, and methods that increase clearance after shortening.
+
+### 6.2 Smoothing
+
+A shortened path is still a polyline with corners. At a corner the direction of motion changes instantly, so the velocity would have to drop to zero there, or the acceleration would be unbounded. The remedy, **smoothing**, replaces the polyline with a curve that has continuous derivatives, for example by fitting a spline through its vertices or by rounding each corner with an arc. Any smoothing moves the path away from the checked segments, so the smoothed curve must be checked again, and where it collides the smoothing is relaxed locally. Geometric smoothing also says nothing about how fast the robot moves along the curve; that is the job of a time scaling.
+
+## 7. Exercises
+
+**Exercise 1.** For the plane map ($\mu(\mathcal{C}_{\mathrm{free}}) = 71.80$ m²), compute the PRM* radius threshold and the radius for $n = 2000$. Then compute the $k$-nearest value $k(2000)$ with $k_{\mathrm{PRM}} = 2e$. Compare with the output in Section 4.4.
+
+<details>
+<summary>Answer</summary>
+
+The threshold is $2 \times (3/2)^{1/2} \times (71.80/\pi)^{1/2} = 2 \times 1.2247 \times 4.7807 = 11.71$ m. For $n = 2000$, $\log 2000 / 2000 = 7.601/2000 = 0.0038005$, whose square root is 0.061648, so $r_{2000} = 11.71 \times 0.061648 = 0.722$ m, as printed. $k(2000) = \lceil 2e \times 7.601 \rceil = \lceil 41.32 \rceil = 42$, also as printed.
+
+</details>
+
+**Exercise 2.** Suppose RRT's goal bias is set to 1, so that every iteration steers toward $q_{\mathrm{goal}}$. What happens on the plane map, and what does this say about the role of the random samples?
+
+<details>
+<summary>Answer</summary>
+
+The nearest vertex to the goal is always chosen, and the tree grows in a straight line from the start toward $(9, 9)$ until the first obstacle on that line, the box at $x$ from 2.0 m to 3.5 m. From then on every iteration selects the same vertex, steers into the box and fails the edge check, so the planner spins without progress until its iteration limit. The random samples supply the exploration (Section 3.2); a goal bias is useful only as a small perturbation of them.
+
+</details>
+
+**Exercise 3.** For the plane map with a door of width $w = 0.125$ m, estimate the expected number of uniform samples that land inside the door (0.8 m deep) when $n = 300$. Uniform PRM still solved 2 of 20 queries with this door. How can a roadmap pass through the door with no vertex in it?
+
+<details>
+<summary>Answer</summary>
+
+The obstacles cover $21.0 + 0.8 \times (10 - 0.125) = 28.9$ m², so the free area is 71.1 m², and the door occupies $0.8 \times 0.125 = 0.1$ m². The probability per sample is $0.1/71.1 = 0.0014$, and the expected number in 300 samples is 0.42. A roadmap does not need a vertex inside the door: an edge between a vertex just left of the wall and one just right of it can pass through the opening if both lie nearly in line with the door. Such pairs are rare, which is why the success rate is low.
+
+</details>
+
+**Exercise 4.** A colleague runs RRT on a new problem with a limit of 50,000 iterations, and it fails. They conclude that no path exists. What can be concluded, and what are sensible next steps?
+
+<details>
+<summary>Answer</summary>
+
+Nothing can be concluded about existence: probabilistic completeness (Section 1.3) says only that the probability of success tends to 1, at a problem-dependent rate. The failure is consistent with a narrow passage or with infeasibility. Useful next steps are to run several seeds, try RRT-Connect and add a sampling strategy for narrow passages (Section 5.2). The distance function and the checking resolution should be checked against the problem (Section 5.3). If infeasibility is suspected, it needs other evidence, such as a check that the start and goal are free and in reach. A search on a coarse grid also counts if it meets two conditions. Its cells are marked blocked only when every configuration in them is in collision, a test over the whole cell, unlike the center test of [Section 6.3 of the second entry](/blog/graph-search-dijkstra-and-a-star#63-a-grid-over-the-arms-configuration-space). And it may move between any two cells that touch, even at a single corner. A failure of such a search proves that no path exists. The grid planners of the second entry, which test cell centers and forbid corner moves, give no such proof.
+
+</details>
+
+**Exercise 5.** Why can random shortcutting never produce a path that collides, apart from the checker's resolution? Can it move a path to the other side of an obstacle?
+
+<details>
+<summary>Answer</summary>
+
+Every segment that shortcutting inserts has passed an edge check, and the rest of the path is unchanged, so the new path is as collision-free as the checks are. It can move the path to the other side of an obstacle, but only of one that lies between the replaced piece and the new segment, such as a small obstacle inside a wide detour. It cannot move the path across a large obstacle that the path goes around as a whole: any segment that would cross it is blocked, so the route around the far side is never tried. This is the behavior of seed 8 in Section 6.1, which stayed on its own side of the obstacle bands.
+
+</details>
+
+## 8. Summary
+
+| Concept | Result | Main limit |
+|---|---|---|
+| Sampling instead of a grid | The collision checker is the only geometry; cost scales with the checks needed, not with $N^d$ cells | Collision-free only up to the checking resolution |
+| Probabilistic completeness | Probability of finding an existing path tends to 1 as $n \to \infty$ | No rate in general; cannot prove that no path exists |
+| PRM | Multi-query roadmap; plane map, $n = 1000$, $k = 10$: about 55,000 checks to build, about 150 per query | Zigzag paths, 7% above $C^*$ in the median; narrow passages |
+| RRT and RRT-Connect | Single-query trees with a Voronoi bias; plane map: median 2,456 and 1,159 checks | Paths 30% to 40% above $C^*$; do not improve with more samples |
+| PRM* and RRT* | $r_n = \gamma (\log n / n)^{1/d}$ or $k = k_{\mathrm{PRM}} \log n$; asymptotically optimal; RRT* reached 1.3% above $C^*$ after 4000 iterations | A limit without a rate; constants need $\mu(\mathcal{C}_{\mathrm{free}})$; RRT* proof needed a revised radius |
+| Narrow passages | Uniform PRM success fell from 19 to 2 of 20 as the door narrowed eightfold | Gaussian and bridge sampling help at a cost in checks |
+| Shortcutting | Arm paths shortened by 25% in the median with 100 attempts | Stays in one homotopy class; leaves no clearance |
+
+Sampling-based planners trade the grid's exhaustive coverage for random coverage that is cheap where the free space is open. The trade works because a collision checker is all they need, so the same code plans for a point in a room and for an arm on a torus, and in the examples here the trees found a path with a few thousand checks. The guarantees are weaker than a grid's and need careful reading: completeness only in probability and optimality only in the limit, both slowed by narrow passages. Every planner of this entry returns a geometric path, a sequence of configurations with no notion of time, and even a shortened path has corners that no real actuator can turn instantly. The next entry, [From Paths to Trajectories: Time Scaling and Velocity Profiles](/blog/trajectories-and-time-scaling), adds time: it turns such a path into a trajectory with bounded velocity and acceleration that a robot can follow.
+
+### References
+
+- V. Boor, M. H. Overmars and A. F. van der Stappen, "The Gaussian sampling strategy for probabilistic roadmap planners," in *Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)*, pp. 1018–1023, 1999.
+- H. Choset, K. M. Lynch, S. Hutchinson, G. Kantor, W. Burgard, L. E. Kavraki and S. Thrun, *Principles of Robot Motion: Theory, Algorithms, and Implementations*, MIT Press, 2005.
+- R. Geraerts and M. H. Overmars, "Creating high-quality paths for motion planning," *International Journal of Robotics Research*, vol. 26, no. 8, pp. 845–863, 2007.
+- D. Hsu, T. Jiang, J. Reif and Z. Sun, "The bridge test for sampling narrow passages with probabilistic roadmap planners," in *Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)*, vol. 3, pp. 4420–4426, 2003.
+- D. Hsu, J.-C. Latombe and R. Motwani, "Path planning in expansive configuration spaces," *International Journal of Computational Geometry and Applications*, vol. 9, no. 4–5, pp. 495–512, 1999.
+- S. Karaman and E. Frazzoli, "Sampling-based algorithms for optimal motion planning," *International Journal of Robotics Research*, vol. 30, no. 7, pp. 846–894, 2011.
+- L. E. Kavraki, P. Švestka, J.-C. Latombe and M. H. Overmars, "Probabilistic roadmaps for path planning in high-dimensional configuration spaces," *IEEE Transactions on Robotics and Automation*, vol. 12, no. 4, pp. 566–580, 1996.
+- M. Kleinbort, K. Solovey, Z. Littlefield, K. E. Bekris and D. Halperin, "Probabilistic completeness of RRT for geometric and kinodynamic planning with forward propagation," *IEEE Robotics and Automation Letters*, vol. 4, no. 2, pp. 277–283, 2019.
+- J. J. Kuffner and S. M. LaValle, "RRT-connect: An efficient approach to single-query path planning," in *Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)*, vol. 2, pp. 995–1001, 2000.
+- S. M. LaValle, "Rapidly-exploring random trees: A new tool for path planning," Technical Report TR 98-11, Computer Science Department, Iowa State University, 1998.
+- S. M. LaValle, *Planning Algorithms*, Cambridge University Press, 2006.
+- S. M. LaValle and J. J. Kuffner, "Randomized kinodynamic planning," *International Journal of Robotics Research*, vol. 20, no. 5, pp. 378–400, 2001.
+- K. Solovey, L. Janson, E. Schmerling, E. Frazzoli and M. Pavone, "Revisiting the asymptotic optimality of RRT*," in *Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)*, pp. 2189–2195, 2020.

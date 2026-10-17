@@ -216,3 +216,58 @@ and status phrases (`401 Unauthorized`) are code and stay in English.
 | truncation error, round-off error, floating point | sai số cắt cụt, sai số làm tròn, dấu phẩy động (floating point) |
 | simulation, sim-to-real gap | mô phỏng, khoảng cách mô phỏng – thực tế (sim-to-real gap) |
 | compute-bound, memory-bound, arithmetic intensity | bị giới hạn bởi tính toán (compute-bound), bị giới hạn bởi bộ nhớ (memory-bound), cường độ số học (arithmetic intensity) |
+
+### Parallel and high-performance computing
+
+| English | Tiếng Việt |
+|---|---|
+| parallel computing, high-performance computing (HPC) | tính toán song song, tính toán hiệu năng cao (high-performance computing, HPC) |
+| processor, core, thread, process, node | bộ xử lý, lõi (core), luồng (thread), tiến trình (process), nút (node) |
+| speedup, efficiency, scalability | hệ số tăng tốc (speedup), hiệu suất song song (efficiency), khả năng mở rộng (scalability) |
+| strong scaling, weak scaling | mở rộng mạnh (strong scaling), mở rộng yếu (weak scaling) |
+| Amdahl's law, Gustafson's law, serial fraction | định luật Amdahl, định luật Gustafson, tỉ lệ tuần tự (serial fraction) |
+| work, span, parallelism | khối lượng công việc (work), độ dài đường găng (span), độ song song (parallelism) |
+| roofline model, ridge point, peak performance | mô hình roofline (roofline model), điểm gãy (ridge point), hiệu năng đỉnh |
+| bandwidth, latency, throughput | băng thông, độ trễ (latency), thông lượng |
+| memory hierarchy, cache, cache line, cache miss | phân cấp bộ nhớ (memory hierarchy), bộ nhớ đệm (cache), dòng cache (cache line), trượt cache (cache miss) |
+| locality (temporal / spatial), blocking (tiling) | tính cục bộ (thời gian / không gian), chia khối (blocking, tiling) |
+| associativity, set, way | độ kết hợp (associativity), tập (set), đường (way) |
+| prefetching, translation lookaside buffer (TLB) | nạp trước (prefetching), bộ đệm dịch địa chỉ (translation lookaside buffer, TLB) |
+| array of structures, structure of arrays | mảng cấu trúc (array of structures, AoS), cấu trúc mảng (structure of arrays, SoA) |
+| shared memory, distributed memory | bộ nhớ dùng chung (shared memory), bộ nhớ phân tán (distributed memory) |
+| data race, race condition, atomic operation | tranh chấp dữ liệu (data race), điều kiện tranh chấp (race condition), thao tác nguyên tử (atomic operation) |
+| mutual exclusion, lock, critical section, barrier | loại trừ lẫn nhau, khóa (lock), đoạn găng (critical section), rào chắn (barrier) |
+| memory consistency model, memory ordering | mô hình nhất quán bộ nhớ (memory consistency model), thứ tự bộ nhớ (memory ordering) |
+| false sharing, load imbalance, scheduling | chia sẻ giả (false sharing), mất cân bằng tải (load imbalance), lập lịch (scheduling) |
+| reduction | phép rút gọn (reduction) |
+| vector instruction, SIMD, lane | lệnh vector, SIMD, làn (lane) |
+| graphics processing unit (GPU), kernel, warp, thread block | bộ xử lý đồ họa (graphics processing unit, GPU), kernel (kept), warp (kept), khối luồng (thread block) |
+| coalescing, divergence, occupancy, offloading | gộp truy cập bộ nhớ (coalescing), phân kỳ (divergence), độ lấp đầy (occupancy), chuyển tải tính toán (offloading) |
+| message passing, point-to-point, collective operation | truyền thông điệp (message passing), truyền điểm – điểm (point-to-point), thao tác tập thể (collective operation) |
+| domain decomposition, halo (ghost) cells, halo exchange | phân rã miền (domain decomposition), ô biên ảo (halo cells), trao đổi biên (halo exchange) |
+| broadcast, all-reduce | phát quảng bá (broadcast), all-reduce (kept) |
+
+### Motion planning
+
+| English | Tiếng Việt |
+|---|---|
+| motion planning, path planning, planner | lập kế hoạch chuyển động (motion planning), lập kế hoạch đường đi (path planning), bộ lập kế hoạch (planner) |
+| configuration, configuration space, free space, obstacle region | cấu hình, không gian cấu hình (configuration space), không gian tự do (free space), vùng vật cản (obstacle region) |
+| workspace, obstacle | không gian làm việc, vật cản |
+| Minkowski sum | tổng Minkowski (Minkowski sum) |
+| path, trajectory, time scaling, waypoint | đường đi (path), quỹ đạo (trajectory), tham số hóa thời gian (time scaling), điểm trung gian (waypoint) |
+| collision checking, clearance | kiểm tra va chạm (collision checking), khoảng hở an toàn (clearance) |
+| complete, resolution complete, probabilistically complete, asymptotically optimal | đầy đủ (complete), đầy đủ theo độ phân giải (resolution complete), đầy đủ theo xác suất (probabilistically complete), tối ưu tiệm cận (asymptotically optimal) |
+| graph, node (vertex), edge, cost | đồ thị, đỉnh (node), cạnh, chi phí |
+| graph search, Dijkstra's algorithm, A*, heuristic, admissible, consistent | tìm kiếm trên đồ thị, thuật toán Dijkstra, A*, hàm heuristic (heuristic), chấp nhận được (admissible), nhất quán (consistent) |
+| open list, closed list, priority queue | danh sách mở (open list), danh sách đóng (closed list), hàng đợi ưu tiên (priority queue) |
+| occupancy grid, cell, connectivity | lưới chiếm dụng (occupancy grid), ô, tính liên thông (4-/8-connectivity) |
+| sampling-based planning, probabilistic roadmap (PRM), rapidly-exploring random tree (RRT) | lập kế hoạch dựa trên lấy mẫu (sampling-based planning), bản đồ lộ trình xác suất (probabilistic roadmap, PRM), cây ngẫu nhiên khám phá nhanh (rapidly-exploring random tree, RRT) |
+| narrow passage, steering function, nearest neighbor | lối đi hẹp (narrow passage), hàm lái (steering function), lân cận gần nhất (nearest neighbor) |
+| shortcutting, smoothing | rút ngắn đường đi (shortcutting), làm trơn (smoothing) |
+| velocity profile, trapezoidal profile, S-curve, jerk | biên dạng vận tốc (velocity profile), biên dạng hình thang, biên dạng chữ S (S-curve), độ giật (jerk) |
+| cubic / quintic polynomial, spline | đa thức bậc ba / bậc năm, spline (kept) |
+| path tracking, pure pursuit, look-ahead distance | bám đường đi (path tracking), thuật toán pure pursuit (kept), khoảng nhìn trước (look-ahead distance) |
+| differential-drive robot, unicycle model | robot dẫn động vi sai (differential-drive robot), mô hình unicycle (kept) |
+| potential field, local minimum, dynamic window approach | trường thế (potential field), cực tiểu cục bộ, phương pháp cửa sổ động (dynamic window approach, DWA) |
+| replanning, global / local planner | lập lại kế hoạch (replanning), bộ lập kế hoạch toàn cục / cục bộ |
