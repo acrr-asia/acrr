@@ -14,7 +14,7 @@ seriesOrder: 3
 
 [Bài trước](/vi/blog/graph-search-dijkstra-and-a-star) đã biến không gian cấu hình (configuration space) thành một lưới và tìm kiếm trên đó bằng thuật toán Dijkstra và A*. Các phép tìm kiếm ấy tối ưu trên lưới, nhưng mục 6 của [bài đó](/vi/blog/graph-search-dijkstra-and-a-star) đã chỉ ra cái giá phải trả. Số ô tăng theo độ phân giải lũy thừa số chiều, nên một lưới đủ dùng cho robot di động trong mặt phẳng trở nên bất khả thi với một cánh tay có sáu hay bảy khớp. Bài thứ ba này của loạt bài [Lập kế hoạch chuyển động cho robot](/vi/series/motion-planning) mô tả các phương pháp đã thay thế lưới trong lập kế hoạch nhiều chiều. Chúng đặt các cấu hình một cách ngẫu nhiên, giữ lại những cấu hình tự do, nối chúng bằng các chuyển động ngắn không va chạm và tìm kiếm trên đồ thị thu được. Hai họ phương pháp được trình bày là **bản đồ lộ trình xác suất** (probabilistic roadmap), xây dựng một đồ thị dùng lại được của không gian tự do, và **cây ngẫu nhiên khám phá nhanh** (rapidly-exploring random tree), phát triển một cây từ điểm xuất phát về phía đích.
 
-Bài này dựa trên không gian cấu hình, vùng vật cản (obstacle region) và bộ kiểm tra va chạm của [bài thứ nhất](/vi/blog/configuration-space-and-the-planning-problem), cùng các bảo đảm được định nghĩa ở mục 4 của bài đó. Nó dùng thuật toán Dijkstra của bài thứ hai làm chương trình con. Bài giải thích hai họ phương pháp hoạt động thế nào và các bảo đảm của chúng có nghĩa gì, biến thể nào hội tụ đến đường đi tối ưu, việc lấy mẫu thất bại ở đâu và một đường đi lấy mẫu được rút ngắn ra sao trước khi robot sử dụng nó.
+Bài này dựa trên không gian cấu hình, vùng vật cản (obstacle region) và bộ kiểm tra va chạm (collision checker) của [bài thứ nhất](/vi/blog/configuration-space-and-the-planning-problem), cùng các bảo đảm được định nghĩa ở mục 4 của bài đó. Nó dùng thuật toán Dijkstra của bài thứ hai làm chương trình con. Bài giải thích hai họ phương pháp hoạt động thế nào và các bảo đảm của chúng có nghĩa gì, biến thể nào hội tụ đến đường đi tối ưu, việc lấy mẫu thất bại ở đâu và một đường đi lấy mẫu được rút ngắn ra sao trước khi robot sử dụng nó.
 
 **Quy ước.** Ký hiệu là ký hiệu của loạt bài. Một cấu hình là $q$, không gian cấu hình $\mathcal{C}$ có số chiều $d$, phần tự do của nó là $\mathcal{C}_{\mathrm{free}}$ và vùng vật cản của nó là $\mathcal{C}_{\mathrm{obs}}$; một truy vấn yêu cầu một đường đi (path) từ $q_{\mathrm{start}}$ đến $q_{\mathrm{goal}}$. Một bộ lập kế hoạch (planner) rút $n$ mẫu và nối mỗi mẫu với các mẫu nằm trong một bán kính kết nối $r_n$ hoặc với $k$ lân cận gần nhất (nearest neighbor) của nó; một cây ngẫu nhiên tiến tối đa một kích thước bước (step size) $\eta$ ở mỗi vòng lặp. Chi phí của một đường đi là độ dài của nó, và $C^*$ là chi phí tối ưu. Logarit là logarit tự nhiên. Độ dài tính bằng mét cho các ví dụ phẳng và bằng radian cho cánh tay, với các góc khớp $\theta_1, \theta_2$ và độ dài khâu $l_1 = 1.0$ m và $l_2 = 0.7$ m như trong bài [Động học thuận và động học ngược của cánh tay phẳng](/vi/blog/planar-arm-kinematics). Mã nguồn viết bằng Python 3.13 với NumPy 2.5. Mọi lựa chọn ngẫu nhiên đều được rút từ `numpy.random.default_rng(seed)` với hạt giống (seed) được nêu rõ, và kết quả được báo cáo dưới dạng trung vị, giá trị nhỏ nhất và lớn nhất trên 10 hoặc 20 hạt giống thay vì một lần chạy, vì một lần chạy đơn lẻ của bộ lập kế hoạch ngẫu nhiên có thể may mắn hoặc kém may mắn một cách bất thường.
 
@@ -41,7 +41,7 @@ Từ bỏ lưới cũng là từ bỏ bảo đảm của lưới. Tìm kiếm tr
 
 ### 1.4 Các bài toán thử nghiệm
 
-Hai bài toán xuyên suốt bài này. Bài toán thứ nhất là một robot điểm trong một căn phòng vuông 10 m × 10 m, với một bức tường có một cửa rộng 1.0 m và ba hộp chữ nhật. Một robot hình đĩa quy về trường hợp này bằng cách nới rộng vật cản thêm bán kính của nó, như ở bài thứ nhất. Chương trình `show_maps.py` in bản đồ này trên một lưới ô rộng 0.25 m và cao 0.5 m (chỉ để hiển thị; các bộ lập kế hoạch làm việc với tọa độ liên tục):
+Hai bài toán xuyên suốt bài này. Bài toán thứ nhất là một robot điểm trong một căn phòng vuông 10 m × 10 m, với một bức tường có một cửa rộng 1.0 m và ba hộp chữ nhật. Một robot hình đĩa quy về trường hợp này bằng cách phình to các vật cản thêm bán kính của nó, như ở bài thứ nhất. Chương trình `show_maps.py` in bản đồ này trên một lưới ô rộng 0.25 m và cao 0.5 m (chỉ để hiển thị; các bộ lập kế hoạch làm việc với tọa độ liên tục):
 
 ```text
 Plane map, x right, y up, 0 to 10 m; S start, G goal, # obstacle
@@ -482,7 +482,7 @@ Mọi đoạn mà phép rút ngắn chèn vào đều đã qua một phép kiể
 
 ## 8. Tóm tắt
 
-| Khái niệm | Kết quả | Hạn chế chính |
+| Khái niệm | Kết quả | Giới hạn chính |
 |---|---|---|
 | Lấy mẫu thay cho lưới | Bộ kiểm tra va chạm là hình học duy nhất; chi phí tăng theo số phép kiểm tra cần thiết, không theo $N^d$ ô | Chỉ không va chạm trong giới hạn độ phân giải kiểm tra |
 | Tính đầy đủ theo xác suất | Xác suất tìm được một đường đi tồn tại tiến tới 1 khi $n \to \infty$ | Nói chung không có tốc độ; không thể chứng minh rằng không có đường đi |
