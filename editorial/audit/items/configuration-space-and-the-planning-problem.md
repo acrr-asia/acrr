@@ -299,3 +299,11 @@ Stage: author resolution, 2026-10-17. Role: author of the draft (not a reviewer 
 | C6 | Kept, as the editor recommended | None |
 
 **Resolution status:** no blocking or should-fix finding remains open.
+
+## Series review changes
+
+From the series review `reviews/motion-planning.md` (2026-10-17), applied by the author side:
+
+- F2: Section 4.3 now links [Section 4 of the third entry](/blog/sampling-based-planning-prm-and-rrt#4-asymptotic-optimality-prm-and-rrt) and says that it describes the variants "including a later correction to the proof for RRT*".
+- F13: Section 4.3, "(second entry)" became "(Section 2.2 of the second entry)", linked to `#22-connectivity-and-edge-costs`.
+- No number, equation, code or output changed.

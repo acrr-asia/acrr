@@ -285,3 +285,13 @@ By the author. Each change was made in `src/content/blog/graph-search-dijkstra-a
 | T2 | Applied with changes | Section 5.3, mechanism: "whether the segment between their centers stays out of blocked cells." became "whether the segment between them stays out of blocked cells (in the implementation here, nodes are cell centers)." Result paragraph: "It is not the shortest path, because it turns at cell centers while the shortest path turns at obstacle corners; Nash et al. state ..." became "It is not the shortest path. This implementation turns only at cell centers, while the shortest path turns at obstacle corners. More generally, Theta* considers as the parent of a node only the expanded node or that node's parent, and Nash et al. state that Theta* is not guaranteed to find shortest paths." This is the suggested text, split into two sentences to stay under the sentence-length limit. |
 | T3 | Applied | Listing comment: "# Python 3.13. The search used in Sections 3 to 5 (from gridsearch.py)." became "# Python 3.13. The grid search of Sections 3, 4 and 5.1 (from gridsearch.py)." `gridsearch.py` itself has no such comment, so the listing still matches the code. |
 | T4 | Applied | Section 6.3: "but every path found is close to 4.94 rad." became "but every path found is between 4.93 and 5.00 rad long." (The table gives 4.9293 to 5.0016 rad.) |
+
+## Series review changes
+
+From the series review `reviews/motion-planning.md` (2026-10-17), applied by the author side:
+
+- F3: Section 5.4 now reads "**D* Lite**, introduced by Koenig and Likhachev in 2002, ... and their journal account shows that it is at least as efficient as D*"; the AAAI-02 paper "D* Lite" (pp. 476–483) is added to the references before the 2005 journal paper, which is kept.
+- F5: the disk radius in Section 2.1 is $r$ (as in the first entry), not $\rho$.
+- F9: the link to the state estimation entry now says that it names such a grid as one form of map in simultaneous localization and mapping, not that it describes how the grid is built.
+- F14: the cheapest cost in the proof of Section 3.2 and in the answer to Exercise 3 is $g^*(\cdot)$ (as in Section 4.2) instead of $d(\cdot)$, which clashed with the dimension $d$.
+- No number, code or output changed.

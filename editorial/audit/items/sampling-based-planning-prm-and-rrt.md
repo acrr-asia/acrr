@@ -331,3 +331,16 @@
 | T11 | Applied | Section 3.5: "the two planners compare in the same way:" → "RRT-Connect again needs fewer checks than RRT, and the two path lengths are similar:" |
 
 **Resolution verdict:** every blocking and should-fix finding (F1, T1 to T6) is applied; optional F2 and T7 to T11 are applied. No finding is open.
+
+## Series review changes
+
+From the series review `reviews/motion-planning.md` (2026-10-17), applied by the author side:
+
+- F1: the PRM diagram of Section 2.1 is `flowchart TB` instead of `LR`; the built figure's min-width fell from 1005 px to 143 px (natural size 239 × 946 px).
+- F6: the checking resolution in Sections 1.2 and 5.3 is $\varepsilon$, not $\delta$ (the first entry's safety margin).
+- F7: the grid size in Section 1.1 and the Summary is $N$ ($N^d$ cells), as in Section 6.4 of the second entry.
+- F8: the point check is related to the first entry's configuration check, with a link to its Section 5.1.
+- F10: the answer to Exercise 4 now states both conditions for a grid proof of infeasibility (a whole-cell test and moves between cells that touch at a corner) and says that the second entry's grid planners give no such proof.
+- F13: Section 5.3 identifies the 0.037 m tip bound with the bound $D$ of Section 5.3 of the first entry, linked.
+- F15: Section 4.4 says that the printed radii are capped at $\eta = 1.0$ m and that the formula gives 1.306 m at $n = 500$ (recomputed: $11.71 \times (\ln 500/500)^{1/2} = 1.3055$ m).
+- No program was changed and no quoted output changed.

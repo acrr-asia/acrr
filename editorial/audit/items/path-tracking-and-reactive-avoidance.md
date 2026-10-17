@@ -289,3 +289,12 @@ Stage: EOS step 7, by the author. Every quoted number below comes from a program
 | D1–D4, C1–C7 | Already applied by the editors | No author action needed; the re-read confirmed that their wording is consistent with the changes above. |
 
 No open blocking or should-fix finding remains.
+
+## Series review changes
+
+From the series review `reviews/motion-planning.md` (2026-10-17), applied by the author side:
+
+- F4: the Khatib (1986) reference now names the journal *International Journal of Robotics Research*, as in the first entry and every other reference to that journal in the series.
+- F14: the answer to Exercise 3 writes the characteristic polynomial in $\lambda$ instead of $s$ (the series' path parameter, and the unit symbol beside it).
+- F3 needed no change here: the second entry now cites the same 2002 paper.
+- No number, code or output changed.
