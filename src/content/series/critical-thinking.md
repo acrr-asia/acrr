@@ -11,7 +11,7 @@ objectives:
   - "Identify common fallacies and cognitive biases in real reasoning, and apply structured techniques for generating and developing new ideas."
 ---
 
-The series is written for readers who want to reason more carefully about technical and everyday questions alike: what a claim means, whether the evidence for it is good, and what follows from it. It assumes no background in philosophy or logic. The entries on probability and statistics use school algebra and a few short Python 3 listings; nothing else beyond the site's usual prerequisites is needed.
+The series is written for readers who want to reason more carefully about technical and everyday questions alike: what a claim means, whether the evidence for it is good, and what follows from it. It assumes no background in philosophy or logic. Entries four, nine and twelve include a few short Python 3 listings, and the probability and statistics entries use school algebra; nothing else beyond the site's usual prerequisites is needed.
 
 The order follows the order in which a careful reasoner meets a claim. The first entry says what critical thinking is and why intuition alone is not enough. The second deals with meaning, because a claim that is ambiguous or vague cannot yet be evaluated. The third introduces arguments: premises and conclusions, hidden assumptions and the difference between deductive validity and inductive strength.
 
