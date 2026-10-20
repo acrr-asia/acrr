@@ -52,25 +52,25 @@ The first term is the **aleatoric** part of the variance, the noise each member 
 
 In classification each member outputs a vector of class probabilities $p_j = p(y^* \mid x^*, \hat\theta_j)$, and the ensemble averages these vectors, $\bar p = \frac{1}{J}\sum_j p_j$. Averaging the members' logits (the inputs to the softmax) gives a different and generally more confident predictor, which is not the mixture above.
 
-The entropy $H[p] = -\sum_c p_c \ln p_c$ of the averaged prediction splits into two non-negative parts:
+The [first entry](/blog/bayesian-inference-for-neural-networks) (Section 2.2) split the entropy of a posterior predictive into an expected entropy (aleatoric) and the mutual information between the prediction and the parameters (epistemic). The same split applies to the ensemble with the posterior average replaced by the average over members:
 
 $$
-H[\bar p] = \underbrace{\frac{1}{J}\sum_{j=1}^J H[p_j]}_{\text{expected entropy}} + \underbrace{\Big(H[\bar p] - \frac{1}{J}\sum_{j=1}^J H[p_j]\Big)}_{\text{mutual information}} .
+H[\bar p] = \underbrace{\frac{1}{J}\sum_{j=1}^J H[p_j]}_{\text{expected entropy}} + \underbrace{\Big(H[\bar p] - \frac{1}{J}\sum_{j=1}^J H[p_j]\Big)}_{\text{mutual information}} ,
 $$
 
-The second part is the mutual information between the prediction and the choice of member. It is zero when all members agree and grows with their disagreement, so it plays the role of the disagreement term in regression (Depeweg et al., 2018, use this decomposition to separate the two kinds of uncertainty). A two-member example shows the difference. If one member predicts $(0.9, 0.1)$ for a binary problem and the other $(0.1, 0.9)$, the average is $(0.5, 0.5)$ with entropy $\ln 2 \approx 0.693$ nats. Each member alone has entropy $-0.9\ln 0.9 - 0.1\ln 0.1 \approx 0.325$, so the mutual information is $0.693 - 0.325 = 0.368$. A single member predicting $(0.5, 0.5)$ has the same total entropy with zero mutual information: the same total uncertainty, but of the aleatoric kind.
+where $H[p] = -\sum_c p_c \ln p_c$ is the entropy of a probability vector. The second term is zero when all members agree and grows with their disagreement, so it plays the role of the disagreement term in regression. For three members predicting $(0.8, 0.2)$, $(0.6, 0.4)$ and $(0.1, 0.9)$, the average is $(0.5, 0.5)$ with entropy $\ln 2 \approx 0.693$ nats; the members' entropies are 0.500, 0.673 and 0.325, with mean 0.499, so the mutual information is 0.194.
 
 ## 2. A toy ensemble
 
 ### 2.1 Setup
 
-The data are 40 noisy samples of $\sin x$, drawn in two clusters, $x \in [-3, -1]$ and $x \in [1, 3]$, with noise standard deviation $\sigma = 0.1$. Each member is a network with one hidden layer of 50 $\tanh$ units (151 parameters), trained by full-batch gradient descent on
+The data follow the layout of the first entry's worked example, with more points and less noise: 40 noisy samples of $\sin x$, drawn in two clusters, $x \in [-3, -1]$ and $x \in [1, 3]$, with noise standard deviation $\sigma = 0.1$. Each member is a network with one hidden layer of 50 $\tanh$ units (151 parameters), trained by full-batch gradient descent on
 
 $$
 \frac{1}{2N}\sum_{n=1}^{N}\big(f_\theta(x_n) - y_n\big)^2 + \frac{\lambda}{2}\,\lVert\theta\rVert^2 , \qquad \lambda = 10^{-4},
 $$
 
-where $f_\theta$ is the network output. Multiplying the negative log-posterior for Gaussian noise of variance $\sigma^2$ and a prior $\theta \sim \mathcal{N}(0, s^2 I)$ by $\sigma^2/N$ gives this objective with $\lambda = \sigma^2/(N s^2)$, so $\lambda = 10^{-4}$ corresponds to a prior standard deviation $s = \sqrt{0.01/(40 \times 10^{-4})} \approx 1.58$. The members predict only a mean, and the noise variance is fixed at its true value, so the average-noise term of Section 1.2 is $\sigma^2 = 0.01$ everywhere.
+where $f_\theta$ is the network output. As the first entry showed (its Exercise 1), this is the negative log-posterior for Gaussian noise of variance $\sigma^2$ and a prior $\theta \sim \mathcal{N}(0, s_0^2 I)$, scaled by $\sigma^2/N$, with $\lambda = \sigma^2/(N s_0^2)$. So $\lambda = 10^{-4}$ corresponds to a prior standard deviation $s_0 = \sqrt{0.01/(40 \times 10^{-4})} \approx 1.58$. The members predict only a mean, and the noise variance is fixed at its true value, so the average-noise term of Section 1.2 is $\sigma^2 = 0.01$ everywhere.
 
 ```python
 import numpy as np
@@ -167,22 +167,22 @@ A further distinction explains part of the ensembles' accuracy. The BMA weights 
 
 A convex problem shows why plain ensembles are not samplers: with a quadratic loss, every initialization converges to the same minimum, and an ensemble of $J$ identical members has zero spread. In a network, diversity comes only from the non-convexity of the loss. A small change to each member's objective repairs this, exactly in the linear-Gaussian case.
 
-Take a linear model $f_\theta(x) = \phi(x)^\top \theta$ with $D$ features, feature matrix $\Phi \in \mathbb{R}^{N \times D}$, Gaussian noise of variance $\sigma^2$ and prior $\theta \sim \mathcal{N}(0, s^2 I)$. The [first entry](/blog/bayesian-inference-for-neural-networks) derived its posterior, $\mathcal{N}(m, S)$ with
+Take the Bayesian linear regression of the [first entry](/blog/bayesian-inference-for-neural-networks) (Section 3): $f_\theta(x) = \phi(x)^\top \theta$ with $P$ features, design matrix $\Phi \in \mathbb{R}^{N \times P}$, targets $\mathbf{y}$, Gaussian noise of variance $\sigma^2$ and prior $\theta \sim \mathcal{N}(0, s_0^2 I)$. Its posterior is $\mathcal{N}(m_N, S_N)$ with
 
 $$
-S = \Big(\tfrac{1}{\sigma^2}\Phi^\top\Phi + \tfrac{1}{s^2} I\Big)^{-1}, \qquad m = \tfrac{1}{\sigma^2} S \Phi^\top y .
+S_N = \Big(\tfrac{1}{\sigma^2}\Phi^\top\Phi + \tfrac{1}{s_0^2} I\Big)^{-1}, \qquad m_N = \tfrac{1}{\sigma^2} S_N \Phi^\top \mathbf{y} .
 $$
 
-Now let member $j$ draw an **anchor** $\theta_{0,j} \sim \mathcal{N}(0, s^2 I)$ from the prior and a target perturbation $\varepsilon_j \sim \mathcal{N}(0, \sigma^2 I_N)$, and minimize
+Now let member $j$ draw an **anchor** $\theta_{0,j} \sim \mathcal{N}(0, s_0^2 I)$ from the prior and a target perturbation $\varepsilon_j \sim \mathcal{N}(0, \sigma^2 I_N)$, and minimize
 
 $$
-L_j(\theta) = \frac{1}{2\sigma^2}\lVert y + \varepsilon_j - \Phi\theta\rVert^2 + \frac{1}{2s^2}\lVert\theta - \theta_{0,j}\rVert^2 .
+L_j(\theta) = \frac{1}{2\sigma^2}\lVert \mathbf{y} + \varepsilon_j - \Phi\theta\rVert^2 + \frac{1}{2s_0^2}\lVert\theta - \theta_{0,j}\rVert^2 .
 $$
 
-Setting the gradient to zero gives $\hat\theta_j = S\big(\Phi^\top(y + \varepsilon_j)/\sigma^2 + \theta_{0,j}/s^2\big)$. This is a linear function of independent Gaussian vectors, so it is Gaussian; its mean is $S\Phi^\top y/\sigma^2 = m$, because $\varepsilon_j$ and $\theta_{0,j}$ have mean zero. Its covariance is
+Setting the gradient to zero gives $\hat\theta_j = S_N\big(\Phi^\top(\mathbf{y} + \varepsilon_j)/\sigma^2 + \theta_{0,j}/s_0^2\big)$. This is a linear function of independent Gaussian vectors, so it is Gaussian; its mean is $S_N\Phi^\top \mathbf{y}/\sigma^2 = m_N$, because $\varepsilon_j$ and $\theta_{0,j}$ have mean zero. Its covariance is
 
 $$
-S\Big(\frac{\Phi^\top (\sigma^2 I)\Phi}{\sigma^4} + \frac{s^2 I}{s^4}\Big)S = S\,S^{-1}S = S ,
+S_N\Big(\frac{\Phi^\top (\sigma^2 I)\Phi}{\sigma^4} + \frac{s_0^2 I}{s_0^4}\Big)S_N = S_N\,S_N^{-1}S_N = S_N ,
 $$
 
 so each member is an exact posterior sample. Bardsley et al. (2014) studied this **randomize-then-optimize** idea for inverse problems. For neural networks it becomes an approximation: Pearce et al. (2020) proposed anchored ensembles that regularize each member toward its own prior draw, and Osband, Aslanides and Cassirer (2018) add a fixed, randomly initialized "prior network" to each member's output, which has a similar effect.
@@ -226,7 +226,7 @@ posterior sd        [0.124 0.223 0.396]
 ensemble sd         [0.124 0.223 0.396]
 ```
 
-The means agree to Monte Carlo error (about $0.4/\sqrt{20\,000} \approx 0.003$ for the third coefficient) and the standard deviations to three decimals. Without the anchors and perturbations, every member would be the MAP estimate $m$ and the ensemble would report no uncertainty at all.
+The means agree to Monte Carlo error (about $0.4/\sqrt{20\,000} \approx 0.003$ for the third coefficient) and the standard deviations to three decimals. Without the anchors and perturbations, every member would be the MAP estimate $m_N$ and the ensemble would report no uncertainty at all.
 
 ## 5. Ensembles combined with local approximations
 
@@ -304,7 +304,7 @@ The mean is $(1.0 + 1.4 + 0.6)/3 = 1.0$. The disagreement term is $(0^2 + 0.4^2 
 <details>
 <summary>Answer</summary>
 
-$s = \sqrt{\sigma^2/(N\lambda)} = \sqrt{0.01/(40 \times 10^{-3})} = 0.5$. The stronger penalty pulls every member toward small weights and smoother functions, so the members become more alike and disagree less in the gap. (Rerunning the listing with $\lambda = 10^{-3}$ gives a member spread of 0.005 at $x = 0$, against 0.087.)
+$s_0 = \sqrt{\sigma^2/(N\lambda)} = \sqrt{0.01/(40 \times 10^{-3})} = 0.5$. The stronger penalty pulls every member toward small weights and smoother functions, so the members become more alike and disagree less in the gap. (Rerunning the listing with $\lambda = 10^{-3}$ gives a member spread of 0.005 at $x = 0$, against 0.087.)
 
 </details>
 
@@ -313,7 +313,7 @@ $s = \sqrt{\sigma^2/(N\lambda)} = \sqrt{0.01/(40 \times 10^{-3})} = 0.5$. The st
 <details>
 <summary>Answer</summary>
 
-Then $\hat\theta_j = S\Phi^\top(y + \varepsilon_j)/\sigma^2$, with mean $m$ and covariance $S(\Phi^\top\Phi/\sigma^2)S$. Since $S^{-1} = \Phi^\top\Phi/\sigma^2 + I/s^2$, this equals $S(S^{-1} - I/s^2)S = S - S^2/s^2$, which is smaller than $S$ by the positive semi-definite matrix $S^2/s^2$.
+Then $\hat\theta_j = S_N\Phi^\top(\mathbf{y} + \varepsilon_j)/\sigma^2$, with mean $m_N$ and covariance $S_N(\Phi^\top\Phi/\sigma^2)S_N$. Since $S_N^{-1} = \Phi^\top\Phi/\sigma^2 + I/s_0^2$, this equals $S_N(S_N^{-1} - I/s_0^2)S_N = S_N - S_N^2/s_0^2$, which is smaller than $S_N$ by the positive semi-definite matrix $S_N^2/s_0^2$.
 
 </details>
 

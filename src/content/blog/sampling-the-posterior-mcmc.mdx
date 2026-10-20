@@ -1,0 +1,425 @@
+---
+title: "Sampling the Posterior: From HMC to Stochastic-Gradient MCMC"
+description: "How Markov chain Monte Carlo draws samples from a network posterior: Metropolis–Hastings, Hamiltonian Monte Carlo, SGLD, SGHMC and their failure modes."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian inference
+  - markov chain monte carlo
+  - neural networks
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 2
+---
+
+import Figure from '../../components/Figure.astro';
+import BdlSamplerPaths from '../../components/diagrams/BdlSamplerPaths.astro';
+
+The [first entry](/blog/bayesian-inference-for-neural-networks) of this series defined the posterior over network parameters and showed that, once samples from it are available, the posterior predictive is a plain average. It also showed why the samples cannot be drawn directly for a neural network: the posterior has no closed form, and its normalizing constant is an integral over millions of dimensions. What can be computed is the unnormalized log-posterior and its gradient, the same quantities that training uses.
+
+This entry builds Markov chain Monte Carlo (MCMC) samplers from those two ingredients alone. It starts with the Metropolis–Hastings algorithm, the general recipe that needs only ratios of posterior densities, and shows why its simplest form crawls in high dimensions. Hamiltonian Monte Carlo (HMC) uses the gradient to make long, well-directed moves. Stochastic-gradient MCMC (SG-MCMC) replaces the full-data gradient with a mini-batch estimate, which makes sampling affordable for large data sets at the price of a bias that this entry measures. The last sections deal with the multimodal posteriors of real networks, the "cold posterior" observation and diagnostics, and they point to samplers for settings outside this entry's scope.
+
+The notation is that of the series and the first entry. In addition, $U(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta)$ is the **energy**, so that the posterior is $\pi(\theta) \propto \exp(-U(\theta))$, and $h$ denotes a step size. The examples reuse the Bayesian linear regression of the first entry, whose posterior is a known Gaussian, so every sampler can be checked against the exact answer. The code uses Python 3.13 and NumPy 2.5.3 with the seeds shown and needs about 15 seconds to run.
+
+## 1. What a sampler has to deliver
+
+### 1.1 Estimates, not pictures
+
+The goal is not to draw a picture of the posterior; it is to estimate expectations under it, above all the predictive average $\mathbb{E}_{\theta \mid \mathcal{D}}[p(y^* \mid x^*, \theta)]$. With $S$ independent samples, the Monte Carlo estimate of the expectation of a function $g(\theta)$ has standard error $\operatorname{sd}(g)/\sqrt{S}$, where $\operatorname{sd}(g)$ is the posterior standard deviation of $g$. A few hundred independent samples are therefore enough for most predictive quantities, whatever the number of parameters $P$.
+
+None of the methods below delivers independent samples. Each produces a **Markov chain**, a sequence $\theta_1, \theta_2, \dots$ in which every state is drawn from a distribution that depends only on the previous one. Suppose the chain is built so that $\pi$ is its **stationary distribution** (a state drawn from $\pi$ is followed by a state also distributed as $\pi$), and that it can reach every region of the parameter space. Then the distribution of $\theta_k$ approaches $\pi$ as $k$ grows and averages along the chain converge to expectations under $\pi$. That is the principle of **Markov chain Monte Carlo**. The early part of the chain, before it has forgotten its starting point, is discarded as **burn-in**.
+
+### 1.2 Correlated samples and the effective sample size
+
+Successive states of a chain are correlated, so $S$ of them carry less information than $S$ independent draws. The **effective sample size (ESS)** of a chain for a function $g$ is the number of independent samples that would give the same standard error:
+
+$$
+\text{ESS} = \frac{S}{1 + 2\sum_{k=1}^{\infty} \rho_k},
+$$
+
+where $\rho_k$ is the correlation between $g(\theta_t)$ and $g(\theta_{t+k})$ along the chain. In practice the sum is truncated where the estimated correlations become noise; the listing in Section 4 uses Geyer's rule of stopping at the first pair of consecutive lags whose sum is negative (Geyer, 1992). The ESS per unit of computation is the figure of merit for comparing samplers, and Section 4 measures it.
+
+### 1.3 Detailed balance
+
+The usual way to make $\pi$ stationary is to make the chain **reversible** with respect to it: the probability of being at $\theta$ and moving to $\theta'$ equals that of being at $\theta'$ and moving to $\theta$,
+
+$$
+\pi(\theta)\, T(\theta' \mid \theta) = \pi(\theta')\, T(\theta \mid \theta'),
+$$
+
+where $T(\theta' \mid \theta)$ is the transition density of the chain. This condition, **detailed balance**, implies stationarity: integrating both sides over $\theta$ shows that one step from $\pi$ leaves $\pi$ unchanged. Its practical value is that both sides contain $\pi$, so the unknown normalizing constant cancels.
+
+## 2. Metropolis–Hastings
+
+### 2.1 The algorithm
+
+The **Metropolis–Hastings (MH) algorithm** turns any proposal mechanism into a chain with stationary distribution $\pi$ (Metropolis et al., 1953; Hastings, 1970). From the current state $\theta$, it draws a candidate $\theta'$ from a **proposal distribution** $q(\theta' \mid \theta)$ and accepts it with probability
+
+$$
+\alpha(\theta, \theta') = \min\!\left(1,\; \frac{\pi(\theta')\, q(\theta \mid \theta')}{\pi(\theta)\, q(\theta' \mid \theta)}\right)
+= \min\!\left(1,\; e^{\,U(\theta) - U(\theta')}\, \frac{q(\theta \mid \theta')}{q(\theta' \mid \theta)}\right).
+$$
+
+If the candidate is rejected, the chain stays where it is and the current state is counted again. Substituting $\alpha$ into the detailed-balance equation verifies it in one line. Only the energy difference appears, so the normalizing constant is never needed. For a symmetric proposal, $q(\theta' \mid \theta) = q(\theta \mid \theta')$, the ratio of proposals is 1: a move downhill in energy is always accepted, and a move uphill by $\Delta U$ is accepted with probability $e^{-\Delta U}$.
+
+### 2.2 The random walk and the curse of the narrowest direction
+
+The simplest proposal is a **random walk**, $\theta' = \theta + \ell\, \xi$ with $\xi \sim \mathcal{N}(0, I)$ and step length $\ell$. It is easy to state and hard to tune. A step longer than the posterior's narrowest width almost always lands at much higher energy and is rejected. A step short enough to be accepted moves the chain like a diffusion: after $k$ accepted steps of length $\ell$ the chain has typically traveled only about $\ell\sqrt{k}$, so crossing a direction of width $L_{\max}$ takes on the order of $(L_{\max}/\ell)^2$ steps. With $\ell$ set by the narrowest direction, the cost grows with the square of the ratio between the widest and narrowest widths of the posterior.
+
+The dimension makes matters worse. For targets made of many independent components, Roberts, Gelman and Gilks showed that the step must shrink in proportion to $P^{-1/2}$ to keep the acceptance rate away from zero, and that the efficient acceptance rate is about 0.234 (Roberts et al., 1997). A network posterior is high-dimensional and badly conditioned (first entry, Section 4.2), the worst case on both counts. Random-walk MH is still useful for a handful of hyperparameters; for weights it is a baseline to beat.
+
+## 3. Hamiltonian Monte Carlo
+
+### 3.1 Adding momentum
+
+**Hamiltonian Monte Carlo** (Duane et al., 1987; Neal, 2011) replaces the blind random step with a simulated physical trajectory. It adds an auxiliary **momentum** vector $r \in \mathbb{R}^P$ and defines the **Hamiltonian**
+
+$$
+H(\theta, r) = U(\theta) + \tfrac{1}{2}\, r^\top M^{-1} r,
+$$
+
+the sum of a potential energy $U$ and a kinetic energy, with a positive-definite **mass matrix** $M$. The joint density $\exp(-H(\theta, r))$ factorizes into $\pi(\theta)$ times a Gaussian $\mathcal{N}(0, M)$ for $r$, so sampling the pair and discarding $r$ samples the posterior.
+
+Hamilton's equations, $\dot{\theta} = M^{-1} r$ and $\dot{r} = -\nabla U(\theta)$, move the pair along a path on which $H$ is constant. Picture a frictionless puck sliding over the energy surface: it speeds up going downhill and slows going uphill, and it can travel far while keeping the same total energy. One HMC transition draws a fresh momentum from $\mathcal{N}(0, M)$, which sets a new energy level, follows the dynamics for a while, and takes the end point as the proposal. Because the trajectory follows the gradient, it moves along the long axis of a narrow posterior instead of bouncing off its walls.
+
+### 3.2 The leapfrog integrator and the acceptance step
+
+The dynamics are simulated with the **leapfrog integrator**, which advances the pair by a step $h$ in three parts:
+
+$$
+r \leftarrow r - \tfrac{h}{2}\nabla U(\theta), \qquad
+\theta \leftarrow \theta + h\, M^{-1} r, \qquad
+r \leftarrow r - \tfrac{h}{2}\nabla U(\theta).
+$$
+
+Repeating this $L$ times costs $L$ gradient evaluations (the half steps of consecutive repetitions merge). Leapfrog has two properties that make it suitable for MCMC: it is **reversible** (running it with the momentum negated retraces the path) and **volume-preserving** (it maps regions of $(\theta, r)$ space to regions of equal volume). With these, the end point $(\theta', r')$ is a valid MH proposal with a symmetric ratio, and it is accepted with probability $\min(1, e^{-\Delta H})$, where $\Delta H = H(\theta', r') - H(\theta, r)$. Exact dynamics would conserve $H$ and always be accepted; the integrator's error makes $\Delta H$ small but not zero, and the acceptance step removes the resulting bias entirely.
+
+### 3.3 Tuning
+
+HMC has three settings, and each has a characteristic failure.
+
+- **The step size $h$.** For a Gaussian target with $M = I$, the leapfrog iteration is stable only if $h$ is below twice the posterior's narrowest standard deviation; above that, $\Delta H$ explodes and nothing is accepted. In the worked example the narrowest standard deviation is $0.081$, so $h$ must stay below $0.162$. In high dimensions the step needs to shrink only like $P^{-1/4}$, much more slowly than for the random walk, and the efficient acceptance rate is about 0.65 (Beskos et al., 2013).
+- **The number of steps $L$.** Too few, and HMC degenerates into a random walk; too many, and the trajectory wastes gradients by curving back toward its start. Worse, a fixed trajectory length can be in step with the period of oscillation in some direction: after a whole period the trajectory returns to its start in that direction, and after half a period it reaches the mirror image of its start, so in either case that direction is never explored. Randomizing $h$ slightly at each transition breaks that resonance (Neal, 2011). The No-U-Turn Sampler (NUTS) chooses the length adaptively, stopping a trajectory when it starts to double back (Hoffman and Gelman, 2014).
+- **The mass matrix $M$.** Choosing $M$ close to the posterior precision makes the target look isotropic to the dynamics, which removes the conditioning problem. For networks only diagonal or low-rank estimates are affordable.
+
+<Figure caption="One run of each sampler from the same start (circle) on a two-dimensional Gaussian with correlation 0.95. The random walk (left) takes 120 short steps and stays in the lower part of the long axis. HMC (right) spends the same 120 gradient evaluations on 8 transitions; its dashed leapfrog trajectories carry it along the ellipse, and its 8 states (dots) cover most of it.">
+  <BdlSamplerPaths />
+</Figure>
+
+The figure shows the difference on a target small enough to draw. The random walk's step of 0.25 is close to the narrow width of the ellipse (standard deviation 0.22), so it cannot move faster along the long one (standard deviation 1.40). HMC's trajectories of 15 leapfrog steps of size 0.15 oscillate across the narrow direction while drifting along the long one.
+
+## 4. Worked example: three samplers against an exact answer
+
+### 4.1 The setup
+
+The target is the posterior of the first entry's Bayesian linear regression: 11 weights, 20 observations, noise standard deviation $\sigma = 0.25$ and prior standard deviation $s_0 = 1$. It is a Gaussian $\mathcal{N}(m_N, S_N)$ known in closed form, so sampler output can be compared with the truth. It is also badly conditioned in a way that resembles a network posterior. The weights of features near the data are pinned down (standard deviations down to $0.081$), while those of features far from the data keep their prior width (up to 1.0), a ratio of 12 between the widest and narrowest directions.
+
+The quantities checked are the predictive function value $f(x^*) = \phi(x^*)^\top\theta$ at two inputs from the first entry: $x^* = 0$, in the gap between the data clusters, where the posterior is wide, and $x^* = -2$, inside a cluster, where it is narrow. Every sampler starts at $\theta = 0$, discards the first 20% of its chain and gets a comparable budget of about 20 000 passes over the data. The stochastic-gradient Langevin sampler that completes the comparison is explained in Section 5; it is included here so that all results are in one table.
+
+### 4.2 The code
+
+```python
+import numpy as np
+
+# The model and data of the first entry (seed 0): exact posterior N(m, S) is known
+rng = np.random.default_rng(seed=0)
+sigma, s0 = 0.25, 1.0
+centers = np.arange(-5.0, 5.5, 1.0)
+features = lambda x: np.exp(-(x[:, None] - centers[None, :]) ** 2)
+x = np.concatenate([rng.uniform(-3, -1, 10), rng.uniform(1, 3, 10)])
+y = np.sin(x) + rng.normal(0.0, sigma, size=x.size)
+Phi, N, P = features(x), x.size, centers.size
+S = np.linalg.inv(Phi.T @ Phi / sigma**2 + np.eye(P) / s0**2)
+m = S @ Phi.T @ y / sigma**2
+
+def U(t):                                     # energy: -log posterior + const
+    return np.sum((y - Phi @ t) ** 2) / (2 * sigma**2) + t @ t / (2 * s0**2)
+
+def grad_U(t, idx=None):                      # idx: mini-batch indices, None = all
+    if idx is None:
+        idx = np.arange(N)
+    r = y[idx] - Phi[idx] @ t
+    return -(N / idx.size) * Phi[idx].T @ r / sigma**2 + t / s0**2
+
+def rw_mh(n, step, rng):
+    t, u, out, acc = np.zeros(P), U(np.zeros(P)), [], 0
+    for _ in range(n):
+        prop = t + step * rng.normal(size=P) # symmetric Gaussian proposal
+        u_prop = U(prop)
+        if np.log(rng.uniform()) < u - u_prop:
+            t, u, acc = prop, u_prop, acc + 1
+        out.append(t)
+    return np.array(out), acc / n
+
+def hmc(n, eps, L, rng):
+    t, out, acc = np.zeros(P), [], 0
+    for _ in range(n):
+        e = eps * rng.uniform(0.8, 1.2)      # jittered step size
+        r0 = rng.normal(size=P)              # fresh momentum, M = I
+        q, r = t.copy(), r0 - 0.5 * e * grad_U(t)
+        for l in range(L):                   # leapfrog integration
+            q = q + e * r
+            if l < L - 1:
+                r = r - e * grad_U(q)
+        r = r - 0.5 * e * grad_U(q)
+        dH = U(q) + r @ r / 2 - U(t) - r0 @ r0 / 2
+        if np.log(rng.uniform()) < -dH:
+            t, acc = q, acc + 1
+        out.append(t)
+    return np.array(out), acc / n
+
+def sgld(n, step, batch, rng):
+    t, out = np.zeros(P), []
+    for _ in range(n):
+        idx = rng.choice(N, size=batch, replace=False)
+        t = t - step * grad_U(t, idx) + np.sqrt(2 * step) * rng.normal(size=P)
+        out.append(t)
+    return np.array(out)
+
+def ess(z):                                  # effective sample size, initial positive sequence
+    z = z - z.mean()
+    f = np.fft.rfft(z, 2 * z.size)
+    ac = np.fft.irfft(f * np.conj(f))[:z.size] / (z @ z)
+    s, k = 0.0, 1
+    while k + 1 < z.size and ac[k] + ac[k + 1] > 0:
+        s, k = s + ac[k] + ac[k + 1], k + 2
+    return z.size / (1 + 2 * s)
+
+phi = features(np.array([0.0, -2.0]))         # test inputs x* = 0 (gap) and x* = -2 (data)
+sd = np.sqrt(np.diag(phi @ S @ phi.T))
+print(f"exact          : mean f(0) {phi[0] @ m:6.3f}  sd f(0) {sd[0]:.3f}  sd f(-2) {sd[1]:.3f}")
+rng = np.random.default_rng(seed=1)
+runs = {"random-walk MH": rw_mh(20000, 0.06, rng),       # 20 000 full-data evaluations
+        "HMC":            hmc(1000, 0.06, 20, rng),        # 1000 x 20 full-data gradients
+        "SGLD h=2e-3":    (sgld(80000, 2e-3, 5, rng), None),  # 80 000 x 5/20 of the data
+        "SGLD h=2e-4":    (sgld(80000, 2e-4, 5, rng), None)}
+for name, (chain, acc) in runs.items():
+    f = chain[len(chain) // 5:] @ phi.T    # drop the first 20% as burn-in
+    a = "" if acc is None else f"  accepted {acc:.2f}"
+    print(f"{name:15s}: mean f(0) {f[:, 0].mean():6.3f}  sd f(0) {f[:, 0].std():.3f}  "
+          f"sd f(-2) {f[:, 1].std():.3f}  ESS f(0) {ess(f[:, 0]):5.0f}{a}")
+```
+
+It prints:
+
+```text
+exact          : mean f(0)  0.039  sd f(0) 0.632  sd f(-2) 0.138
+random-walk MH : mean f(0)  0.004  sd f(0) 0.556  sd f(-2) 0.131  ESS f(0)    17  accepted 0.58
+HMC            : mean f(0)  0.013  sd f(0) 0.665  sd f(-2) 0.145  ESS f(0)   493  accepted 0.96
+SGLD h=2e-3    : mean f(0)  0.054  sd f(0) 0.596  sd f(-2) 0.150  ESS f(0)    47
+SGLD h=2e-4    : mean f(0)  0.366  sd f(0) 0.493  sd f(-2) 0.133  ESS f(0)    18
+```
+
+### 4.3 Reading the results
+
+- **Random-walk MH.** With a step of 0.06, a little below the narrowest standard deviation, 58% of proposals are accepted, but the chain diffuses so slowly along the wide directions that 16 000 retained states are worth about 17 independent ones. The estimate of the standard deviation at $x^* = 0$, 0.556, is 12% too small, because the chain has not yet explored the tails of the wide directions. The diffusion estimate of Section 2.2 predicts this order of magnitude: with widths of 1 and a step of 0.06, crossing takes about $(1/0.06)^2 \approx 280$ accepted moves, and the measured ESS corresponds to one independent sample per 940 iterations.
+- **HMC.** With the same number of gradient evaluations as the random walk has energy evaluations, HMC delivers an ESS of 493 from 800 retained states, almost 30 times as many effective samples. Its estimates agree with the exact values to within their Monte Carlo standard errors: at $x^* = 0$ the standard error of the mean is about $0.632/\sqrt{493} \approx 0.028$, and the estimate is off by 0.026.
+- **Stochastic gradient Langevin dynamics (SGLD) with step $2 \times 10^{-3}$.** Each step uses a mini-batch of 5 examples, a quarter of the data, so 80 000 steps cost the same 20 000 data passes. It mixes better than the random walk (ESS 47) but its standard deviation at $x^* = -2$ is 0.150 against the exact 0.138: the narrow directions are too wide. This is not Monte Carlo noise, as Section 5.3 shows.
+- **SGLD with step $2 \times 10^{-4}$.** A smaller step reduces that bias, and the narrow-direction value, 0.133, is now close to exact, but the chain moves ten times more slowly in the wide directions and has not converged in the same budget: the mean at $x^* = 0$ is 0.366 instead of 0.039.
+
+An earlier version of this listing ran HMC with a fixed step size of 0.06. Its standard deviation at $x^* = -2$ was then too wide on every seed tried. Over six seeds with 4000 transitions each it ranged from 0.140 to 0.160, with a mean of 0.149; the jittered version ranged from 0.134 to 0.145, with a mean of 0.138.
+
+The cause is the resonance described in Section 3.3. One principal direction of the posterior has standard deviation 0.382, and along it the dynamics oscillate with period $2\pi \times 0.382 = 2.40$, so the trajectory length $20 \times 0.06 = 1.20$ is half a period. After half a period, a Gaussian oscillation reaches the mirror image of its starting deviation from the mean whatever the momentum, so the size of that deviation never changes from one transition to the next. The ESS estimator saw only sign flips and reported no correlation at all. The lesson generalizes: a sampler can be wrong in a way its own diagnostics do not reveal, and checking it on a problem with a known answer is the cheapest protection.
+
+## 5. Stochastic-gradient MCMC
+
+### 5.1 Langevin dynamics
+
+The **Langevin update** is the simplest gradient-based sampler:
+
+$$
+\theta_{k+1} = \theta_k - h\, \nabla U(\theta_k) + \sqrt{2h}\; \xi_k, \qquad \xi_k \sim \mathcal{N}(0, I).
+$$
+
+It is a gradient descent step on the energy plus Gaussian noise whose variance, $2h$, is matched to the step. In the limit of small $h$ it simulates a stochastic differential equation whose stationary distribution is exactly $\pi$. At a finite step it does not: used without an acceptance step, it is the **unadjusted Langevin algorithm**, and its stationary distribution is slightly wrong. Adding an MH correction (the Metropolis-adjusted Langevin algorithm) removes the bias, but that correction needs the energy on the full data set (Roberts and Tweedie, 1996).
+
+For a Gaussian target the error can be computed. Write the energy as $U(\theta) = \frac{1}{2}(\theta - m)^\top A(\theta - m)$ with precision matrix $A$. The update is then linear, and its stationary covariance $C$ satisfies $C = (I - hA)\,C\,(I - hA) + 2h I$, which gives
+
+$$
+C = \Big(A\,\big(I - \tfrac{h}{2}A\big)\Big)^{-1}.
+$$
+
+Each posterior variance $1/\lambda$, for an eigenvalue $\lambda$ of $A$, is inflated by the factor $1/(1 - h\lambda/2)$. The stiffest directions, those with the largest $\lambda$ and the smallest posterior width, are distorted most. The step must also satisfy $h < 2/\lambda_{\max}$ or the iteration diverges, the same stability limit as gradient descent.
+
+### 5.2 Stochastic gradient Langevin dynamics
+
+**Stochastic gradient Langevin dynamics** (Welling and Teh, 2011) replaces $\nabla U$ in the Langevin update with its mini-batch estimate. For a mini-batch $B$ of $\lvert B \rvert$ examples,
+
+$$
+\nabla \tilde{U}(\theta) = -\frac{N}{\lvert B \rvert}\sum_{n \in B} \nabla \log p(y_n \mid x_n, \theta) - \nabla \log p(\theta),
+$$
+
+an unbiased estimate of $\nabla U(\theta)$, exactly as in stochastic gradient descent (SGD). The resulting algorithm is SGD with a learning rate $h$ and added noise of variance $2h$, which is why it was attractive for neural networks: it costs no more than training.
+
+The mini-batch adds a second source of noise, $h$ times the gradient error, with variance proportional to $h^2$. The injected noise has variance $2h$, so as $h \to 0$ the injected noise dominates and the mini-batch error becomes negligible. Welling and Teh used step sizes that decrease with the iteration $k$ so that $\sum_k h_k = \infty$ (the chain can travel arbitrarily far) and $\sum_k h_k^2 < \infty$ (the accumulated discretization and mini-batch errors stay bounded), as in the classical conditions for stochastic approximation. Under such schedules, and suitable regularity assumptions, SGLD averages converge to posterior expectations (Teh et al., 2016). In practice a decreasing step slows the chain as it shrinks, and most applications use a small constant step and accept a bias.
+
+### 5.3 Measuring the bias
+
+The worked example allows the bias to be separated into its two parts. The extension below, appended to the listing of Section 4, computes the full-batch Langevin covariance from the formula of Section 5.1 and runs SGLD at $h = 2 \times 10^{-3}$ for 200 000 steps, with mini-batches of 5 and with all 20 examples.
+
+```python
+A = np.linalg.inv(S)                         # posterior precision
+h = 2e-3
+C = np.linalg.inv(A @ (np.eye(P) - h * A / 2))   # stationary covariance of full-batch Langevin
+print(f"formula, full batch   : sd f(-2) {np.sqrt(phi[1] @ C @ phi[1]):.3f}")
+rng = np.random.default_rng(seed=5)
+for batch in [5, 20]:
+    f = sgld(200000, h, batch, rng)[20000:] @ phi[1]
+    print(f"simulated, batch {batch:2d}   : sd f(-2) {f.std():.3f}")
+```
+
+```text
+formula, full batch   : sd f(-2) 0.144
+simulated, batch  5   : sd f(-2) 0.156
+simulated, batch 20   : sd f(-2) 0.145
+```
+
+The exact posterior standard deviation at $x^* = -2$ is 0.138. Discretization alone, at this step size, inflates it to 0.144 (formula) or 0.145 (simulation, which agrees within its own noise). Mini-batches of 5 inflate it to 0.156, so at this step the gradient noise contributes about twice as much error as the discretization. The bias is modest here, about 13% of the standard deviation, but it is systematic: running longer does not reduce it, and neither diagnostic of Section 7 would detect it without the exact answer. The largest eigenvalue of the precision is 152, so this step is about one fifth of the stability limit $2/152 = 0.013$.
+
+### 5.4 Stochastic gradient Hamiltonian Monte Carlo
+
+Using mini-batch gradients inside HMC is less simple than it looks. Chen, Fox and Guestrin showed that HMC dynamics driven by noisy gradients, without an acceptance step, do not keep the posterior stationary: the gradient noise steadily pumps energy into the system (Chen et al., 2014). Their **stochastic gradient HMC (SGHMC)** adds a **friction** term that removes momentum in proportion to its size, together with injected noise, chosen so that friction and noise balance. If the gradient noise is estimated, the injected noise is reduced by that amount. Discretized, SGHMC looks like SGD with momentum (the momentum method of the fundamentals series) plus noise, which again makes it cheap to implement in existing training code.
+
+Ma, Chen and Fox later described a general family of stochastic dynamics with the posterior as stationary distribution, which contains SGLD and SGHMC as special cases and gives a recipe for constructing others, including preconditioned variants (Ma et al., 2015).
+
+## 6. Multimodal posteriors, cyclical step sizes and cold posteriors
+
+### 6.1 Chains that stay in one mode
+
+The worked example has a single mode. A network posterior has many (first entry, Section 4.2), separated by regions of high energy that a gradient-based chain crosses rarely. A chain run with a small step explores one mode well and the others not at all. For prediction, the copies created by permutation symmetry do not matter, since they give the same predictions; distinct modes, which make different predictions, do. The usual practical answer is to run several chains from different initializations, which is close in spirit to the deep ensembles of the [fifth entry](/blog/deep-ensembles).
+
+### 6.2 Cyclical step sizes
+
+Zhang et al. proposed instead to vary the step size in cycles (Zhang et al., 2020). Within each cycle of $K$ steps, the step size follows half a cosine from a large value $h_0$ down to nearly zero,
+
+$$
+h_k = \frac{h_0}{2}\left[\cos\!\left(\frac{\pi\,(k \bmod K)}{K}\right) + 1\right],
+$$
+
+where $k \bmod K$ is the position of step $k$ in its cycle. In the early, large-step part of each cycle the chain behaves like an optimizer with a high learning rate and can leave its current mode; in the late, small-step part it samples the mode it has reached, and only those states are kept. Each cycle therefore contributes samples from one mode, possibly a new one. The authors reported better predictive performance than SGLD with a single decreasing step size on image classification benchmarks. The schedule does not guarantee that modes are visited in proportion to their posterior mass, a property no method achieves at this scale.
+
+### 6.3 How good can sampling get?
+
+Izmailov et al. ran full-batch HMC on modern image classification networks, with a computational budget far beyond that of ordinary training, to obtain a reference for what the exact posterior predicts (Izmailov et al., 2021). They reported that HMC's Bayesian model average predicted well, and that cheaper approximations, deep ensembles among them, differed noticeably from it. Such reference runs are rare, because a single HMC sample of a large network costs as much as many training runs. They are what makes it possible to say how close the cheaper methods of later entries come to the posterior they approximate.
+
+### 6.4 The cold posterior effect
+
+Wenzel et al. reported a puzzling observation (Wenzel et al., 2020). With SG-MCMC on image classification, predictions improved when the posterior was "cooled", that is, sampled from
+
+$$
+\pi_T(\theta) \propto \exp\!\big(-U(\theta)/T\big)
+$$
+
+with a **temperature** $T < 1$, which sharpens the posterior around its modes; $T = 1$ is the Bayes posterior, and $T \to 0$ approaches optimization. If the model and prior were right, $T = 1$ would be optimal, so the effect suggests that something is misspecified. Several explanations have been put forward. Data augmentation multiplies the effective number of observations without changing the likelihood accordingly (Izmailov et al., 2021, attributed much of the effect to it). Curated benchmark data sets have less label noise than the likelihood assumes (Aitchison, 2021). And isotropic Gaussian priors over weights may be poor priors (Fortuin et al., 2022). How much each contributes depends on the setting, and the question is not fully settled. The [seventh entry](/blog/priors-symmetries-and-identifiability) takes up the prior side.
+
+The practical lesson for this entry is narrower. A temperature is an extra knob that changes the target, so results obtained with $T \neq 1$ are not samples from the Bayes posterior, and reports should state the temperature used.
+
+## 7. Diagnostics and practice
+
+A chain never announces that it has converged. The standard checks look for evidence that it has not.
+
+- **Several chains.** Run at least four chains from dispersed starting points. The **potential scale reduction** $\hat{R}$ compares the variance between chains with the variance within them, and values well above 1 show that the chains have not mixed (Gelman and Rubin, 1992). Vehtari et al. recommend a rank-normalized version and a threshold of 1.01 (Vehtari et al., 2021).
+- **The effective sample size** of each quantity of interest, computed as in Section 1.2, with a few hundred as a usual minimum.
+- **Monitor predictions, not weights.** Because of permutation symmetry, individual weights of a network can jump between equivalent values while the predictions stay the same, so $\hat{R}$ on weights can signal a problem that does not affect the predictive. Function values at test inputs, as in the worked example, are the quantities that matter.
+- **Check against a known answer.** As Section 4.3 showed, a sampler with a subtle bug or a bad setting can pass internal checks. A conjugate model, or a short exact reference, catches what diagnostics miss.
+
+For networks, storage matters as well: every sample is a full copy of the parameters. Practical SG-MCMC keeps a few tens of samples, spaced far apart along the chain (**thinning**), and averages their predictions.
+
+## 8. Beyond gradient-based sampling of weights
+
+The methods above sample continuous parameters using gradients of a likelihood that can be evaluated. Several related families relax one of those assumptions; this series does not develop them further.
+
+- **Sequential Monte Carlo (SMC) samplers** move a population of weighted samples, called particles, through a sequence of distributions from the prior to the posterior, for example by raising the likelihood to a power that increases from 0 to 1, with resampling and MCMC moves between stages (Del Moral et al., 2006). The population runs in parallel and its weights provide an estimate of the marginal likelihood.
+- **Simulation-based inference** addresses models whose likelihood cannot be evaluated but can be simulated from, such as scientific simulators. Neural networks are trained on simulated pairs of parameters and data to approximate the posterior or the likelihood directly (Cranmer et al., 2020).
+- **Low-precision sampling** runs SG-MCMC with weights or gradients stored in few bits, to cut memory and compute. Zhang, Wilson and De Sa analyzed SGLD with quantized weights and showed how to keep the quantization error from biasing the target (Zhang et al., 2022).
+- **Discrete sampling** applies when some parameters or latent variables take discrete values, as for pruning masks or binary networks. Informed proposals weight neighboring states by their posterior probability (Zanella, 2020), and gradients of a continuous extension of the energy can be used to choose which discrete variable to change (Grathwohl et al., 2021).
+
+## 9. Exercises
+
+**Exercise 1.** A random-walk MH chain proposes a move that raises the energy by $\Delta U = 1.5$. What is the probability that it is accepted? What if it lowers the energy by 1.5?
+
+<details>
+<summary>Answer</summary>
+
+$e^{-1.5} = 0.223$ for the uphill move. The downhill move has acceptance ratio $e^{1.5} > 1$, so it is accepted with probability 1.
+
+</details>
+
+**Exercise 2.** The posterior of a model has standard deviations ranging from 0.01 to 2 along its principal directions. Estimate how many random-walk steps are needed to cross the widest direction once, with a step length equal to the narrowest standard deviation.
+
+<details>
+<summary>Answer</summary>
+
+About $(2/0.01)^2 = 40\,000$ accepted steps, more once rejections are counted. HMC with a step of the same size would cross the same direction in about $2/0.01 = 200$ leapfrog steps, since its motion along a trajectory is directed rather than diffusive.
+
+</details>
+
+**Exercise 3.** For the worked example, compute the factor by which the unadjusted Langevin algorithm with $h = 2 \times 10^{-3}$ inflates the variance in the stiffest direction ($\lambda_{\max} = 152$). Which step size would bring that inflation down to 1%?
+
+<details>
+<summary>Answer</summary>
+
+$1/(1 - 0.002 \times 152/2) = 1/0.848 = 1.18$, an 18% inflation of the variance (9% of the standard deviation). For 1%, $h\lambda/2 \approx 0.01$, so $h \approx 0.02/152 = 1.3 \times 10^{-4}$, roughly 15 times smaller, and the chain then needs about 15 times as many steps to move the same distance in the wide directions.
+
+</details>
+
+**Exercise 4.** In the table of Section 4.2, SGLD with the smaller step has the more accurate standard deviation at $x^* = -2$ and the less accurate mean at $x^* = 0$. Explain both.
+
+<details>
+<summary>Answer</summary>
+
+The smaller step reduces both bias sources of Section 5.3, which matter most in the stiff directions that determine $f(-2)$. But in the same number of steps the chain covers ten times less "time" ($80\,000 \times 2 \times 10^{-4} = 16$ against 160), which is too short to equilibrate the wide directions that determine $f(0)$, whose posterior variances are near 1. The mean there still reflects the starting point.
+
+</details>
+
+**Exercise 5.** Show that one random-walk MH step from a state drawn from $\pi$ leaves the distribution $\pi$ unchanged, using detailed balance.
+
+<details>
+<summary>Answer</summary>
+
+The density after one step is $\int \pi(\theta)\, T(\theta' \mid \theta)\, d\theta$. By detailed balance this equals $\int \pi(\theta')\, T(\theta \mid \theta')\, d\theta = \pi(\theta') \int T(\theta \mid \theta')\, d\theta = \pi(\theta')$, because a transition density integrates to 1 over its destination (the rejection case, staying at $\theta'$, is included in $T$ as a point mass).
+
+</details>
+
+## 10. Summary
+
+| Method | Uses | Exact in the limit? | Main weakness |
+|---|---|---|---|
+| Random-walk Metropolis–Hastings | Energy differences | Yes | Diffusive; step limited by the narrowest direction |
+| Hamiltonian Monte Carlo | Full-data gradients and energies | Yes (acceptance step) | Full-data cost per step; tuning of $h$, $L$, $M$ |
+| Unadjusted Langevin | Full-data gradients | Only as $h \to 0$ | Inflates the stiffest directions by $1/(1 - h\lambda/2)$ |
+| SGLD | Mini-batch gradients | Only with decreasing steps | Discretization plus gradient-noise bias at a fixed step |
+| SGHMC | Mini-batch gradients, friction | Only as $h \to 0$ | Needs a noise estimate; same bias trade-off |
+| Cyclical SG-MCMC | Mini-batch gradients, cyclical $h$ | No guarantee across modes | Mode proportions not controlled |
+
+The worked example measured what the table states. On a known posterior with a 12-fold range of widths, HMC delivered almost 30 times the effective samples of a random walk for the same cost and matched the exact answer; SGLD was cheap per step and visibly biased at a practical step size. For networks, these samplers remain the reference against which approximations are judged, but their cost limits them to small models or exceptional budgets.
+
+The next entry, [Laplace Approximations and the Linearized Predictive](/blog/laplace-approximations), takes the opposite route. Instead of exploring the posterior, it trains one network to a mode and fits a Gaussian there from the local curvature, at a cost little above that of training.
+
+### References
+
+- L. Aitchison, "A statistical theory of cold posteriors in deep neural networks," in *International Conference on Learning Representations (ICLR)*, 2021.
+- A. Beskos, N. Pillai, G. Roberts, J.-M. Sanz-Serna and A. Stuart, "Optimal tuning of the hybrid Monte Carlo algorithm," *Bernoulli*, vol. 19, no. 5A, pp. 1501–1534, 2013.
+- T. Chen, E. B. Fox and C. Guestrin, "Stochastic Gradient Hamiltonian Monte Carlo," in *Proceedings of the 31st International Conference on Machine Learning (ICML)*, 2014.
+- K. Cranmer, J. Brehmer and G. Louppe, "The frontier of simulation-based inference," *Proceedings of the National Academy of Sciences*, vol. 117, no. 48, pp. 30055–30062, 2020.
+- P. Del Moral, A. Doucet and A. Jasra, "Sequential Monte Carlo samplers," *Journal of the Royal Statistical Society, Series B*, vol. 68, no. 3, pp. 411–436, 2006.
+- S. Duane, A. D. Kennedy, B. J. Pendleton and D. Roweth, "Hybrid Monte Carlo," *Physics Letters B*, vol. 195, no. 2, pp. 216–222, 1987.
+- V. Fortuin et al., "Bayesian Neural Network Priors Revisited," in *International Conference on Learning Representations (ICLR)*, 2022.
+- A. Gelman and D. B. Rubin, "Inference from Iterative Simulation Using Multiple Sequences," *Statistical Science*, vol. 7, no. 4, pp. 457–472, 1992.
+- C. J. Geyer, "Practical Markov Chain Monte Carlo," *Statistical Science*, vol. 7, no. 4, pp. 473–483, 1992.
+- W. Grathwohl, K. Swersky, M. Hashemi, D. Duvenaud and C. J. Maddison, "Oops I Took A Gradient: Scalable Sampling for Discrete Distributions," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- W. K. Hastings, "Monte Carlo sampling methods using Markov chains and their applications," *Biometrika*, vol. 57, no. 1, pp. 97–109, 1970.
+- M. D. Hoffman and A. Gelman, "The No-U-Turn Sampler: Adaptively Setting Path Lengths in Hamiltonian Monte Carlo," *Journal of Machine Learning Research*, vol. 15, pp. 1593–1623, 2014.
+- P. Izmailov, S. Vikram, M. D. Hoffman and A. G. Wilson, "What Are Bayesian Neural Network Posteriors Really Like?," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- Y.-A. Ma, T. Chen and E. B. Fox, "A Complete Recipe for Stochastic Gradient MCMC," in *Advances in Neural Information Processing Systems (NeurIPS)*, vol. 28, 2015.
+- N. Metropolis, A. W. Rosenbluth, M. N. Rosenbluth, A. H. Teller and E. Teller, "Equation of State Calculations by Fast Computing Machines," *Journal of Chemical Physics*, vol. 21, no. 6, pp. 1087–1092, 1953.
+- R. M. Neal, "MCMC Using Hamiltonian Dynamics," in S. Brooks, A. Gelman, G. L. Jones and X.-L. Meng (eds.), *Handbook of Markov Chain Monte Carlo*, Chapman and Hall/CRC, 2011.
+- G. O. Roberts, A. Gelman and W. R. Gilks, "Weak convergence and optimal scaling of random walk Metropolis algorithms," *Annals of Applied Probability*, vol. 7, no. 1, pp. 110–120, 1997.
+- G. O. Roberts and R. L. Tweedie, "Exponential convergence of Langevin distributions and their discrete approximations," *Bernoulli*, vol. 2, no. 4, pp. 341–363, 1996.
+- Y. W. Teh, A. H. Thiery and S. J. Vollmer, "Consistency and fluctuations for stochastic gradient Langevin dynamics," *Journal of Machine Learning Research*, vol. 17, 2016.
+- A. Vehtari, A. Gelman, D. Simpson, B. Carpenter and P.-C. Bürkner, "Rank-normalization, folding, and localization: An improved R-hat for assessing convergence of MCMC," *Bayesian Analysis*, vol. 16, no. 2, pp. 667–718, 2021.
+- M. Welling and Y. W. Teh, "Bayesian Learning via Stochastic Gradient Langevin Dynamics," in *Proceedings of the 28th International Conference on Machine Learning (ICML)*, 2011.
+- F. Wenzel et al., "How Good is the Bayes Posterior in Deep Neural Networks Really?," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
+- G. Zanella, "Informed Proposals for Local MCMC in Discrete Spaces," *Journal of the American Statistical Association*, vol. 115, no. 530, pp. 852–865, 2020.
+- R. Zhang, C. Li, J. Zhang, C. Chen and A. G. Wilson, "Cyclical Stochastic Gradient MCMC for Bayesian Deep Learning," in *International Conference on Learning Representations (ICLR)*, 2020.
+- R. Zhang, A. G. Wilson and C. De Sa, "Low-Precision Stochastic Gradient Langevin Dynamics," in *Proceedings of the 39th International Conference on Machine Learning (ICML)*, 2022.
