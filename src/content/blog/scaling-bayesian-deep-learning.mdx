@@ -63,23 +63,21 @@ a Bayesian linear regression in $K$ features, where $\alpha$ is the prior precis
 
 ### 2.2 The posterior and the predictive
 
-With the $N \times K$ feature matrix $\Phi$ whose rows are $\phi(x_n)^\top$ and the target vector $y$, the posterior over $w$ is Gaussian with precision and mean
+This is the Bayesian linear regression of the [first entry](/blog/bayesian-inference-for-neural-networks), with the learned features in place of its fixed Gaussian bumps and with the prior written through its precision $\alpha = 1/s_0^2$. With the $N \times K$ feature matrix $\Phi$ whose rows are $\phi(x_n)^\top$ and the target vector $\mathbf{y}$, the posterior is $\mathcal{N}(m_N, S_N)$ and the predictive at $x^*$, with $z^* = \phi(x^*)$, is
 
 $$
-A = \alpha I + \sigma^{-2} \Phi^\top \Phi, \qquad m = \sigma^{-2} A^{-1} \Phi^\top y,
+S_N^{-1} = \alpha I + \sigma^{-2} \Phi^\top \Phi, \qquad m_N = \sigma^{-2} S_N \Phi^\top \mathbf{y},
 $$
 
-and the posterior predictive at $x^*$, with $z^* = \phi(x^*)$, is
-
 $$
-p(y^* \mid x^*, \mathcal{D}) = \mathcal{N}\big(y^*;\; m^\top z^*,\; \sigma^2 + z^{*\top} A^{-1} z^*\big).
+p(y^* \mid x^*, \mathcal{D}) = \mathcal{N}\big(y^*;\; m_N^\top z^*,\; \sigma^2 + z^{*\top} S_N z^*\big).
 $$
 
-The two variance terms are the aleatoric noise $\sigma^2$ and the epistemic part $z^{*\top} A^{-1} z^*$, which is small where the training features span $z^*$ and large where they do not. Forming $\Phi^\top \Phi$ costs $O(N K^2)$, factorizing $A$ costs $O(K^3)$, and each prediction then costs one forward pass and $O(K^2)$. For $K$ in the hundreds or low thousands this is negligible next to training.
+What is new at scale is the cost. Forming $\Phi^\top \Phi$ costs $O(N K^2)$ in one pass over the data, factorizing the $K \times K$ precision costs $O(K^3)$, and each prediction then costs one forward pass and $O(K^2)$. For $K$ in the hundreds or low thousands this is negligible next to training, and beyond one forward pass per example none of it depends on the size of the feature extractor.
 
 ### 2.3 A worked example
 
-The listing below uses 200 fixed random cosine features in place of a trained feature extractor. They are random Fourier features (Rahimi and Recht, 2007), whose inner products approximate a radial basis function kernel with length scale 1, so the example is also a cheap approximation to the GP of the sixth entry. The data are 40 noisy observations of $\sin(2x)$ in two clusters with a gap at $x = 0$. The code computes the posterior for five prior precisions, reports the log marginal likelihood of each and then predicts at four test inputs with $\alpha = 1$.
+The listing below uses 200 fixed random cosine features in place of a trained feature extractor. They are random Fourier features (Rahimi and Recht, 2007), whose inner products approximate a radial basis function kernel with length scale 1, so the example is also a cheap approximation to the GP of the sixth entry. The data are 40 noisy observations of $\sin(2x)$ in two clusters with a gap at $x = 0$. The code computes the posterior for five prior precisions, reports the log marginal likelihood of each and then predicts at four test inputs with $\alpha = 1$. In the code, `A` is the posterior precision $S_N^{-1}$ and `m` is $m_N$.
 
 ```python
 import numpy as np
@@ -141,7 +139,7 @@ Inside the clusters the predictive standard deviation, 0.105 and 0.106, is barel
 
 ### 2.4 Choosing the prior by the evidence
 
-The log marginal likelihood (the evidence of the [previous entry](/blog/priors-symmetries-and-identifiability), Section 6) is available in closed form, and on the grid above it peaks at $\alpha = 1$. A weak prior ($\alpha = 0.01$) spreads probability over many wiggly functions and pays for it; a strong prior ($\alpha = 100$) cannot reach the data and pays far more. Because the evidence is a smooth function of $\alpha$ and $\sigma$, both can be optimized by gradient ascent or by the fixed-point updates of MacKay (1992), with no validation set. In practice the same objective is often used to tune the prior precision of a last-layer Laplace approximation after training.
+The log marginal likelihood, used in the first entry to choose the prior scale and in the [previous entry](/blog/priors-symmetries-and-identifiability) to learn priors, is available in closed form, and on the grid above it peaks at $\alpha = 1$. A weak prior ($\alpha = 0.01$) spreads probability over many wiggly functions and pays for it; a strong prior ($\alpha = 100$) cannot reach the data and pays far more. Because the evidence is a smooth function of $\alpha$ and $\sigma$, both can be optimized by gradient ascent or by the fixed-point updates of MacKay (1992), with no validation set. In practice the same objective is often used to tune the prior precision of a last-layer Laplace approximation after training.
 
 ### 2.5 What last-layer inference cannot do
 
@@ -151,11 +149,9 @@ The features are fixed. If the feature extractor maps an unfamiliar input onto t
 
 ### 3.1 Structured curvature
 
-The Laplace approximation of the third entry needs the precision matrix $H + \delta I$, where $H$ is the GGN (or Fisher) matrix of the log likelihood at the MAP estimate and $\delta$ is the prior precision. Three structures make it affordable.
+The Laplace approximation of the [third entry](/blog/laplace-approximations) needs the precision matrix $H + \delta I$, where $H$ is the GGN matrix of the negative log likelihood at the MAP estimate and $\delta$ is the prior precision. That entry listed the structures that make it affordable: diagonal, Kronecker-factored, low-rank and restricted to a subset of the weights. This section looks at the two that matter most at scale in more detail.
 
-A **diagonal** approximation keeps only the $P$ diagonal entries. It is cheap but ignores all correlations between weights, which tends to make predictive uncertainty too small or, after tuning $\delta$ to compensate, poorly shaped.
-
-A **Kronecker-factored** approximation (KFAC), introduced for optimization by Martens and Grosse (2015) and applied to the Laplace approximation by Ritter, Botev and Barber (2018), treats layers as independent and approximates the block of a fully connected layer with weight matrix $W \in \mathbb{R}^{d_\text{out} \times d_\text{in}}$ as a Kronecker product
+A **Kronecker-factored** approximation (KFAC) was introduced for optimization by Martens and Grosse (2015) and applied to the Laplace approximation by Ritter, Botev and Barber (2018). It treats layers as independent and approximates the block of a fully connected layer with weight matrix $W \in \mathbb{R}^{d_\text{out} \times d_\text{in}}$ as a Kronecker product (written here with the gradient factor first, to match the row-major ordering of the code below)
 
 $$
 H_W \approx G \otimes A, \qquad A = \mathbb{E}[a a^\top], \qquad G = \mathbb{E}[g g^\top],
@@ -163,7 +159,7 @@ $$
 
 where $a \in \mathbb{R}^{d_\text{in}}$ is the input to the layer, $g \in \mathbb{R}^{d_\text{out}}$ is the gradient of the loss with respect to the layer's output and the expectations are averages over the training data. The approximation assumes that activations and output gradients are independent, which is not exact, but it keeps the dominant correlations within a layer. For a layer with 1024 inputs and 1024 outputs, the exact block would have $2^{40}$ entries (4 TiB); the two factors have $2 \times 2^{20}$ entries (8 MiB), twice the diagonal (4 MiB).
 
-The third structure restricts inference to a **subnetwork**. In their work on subnetwork inference, Daxberger et al. (2021) chose a small subset of weights, for example those with the largest marginal variance under a diagonal approximation, kept a full covariance over them and fixed the rest at their MAP values. Last-layer inference is the special case where the subset is the last layer.
+The second structure restricts inference to a **subnetwork**. In their work on subnetwork inference, Daxberger et al. (2021) chose a small subset of weights, for example those with the largest marginal variance under a diagonal approximation, kept a full covariance over them and fixed the rest at their MAP values. Last-layer inference is the special case where the subset is the last layer.
 
 ### 3.2 The Kronecker trick in code
 
@@ -207,7 +203,7 @@ The two routes agree to rounding error, and the factors store 1300 numbers inste
 
 ### 3.3 Predicting and sampling at scale
 
-With a structured covariance, predictions come either from sampling weights and running $S$ forward passes, or from the linearized predictive of the third entry, which replaces the network by its first-order expansion around the MAP estimate. Immer, Korzepa and Bauer (2021) showed that the linearized predictive often works better than sampling the network itself under a GGN-based Laplace approximation, because the GGN is the exact curvature of the linearized model. In a later study, Daxberger et al. (2021) collected these choices (which weights, which curvature structure, which predictive, how to tune $\delta$) in a library and compared them, finding that last-layer approximations with KFAC curvature and a tuned prior precision were a strong default.
+With a structured covariance, predictions come either from sampling weights and running $S$ forward passes, or from the linearized predictive of the third entry, which replaces the network by its first-order expansion around the MAP estimate. Immer, Korzepa and Bauer (2021) showed that the linearized predictive often works better than sampling the network itself under a GGN-based Laplace approximation, because the GGN is the exact curvature of the linearized model. The comparison by Daxberger et al. (2021) of these choices, which recommended last-layer approximations with Kronecker-factored or full curvature as a default, was discussed in the third entry.
 
 When even Kronecker factors are too coarse, the posterior of the linearized model can be sampled without storing a covariance at all. A sample from a Gaussian posterior of a linear model is the minimizer of a randomly perturbed least-squares objective, so drawing a sample costs about as much as one optimization run. Antorán et al. (2023) used this, with stochastic optimization in place of exact solves, to sample linearized Laplace posteriors of image classifiers that were too large for other covariance structures.
 
@@ -261,12 +257,12 @@ The cost table and the sections above suggest the decision sequence below. It re
 
 ```mermaid
 flowchart TD
-    A{"Retraining allowed?"} -->|no| B["Post hoc: last-layer or<br/>KFAC Laplace"]
-    A -->|yes| C{"One forward pass<br/>at test time?"}
+    A["Retraining allowed?"] -->|no| B["Post hoc: last-layer<br/>or KFAC Laplace"]
+    A -->|yes| C["One forward pass<br/>at test time?"]
     C -->|yes| D["Distance-aware model<br/>(SNGP, DUQ, DDU)"]
-    C -->|no| E{"Several training<br/>runs affordable?"}
+    C -->|no| E["Several training<br/>runs affordable?"]
     E -->|yes| F["Deep ensemble"]
-    E -->|no| G["Last-layer Laplace, SWAG<br/>or Monte Carlo dropout"]
+    E -->|no| G["Laplace, SWAG or<br/>Monte Carlo dropout"]
 ```
 
 The post hoc route is attractive because it leaves an existing training pipeline untouched. Train as usual, compute the curvature of the last layer or of the whole network with Kronecker factors in one extra pass and tune the prior precision on the evidence or on validation data. Ensembles remain the most reliable choice when several training runs are affordable, as the fifth entry discussed, and combining them with a Laplace approximation per member costs little extra.
@@ -297,7 +293,7 @@ The layer has $512 \times 2048 = 2^{20}$ weights. The exact block has $2^{40}$ e
 <details>
 <summary>Answer</summary>
 
-Far from the data, the training features carry little information about $z^*$, so $A^{-1}$ acts on $z^*$ almost like the prior covariance $\alpha^{-1} I$ and the variance is close to $\sigma^2 + \lVert z^* \rVert^2 / \alpha$. Each feature is $\sqrt{2/K}\cos(\cdot)$, so $\lVert z^* \rVert^2$ averages $2/K \cdot K \cdot 1/2 = 1$, giving $\sqrt{1.01} \approx 1.005$. For these features $\lVert z^* \rVert^2 = 1.003$ at $x^* = 6$, so the small shortfall comes from the data: the low-frequency features vary slowly enough to carry some information from the clusters out to $x = 6$, which removes a little of the prior variance.
+Far from the data, the training features carry little information about $z^*$, so $S_N$ acts on $z^*$ almost like the prior covariance $\alpha^{-1} I$ and the variance is close to $\sigma^2 + \lVert z^* \rVert^2 / \alpha$. Each feature is $\sqrt{2/K}\cos(\cdot)$, so $\lVert z^* \rVert^2$ averages $2/K \cdot K \cdot 1/2 = 1$, giving $\sqrt{1.01} \approx 1.005$. For these features $\lVert z^* \rVert^2 = 1.003$ at $x^* = 6$, so the small shortfall comes from the data: the low-frequency features vary slowly enough to carry some information from the clusters out to $x = 6$, which removes a little of the prior variance.
 
 </details>
 

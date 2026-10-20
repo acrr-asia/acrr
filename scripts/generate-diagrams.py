@@ -503,3 +503,626 @@ svg('MemsAccelerometer', 520, 266, 'Schematic of a capacitive MEMS accelerometer
     'When the case accelerates to the left, the mass lags behind and moves to the right relative to it by x: the gap to the left electrode '
     'widens to d plus x and the gap to the right electrode narrows to d minus x, so C1 falls and C2 rises.',
     b)
+
+# ==================== Bayesian Deep Learning series ====================
+
+# ---------- 01-bayesian-inference-for-neural-networks ----------
+
+# ---------- BDL entry 1: posterior predictive of Bayesian linear regression ----------
+import numpy as _bdl_np
+
+def bdl_bi_model():
+    rng = _bdl_np.random.default_rng(seed=0)
+    sigma, s0 = 0.25, 1.0
+    centers = _bdl_np.arange(-5.0, 5.5, 1.0)
+    feats = lambda x: _bdl_np.exp(-(x[:, None] - centers[None, :]) ** 2)
+    x = _bdl_np.concatenate([rng.uniform(-3, -1, 10), rng.uniform(1, 3, 10)])
+    y = _bdl_np.sin(x) + rng.normal(0.0, sigma, size=x.size)
+    Phi = feats(x)
+    S = _bdl_np.linalg.inv(Phi.T @ Phi / sigma**2 + _bdl_np.eye(centers.size) / s0**2)
+    m = S @ Phi.T @ y / sigma**2
+    return x, y, feats, m, S, sigma
+
+def bdl_bi_band_path(P, xs, lo, hi):
+    pts = [(P.X(a), P.Y(b)) for a, b in zip(xs, hi)] + [(P.X(a), P.Y(b)) for a, b in zip(xs[::-1], lo[::-1])]
+    return ' '.join(('M' if i == 0 else 'L') + f'{px:.1f},{py:.1f}' for i, (px, py) in enumerate(pts)) + ' Z'
+
+bx, by, bfeats, bm, bS, bsig = bdl_bi_model()
+g = _bdl_np.linspace(-5, 5, 201)
+F = bfeats(g)
+mu = F @ bm
+epi = _bdl_np.einsum('ij,jk,ik->i', F, bS, F)
+tot = _bdl_np.sqrt(epi + bsig**2)
+epi = _bdl_np.sqrt(epi)
+P = Plot(56, 30, 540, 230, (-5, 5), (-3, 3))
+b = P.axes([-4, -2, 0, 2, 4], [-2, 0, 2], 'input  ' + var('x'), 'output  ' + var('y'))
+b += f'  <path class="region" d="{bdl_bi_band_path(P, g, mu - 2*tot, mu + 2*tot)}" />\n'
+b += f'  <path class="band" d="{bdl_bi_band_path(P, g, mu - 2*epi, mu + 2*epi)}" />\n'
+b += P.curve(math.sin, cls='mut', extra=' stroke-dasharray="5 4"')
+b += line([(P.X(a), P.Y(c)) for a, c in zip(g, mu)], 'acc')
+for a, c in zip(bx, by):
+    b += f'  <circle class="dot" cx="{P.X(a):.1f}" cy="{P.Y(c):.1f}" r="3" />\n'
+# legend
+lx, ly = 62, 322
+b += f'  <rect class="band" x="{lx}" y="{ly-9}" width="22" height="10" />\n'
+b += text(lx+28, ly, '±2 epistemic sd', 'start', 'small')
+b += f'  <rect class="region" x="{lx+150}" y="{ly-9}" width="22" height="10" />\n'
+b += text(lx+178, ly, '±2 total sd', 'start', 'small')
+b += line([(lx+290, ly-4), (lx+312, ly-4)], 'acc')
+b += text(lx+318, ly, 'predictive mean', 'start', 'small')
+b += line([(lx+436, ly-4), (lx+458, ly-4)], 'mut', ' stroke-dasharray="5 4"')
+b += text(lx+464, ly, 'sin ' + var('x'), 'start', 'small')
+svg("BdlPredictiveBand", 640, 332, 'Posterior predictive of Bayesian linear regression with 11 Gaussian features',
+    'Twenty noisy observations of sin x lie in two clusters, between minus 3 and minus 1 and between 1 and 3. The predictive mean follows the sine inside the clusters with a narrow band. In the gap between the clusters the epistemic band widens, and beyond the data, near x equal to plus or minus 5, the mean returns to 0 and the band widens to the prior width of about plus or minus 2.',
+    b)
+
+# ---------- 02-sampling-the-posterior-mcmc ----------
+
+# ---------- BDL entry 2: random-walk Metropolis versus HMC on a correlated Gaussian ----------
+import numpy as _bdl_np2
+
+bdl_mc_C = _bdl_np2.array([[1.0, 0.95], [0.95, 1.0]])
+bdl_mc_A = _bdl_np2.linalg.inv(bdl_mc_C)
+
+def bdl_mc_U(t):
+    return 0.5 * t @ bdl_mc_A @ t
+
+def bdl_mc_rw(n, step, start, rng):
+    t, out = start.copy(), [start.copy()]
+    for _ in range(n):
+        q = t + step * rng.normal(size=2)
+        if _bdl_np2.log(rng.uniform()) < bdl_mc_U(t) - bdl_mc_U(q):
+            t = q
+        out.append(t.copy())
+    return out
+
+def bdl_mc_hmc(n, eps, L, start, rng):
+    t, states, trajs = start.copy(), [start.copy()], []
+    for _ in range(n):
+        r0 = rng.normal(size=2)
+        q, r = t.copy(), r0 - 0.5 * eps * bdl_mc_A @ t
+        path = [q.copy()]
+        for l in range(L):
+            q = q + eps * r
+            path.append(q.copy())
+            if l < L - 1:
+                r = r - eps * bdl_mc_A @ q
+        r = r - 0.5 * eps * bdl_mc_A @ q
+        dH = bdl_mc_U(q) + r @ r / 2 - bdl_mc_U(t) - r0 @ r0 / 2
+        if _bdl_np2.log(rng.uniform()) < -dH:
+            t = q
+        trajs.append(path)
+        states.append(t.copy())
+    return states, trajs
+
+def bdl_mc_ellipse(P, k):
+    w, V = _bdl_np2.linalg.eigh(bdl_mc_C)
+    pts = []
+    for i in range(121):
+        a = 2 * math.pi * i / 120
+        v = V @ (k * _bdl_np2.sqrt(w) * _bdl_np2.array([math.cos(a), math.sin(a)]))
+        pts.append((P.X(v[0]), P.Y(v[1])))
+    return line(pts, 'grid', ' stroke-width="1.5"')
+
+def bdl_mc_panel(P, title):
+    o = bdl_mc_ellipse(P, 1) + bdl_mc_ellipse(P, 2)
+    o += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
+    for v in (-2, 0, 2):
+        o += text(P.X(v), P.y0+P.h+16, f'{v:g}', 'middle', 'small')
+        o += text(P.x0-6, P.Y(v)+4, f'{v:g}', 'end', 'small')
+    o += text(P.x0+P.w, P.y0+P.h+34, var('θ') + '<tspan class="sub" dy="3">1</tspan>', 'end', 'small')
+    o += text(P.x0, P.y0-10, var('θ') + '<tspan class="sub" dy="3">2</tspan>', 'start', 'small')
+    o += text(P.x0+P.w/2, P.y0-10, title, 'middle')
+    return o
+
+start = _bdl_np2.array([-2.2, -1.6])
+rw = bdl_mc_rw(120, 0.25, start, _bdl_np2.random.default_rng(seed=0))
+hs, ht = bdl_mc_hmc(8, 0.15, 15, start, _bdl_np2.random.default_rng(seed=0))
+P1 = Plot(46, 30, 250, 250, (-3, 3), (-3, 3))
+P2 = Plot(366, 30, 250, 250, (-3, 3), (-3, 3))
+b = bdl_mc_panel(P1, 'random-walk Metropolis')
+b += line([(P1.X(p[0]), P1.Y(p[1])) for p in rw], 'acc', ' stroke-width="1.5"')
+b += f'  <circle class="dot" cx="{P1.X(rw[-1][0]):.1f}" cy="{P1.Y(rw[-1][1]):.1f}" r="4" />\n'
+b += bdl_mc_panel(P2, 'Hamiltonian Monte Carlo')
+for path in ht:
+    b += line([(P2.X(p[0]), P2.Y(p[1])) for p in path], 'mut', ' stroke-dasharray="3 3"')
+for p in hs:
+    b += f'  <circle class="dot" cx="{P2.X(p[0]):.1f}" cy="{P2.Y(p[1]):.1f}" r="3.5" />\n'
+b += f'  <circle class="ln" cx="{P1.X(start[0]):.1f}" cy="{P1.Y(start[1]):.1f}" r="6" />\n'
+b += f'  <circle class="ln" cx="{P2.X(start[0]):.1f}" cy="{P2.Y(start[1]):.1f}" r="6" />\n'
+b += text(330, 342, 'random walk: 120 proposals; HMC: 8 transitions of 15 leapfrog steps; ellipses at 1 and 2 standard deviations', 'middle', 'small')
+svg('BdlSamplerPaths', 650, 352, 'Random-walk Metropolis and Hamiltonian Monte Carlo on a correlated two-dimensional Gaussian',
+    'Both samplers start at the same point in the lower left of a narrow Gaussian whose ellipses lie along the diagonal. With 120 proposals, random-walk Metropolis moves in short steps and covers only a small part of the long axis. With the same number of gradient evaluations, Hamiltonian Monte Carlo makes 8 transitions whose leapfrog trajectories, drawn dashed, sweep along the ellipse, so its 8 states spread along most of the long axis, while the random walk stays in the lower half.',
+    b)
+
+# ---------- 03-laplace-approximations ----------
+
+# ---------- BDL entry 3: Laplace approximation of 1-D logistic regression ----------
+# Recomputes the toy problem of /blog/laplace-approximations (seed 8, N = 20, alpha = 1):
+# left, the exact marginal posterior of the slope w (grid) against the Laplace Gaussian;
+# right, the predictive probability: plug-in MAP, Laplace (Gauss-Hermite over f ~ N(mu, s2)) and exact.
+import numpy as np
+
+def bdl_la_sig(z):
+    return 1 / (1 + np.exp(-z))
+
+def bdl_la_problem():
+    rng = np.random.default_rng(8)
+    N = 20
+    x = rng.uniform(-3, 3, N)
+    y = (rng.uniform(size=N) < bdl_la_sig(0.5 + 1.5 * x)).astype(float)
+    X = np.column_stack([np.ones(N), x])
+    alpha = 1.0
+    t = np.zeros(2)
+    for _ in range(50):
+        p = bdl_la_sig(X @ t)
+        g = X.T @ (y - p) - alpha * t
+        H = X.T @ (X * (p * (1 - p))[:, None]) + alpha * np.eye(2)
+        t = t + np.linalg.solve(H, g)
+    p = bdl_la_sig(X @ t)
+    H = X.T @ (X * (p * (1 - p))[:, None]) + alpha * np.eye(2)
+    S = np.linalg.inv(H)
+    g1 = np.linspace(-6, 8, 601)
+    B, W = np.meshgrid(g1, g1, indexing='ij')
+    G = np.stack([B.ravel(), W.ravel()], 1)
+    Z = G @ X.T
+    lj = (Z * y - np.logaddexp(0, Z)).sum(1) - 0.5 * alpha * (G**2).sum(1)
+    post = np.exp(lj - lj.max()); post /= post.sum()
+    return x, y, t, S, g1, G, post
+
+bx, by, bt, bS, bg1, bG, bpost = bdl_la_problem()
+dw = bg1[1] - bg1[0]
+marg_w = bpost.reshape(601, 601).sum(0) / dw          # density of w on the grid
+
+b = ''
+# left panel: marginal posterior of w
+P = Plot(52, 34, 236, 196, (0, 3.5), (0, 0.9))
+b += P.axes([0, 1, 2, 3], [0, 0.4, 0.8], 'slope ' + var('w'), 'density')
+sel = (bg1 >= 0) & (bg1 <= 3.5)
+b += line([(P.X(v), P.Y(d)) for v, d in zip(bg1[sel], marg_w[sel])], 'thick')
+mu, sd = bt[1], math.sqrt(bS[1, 1])
+b += P.curve(lambda v: math.exp(-0.5 * ((v - mu) / sd) ** 2) / (sd * math.sqrt(2 * math.pi)), cls='acc', extra=' stroke-dasharray="6 4"')
+b += line([(P.X(mu), P.Y(0)), (P.X(mu), P.Y(0.86))], 'mut', ' stroke-dasharray="2 3"')
+b += text(P.X(mu) - 4, P.Y(0.86) + 2, 'MAP', 'end', 'small')
+pm = float((bpost @ bG)[1])
+b += f'  <circle class="dot" cx="{P.X(pm):.1f}" cy="{P.Y(0):.1f}" r="3.5" />\n'
+b += text(P.X(pm) + 6, P.Y(0) - 6, 'exact mean', 'start', 'small')
+
+# right panel: predictive probability
+Q = Plot(380, 34, 242, 196, (1.5, 8), (0.85, 1))
+b += Q.axes([2, 4, 6, 8], [0.85, 0.9, 0.95, 1], 'input ' + var('x') + '*', 'p(' + var('y') + '* = 1 | ' + var('x') + '*, ' + '𝒟)')
+gh_x, gh_w = np.polynomial.hermite_e.hermegauss(40)
+gh_w = gh_w / gh_w.sum()
+def lap_pred(xs):
+    phi = np.array([1.0, xs]); m = phi @ bt; s = math.sqrt(phi @ bS @ phi)
+    return float(gh_w @ bdl_la_sig(m + s * gh_x))
+def exact_pred(xs):
+    return float(bpost @ bdl_la_sig(bG @ np.array([1.0, xs])))
+b += Q.curve(lambda v: float(bdl_la_sig(bt[0] + bt[1] * v)), n=160, cls='mut', extra=' stroke-dasharray="3 3"')
+b += Q.curve(exact_pred, n=160, cls='thick')
+b += Q.curve(lap_pred, n=160, cls='acc', extra=' stroke-dasharray="6 4"')
+for xi, yi in zip(bx, by):
+    if xi >= 1.5 and yi == 1:
+        b += f'  <circle class="dot" cx="{Q.X(xi):.1f}" cy="{Q.Y(yi):.1f}" r="2.5" />\n'
+
+# legend (shared)
+ly = 296
+b += line([(60, ly), (88, ly)], 'thick') + text(94, ly + 4, 'exact posterior', 'start', 'small')
+b += line([(214, ly), (242, ly)], 'acc', ' stroke-dasharray="6 4"') + text(248, ly + 4, 'Laplace', 'start', 'small')
+b += line([(326, ly), (354, ly)], 'mut', ' stroke-dasharray="3 3"') + text(360, ly + 4, 'plug-in MAP (right only)', 'start', 'small')
+svg('BdlLaplaceLogistic', 640, 308,
+    'Laplace approximation of a two-parameter logistic regression compared with the exact posterior',
+    'Left: the exact marginal posterior density of the slope w is skewed to the right, with its mean near 1.48, while the '
+    'Laplace Gaussian is centered at the MAP value 1.33 with standard deviation 0.50. Right: predictive probability of class 1 '
+    'for inputs from 1.5 to 8, on a vertical axis from 0.85 to 1, with the training points of class 1 in that range marked at 1. '
+    'The plug-in MAP curve approaches 1 fastest, the exact predictive lies just below it, and the Laplace predictive levels off lowest, near 0.98.',
+    b)
+
+# ---------- 04-variational-inference-for-neural-networks ----------
+
+# ---------- BDL entry 4: mean-field Gaussian VI on Bayesian linear regression ----------
+# Recomputes the toy problem of /blog/variational-inference-for-neural-networks (seed 1, N = 20,
+# noise sd 0.5, prior N(0, I)). The mean-field optimum is known in closed form: mean = exact posterior
+# mean, variances = 1 / diag(posterior precision); the listing in the article converges to it.
+# Left: 2-sd ellipses of the exact posterior and the mean-field optimum in the (b, w) plane.
+# Right: standard deviation of f(x) = b + w x under each, against x, with the data range shaded.
+import numpy as np
+
+def bdl_vi_problem():
+    rng = np.random.default_rng(1)
+    N, s2 = 20, 0.5**2
+    x = rng.uniform(0, 4, N)
+    y = 1.0 + 0.8 * x + rng.normal(0, 0.5, N)
+    X = np.column_stack([np.ones(N), x])
+    Lam = X.T @ X / s2 + np.eye(2)
+    Sig = np.linalg.inv(Lam)
+    m = Sig @ X.T @ y / s2
+    return x, m, Lam, Sig
+
+bvx, bvm, bvLam, bvSig = bdl_vi_problem()
+bvQ = np.diag(1 / np.diag(bvLam))                     # optimal mean-field covariance
+
+def bdl_vi_ellipse(P, mean, cov, k=2.0, n=120):
+    vals, vecs = np.linalg.eigh(cov)
+    A = vecs @ np.diag(np.sqrt(vals)) * k
+    pts = []
+    for i in range(n + 1):
+        a = 2 * math.pi * i / n
+        v = mean + A @ np.array([math.cos(a), math.sin(a)])
+        pts.append((P.X(v[0]), P.Y(v[1])))
+    return pts
+
+b = ''
+P = Plot(56, 34, 220, 200, (0.1, 1.3), (0.7, 1.2))
+b += P.axes([0.2, 0.6, 1.0], [0.8, 1.0, 1.2], 'intercept ' + var('b'), 'slope ' + var('w'))
+b += line(bdl_vi_ellipse(P, bvm, bvSig), 'thick')
+b += line(bdl_vi_ellipse(P, bvm, bvQ), 'acc', ' stroke-dasharray="6 4"')
+b += f'  <circle class="dot" cx="{P.X(bvm[0]):.1f}" cy="{P.Y(bvm[1]):.1f}" r="3" />\n'
+
+Q = Plot(372, 34, 250, 200, (-2, 6), (0, 0.5))
+b += Q.axes([-2, 0, 2, 4, 6], [0, 0.25, 0.5], 'input ' + var('x') + '*', 'sd of ' + var('f') + '(' + var('x') + '*)')
+b += f'  <rect class="region" x="{Q.X(bvx.min()):.1f}" y="{Q.y0}" width="{Q.X(bvx.max()) - Q.X(bvx.min()):.1f}" height="{Q.h}" />\n'
+b += text((Q.X(bvx.min()) + Q.X(bvx.max())) / 2, Q.y0 + 14, 'data range', 'middle', 'small')
+b += Q.curve(lambda v: math.sqrt(np.array([1.0, v]) @ bvSig @ np.array([1.0, v])), n=160, cls='thick')
+b += Q.curve(lambda v: math.sqrt(np.array([1.0, v]) @ bvQ @ np.array([1.0, v])), n=160, cls='acc', extra=' stroke-dasharray="6 4"')
+
+ly = 296
+b += line([(150, ly), (178, ly)], 'thick') + text(184, ly + 4, 'exact posterior', 'start', 'small')
+b += line([(330, ly), (358, ly)], 'acc', ' stroke-dasharray="6 4"') + text(364, ly + 4, 'mean-field optimum', 'start', 'small')
+svg('BdlMeanFieldVi', 640, 308,
+    'Mean-field Gaussian variational approximation of a Bayesian linear regression compared with the exact posterior',
+    'Left: in the plane of intercept b and slope w, the exact posterior two-standard-deviation ellipse is long, narrow and tilted, '
+    'because the two parameters have correlation minus 0.86. The mean-field ellipse has the same center but is axis-aligned and only about '
+    'as wide as the narrow direction of the exact ellipse, so its marginal standard deviations are about half the exact ones. Right: standard '
+    'deviation of the regression function against the input from minus 2 to 6, with the range of the training inputs, about 0.1 to 3.8, shaded. The exact curve has '
+    'a minimum of about 0.11 inside the data range and rises to above 0.4 at both ends; the mean-field curve is flatter, higher than '
+    'the exact curve over most of the data range and much lower outside it.',
+    b)
+
+# ---------- 05-deep-ensembles ----------
+
+# ---------- BDL 5. Deep ensemble of five tanh networks on 1-D regression ----------
+# Recomputes the toy ensemble of the article "Deep Ensembles and Their Bayesian Interpretation"
+# (same data, seeds, architecture and training loop as its first listing).
+import numpy as np
+
+def bdl_de_train():
+    rng = np.random.default_rng(0)
+    N, sigma = 40, 0.1
+    x = np.concatenate([rng.uniform(-3, -1, N // 2), rng.uniform(1, 3, N // 2)])
+    y = np.sin(x) + sigma * rng.normal(size=N)
+    X = x[:, None]
+    def init(seed, H=50):
+        r = np.random.default_rng(seed)
+        return [r.normal(0, 1, (1, H)), r.normal(0, 1, H),
+                r.normal(0, 1 / np.sqrt(H), (H, 1)), np.zeros(1)]
+    def forward(p, X):
+        W1, b1, W2, b2 = p
+        h = np.tanh(X @ W1 + b1)
+        return h, (h @ W2 + b2).ravel()
+    def train(seed, steps=20_000, lr=0.1, lam=1e-4):
+        p = init(seed)
+        for _ in range(steps):
+            h, f = forward(p, X)
+            r = (f - y)[:, None] / N
+            dh = (r @ p[2].T) * (1 - h ** 2)
+            g = [X.T @ dh, dh.sum(0), h.T @ r, r.sum(0)]
+            p = [w - lr * (gw + lam * w) for w, gw in zip(p, g)]
+        return p
+    members = [train(s) for s in range(1, 6)]
+    return x, y, sigma, members, forward
+
+def bdl_de_figure():
+    x, y, sigma, members, forward = bdl_de_train()
+    xs = np.linspace(-6, 6, 241)
+    F = np.array([forward(p, xs[:, None])[1] for p in members])
+    mean = F.mean(0); sd = np.sqrt(sigma ** 2 + F.var(0))
+    P = Plot(56, 24, 548, 230, (-6, 6), (-2.5, 2.5))
+    b = ''
+    for lo, hi in [(-3, -1), (1, 3)]:
+        b += f'  <rect class="region" x="{P.X(lo):.1f}" y="{P.y0}" width="{P.X(hi)-P.X(lo):.1f}" height="{P.h}" />\n'
+    b += P.axes([-6, -4, -2, 0, 2, 4, 6], [-2, -1, 0, 1, 2], 'input  ' + var('x'), 'output  ' + var('y'))
+    clip = lambda v: max(-2.5, min(2.5, v))
+    up = [(P.X(a), P.Y(clip(m + 2 * s))) for a, m, s in zip(xs, mean, sd)]
+    dn = [(P.X(a), P.Y(clip(m - 2 * s))) for a, m, s in zip(xs, mean, sd)]
+    d = 'M' + ' L'.join(f'{px:.1f},{py:.1f}' for px, py in up + dn[::-1]) + ' Z'
+    b += f'  <path class="band" d="{d}" />\n'
+    for f in F:
+        b += line([(P.X(a), P.Y(clip(v))) for a, v in zip(xs, f)], 'mut')
+    b += line([(P.X(a), P.Y(np.sin(a))) for a in xs], 'ln', ' stroke-dasharray="5 4"')
+    b += line([(P.X(a), P.Y(clip(m))) for a, m in zip(xs, mean)], 'acc')
+    for a, v in zip(x, y):
+        b += f'  <circle class="dot" cx="{P.X(a):.1f}" cy="{P.Y(v):.1f}" r="2.6" />\n'
+    b += text(P.X(-2), P.y0 + 14, 'data', 'middle', 'small')
+    b += text(P.X(2), P.y0 + 14, 'data', 'middle', 'small')
+    b += text(P.X(0), P.y0 + 14, 'gap', 'middle', 'small')
+    svg('BdlEnsembleDisagreement', 620, 300,
+        'Five independently trained networks agree on the data and disagree away from it',
+        'Forty noisy samples of sin(x) lie in two shaded intervals, from -3 to -1 and from 1 to 3. '
+        'Five tanh networks trained from different random initializations pass through the data almost '
+        'identically. Between the intervals and beyond them their curves fan apart, and the band of '
+        'plus or minus two predictive standard deviations around the ensemble mean widens, but not enough: '
+        'from about x = 3.3 to 4.9, and below about x = -5, the dashed true function lies outside the band.',
+        b)
+
+bdl_de_figure()
+
+# ---------- 06-gaussian-processes-and-kernels ----------
+
+# ---------- BDL 6. Gaussian-process prior samples and posterior ----------
+# Recomputes the GP example of "Gaussian Processes, Kernels and Infinitely Wide Networks":
+# same data (seed 4), squared-exponential kernel, signal sd 1, noise sd 0.1, lengthscale 1.6
+# (the grid maximizer of the log marginal likelihood printed by the article's listing).
+import numpy as np
+
+def bdl_gp_k(a, b, ell=1.6):
+    return np.exp(-0.5 * (a[:, None] - b[None, :]) ** 2 / ell ** 2)
+
+def bdl_gp_figure():
+    rng = np.random.default_rng(4)
+    x = np.array([-4.0, -3.2, -2.5, -1.0, 0.5, 1.2, 3.5])
+    sn = 0.1
+    y = np.sin(x) + sn * rng.normal(size=x.size)
+    xs = np.linspace(-6, 8, 141)
+    Kss = bdl_gp_k(xs, xs)
+    # prior samples (seeded separately so they do not depend on the data draw)
+    r = np.random.default_rng(6)
+    Lp = np.linalg.cholesky(Kss + 1e-8 * np.eye(xs.size))
+    prior = (Lp @ r.normal(size=(xs.size, 3))).T
+    # posterior of the latent function
+    K = bdl_gp_k(x, x) + sn ** 2 * np.eye(x.size)
+    L = np.linalg.cholesky(K)
+    Ks = bdl_gp_k(x, xs)
+    mean = Ks.T @ np.linalg.solve(L.T, np.linalg.solve(L, y))
+    V = np.linalg.solve(L, Ks)
+    cov = Kss - V.T @ V
+    sd = np.sqrt(np.clip(np.diag(cov), 0, None))
+    Lq = np.linalg.cholesky(cov + 1e-6 * np.eye(xs.size))
+    post = (mean[:, None] + Lq @ r.normal(size=(xs.size, 3))).T
+
+    def panel(P, m, s, samples, title, data):
+        b = P.axes([-6, -3, 0, 3, 6], [-2, 0, 2], 'input  ' + var('x'), title)
+        clip = lambda v: max(-3, min(3, v))
+        up = [(P.X(a), P.Y(clip(mm + 2 * ss))) for a, mm, ss in zip(xs, m, s)]
+        dn = [(P.X(a), P.Y(clip(mm - 2 * ss))) for a, mm, ss in zip(xs, m, s)]
+        b += '  <path class="band" d="M' + ' L'.join(f'{px:.1f},{py:.1f}' for px, py in up + dn[::-1]) + ' Z" />\n'
+        for f in samples:
+            b += line([(P.X(a), P.Y(clip(v))) for a, v in zip(xs, f)], 'mut')
+        b += line([(P.X(a), P.Y(clip(v))) for a, v in zip(xs, m)], 'acc')
+        if data:
+            for a, v in zip(x, y):
+                b += f'  <circle class="dot" cx="{P.X(a):.1f}" cy="{P.Y(v):.1f}" r="3" />\n'
+        return b
+
+    b = panel(Plot(44, 28, 250, 200, (-6, 8), (-3, 3)), np.zeros(xs.size), np.ones(xs.size), prior, 'prior', False)
+    b += panel(Plot(358, 28, 250, 200, (-6, 8), (-3, 3)), mean, sd, post, 'posterior', True)
+    svg('BdlGpPriorPosterior', 620, 280,
+        'Samples and two-standard-deviation bands of a Gaussian-process prior and posterior',
+        'Left: three random functions drawn from a Gaussian-process prior with a squared-exponential kernel, '
+        'lengthscale 1.6, around a zero mean with a constant band from -2 to 2. Right: after conditioning on seven '
+        'noisy observations of sin(x) between x = -4 and x = 3.5, the posterior band is narrow at the data, widens slightly '
+        'in the gap between x = 1.2 and x = 3.5, and grows back toward the prior width away from the data on both sides. Three posterior '
+        'samples pass close to every observation.',
+        b)
+
+bdl_gp_figure()
+
+# ---------- 07-priors-symmetries-and-identifiability ----------
+
+# ---------- BDL entry 7: prior predictive samples for three weight scales ----------
+import numpy as _bdl_np
+
+def bdl_pri_functions(s, n_fun, seed, H=50):
+    """f(x) = sum_j v_j tanh(u_j x + b_j), u, b ~ N(0, s^2), v ~ N(0, 1/H) (entry 7, Section 2)."""
+    r = _bdl_np.random.default_rng(seed)
+    xs = _bdl_np.linspace(-3, 3, 241)
+    u = r.normal(0, s, size=(n_fun, H, 1))
+    b = r.normal(0, s, size=(n_fun, H, 1))
+    v = r.normal(0, 1 / _bdl_np.sqrt(H), size=(n_fun, 1, H))
+    return xs, (v @ _bdl_np.tanh(u * xs + b)).squeeze(1)
+
+def bdl_pri_panel(x0, s, seed):
+    P = Plot(x0, 40, 170, 190, (-3, 3), (-2.5, 2.5))
+    o = ''
+    for v in (-2, 0, 2):
+        o += line([(P.X(-3), P.Y(v)), (P.X(3), P.Y(v))], 'grid')
+    for v in (-3, 0, 3):
+        o += text(P.X(v), P.Y(-2.5) + 16, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+    o += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    xs, F = bdl_pri_functions(s, 6, seed)
+    for k, f in enumerate(F):
+        pts = [(P.X(a), P.Y(max(-2.5, min(2.5, c)))) for a, c in zip(xs, f)]
+        o += line(pts, 'acc' if k == 0 else 'mut')
+    o += text(P.x0 + P.w / 2, 26, var('s') + f' = {s:g}', 'middle')
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 34, var('x'), 'middle', 'small')
+    return o, P
+
+b = ''
+for i, (s, seed) in enumerate([(0.5, 11), (2.0, 12), (8.0, 13)]):
+    o, P = bdl_pri_panel(60 + i * 200, s, seed)
+    b += o
+    if i == 0:
+        for v in (-2, 0, 2):
+            b += text(P.x0 - 6, P.Y(v) + 4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+        b += text(P.x0 - 44, P.y0 - 14, var('f') + '(' + var('x') + ')', 'start', 'small')
+svg('BdlPriorSamples', 640, 280,
+    'Functions drawn from the prior of a one-hidden-layer tanh network for three weight scales',
+    'Three panels show six functions each, drawn from the prior of a network with 50 tanh hidden units on inputs from minus 3 to 3. '
+    'With input-weight scale s equal to 0.5 the functions are smooth, close to straight lines. With s equal to 2 they bend a few times. '
+    'With s equal to 8 they look like sums of steps and change direction often. The output-weight variance is 1/50 in all panels, so the vertical range stays similar.',
+    b)
+
+# ---------- 08-scaling-bayesian-deep-learning ----------
+
+# ---------- BDL entry 8: last-layer Bayesian linear regression on random features ----------
+import numpy as _bdl_np
+
+def bdl_ll_fit():
+    """Same data, features and posterior as the listing in entry 8, Section 2 (seed 3, alpha = 1)."""
+    r = _bdl_np.random.default_rng(3)
+    N, K, sigma, alpha = 40, 200, 0.1, 1.0
+    x = _bdl_np.r_[r.uniform(-3, -1, N // 2), r.uniform(1, 3, N // 2)]
+    y = _bdl_np.sin(2 * x) + sigma * r.normal(size=N)
+    omega = r.normal(0, 1.0, size=K)
+    phase = r.uniform(0, 2 * _bdl_np.pi, size=K)
+    feat = lambda t: _bdl_np.sqrt(2 / K) * _bdl_np.cos(_bdl_np.outer(t, omega) + phase)
+    Phi = feat(x)
+    A = alpha * _bdl_np.eye(K) + Phi.T @ Phi / sigma**2
+    m = _bdl_np.linalg.solve(A, Phi.T @ y) / sigma**2
+    xs = _bdl_np.linspace(-6, 6, 361)
+    Fs = feat(xs)
+    sd = _bdl_np.sqrt(sigma**2 + _bdl_np.einsum('ij,ji->i', Fs, _bdl_np.linalg.solve(A, Fs.T)))
+    return x, y, xs, Fs @ m, sd
+
+x, y, xs, mu, sd = bdl_ll_fit()
+P = Plot(56, 24, 556, 210, (-6, 6), (-3, 3))
+b = ''
+up = [(P.X(a), P.Y(min(3, c + 2 * s))) for a, c, s in zip(xs, mu, sd)]
+lo = [(P.X(a), P.Y(max(-3, c - 2 * s))) for a, c, s in zip(xs, mu, sd)]
+d = 'M' + ' L'.join(f'{a:.1f},{c:.1f}' for a, c in up + lo[::-1]) + ' Z'
+b += f'  <path class="band" d="{d}" />\n'
+b += P.axes([-6, -4, -2, 0, 2, 4, 6], [-2, 0, 2], 'input  ' + var('x') + '*', 'prediction')
+b = b.replace('>-', '>−')
+b += P.curve(lambda t: math.sin(2 * t), cls='mut', extra=' stroke-dasharray="4 4"')
+b += line([(P.X(a), P.Y(c)) for a, c in zip(xs, mu)], 'acc')
+for a, c in zip(x, y):
+    b += f'  <circle class="dot" cx="{P.X(a):.1f}" cy="{P.Y(c):.1f}" r="2.6" />\n'
+b += text(P.X(0), P.Y(2.55), 'gap', 'middle', 'small')
+b += text(P.X(5.9), P.Y(2.55), 'far from data', 'end', 'small')
+svg('BdlLastLayer', 640, 280,
+    'Posterior predictive of Bayesian linear regression on 200 fixed random features',
+    'Forty noisy observations of sin(2x) lie in two clusters, from minus 3 to minus 1 and from 1 to 3. '
+    'The predictive mean follows the data inside the clusters with a narrow band of plus or minus two standard deviations. '
+    'In the gap around zero the band widens, and beyond about plus or minus 3.5 the mean no longer follows sin(2x) and the band widens to about plus or minus 2, the prior scale.',
+    b)
+
+# ---------- 09-evaluating-and-using-uncertainty ----------
+
+# ---------- BDL 9. Evaluating and using predictive uncertainty ----------
+# Recomputes the synthetic predictions of the article's first listing (seed 7) and draws
+# the reliability diagram and the risk-coverage curves from them.
+import numpy as _bdl_np
+
+def bdl_eval_data():
+    np = _bdl_np
+    rng = np.random.default_rng(seed=7)
+    n, k = 6000, 4
+    z = rng.normal(0.0, 1.5, size=(n, k))
+    p_true = np.exp(z) / np.exp(z).sum(axis=1, keepdims=True)
+    y = np.array([rng.choice(k, p=p) for p in p_true])
+    logits = 2.5 * (z + rng.normal(0.0, 0.5, size=(n, k)))
+    def softmax(a):
+        e = np.exp(a - a.max(axis=1, keepdims=True))
+        return e / e.sum(axis=1, keepdims=True)
+    def nll(p, yy):
+        return -np.mean(np.log(p[np.arange(len(yy)), yy]))
+    val, test = slice(0, 3000), slice(3000, n)
+    temps = np.linspace(0.5, 5.0, 451)
+    T = temps[int(np.argmin([nll(softmax(logits[val] / t), y[val]) for t in temps]))]
+    return softmax(logits[test]), softmax(logits[test] / T), p_true[test], y[test], T
+
+def bdl_eval_bins(p, y, bins=10, min_count=20):
+    np = _bdl_np
+    conf, pred = p.max(axis=1), p.argmax(axis=1)
+    correct = (pred == y).astype(float)
+    edges = np.linspace(0.0, 1.0, bins + 1)
+    b = np.clip(np.digitize(conf, edges[1:-1]), 0, bins - 1)
+    out = []
+    for j in range(bins):
+        m = b == j
+        if m.sum() >= min_count:
+            out.append((j, edges[j], edges[j + 1], conf[m].mean(), correct[m].mean()))
+    return out
+
+def bdl_eval_reliability_panel(P, rows, heading):
+    o = P.axes([0, 0.5, 1], [0, 0.5, 1], 'confidence', 'accuracy')
+    o += text(P.x0 + P.w / 2, 18, heading, 'middle')
+    for (_, lo, hi, c, a) in rows:
+        o += f'  <rect class="band" x="{P.X(lo) + 1:.1f}" y="{P.Y(a):.1f}" width="{P.X(hi) - P.X(lo) - 2:.1f}" height="{P.Y(0) - P.Y(a):.1f}" />\n'
+    o += line([(P.X(0), P.Y(0)), (P.X(1), P.Y(1))], 'mut', ' stroke-dasharray="4 4"')
+    o += line([(P.X(c), P.Y(a)) for (_, _, _, c, a) in rows], 'acc')
+    for (_, _, _, c, a) in rows:
+        o += f'  <circle class="dot" cx="{P.X(c):.1f}" cy="{P.Y(a):.1f}" r="3.5" />\n'
+    return o
+
+_p_raw, _p_cal, _p_true, _y, _T = bdl_eval_data()
+_P1 = Plot(52, 56, 240, 210, (0, 1), (0, 1))
+_P2 = Plot(372, 56, 240, 210, (0, 1), (0, 1))
+b = bdl_eval_reliability_panel(_P1, bdl_eval_bins(_p_raw, _y), 'Trained model')
+b += bdl_eval_reliability_panel(_P2, bdl_eval_bins(_p_cal, _y), f'After temperature scaling, T = {_T:.2f}')
+svg('BdlReliabilityDiagram', 640, 312, 'Reliability diagrams before and after temperature scaling',
+    'Ten equal-width confidence bins on 3000 synthetic test predictions; bins with fewer than 20 predictions are omitted. '
+    'Bars and dots show the accuracy in each bin against its mean confidence; the dashed diagonal is perfect calibration. '
+    'Before scaling the dots lie well below the diagonal, for example 70 percent accuracy at 97 percent mean confidence in the top bin. '
+    f'After dividing the logits by T = {_T:.2f} the dots lie close to the diagonal.',
+    b)
+
+def bdl_eval_risk_coverage(score, correct):
+    np = _bdl_np
+    order = np.argsort(-score, kind='stable')
+    errors = np.cumsum(~correct[order])
+    kept = np.arange(1, len(order) + 1)
+    return kept / len(order), errors / kept
+
+_c_cal = _p_cal.argmax(axis=1) == _y
+_c_true = _p_true.argmax(axis=1) == _y
+_cov, _r_cal = bdl_eval_risk_coverage(_p_cal.max(axis=1), _c_cal)
+_, _r_true = bdl_eval_risk_coverage(_p_true.max(axis=1), _c_true)
+_, _r_orc = bdl_eval_risk_coverage(_c_cal.astype(float), _c_cal)
+P = Plot(60, 30, 540, 220, (0, 1), (0, 0.45))
+b = P.axes([0, 0.2, 0.4, 0.6, 0.8, 1.0], [0, 0.1, 0.2, 0.3, 0.4], 'coverage (fraction of inputs answered)', 'selective risk (error rate on answered inputs)')
+_start = int(0.05 * len(_cov))
+_step = 15
+def _pts(r):
+    idx = list(range(_start, len(_cov), _step)) + [len(_cov) - 1]
+    return [(P.X(_cov[i]), P.Y(r[i])) for i in idx]
+b += line([(P.X(0), P.Y(1 - _c_cal.mean())), (P.X(1), P.Y(1 - _c_cal.mean()))], 'mut', ' stroke-dasharray="2 4"')
+b += line(_pts(_r_orc), 'ln')
+b += line(_pts(_r_true), 'mut', ' stroke-dasharray="6 4"')
+b += line(_pts(_r_cal), 'acc')
+b += text(P.X(0.02), P.Y(1 - _c_cal.mean()) - 6, 'random order', 'start', 'small')
+b += text(P.X(0.30), P.Y(_r_cal[int(0.30 * len(_cov))]) - 10, 'scaled model', 'end', 'small')
+b += text(P.X(0.50), P.Y(_r_true[int(0.50 * len(_cov))]) + 18, 'true probabilities', 'start', 'small')
+b += text(P.X(0.66), P.Y(0.02), 'oracle', 'start', 'small')
+svg('BdlRiskCoverage', 640, 290, 'Risk-coverage curves for selective classification',
+    'Selective risk against coverage on the 3000 synthetic test predictions when the least confident inputs are rejected first. '
+    'Ranking by the temperature-scaled confidence lowers the risk from 0.41 at full coverage to 0.29 at half coverage. '
+    'Ranking by the true class probabilities does a little better; an oracle that rejects exactly the errors reaches zero risk at coverage 0.59. '
+    'Rejecting in random order leaves the risk at 0.41.',
+    b)
+
+# ---------- 10-frontiers-of-bayesian-deep-learning ----------
+
+# ---------- BDL 10. Frontiers: free energy of a regular and a singular model ----------
+# Recomputes the article's listing: F(n) = -log Z(n) with Z(n) the integral over [-1, 1]^2 of
+# exp(-n K(a, b)) / 4, for K = (a^2 + b^2) / 2 (regular) and K = (a b)^2 / 2 (singular).
+import numpy as _bdl_np10
+
+def bdl_slt_free_energy(n, singular):
+    np = _bdl_np10
+    a = np.concatenate([[0.0], np.logspace(-9, 0, 20001)])
+    if singular:
+        g = np.full_like(a, 2.0)
+        s = a[1:] * np.sqrt(n / 2)
+        g[1:] = np.sqrt(np.pi) * np.array([math.erf(v) for v in s]) / s
+    else:
+        g = np.exp(-n * a**2 / 2) * np.sqrt(2 * np.pi / n) * math.erf(np.sqrt(n / 2))
+    return -np.log(2 * np.trapezoid(g, a) / 4)
+
+_lg = [1 + 0.1 * i for i in range(71)]                    # log10 n from 1 to 8
+_Freg = [bdl_slt_free_energy(10 ** v, False) for v in _lg]
+_Fsin = [bdl_slt_free_energy(10 ** v, True) for v in _lg]
+P = Plot(60, 30, 470, 220, (1, 8), (0, 20))
+b = P.axes([1, 2, 3, 4, 5, 6, 7, 8], [0, 5, 10, 15, 20], 'sample size  log' + '<tspan class="sub" dy="3">10</tspan><tspan dy="-3"> </tspan>' + var('n'), 'free energy  ' + var('F') + '(' + var('n') + ') = −log ' + var('Z') + '(' + var('n') + ')')
+b += line([(P.X(v), P.Y(f)) for v, f in zip(_lg, _Freg)], 'mut', ' stroke-dasharray="6 4"')
+b += line([(P.X(v), P.Y(f)) for v, f in zip(_lg, _Fsin)], 'acc')
+b += text(P.X(8) + 8, P.Y(_Freg[-1]) + 4, 'regular: about log ' + var('n'), 'start', 'small')
+b += text(P.X(8) + 8, P.Y(_Fsin[-1]) + 4, 'singular: about ½ log ' + var('n'), 'start', 'small')
+b += text(P.X(4.6), P.Y(_Freg[36]) - 12, var('K') + ' = (' + var('a') + '² + ' + var('b') + '²)/2', 'end', 'small')
+b += text(P.X(4.6), P.Y(_Fsin[36]) + 22, var('K') + ' = (' + var('a') + var('b') + ')²/2', 'start', 'small')
+svg('BdlSingularFreeEnergy', 680, 290, 'Free energy of a regular and a singular two-parameter model',
+    'The negative log marginal likelihood F of two models with two parameters and a uniform prior on the square from minus 1 to 1, '
+    'plotted against the base-10 logarithm of the sample size n from 10 to 100 million. '
+    'For the regular model, with K equal to a squared plus b squared over 2, F grows like the natural logarithm of n, as the Bayesian information criterion predicts for two parameters. '
+    'For the singular model, with K equal to the square of a times b over 2, F grows much more slowly, like one half of the natural logarithm of n minus a log log n correction.',
+    b)
