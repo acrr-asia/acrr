@@ -23,4 +23,4 @@ Logical symbols follow common textbook usage: ¬ (not), ∧ (and), ∨ (or), →
 
 ## References
 
-- J. Lau and J. Chan, *Critical Thinking Web*, Department of Philosophy, The University of Hong Kong, 2004–2026. https://philosophy.hku.hk/think/
+- J. Y. F. Lau and J. Chan, *Critical Thinking Web*, Department of Philosophy, The University of Hong Kong, 2004–2026. https://philosophy.hku.hk/think/
