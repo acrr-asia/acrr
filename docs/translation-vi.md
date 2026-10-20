@@ -271,3 +271,38 @@ and status phrases (`401 Unauthorized`) are code and stay in English.
 | differential-drive robot, unicycle model | robot dẫn động vi sai (differential-drive robot), mô hình unicycle (kept) |
 | potential field, local minimum, dynamic window approach | trường thế (potential field), cực tiểu cục bộ, phương pháp cửa sổ động (dynamic window approach, DWA) |
 | replanning, global / local planner | lập lại kế hoạch (replanning), bộ lập kế hoạch toàn cục / cục bộ |
+
+### Critical thinking and logic
+
+| English | Tiếng Việt |
+|---|---|
+| critical thinking, reasoning | tư duy phản biện (critical thinking), lập luận |
+| claim, statement, proposition | nhận định, phát biểu (statement), mệnh đề (proposition) |
+| meaning, ambiguity, vagueness | ý nghĩa, tính mơ hồ (ambiguity), tính không rõ ranh giới (vagueness) |
+| definition, necessary / sufficient condition | định nghĩa, điều kiện cần / điều kiện đủ |
+| argument, premise, conclusion | lập luận (argument), tiền đề (premise), kết luận (conclusion) |
+| hidden assumption, argument map | giả định ẩn (hidden assumption), sơ đồ lập luận (argument map) |
+| deductive, inductive, analogical argument | lập luận diễn dịch, lập luận quy nạp, lập luận loại suy |
+| valid, sound, inductively strong, cogent | hợp lệ (valid), đúng đắn (sound), mạnh về quy nạp (inductively strong), thuyết phục (cogent) |
+| consistency, contradiction, logical form | tính nhất quán, mâu thuẫn, hình thức logic (logical form) |
+| entailment, logical consequence, counterexample | kéo theo (entailment), hệ quả logic, phản ví dụ (counterexample) |
+| categorical statement, syllogism, subject / predicate term | mệnh đề định danh (categorical statement), tam đoạn luận (syllogism), thuật ngữ chủ ngữ / vị ngữ |
+| Venn diagram, existential import | biểu đồ Venn, hàm ý tồn tại (existential import) |
+| sentential (propositional) logic, connective, well-formed formula (WFF) | logic mệnh đề (sentential logic), liên từ logic (connective), công thức đúng cú pháp (well-formed formula, WFF) |
+| negation, conjunction, disjunction, conditional, biconditional | phủ định, hội (conjunction), tuyển (disjunction), điều kiện (conditional), song điều kiện (biconditional) |
+| material conditional, antecedent, consequent | điều kiện vật chất (material conditional), tiền kiện (antecedent), hậu kiện (consequent) |
+| truth table, truth value, assignment | bảng chân trị, giá trị chân lý, phép gán (assignment) |
+| tautology, contradiction, contingent | hằng đúng (tautology), hằng sai (contradiction), khả biến (contingent) |
+| natural deduction, derivation, rule of inference | suy diễn tự nhiên (natural deduction), dẫn xuất (derivation), quy tắc suy luận |
+| modus ponens, modus tollens | modus ponens, modus tollens (kept) |
+| soundness, completeness (of a proof system) | tính đúng đắn (soundness), tính đầy đủ (completeness) |
+| predicate logic, quantifier (universal / existential), variable, domain | logic vị từ (predicate logic), lượng từ (toàn thể / tồn tại), biến, miền (domain) |
+| interpretation, model, counter-model, extension | diễn giải (interpretation), mô hình (model), phản mô hình (counter-model), ngoại diên (extension) |
+| hypothesis, falsifiability, confounder | giả thuyết, tính khả bác bỏ (falsifiability), biến gây nhiễu (confounder) |
+| correlation, causation, controlled experiment | tương quan, quan hệ nhân quả, thí nghiệm có đối chứng |
+| probability, conditional probability, base rate | xác suất, xác suất có điều kiện, tỉ lệ nền (base rate) |
+| sample, sampling bias, statistical significance, p-value | mẫu, sai lệch chọn mẫu (sampling bias), ý nghĩa thống kê, giá trị p (p-value) |
+| value judgment, fact–value distinction | phán đoán giá trị (value judgment), phân biệt sự kiện – giá trị |
+| decision matrix, expected value, SWOT analysis | ma trận quyết định, giá trị kỳ vọng, phân tích SWOT |
+| fallacy, cognitive bias | ngụy biện (fallacy), thiên kiến nhận thức (cognitive bias) |
+| creativity, divergent / convergent thinking | sáng tạo, tư duy phân kỳ / tư duy hội tụ |
