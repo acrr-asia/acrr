@@ -1,0 +1,420 @@
+---
+title: "Priors, Symmetries and Identifiability"
+description: "What a prior over network weights says about functions, why weight-space symmetries make the parameters unidentifiable and what that means for inference."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - symmetries
+  - identifiability
+series: bayesian-deep-learning
+seriesOrder: 7
+---
+
+import Figure from '../../components/Figure.astro';
+import BdlPriorSamples from '../../components/diagrams/BdlPriorSamples.astro';
+
+Every method in this series so far has taken the prior $p(\theta)$ as given, usually an isotropic Gaussian, and concentrated on the posterior $p(\theta \mid \mathcal{D})$. The [first entry](/blog/bayesian-inference-for-neural-networks) set up the posterior and the posterior predictive, the [second](/blog/sampling-the-posterior-mcmc) through [fifth](/blog/deep-ensembles) entries approximated them, and the [sixth](/blog/gaussian-processes-and-kernels) showed that a wide network with a Gaussian prior on its weights defines a Gaussian process (GP) over functions. This entry looks at the prior itself and at a property of neural networks that the earlier entries mentioned only in passing: many different weight vectors compute exactly the same function.
+
+The two topics belong together. A prior over weights is only a means to a prior over functions, and the map from weights to functions is many-to-one. The first half of the entry asks what a weight prior says about functions, how to inspect it and which alternatives exist. The second half counts the symmetries of a network, shows that they make the parameters **unidentifiable** (the data cannot single out one parameter vector, even with infinitely many examples) and explains what this does to sampling, to diagnostics and to the interpretation of individual weights. A short section on learning the prior from data and one on models designed to be identifiable close the entry.
+
+The network $f(x; \theta)$ throughout is a multilayer perceptron (MLP) with a scalar input and output, as in the toy problems of the earlier entries. Code uses Python 3.13 and NumPy 2.5.3 with the seeds given in each listing.
+
+## 1. What a prior over weights says
+
+### 1.1 The prior predictive distribution
+
+A prior over weights cannot be judged by looking at the weights: nobody has an opinion about the value of the 37th weight of the second layer. What a modeler does have opinions about are functions: how large the outputs should be, how smooth, how they should behave far from the data. The object that connects the two is the **prior predictive distribution**, the distribution of the function values $f(x_1; \theta), \dots, f(x_n; \theta)$ at chosen inputs when $\theta$ is drawn from $p(\theta)$. For observations it adds the noise model: $p(y) = \int p(y \mid \theta)\, p(\theta)\, d\theta$, the same integral as the marginal likelihood of Section 6, evaluated before any data have been seen.
+
+The prior predictive is intractable in closed form for a finite network, because $f$ is a nonlinear function of $\theta$, but it is easy to sample: draw $\theta$ from the prior, run the network forward and plot the result. That makes it the main practical tool for checking a prior. If the sampled functions look nothing like the functions the problem could plausibly produce, the prior is wrong in a way that no amount of careful posterior approximation will fix when data are scarce.
+
+### 1.2 The Gaussian prior and weight decay
+
+The default prior in Bayesian deep learning is $p(\theta) = \mathcal{N}(\theta; 0, \sigma_p^2 I)$, independent zero-mean Gaussians with a shared prior standard deviation $\sigma_p$. Its link to ordinary training is direct. With a Gaussian likelihood of noise standard deviation $\sigma$, the negative log posterior is, up to a constant,
+
+$$
+-\log p(\theta \mid \mathcal{D}) = \frac{1}{2\sigma^2} \sum_{n=1}^{N} \big(y_n - f(x_n; \theta)\big)^2 + \frac{1}{2\sigma_p^2} \lVert \theta \rVert^2 + \text{const}.
+$$
+
+Multiplying by $2\sigma^2$ gives the ridge objective of the [regularization entry](/blog/generalization-overfitting-and-regularization) with $\lambda = \sigma^2 / \sigma_p^2$. The maximum a posteriori (MAP) estimate under a Gaussian prior is therefore a network trained with weight decay. This is a useful reading in both directions: a weight-decay setting implies a prior scale, and a prior scale implies a penalty. It also shows the limit of the analogy. Weight decay is chosen for the optimum it produces, while a prior is used for the whole distribution it induces, and a value that regularizes well can still produce an implausible prior predictive.
+
+### 1.3 Scaling with width
+
+Consider one hidden layer of $H$ units, $f(x; \theta) = \sum_{j=1}^{H} v_j\, \phi(u_j x + b_j)$, with activation $\phi$, input weights $u_j$, biases $b_j$ and output weights $v_j$. If all three have independent zero-mean priors and $v_j$ has variance $\sigma_v^2$, then the prior variance of the output at any input is
+
+$$
+\operatorname{Var}[f(x; \theta)] = H \sigma_v^2\, \mathbb{E}\big[\phi(u x + b)^2\big],
+$$
+
+which grows linearly with the width. Neal [1] showed that the right fix is to let the output-weight variance shrink as $\sigma_v^2 = \omega^2 / H$ for a fixed $\omega$. The variance then stays at $\omega^2\, \mathbb{E}[\phi(ux + b)^2]$, and by the central limit theorem the prior over functions tends to a Gaussian process as $H \to \infty$, the neural network Gaussian process (NNGP) limit of the [sixth entry](/blog/gaussian-processes-and-kernels). The same fan-in scaling, a weight variance divided by the number of inputs to the layer, is what the common initialization schemes use, for the same reason.
+
+## 2. Looking at a prior
+
+### 2.1 A one-hidden-layer example
+
+The listing below draws functions from the prior of a 50-unit tanh network on $x \in [-3, 3]$. The input weights and biases share a prior standard deviation $s$, and the output weights have variance $1/H$ as in Section 1.3. For three values of $s$ it reports the prior standard deviation of $f$ at $x = 0$ and at $x = 3$, the correlation between the values at $x = 0$ and $x = 0.5$ across draws, and the average number of turning points of a function on a grid of 301 points, a crude measure of how often it changes direction.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+H, S = 50, 4000                         # hidden units, prior draws
+x = np.linspace(-3, 3, 301)
+
+def prior_functions(s, S):
+    """f(x) = sum_j v_j tanh(u_j x + b_j), with u, b ~ N(0, s^2), v ~ N(0, 1/H)."""
+    u = rng.normal(0, s, size=(S, H, 1))
+    b = rng.normal(0, s, size=(S, H, 1))
+    v = rng.normal(0, 1 / np.sqrt(H), size=(S, 1, H))
+    return (v @ np.tanh(u * x + b)).squeeze(1)      # shape (S, len(x))
+
+print(" s   sd f(0)  sd f(3)  corr(f(0), f(0.5))  turning points")
+for s in [0.5, 2.0, 8.0]:
+    f = prior_functions(s, S)
+    sd0, sd3 = f[:, 150].std(), f[:, -1].std()
+    r = np.corrcoef(f[:, 150], f[:, 175])[0, 1]
+    turns = (np.diff(np.sign(np.diff(f, axis=1)), axis=1) != 0).sum(1).mean()
+    print(f"{s:4.1f} {sd0:7.2f} {sd3:8.2f} {r:12.2f} {turns:16.1f}")
+```
+
+```text
+ s   sd f(0)  sd f(3)  corr(f(0), f(0.5))  turning points
+ 0.5    0.41     0.75         0.89              0.9
+ 2.0    0.79     0.94         0.85              3.2
+ 8.0    0.95     0.98         0.76              9.3
+```
+
+<Figure caption="Six functions drawn from the prior of the 50-unit tanh network for each input-weight scale s (one highlighted). The output scale is the same in every panel; what changes is how sharply and how often the functions turn, and, for large s, that the turns crowd around x = 0.">
+  <BdlPriorSamples />
+</Figure>
+
+Three things can be read from the table and the figure. First, a single number, the scale of the input weights, decides whether the prior favors almost linear functions ($s = 0.5$, fewer than one turning point on average) or functions that look like sums of steps ($s = 8$, more than nine). Nobody choosing "$\sigma_p = 1$ for every weight" has made that decision consciously, yet it shapes the posterior wherever the data are sparse.
+
+Second, the prior is not stationary: with $s = 0.5$ the standard deviation is 0.41 at $x = 0$ and 0.75 at $x = 3$, because $\tanh(ux + b)$ has more room to vary where $|x|$ is large. A stationary kernel such as the radial basis function kernel of the sixth entry treats every input location alike; this prior does not.
+
+Third, the turns crowd around the origin for every $s$. Unit $j$ changes from one saturated value to the other near $x = -b_j / u_j$, and the ratio of two independent zero-mean Gaussians with the same standard deviation has a standard Cauchy distribution whatever that standard deviation is. Half the transitions therefore lie in $[-1, 1]$ for every $s$; the scale only sets how sharp they are. If the inputs are not centered and scaled, the region where the prior expects structure and the region where the data are can be far apart.
+
+### 2.2 Depth changes the picture
+
+Adding layers does not give a richer prior automatically. The listing below draws from tanh networks of width 50 and depth 1 to 16, with weights of variance $s_w^2$ divided by the fan-in and biases of unit variance, and reports the correlation between $f(-3)$ and $f(3)$ across draws and the number of turning points.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(1)
+H, S = 50, 2000                        # width, prior draws
+x = np.linspace(-3, 3, 301)
+
+def deep_prior(depth, sw):
+    """Tanh network; weights N(0, sw^2 / fan_in), biases N(0, 1)."""
+    h, fan_in = np.broadcast_to(x, (S, 1, x.size)), 1
+    for _ in range(depth):
+        W = rng.normal(0, sw / np.sqrt(fan_in), size=(S, H, fan_in))
+        b = rng.normal(0, 1, size=(S, H, 1))
+        h, fan_in = np.tanh(W @ h + b), H
+    v = rng.normal(0, 1 / np.sqrt(H), size=(S, 1, H))
+    return (v @ h).squeeze(1)
+
+print("sw  depth  corr(f(-3), f(3))  turning points")
+for sw in [1.0, 3.0]:
+    for depth in [1, 2, 4, 8, 16]:
+        f = deep_prior(depth, sw)
+        r = np.corrcoef(f[:, 0], f[:, -1])[0, 1]
+        turns = (np.diff(np.sign(np.diff(f, axis=1)), axis=1) != 0).sum(1).mean()
+        print(f"{sw:3.0f} {depth:5d} {r:12.2f} {turns:16.1f}")
+```
+
+```text
+sw  depth  corr(f(-3), f(3))  turning points
+  1     1        -0.68              1.7
+  1     2         0.26              2.0
+  1     4         0.89              2.1
+  1     8         1.00              2.2
+  1    16         1.00              2.1
+  3     1        -0.92              2.8
+  3     2        -0.60              4.8
+  3     4        -0.12              9.6
+  3     8         0.26             25.4
+  3    16         0.36             85.3
+```
+
+With $s_w = 1$, the values at the two ends of the interval become perfectly correlated by depth 8: each sampled function is close to a constant, and the variation along $x$ is tiny compared with the variation between draws. With $s_w = 3$ the opposite happens, and the number of turning points grows quickly with depth (at depth 16 it is limited by the grid, so 85.3 is a lower bound). Duvenaud et al. [2] described the first pathology for deep priors, and the analysis of signal propagation by Poole et al. [3] and Schoenholz et al. [4] explains both regimes: depending on the weight and bias variances, correlations between inputs either converge to one (an ordered regime) or decay (a chaotic regime) as they pass through the layers. A prior that is sensible at depth 2 can be degenerate at depth 16 with the same per-layer settings.
+
+## 3. Choosing a prior
+
+### 3.1 Heavy-tailed and sparsity-inducing priors
+
+A Gaussian prior shrinks every weight toward zero by the same relative amount. Two families change that. A **sparsity-inducing prior** puts much mass near zero and also has heavy tails, so most weights are pushed to zero while a few are left large. The spike-and-slab prior [5] mixes a point mass at zero with a broad Gaussian, and the horseshoe [6] reaches a similar effect with a continuous scale mixture. Applied to all the weights leaving one hidden unit or one input, they act as automatic selection of units or features, which Ghosh, Yao and Doshi-Velez [7] used to choose the width of Bayesian neural networks. The older automatic relevance determination of MacKay [8] and Neal [1] does the same with a separate prior variance per group of weights, learned from the data.
+
+Heavy tails also matter without sparsity. Fortuin et al. [9] examined the weights of trained networks and found heavier tails than Gaussian in fully connected layers and spatial correlations in convolutional filters, and reported that priors with those properties improved some posteriors. That is evidence about which priors fit, not a universal rule: the effect depended on the architecture.
+
+### 3.2 Informative and data-driven priors
+
+An **informative prior** encodes knowledge about the problem. Writing one by hand is possible only for parameters with a meaning: the output bias of a regression network, for example, can get a prior centered on a known baseline value with a spread that reflects how well that baseline is known. For the remaining millions of weights, knowledge has to come from data. A common route takes a network pretrained on a related task and uses its weights, with an uncertainty fitted to how they varied during that training, as the prior mean and covariance for the new task; Shwartz-Ziv et al. [10] did this and reported gains over a standard Gaussian prior in transfer learning. Such a prior is "empirical" in that it uses data, which is acceptable as long as the data used for the prior are not also counted again in the likelihood.
+
+### 3.3 Priors over functions
+
+Since what matters is the distribution over functions, an alternative is to state the prior there directly, for example as a GP with a chosen kernel, and then make the network respect it. Two strategies exist. The first keeps a weight prior but tunes its hyperparameters (per-layer variances, or a richer distribution) so that the induced prior predictive matches samples from the target process. Tran et al. [11] minimized a Wasserstein distance between the two at sampled input locations and showed that the matched priors removed some pathologies of Section 2. The second abandons the weight prior altogether and performs inference in function space: functional variational inference (VI) [12] replaces the Kullback–Leibler (KL) divergence between weight distributions with one between the distributions of function values at a set of measurement points. Function-space KL divergences between a network and a GP are subtle (they can be infinite), and the practical estimators rely on sampled measurement points; the method gives useful results but has fewer guarantees than its weight-space counterpart.
+
+### 3.4 How much the prior matters
+
+For a model whose parameters are identified, the Bernstein–von Mises theorem states that, as the amount of data grows, the posterior becomes approximately Gaussian around the true parameter and forgets the prior, provided the prior puts positive density there [13]. Neural networks fail its conditions: their parameters are not identified (Section 5), the number of parameters often exceeds the number of examples, and in practice the data never become numerous enough relative to the parameter count. The prior therefore keeps influencing the posterior in the regime where Bayesian deep learning is used.
+
+One well-known observation shows how much is at stake. Wenzel et al. [14] found that, for image classifiers with Gaussian priors, sampling from a "tempered" posterior $p(\theta \mid \mathcal{D})^{1/T}$ with temperature $T < 1$ predicted better than the posterior itself, the **cold posterior effect**. Proposed explanations include misspecified priors, data augmentation that makes the likelihood count each image several times, and curated data sets with less label noise than the likelihood assumes; the relative weight of each explanation is still debated. For a reader the practical lesson is to inspect the prior predictive before trusting a posterior built on it.
+
+## 4. Symmetries of the weight space
+
+### 4.1 Permutations of hidden units
+
+A **weight-space symmetry** is a transformation $T$ of the parameters that leaves the network function unchanged: $f(x; T(\theta)) = f(x; \theta)$ for every input $x$. The simplest comes from the fact that the units of a hidden layer have no order. Write a hidden layer with $m$ units as $h = \phi(W_1 a + b_1)$, feeding the next pre-activation $W_2 h + b_2$, where $a$ is the layer input, $W_1$ and $b_1$ are its incoming weight matrix and bias vector, $W_2$ is the outgoing weight matrix and $\phi$ acts elementwise. For any $m \times m$ permutation matrix $\Pi$, replacing $W_1$ by $\Pi W_1$, $b_1$ by $\Pi b_1$ and $W_2$ by $W_2 \Pi^\top$ gives
+
+$$
+W_2 \Pi^\top \phi(\Pi W_1 a + \Pi b_1) = W_2 \Pi^\top \Pi\, \phi(W_1 a + b_1) = W_2\, \phi(W_1 a + b_1),
+$$
+
+because an elementwise function commutes with reordering and $\Pi^\top \Pi = I$. Every one of the $m!$ orderings of the units computes the same function. The structure of these permutations, and of the sign flips below, was worked out by Chen, Lu and Hecht-Nielsen [15].
+
+### 4.2 Sign flips and rescalings
+
+The activation adds its own symmetries. For an odd activation such as tanh, $\phi(-z) = -\phi(z)$, so negating the incoming weights and bias of a unit and its outgoing weights leaves the output unchanged. Combined with permutations this gives the group of signed permutations, of order $2^m m!$ per hidden layer, and for a network with hidden widths $m_1, \dots, m_L$
+
+$$
+|G| = \prod_{l=1}^{L} 2^{m_l}\, m_l!.
+$$
+
+Sussmann [16] showed that for single-hidden-layer tanh networks with no redundant units (no unit with zero weights and no two units that duplicate or cancel each other), these are the only transformations that preserve the input–output map. For deeper networks and for degenerate parameter vectors there can be more.
+
+The rectified linear unit (ReLU), $\phi(z) = \max(0, z)$, is not odd but it is positively homogeneous: $\phi(cz) = c\,\phi(z)$ for $c > 0$. Multiplying the incoming weights and bias of a unit by $c$ and dividing its outgoing weights by $c$ therefore leaves the function unchanged for every $c > 0$. This is a continuous symmetry: each function corresponds not to a finite set of parameter vectors but to whole curves of them, one free scale per hidden unit. Dinh et al. [17] used it to show that measures of the "sharpness" of a minimum can be made arbitrarily large without changing the function, so sharpness is not a property of the function alone. A final example sits at the output: adding the same constant to all the logits of a softmax classifier leaves the class probabilities unchanged.
+
+### 4.3 Counting and checking the symmetries
+
+For a tanh network with hidden widths 4 and 3 the formula gives $(2^4 \cdot 4!)(2^3 \cdot 3!) = 384 \cdot 48 = 18\,432$ equivalent parameter vectors. For two hidden layers of 8 units it is about $1.07 \times 10^{14}$, and for two layers of 100 units about $1.4 \times 10^{376}$. The listing applies all 18 432 signed permutations to a random network of widths 1, 4, 3 and 1, checks that the parameter vectors differ and the outputs do not, and maps each one to a **canonical representative** of its class: flip each hidden unit so that its bias is positive, then sort the units of each layer by bias.
+
+```python
+import itertools, math
+import numpy as np
+
+rng = np.random.default_rng(7)
+widths = [1, 4, 3, 1]                  # input, hidden 1, hidden 2, output
+params = [(rng.normal(size=(m, n)), rng.normal(size=m))
+          for n, m in zip(widths[:-1], widths[1:])]
+
+def forward(params, x):                # x has shape (batch, 1)
+    h = x.T
+    for i, (W, b) in enumerate(params):
+        h = W @ h + b[:, None]
+        if i < len(params) - 1:
+            h = np.tanh(h)
+    return h.T
+
+def act_on_layer(params, l, p, s):
+    """Permute (p) and sign-flip (s) the units of hidden layer l."""
+    T = np.diag(s)[p]                  # signed permutation matrix
+    out = list(params)
+    W, b = out[l]
+    out[l] = (T @ W, T @ b)            # incoming weights and biases
+    W2, b2 = out[l + 1]
+    out[l + 1] = (W2 @ T.T, b2)        # outgoing weights
+    return out
+
+def flat(params):
+    return np.concatenate([np.r_[W.ravel(), b] for W, b in params])
+
+def group(m):                          # all 2^m m! signed permutations
+    for p in itertools.permutations(range(m)):
+        for s in itertools.product([1.0, -1.0], repeat=m):
+            yield np.array(p), np.array(s)
+
+def canonical(params):
+    """Representative of the orbit: positive hidden biases, sorted."""
+    for l in range(len(params) - 1):
+        b = params[l][1]
+        s = np.sign(b)
+        params = act_on_layer(params, l, np.argsort(s * b), s)
+    return params
+
+x = np.linspace(-3, 3, 201)[:, None]
+y0 = forward(params, x)
+vecs, canon, worst = set(), set(), 0.0
+for g1, g2 in itertools.product(group(4), group(3)):
+    q = act_on_layer(act_on_layer(params, 0, *g1), 1, *g2)
+    worst = max(worst, np.abs(forward(q, x) - y0).max())
+    vecs.add(tuple(np.round(flat(q), 12)))
+    canon.add(tuple(np.round(flat(canonical(q)), 12)))
+print("2^4 4! 2^3 3! =", 2**4 * math.factorial(4) * 2**3 * math.factorial(3))
+print("distinct weight vectors:", len(vecs))
+print(f"largest output difference: {worst:.1e}")
+print("distinct canonical vectors:", len(canon))
+```
+
+```text
+2^4 4! 2^3 3! = 18432
+distinct weight vectors: 18432
+largest output difference: 4.4e-16
+distinct canonical vectors: 1
+```
+
+All 18 432 parameter vectors are different, the largest difference between their outputs on 201 inputs is at the level of floating-point rounding, and the canonical map sends every one of them to the same vector. The canonical form works here because the biases of a generic random network are nonzero and distinct; Section 5.3 returns to what happens when they are not.
+
+## 5. Identifiability and the posterior
+
+### 5.1 Symmetric copies of every mode
+
+A model is **identifiable** when different parameter values give different distributions of the data. Section 4 shows that a neural network is not: the likelihood satisfies $p(\mathcal{D} \mid T(\theta)) = p(\mathcal{D} \mid \theta)$ for every symmetry $T$. The isotropic Gaussian prior is also invariant, because a signed permutation matrix is orthogonal and $\lVert T(\theta) \rVert = \lVert \theta \rVert$. Any prior that treats the units of a layer exchangeably and is symmetric about zero shares this property. By Bayes' rule the posterior is then invariant as well,
+
+$$
+p(T(\theta) \mid \mathcal{D}) = p(\theta \mid \mathcal{D}) \quad \text{for every } T \in G,
+$$
+
+so each mode of the posterior comes with up to $|G| - 1$ exact copies in other parts of the weight space. With ReLU activations the scaling symmetry adds continuous ridges along which the likelihood is constant; a Gaussian prior is not invariant to rescaling, so it tilts each ridge toward the point where the incoming and outgoing weights of a unit have balanced norms (Exercise 4), but it cannot remove a permutation copy.
+
+The posterior predictive is unaffected by any of this. Because $f(x^*; T(\theta)) = f(x^*; \theta)$, the integral
+
+$$
+p(y^* \mid x^*, \mathcal{D}) = \int p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, d\theta
+$$
+
+takes the same value whether it is computed over the whole space or over one region that contains a single representative of each class, with the posterior renormalized on it. Symmetric copies add no new predictions. A method that explores only one copy of each mode loses nothing; a method that wastes effort on copies gains nothing.
+
+### 5.2 What symmetry does to inference
+
+The consequences differ by method. Local approximations, the Laplace approximation of the [third entry](/blog/laplace-approximations) and Gaussian variational families of the [fourth](/blog/variational-inference-for-neural-networks), sit in one basin and never see the copies; for them the symmetry is harmless, and the copies only mean that the normalizing constants they estimate miss a factor that is the same for all functionally equivalent modes. Deep ensembles, the subject of the [fifth entry](/blog/deep-ensembles), land in different basins, and some of the diversity between members could in principle be pure relabeling; in practice independently trained members differ in function as well, which is why they help.
+
+Markov chain Monte Carlo (MCMC), the subject of the [second entry](/blog/sampling-the-posterior-mcmc), is affected most. A chain started in one basin almost never crosses to a permuted copy, because the copies are separated by regions of low posterior density. That failure is irrelevant for predictions, but it breaks the usual diagnostics. The potential scale reduction factor $\hat{R}$ compares the spread of a parameter within and between chains; two chains that sample the same function in two permuted copies give a large $\hat{R}$ for every weight even though their predictive distributions agree. Conversely, a weight trace that looks well mixed says nothing about whether the chain has explored the functionally different modes that matter. Diagnostics for Bayesian neural networks should therefore be computed on quantities that are invariant to the symmetries: predictions at test inputs, the log likelihood, or the canonical representatives of Section 4.3.
+
+### 5.3 Removing or ignoring symmetries
+
+Two broad responses exist. The first removes the symmetries by constraining the parameters: require positive biases (or positive outgoing weights) and an ordering of the units, as the canonical map does. This turns the orbits into single points, but the constraint has boundaries where two units have equal biases or a bias is zero, and near those boundaries the restricted posterior is cut off sharply, which hampers gradient-based samplers. Removing the scaling symmetries of ReLU networks requires a normalization, for example fixing the norm of each unit's incoming weights. None of these constraints is available off the shelf for convolutional, attention or normalization layers, which have symmetries of their own.
+
+The second response accepts the symmetries and runs several shorter chains from independent starting points, so that between them they visit several functionally different modes; each chain is then judged by functional diagnostics. This is the multi-chain counterpart of a deep ensemble and is the usual practice. A related line of work studies **mode connectivity**: Garipov et al. [18] and Draxler et al. [19] found low-loss curved paths between independently trained solutions, and Entezari et al. [20] conjectured, with supporting experiments, that once permutations are accounted for, many such solutions are connected by nearly straight low-loss paths. Ainsworth, Hayase and Srinivasa [21] gave algorithms that find the aligning permutation. If the conjecture holds broadly, much of the apparent multimodality of the posterior is symmetry, and the functionally distinct part is smaller and better connected than the weight space suggests; whether that holds across architectures and data sets is still open.
+
+## 6. Learning the prior from data
+
+### 6.1 The marginal likelihood
+
+When the prior has hyperparameters $\eta$, such as the scale $s$ of Section 2 or the per-layer variances, they can be chosen by cross-validation as in the [evaluation entry](/blog/evaluating-models-honestly), or by the Bayesian route: maximize the **marginal likelihood** (or evidence)
+
+$$
+p(\mathcal{D} \mid \eta) = \int p(\mathcal{D} \mid \theta)\, p(\theta \mid \eta)\, d\theta,
+$$
+
+the probability the prior predictive assigns to the observed data. MacKay [8], [22] used it to set weight-decay strengths and to compare network architectures. It embodies an automatic Occam's razor: a prior that spreads its predictions over many possible data sets assigns each of them, including the observed one, little probability, while a prior that is too narrow misses the data. The evidence favors the narrowest prior that still covers what was observed, and it needs no validation set. For a linear model in fixed features the evidence has a closed form, which the [next entry](/blog/scaling-bayesian-deep-learning) computes for a last-layer model; for a full network it is approximated, most often with the Laplace approximation of the third entry, which Immer et al. [23] made scalable with structured curvature approximations.
+
+### 6.2 Learning invariances
+
+The same tool can learn structure, not only scales. An invariance, such as insensitivity to small rotations of an image, can be built into a model by averaging its output over transformed copies of the input, with the range of transformations as a hyperparameter. Training loss cannot choose that range: a model with no invariance always fits the training data at least as well. The marginal likelihood can, because an invariant model makes sharper predictions about data that really are invariant. Van der Wilk et al. [24] demonstrated this for GPs, and Immer et al. [25] for deep networks with a differentiable Laplace approximation of the evidence.
+
+The approach has documented limits. Lotfi et al. [26] showed that the marginal likelihood measures how well a model predicts each example from the ones before it, starting from the prior, so it can penalize flexible models that generalize well once trained, and it can be misled when the prior hyperparameters and the architecture are chosen together. The evidence answers "which prior made these data probable", which is close to but not the same as "which model will predict new data best".
+
+## 7. When identifiability is the goal
+
+In a neural network the weights are a means to predictions, and their lack of identifiability is a nuisance for inference only. In a model whose parameters are meant to be interpreted, identifiability is part of the scientific question. The classic example is the finite mixture model. Its components can be relabeled without changing the likelihood, the same permutation symmetry as in Section 4.1, and an MCMC sampler that does switch between labelings gives a posterior mean of each component's parameters that averages over all components and means nothing. Stephens [27] analyzed this **label-switching** problem and proposed relabeling the samples after the fact to a consistent ordering, a canonical map in the sense of Section 4.3.
+
+A **mixture of experts** [28] combines both settings. A gating network $g_k(x)$ assigns each input a probability over $K$ experts, and the prediction is $\sum_k g_k(x)\, p_k(y \mid x)$, where $p_k$ is the predictive distribution of expert $k$. It is a mixture model whose weights depend on the input, so it inherits label switching, and for softmax gates the shift symmetry of Section 4.2 as well; Bayesian treatments fix one gate's parameters to zero and impose an order on the experts, or relabel samples, before they interpret which expert handles which region. Research on identifiable deep latent variable models follows the same pattern: impose structural constraints, such as sparsity patterns in how latent variables affect observations, under which the model's parameters are provably determined by the data distribution up to a known, small set of symmetries. The price is a restricted model; the gain is that statements about individual parameters carry meaning.
+
+## 8. Limits and failure modes
+
+The main limitations of the material in this entry are these:
+
+- **The weight prior is chosen for convenience.** An isotropic Gaussian with a default scale makes implicit commitments about smoothness, stationarity and depth behavior (Section 2). Inspect the prior predictive at the scale and depth used, with inputs scaled as they will be in training.
+- **Sample-based checks are coarse.** Turning points and correlations at a few inputs summarize a distribution over functions poorly; they can show that a prior is implausible, not that it is right.
+- **Function-space priors trade one problem for another.** They are easier to state but harder to impose: matching is approximate, and function-space divergences need measurement points whose choice affects the result.
+- **Symmetry handling is architecture-specific.** The counts and canonical maps in Section 4 cover fully connected tanh and ReLU layers. Other layers have other symmetries, and degenerate parameter vectors (zero or duplicated units) have larger symmetry groups.
+- **Weight-space diagnostics mislead.** Mixing statistics for individual weights reflect symmetry as much as convergence; judge sampling by predictions.
+- **The marginal likelihood is a criterion with its own biases.** It needs approximations for networks, and even when exact it measures something other than test performance.
+
+## 9. Exercises
+
+**Exercise 1.** How many signed permutations does a tanh network with hidden widths 3 and 5 have? If tanh is replaced by ReLU, which discrete symmetries remain and how many free scale parameters does the continuous symmetry have?
+
+<details>
+<summary>Answer</summary>
+
+$(2^3 \cdot 3!)(2^5 \cdot 5!) = 48 \cdot 3840 = 184\,320$. ReLU is not odd, so sign flips are no longer symmetries; the $3! \cdot 5! = 720$ permutations remain. Each of the $3 + 5 = 8$ hidden units has its own positive scale factor, so the continuous symmetry has 8 free parameters.
+
+</details>
+
+**Exercise 2.** A regression network is trained with squared error and weight decay $\lambda = 0.01$ on targets with noise standard deviation $\sigma = 0.1$. What prior standard deviation $\sigma_p$ does this correspond to?
+
+<details>
+<summary>Answer</summary>
+
+From Section 1.2, $\lambda = \sigma^2 / \sigma_p^2$, so $\sigma_p^2 = 0.01 / 0.01 = 1$ and $\sigma_p = 1$. The correspondence assumes the loss is the plain sum of squared errors; if the loss is averaged over the $N$ examples, the weight decay must be multiplied by $N$ before applying the formula.
+
+</details>
+
+**Exercise 3.** Which of these priors are invariant under the signed permutations of a tanh layer: (a) $\mathcal{N}(0, \sigma_p^2 I)$; (b) independent Laplace distributions with a common scale; (c) independent Gaussians whose variance differs from one hidden unit to the next; (d) independent Gaussians with a common mean $\mu \neq 0$?
+
+<details>
+<summary>Answer</summary>
+
+(a) and (b) are invariant: both treat all weights identically and are symmetric about zero. (c) is invariant under sign flips but not permutations, since moving a unit to a position with a different variance changes the density; it partly identifies the order of the units. (d) is invariant under permutations but not sign flips, since negating weights moves them away from $\mu$.
+
+</details>
+
+**Exercise 4.** A ReLU unit has incoming weights and bias with squared norm $a$ and outgoing weights with squared norm $c$. Under the rescaling of Section 4.2 by a factor $k > 0$, how does the log density of a $\mathcal{N}(0, \sigma_p^2 I)$ prior change, and for which $k$ is it largest?
+
+<details>
+<summary>Answer</summary>
+
+The log prior is $-(k^2 a + c / k^2) / (2\sigma_p^2)$ plus a constant. Setting the derivative with respect to $k^2$ to zero gives $a = c / k^4$, so $k^2 = \sqrt{c / a}$, at which point both norms equal $\sqrt{ac}$. The prior selects the balanced rescaling along each ridge and so removes the scaling symmetry from the posterior mode, but it leaves the posterior spread along the ridge.
+
+</details>
+
+**Exercise 5.** Two MCMC chains for the same Bayesian neural network report $\hat{R} = 3.2$ for most individual weights, yet their predictive means at 100 test inputs agree to within the Monte Carlo error. What is the most likely explanation, and what would you check next?
+
+<details>
+<summary>Answer</summary>
+
+The chains are probably sampling permuted or sign-flipped copies of the same functional mode, so weights disagree while functions agree. Check $\hat{R}$ on invariant quantities (predictions, log likelihood) or on canonicalized weights; if those agree, the large weight-space $\hat{R}$ is not evidence of a problem. Whether the chains have found all functionally different modes is a separate question that more chains from other starting points can address.
+
+</details>
+
+## 10. Summary
+
+| Question | Answer |
+|---|---|
+| How should a weight prior be judged? | Through its prior predictive distribution: sample weights, run the network, look at the functions. |
+| What does a Gaussian prior correspond to in training? | Weight decay, with $\lambda = \sigma^2 / \sigma_p^2$ for squared error. |
+| Why scale output variances by $1/H$? | To keep the output variance finite as the width grows; the limit is the NNGP. |
+| What does the input-weight scale control? | How sharply and how often prior functions turn (0.9 to 9.3 turning points for $s = 0.5$ to 8 in Section 2.1). |
+| What goes wrong with depth? | Functions become nearly constant or highly erratic, depending on the weight and bias variances. |
+| Which alternatives to the Gaussian exist? | Sparsity-inducing and heavy-tailed priors, data-driven informative priors, priors stated in function space. |
+| How many equivalent weight vectors does a tanh network have? | At least $\prod_l 2^{m_l} m_l!$; 18 432 for hidden widths 4 and 3. |
+| What does symmetry do to the posterior? | Copies every mode; the predictive is unchanged, weight-space MCMC diagnostics are not. |
+| How can hyperparameters and invariances be learned? | By maximizing the marginal likelihood, with care about what it measures. |
+| When does identifiability matter? | When parameters are interpreted, as in mixtures and mixtures of experts (label switching). |
+
+A prior over weights is a prior over functions seen through a many-to-one map, and both halves of this entry follow from that. The prior predictive is the place to check what the prior says, and invariant quantities are the place to check what a sampler has found. The methods so far have been illustrated on toy networks where every computation is cheap. The [next entry](/blog/scaling-bayesian-deep-learning) asks what each of them costs for a network with millions of parameters, and which approximations (last-layer inference, structured curvature, single-forward-pass methods and sparse GPs) bring that cost down.
+
+### References
+
+- [21] S. K. Ainsworth, J. Hayase and S. Srinivasa, "Git Re-Basin: Merging models modulo permutation symmetries," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- [15] A. M. Chen, H. Lu and R. Hecht-Nielsen, "On the geometry of feedforward neural network error surfaces," *Neural Computation*, vol. 5, no. 6, 1993.
+- [6] C. M. Carvalho, N. G. Polson and J. G. Scott, "The horseshoe estimator for sparse signals," *Biometrika*, vol. 97, no. 2, pp. 465–480, 2010.
+- [17] L. Dinh, R. Pascanu, S. Bengio and Y. Bengio, "Sharp minima can generalize for deep nets," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
+- [19] F. Draxler, K. Veschgini, M. Salmhofer and F. A. Hamprecht, "Essentially no barriers in neural network energy landscape," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- [2] D. Duvenaud, O. Rippel, R. P. Adams and Z. Ghahramani, "Avoiding pathologies in very deep networks," in *Proceedings of the 17th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2014.
+- [20] R. Entezari, H. Sedghi, O. Saukh and B. Neyshabur, "The role of permutation invariance in linear mode connectivity of neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- [9] V. Fortuin et al., "Bayesian neural network priors revisited," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- [18] T. Garipov, P. Izmailov, D. Podoprikhin, D. P. Vetrov and A. G. Wilson, "Loss surfaces, mode connectivity, and fast ensembling of DNNs," in *Advances in Neural Information Processing Systems (NeurIPS)*, 2018.
+- [7] S. Ghosh, J. Yao and F. Doshi-Velez, "Model selection in Bayesian neural networks via horseshoe priors," *Journal of Machine Learning Research*, vol. 20, 2019.
+- [23] A. Immer, M. Bauer, V. Fortuin, G. Rätsch and M. E. Khan, "Scalable marginal likelihood estimation for model selection in deep learning," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- [25] A. Immer, T. F. A. van der Ouderaa, G. Rätsch, V. Fortuin and M. van der Wilk, "Invariance learning in deep neural networks with differentiable Laplace approximations," in *Advances in Neural Information Processing Systems (NeurIPS)*, 2022.
+- [28] R. A. Jacobs, M. I. Jordan, S. J. Nowlan and G. E. Hinton, "Adaptive mixtures of local experts," *Neural Computation*, vol. 3, no. 1, pp. 79–87, 1991.
+- [26] S. Lotfi, P. Izmailov, G. Benton, M. Goldblum and A. G. Wilson, "Bayesian model selection, the marginal likelihood, and generalization," in *Proceedings of the 39th International Conference on Machine Learning (ICML)*, 2022.
+- [22] D. J. C. MacKay, "Bayesian interpolation," *Neural Computation*, vol. 4, no. 3, pp. 415–447, 1992.
+- [8] D. J. C. MacKay, "A practical Bayesian framework for backpropagation networks," *Neural Computation*, vol. 4, no. 3, pp. 448–472, 1992.
+- [5] T. J. Mitchell and J. J. Beauchamp, "Bayesian variable selection in linear regression," *Journal of the American Statistical Association*, vol. 83, no. 404, pp. 1023–1032, 1988.
+- [1] R. M. Neal, *Bayesian Learning for Neural Networks*, Springer, 1996.
+- [3] B. Poole, S. Lahiri, M. Raghu, J. Sohl-Dickstein and S. Ganguli, "Exponential expressivity in deep neural networks through transient chaos," in *Advances in Neural Information Processing Systems (NeurIPS)*, 2016.
+- [4] S. S. Schoenholz, J. Gilmer, S. Ganguli and J. Sohl-Dickstein, "Deep information propagation," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2017.
+- [10] R. Shwartz-Ziv et al., "Pre-train your loss: Easy Bayesian transfer learning with informative priors," in *Advances in Neural Information Processing Systems (NeurIPS)*, 2022.
+- [27] M. Stephens, "Dealing with label switching in mixture models," *Journal of the Royal Statistical Society, Series B*, vol. 62, no. 4, pp. 795–809, 2000.
+- [12] S. Sun, G. Zhang, J. Shi and R. Grosse, "Functional variational Bayesian neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2019.
+- [16] H. J. Sussmann, "Uniqueness of the weights for minimal feedforward nets with a given input-output map," *Neural Networks*, vol. 5, no. 4, 1992.
+- [11] B.-H. Tran, S. Rossi, D. Milios and M. Filippone, "All you need is a good functional prior for Bayesian deep learning," *Journal of Machine Learning Research*, vol. 23, 2022.
+- [13] A. W. van der Vaart, *Asymptotic Statistics*, Cambridge University Press, 1998.
+- [24] M. van der Wilk, M. Bauer, S. T. John and J. Hensman, "Learning invariances using the marginal likelihood," in *Advances in Neural Information Processing Systems (NeurIPS)*, 2018.
+- [14] F. Wenzel et al., "How good is the Bayes posterior in deep neural networks really?," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
