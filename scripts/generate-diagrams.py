@@ -695,6 +695,16 @@ svg('CtVennRegions', 470, 262, 'The eight regions of a three-circle Venn diagram
     '4 S and M but not P, 5 all three, 6 P and M but not S, 7 M only, 8 none.',
     b)
 
+def ct_venn_numbers(cs, shift=None):
+    """Small region numbers (as in CtVennRegions); regions in `shift` move their number below a mark."""
+    shift = shift or {}
+    o = ''
+    for k, m in enumerate([(1, 0, 0), (1, 1, 0), (0, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (0, 0, 1)]):
+        x, y = ct_venn_center(cs, m)
+        dx, dy = shift.get(k + 1, (0, 0))
+        o += text(x + dx, y + 4 + dy, str(k + 1), 'middle', 'small')
+    return o
+
 def ct_venn_side(lines, x=300, y=40):
     o = ''
     for k, (t, cls) in enumerate(lines):
@@ -708,7 +718,9 @@ b += ct_venn_shade(cs, (1, 0, 1))   # All M are P: M outside P is empty (S, M, n
 b += ct_venn_shade(cs, (0, 0, 1))   # (M only)
 b += ct_venn_three_frame(0, 0, cs)
 b += ct_venn_outline(cs[:2], (1, 1))
-b += ct_venn_x(ct_venn_center(cs, (1, 1, 1)))
+cx5, cy5 = ct_venn_center(cs, (1, 1, 1))
+b += ct_venn_x((cx5, cy5 - 9), 5.5)
+b += ct_venn_numbers(cs, {5: (0, 8)})
 b += ct_venn_side([('Premise 1: All M are P', None), ('  shade M outside P', 'small'),
                    ('Premise 2: Some S are M', None), ('  X in S and M; the only', 'small'),
                    ('  unshaded part is region 5', 'small'),
@@ -728,6 +740,7 @@ b += ct_venn_shade(cs, (0, 1, 0))
 b += ct_venn_three_frame(0, 0, cs)
 b += ct_venn_outline(cs[:2], (1, 1))
 b += ct_venn_x(ct_venn_on_line(cs, (1, 0, 1), (1, 1, 1)))
+b += ct_venn_numbers(cs, {4: (-6, 4), 5: (8, -6)})
 b += ct_venn_side([('Premise 1: All P are M', None), ('  shade P outside M', 'small'),
                    ('Premise 2: Some S are M', None), ('  X in S and M, on the line:', 'small'),
                    ('  region 4 or region 5', 'small'),
@@ -931,16 +944,14 @@ def ct_val_square(ox, title, tl, tr, bl, br):
     return o
 
 b = ''
-b += text(14, 86, 'A holds', 'start', 'small')
-b += text(14, 206, 'B bears', 'start', 'small')
-b += ct_val_square(80, 'What A and B may do', 'Claim-right', 'Privilege', 'Duty', 'No-right')
-b += ct_val_square(370, 'Who can change that', 'Power', 'Immunity', 'Liability', 'Disability')
+b += ct_val_square(80, 'Conduct', 'Claim-right', 'Privilege', 'Duty', 'No-right')
+b += ct_val_square(370, 'Changing positions', 'Power', 'Immunity', 'Liability', 'Disability')
 b += line([(80, 252), (120, 252)])
-b += text(128, 256, 'correlatives: one relation seen from each side', 'start', 'small')
+b += text(128, 256, 'correlatives: if A holds the upper position against B, B holds the lower one', 'start', 'small')
 b += line([(80, 276), (120, 276)], 'region2')
-b += text(128, 280, 'opposites: holding one means lacking the other', 'start', 'small')
+b += text(128, 280, 'opposites: two positions of the same party; whoever holds one lacks the other', 'start', 'small')
 svg('CtValHohfeld', 650, 292, "Hohfeld's eight jural positions",
-    "Two squares. Left: A's claim-right is correlative with B's duty, and A's privilege with B's no-right; claim-right and no-right are opposites, as are privilege and duty. Right: A's power is correlative with B's liability, and A's immunity with B's disability; power and disability are opposites, as are immunity and liability.",
+    "Two squares. Vertical lines join correlatives, one relation seen from each party: a claim-right of A against B goes with a duty of B to A, a privilege of A with a no-right of B, a power of A with a liability of B, an immunity of A with a disability of B. Dashed diagonals join opposites, two positions of the same party that exclude each other: claim-right and no-right, privilege and duty, power and disability, immunity and liability.",
     b)
 
 # ---------- 11-strategic-thinking-and-decisions ----------
