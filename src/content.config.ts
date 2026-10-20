@@ -59,6 +59,7 @@ const insights = defineCollection({
       'Research question',
       'Methodological note',
       'Emerging idea',
+      'Policy analysis',
     ]),
     tags: z.array(z.string()).default([]),
     draft: z.boolean().default(false),

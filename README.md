@@ -172,7 +172,7 @@ The series page lists published articles in `seriesOrder`, then the remaining pl
 | --- | --- | --- |
 | `title`, `description` | yes | |
 | `publishedAt` | yes | Date. |
-| `kind` | yes | `Concept explanation`, `Engineering observation`, `Comparison`, `Research question`, `Methodological note` or `Emerging idea`. |
+| `kind` | yes | `Concept explanation`, `Engineering observation`, `Comparison`, `Research question`, `Methodological note`, `Emerging idea` or `Policy analysis`. |
 | `tags` | no | List of strings. Same tag pages as for articles (`/tags/<slug>` lists both). |
 | `draft`, `example` | no | Same meaning as for articles. |
 
