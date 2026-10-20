@@ -503,3 +503,537 @@ svg('MemsAccelerometer', 520, 266, 'Schematic of a capacitive MEMS accelerometer
     'When the case accelerates to the left, the mass lags behind and moves to the right relative to it by x: the gap to the left electrode '
     'widens to d plus x and the gap to the right electrode narrows to d minus x, so C1 falls and C2 rises.',
     b)
+
+# ==================== Critical Thinking and Reasoning series ====================
+
+# ---------- 02-meaning-clarity-and-definitions ----------
+
+# ---------- Critical thinking series, entry 2: necessary and sufficient conditions ----------
+def ct_mcd_ellipse(cx, cy, rx, ry, cls):
+    return f'  <ellipse class="{cls}" cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" />\n'
+def ct_mcd_dot(cx, cy):
+    return f'  <circle class="dot" cx="{cx}" cy="{cy}" r="4" />\n'
+b = ''
+b += f'  <rect class="ln" x="10" y="10" width="580" height="250" rx="4" />\n'
+b += text(22, 30, 'All integers', 'start', 'small')
+b += ct_mcd_ellipse(250, 140, 200, 100, 'region')
+b += ct_mcd_ellipse(250, 140, 200, 100, 'ln')
+b += text(250, 62, 'Even integers (' + var('Y') + ')', 'middle')
+b += ct_mcd_ellipse(220, 152, 92, 54, 'region')
+b += ct_mcd_ellipse(220, 152, 92, 54, 'ln')
+b += text(220, 140, 'Multiples of 6', 'middle')
+b += text(220, 158, '(' + var('X') + ')', 'middle')
+b += ct_mcd_dot(220, 182)
+b += text(232, 186, '12', 'start', 'small')
+b += ct_mcd_dot(370, 140)
+b += text(382, 144, '4', 'start', 'small')
+b += ct_mcd_dot(520, 200)
+b += text(532, 204, '9', 'start', 'small')
+b += text(522, 80, var('X') + ' is sufficient for ' + var('Y'), 'middle', 'small')
+b += text(522, 98, var('Y') + ' is necessary for ' + var('X'), 'middle', 'small')
+svg('CtNecessarySufficient', 600, 270, 'Euler diagram of a sufficient and a necessary condition',
+    'Inside the rectangle of all integers, a large region holds the even integers and a smaller region inside it holds the multiples of 6. The number 12 lies in both regions, the number 4 lies in the even region only, and the number 9 lies outside both. Because the smaller region is entirely inside the larger one, being a multiple of 6 is sufficient for being even, and being even is necessary for being a multiple of 6. The number 4 shows that being a multiple of 6 is not necessary for being even.',
+    b)
+
+# ---------- 05-categorical-logic-and-venn-diagrams ----------
+
+# ---------- Critical thinking 5: categorical logic and Venn diagrams ----------
+# Helpers prefixed ct_venn_. A region of a Venn diagram is given by a membership tuple
+# (one entry per circle: 1 inside, 0 outside). Region outlines are traced from the circle
+# arcs that bound them, so shading always follows the drawn circles exactly.
+
+def ct_venn_inside(c, x, y):
+    return (x - c[0]) ** 2 + (y - c[1]) ** 2 < c[2] ** 2
+
+def ct_venn_arcs(circles, i):
+    """Split circle i at its intersections with the others; return (a0, a1) angle pairs."""
+    cx, cy, r = circles[i]
+    angs = []
+    for j, (dx, dy, rr) in enumerate(circles):
+        if j == i:
+            continue
+        d = math.hypot(dx - cx, dy - cy)
+        if d >= r + rr or d <= abs(r - rr):
+            continue
+        a = (r * r - rr * rr + d * d) / (2 * d)
+        base = math.atan2(dy - cy, dx - cx)
+        off = math.acos(max(-1.0, min(1.0, a / r)))
+        angs += [(base + off) % (2 * math.pi), (base - off) % (2 * math.pi)]
+    angs.sort()
+    if not angs:
+        return [(0.0, 2 * math.pi)]
+    return [(angs[k], angs[k + 1] if k + 1 < len(angs) else angs[0] + 2 * math.pi) for k in range(len(angs))]
+
+def ct_venn_pt(c, a):
+    return (c[0] + c[2] * math.cos(a), c[1] + c[2] * math.sin(a))
+
+def ct_venn_boundary(circles, m):
+    """Boundary arcs of region m, each oriented so that the region lies on one consistent side."""
+    arcs = []
+    for i, c in enumerate(circles):
+        for a0, a1 in ct_venn_arcs(circles, i):
+            px, py = ct_venn_pt(c, (a0 + a1) / 2)
+            if all(ct_venn_inside(circles[j], px, py) == bool(m[j]) for j in range(len(circles)) if j != i):
+                n = 48
+                pts = [ct_venn_pt(c, a0 + (a1 - a0) * k / n) for k in range(n + 1)]
+                arcs.append(pts if m[i] else pts[::-1])
+    return arcs
+
+def ct_venn_chain(circles, m):
+    """Closed outline of region m as a list of points, its boundary arcs joined end to start."""
+    arcs = ct_venn_boundary(circles, m)
+    chain = list(arcs.pop(0))
+    while arcs:
+        end = chain[-1]
+        k = min(range(len(arcs)), key=lambda q: math.hypot(arcs[q][0][0] - end[0], arcs[q][0][1] - end[1]))
+        chain += arcs.pop(k)[1:]
+    return chain
+
+def ct_venn_path(circles, m):
+    return 'M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in ct_venn_chain(circles, m)) + ' Z'
+
+def ct_venn_shade(circles, m):
+    return f'  <path class="region" d="{ct_venn_path(circles, m)}" />\n'
+
+def ct_venn_outline(circles, m, k=0.84):
+    """Dashed outline of region m, shrunk toward its center so that it stays visible inside the circles."""
+    cx, cy = ct_venn_center(circles, m)
+    chain = ct_venn_chain(circles, m)
+    d = 'M' + ' L'.join(f'{cx + k * (x - cx):.1f},{cy + k * (y - cy):.1f}' for x, y in chain) + ' Z'
+    return f'  <path class="region2" d="{d}" />\n'
+
+def ct_venn_center(circles, m, step=2.0):
+    """Point of region m farthest from every circle boundary (a good place for a mark or label)."""
+    xs = [c[0] - c[2] for c in circles] + [c[0] + c[2] for c in circles]
+    ys = [c[1] - c[2] for c in circles] + [c[1] + c[2] for c in circles]
+    best, bp = -1.0, None
+    y = min(ys)
+    while y <= max(ys):
+        x = min(xs)
+        while x <= max(xs):
+            if all(ct_venn_inside(c, x, y) == bool(m[j]) for j, c in enumerate(circles)):
+                dist = min(abs(math.hypot(x - c[0], y - c[1]) - c[2]) for c in circles)
+                if dist > best:
+                    best, bp = dist, (x, y)
+            x += step
+        y += step
+    return bp
+
+def ct_venn_on_line(circles, m1, m2):
+    """Midpoint of the arc that separates two regions differing in one circle."""
+    j = [k for k in range(len(m1)) if m1[k] != m2[k]][0]
+    inner = m1 if m1[j] else m2
+    for a0, a1 in ct_venn_arcs(circles, j):
+        px, py = ct_venn_pt(circles[j], (a0 + a1) / 2)
+        if all(ct_venn_inside(circles[k], px, py) == bool(inner[k]) for k in range(len(circles)) if k != j):
+            return (px, py)
+
+def ct_venn_x(p, s=7):
+    x, y = p
+    return line([(x - s, y - s), (x + s, y + s)], 'thick') + line([(x - s, y + s), (x + s, y - s)], 'thick')
+
+def ct_venn_frame(x, y, w, h, circles, names, label_pos):
+    o = f'  <rect class="ln" x="{x}" y="{y}" width="{w}" height="{h}" />\n'
+    for c in circles:
+        o += f'  <circle class="ln" cx="{c[0]:.1f}" cy="{c[1]:.1f}" r="{c[2]:.1f}" />\n'
+    for nm, (lx, ly, anc) in zip(names, label_pos):
+        o += text(lx, ly, var(nm), anc)
+    return o
+
+# --- Figure 1: the four categorical forms on two-circle diagrams ---
+def ct_venn_two(ox, oy, kind, head, sub):
+    r = 46
+    cs = [(ox + 92, oy + 92, r), (ox + 152, oy + 92, r)]
+    o = text(ox + 122, oy + 16, head, 'middle')
+    o += text(ox + 122, oy + 32, sub, 'middle', 'small')
+    if kind == 'A':
+        o += ct_venn_shade(cs, (1, 0))
+    if kind == 'E':
+        o += ct_venn_shade(cs, (1, 1))
+    o += ct_venn_frame(ox + 20, oy + 40, 204, 106, cs, ['S', 'P'],
+                       [(ox + 36, oy + 60, 'start'), (ox + 208, oy + 60, 'end')])
+    if kind == 'I':
+        o += ct_venn_x(ct_venn_center(cs, (1, 1)))
+    if kind == 'O':
+        o += ct_venn_x(ct_venn_center(cs, (1, 0)))
+    return o
+
+b = ''
+b += ct_venn_two(0, 0, 'A', 'A: All S are P', 'S outside P is empty')
+b += ct_venn_two(256, 0, 'E', 'E: No S are P', 'S inside P is empty')
+b += ct_venn_two(0, 168, 'I', 'I: Some S are P', 'something is in S and P')
+b += ct_venn_two(256, 168, 'O', 'O: Some S are not P', 'something is in S outside P')
+svg('CtVennFourForms', 500, 322, 'Venn diagrams of the four categorical forms',
+    'Four two-circle diagrams, each with circle S on the left and circle P on the right inside a rectangle. '
+    'A, all S are P: the part of S outside P is shaded. E, no S are P: the overlap of S and P is shaded. '
+    'I, some S are P: an X in the overlap. O, some S are not P: an X in the part of S outside P.',
+    b)
+
+# --- three-circle layout shared by the remaining figures ---
+CT_VENN_R = 62
+def ct_venn_three(ox, oy):
+    return [(ox + 110, oy + 98, CT_VENN_R), (ox + 186, oy + 98, CT_VENN_R), (ox + 148, oy + 164, CT_VENN_R)]
+def ct_venn_three_frame(ox, oy, cs, names=('S', 'P', 'M')):
+    return ct_venn_frame(ox + 20, oy + 14, 256, 238, cs, names,
+                         [(ox + 44, oy + 44, 'start'), (ox + 252, oy + 44, 'end'), (ox + 148, oy + 244, 'middle')])
+
+# --- Figure 2: the eight regions of a three-circle diagram ---
+cs = ct_venn_three(0, 0)
+b = ct_venn_three_frame(0, 0, cs)
+order = [(1, 0, 0), (1, 1, 0), (0, 1, 0), (1, 0, 1), (1, 1, 1), (0, 1, 1), (0, 0, 1)]
+for k, m in enumerate(order):
+    x, y = ct_venn_center(cs, m)
+    b += text(x, y + 5, str(k + 1), 'middle')
+b += text(36, 238, '8', 'middle')
+rows = ['1  S, not P, not M', '2  S and P, not M', '3  P, not S, not M', '4  S and M, not P',
+        '5  S, P and M', '6  P and M, not S', '7  M, not S, not P', '8  none of the three']
+for k, t in enumerate(rows):
+    b += text(300, 46 + 26 * k, t, 'start', 'small')
+svg('CtVennRegions', 470, 262, 'The eight regions of a three-circle Venn diagram',
+    'Three overlapping circles S (upper left), P (upper right) and M (bottom) inside a rectangle divide it into eight regions, '
+    'numbered 1 to 7 inside the circles and 8 outside them. A key lists each region: 1 S only, 2 S and P but not M, 3 P only, '
+    '4 S and M but not P, 5 all three, 6 P and M but not S, 7 M only, 8 none.',
+    b)
+
+def ct_venn_side(lines, x=300, y=40):
+    o = ''
+    for k, (t, cls) in enumerate(lines):
+        o += text(x, y + 22 * k, t, 'start', cls)
+    return o
+
+# --- Figure 3: a valid syllogism (All M are P; some S are M; so some S are P) ---
+cs = ct_venn_three(0, 0)
+b = ''
+b += ct_venn_shade(cs, (1, 0, 1))   # All M are P: M outside P is empty (S, M, not P)
+b += ct_venn_shade(cs, (0, 0, 1))   # (M only)
+b += ct_venn_three_frame(0, 0, cs)
+b += ct_venn_outline(cs[:2], (1, 1))
+b += ct_venn_x(ct_venn_center(cs, (1, 1, 1)))
+b += ct_venn_side([('Premise 1: All M are P', None), ('  shade M outside P', 'small'),
+                   ('Premise 2: Some S are M', None), ('  X in S and M; the only', 'small'),
+                   ('  unshaded part is region 5', 'small'),
+                   ('Conclusion: Some S are P', None), ('  dashed: S and P', 'small'),
+                   ('An X lies inside the dashed', 'small'), ('region, so the form is valid.', 'small')])
+svg('CtVennValid', 500, 262, 'Venn diagram test of a valid syllogism',
+    'Circles S, P and M. Premise 1, all M are P, shades the two parts of M outside P. Premise 2, some S are M, puts an X in the '
+    'overlap of S and M; because the part of that overlap outside P is shaded, the X goes in the region common to S, P and M. '
+    'The conclusion, some S are P, needs an X in the overlap of S and P, outlined with a dashed line. The X is there, so the argument form is valid.',
+    b)
+
+# --- Figure 4: an invalid syllogism (All P are M; some S are M; so some S are P) ---
+cs = ct_venn_three(0, 0)
+b = ''
+b += ct_venn_shade(cs, (1, 1, 0))   # All P are M: P outside M is empty
+b += ct_venn_shade(cs, (0, 1, 0))
+b += ct_venn_three_frame(0, 0, cs)
+b += ct_venn_outline(cs[:2], (1, 1))
+b += ct_venn_x(ct_venn_on_line(cs, (1, 0, 1), (1, 1, 1)))
+b += ct_venn_side([('Premise 1: All P are M', None), ('  shade P outside M', 'small'),
+                   ('Premise 2: Some S are M', None), ('  X in S and M, on the line:', 'small'),
+                   ('  region 4 or region 5', 'small'),
+                   ('Conclusion: Some S are P', None), ('  dashed: S and P', 'small'),
+                   ('The X may lie outside P, so', 'small'), ('the form is invalid.', 'small')])
+svg('CtVennInvalid', 500, 262, 'Venn diagram test of an invalid syllogism',
+    'Circles S, P and M. Premise 1, all P are M, shades the two parts of P outside M. Premise 2, some S are M, puts an X in the '
+    'overlap of S and M; neither part of that overlap is shaded, so the X sits on the boundary of P, between the region of S and M only '
+    'and the region common to all three. The conclusion, some S are P, needs an X inside the dashed overlap of S and P. The X may lie '
+    'outside it, so the argument form is invalid.',
+    b)
+
+# ---------- 06-sentential-logic ----------
+
+# ---------- Critical thinking 6: parse tree of a sentential-logic WFF ----------
+def ct_sl_f(s):
+    # set sentence letters in italics
+    return ''.join(var(c) if c in 'PQR' else c for c in s)
+def ct_sl_node(cx, cy, label, w):
+    return (f'  <rect class="box" x="{cx-w/2:.1f}" y="{cy-16:.1f}" width="{w}" height="32" rx="3" />\n'
+            + text(cx, cy+5, ct_sl_f(label), 'middle'))
+ct_sl_nodes = {
+    'root': (300, 34, '¬(P ∧ Q) → (¬P ∨ R)', 190),
+    'l':    (160, 112, '¬(P ∧ Q)', 96),
+    'r':    (440, 112, '¬P ∨ R', 84),
+    'll':   (160, 190, 'P ∧ Q', 76),
+    'rl':   (380, 190, '¬P', 50),
+    'rr':   (500, 190, 'R', 40),
+    'lll':  (110, 268, 'P', 40),
+    'llr':  (210, 268, 'Q', 40),
+    'rll':  (380, 268, 'P', 40),
+}
+ct_sl_edges = [('root','l','→'), ('root','r','→'), ('l','ll','¬'), ('r','rl','∨'), ('r','rr','∨'),
+               ('ll','lll','∧'), ('ll','llr','∧'), ('rl','rll','¬')]
+b = ''
+for a, c, _ in ct_sl_edges:
+    x1, y1 = ct_sl_nodes[a][0], ct_sl_nodes[a][1] + 16
+    x2, y2 = ct_sl_nodes[c][0], ct_sl_nodes[c][1] - 16
+    b += line([(x1, y1), (x2, y2)], 'mut')
+for k, (cx, cy, lab, w) in ct_sl_nodes.items():
+    b += ct_sl_node(cx, cy, lab, w)
+# main-connective labels beside each compound node
+for k, mc in [('root', '→'), ('l', '¬'), ('r', '∨'), ('ll', '∧'), ('rl', '¬')]:
+    cx, cy, lab, w = ct_sl_nodes[k]
+    b += text(cx + w/2 + 8, cy + 5, 'main: ' + mc, 'start', 'small')
+b += text(300, 306, 'Leaves: sentence letters', 'middle', 'small')
+svg('CtSlParseTree', 600, 318, 'Parse tree of the formula not (P and Q) implies (not P or R)',
+    'The whole formula is a conditional, so its main connective is the arrow. It splits into the antecedent not (P and Q) and the consequent not P or R. The antecedent is a negation of the conjunction P and Q, which splits into P and Q. The consequent is a disjunction of not P and R, and not P is the negation of P. Every branch ends in a sentence letter.',
+    b)
+
+# ---------- 07-predicate-logic ----------
+
+# ---------- Critical thinking 7: two small counter-models ----------
+def ct_pl_ellipse(cx, cy, rx, ry, cls):
+    return f'  <ellipse class="{cls}" cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" />\n'
+def ct_pl_dot(cx, cy, lab):
+    return f'  <circle class="dot" cx="{cx}" cy="{cy}" r="5" />\n' + text(cx, cy + 22, lab, 'middle')
+b = ''
+# panel A: monadic counter-model, domain {1, 2}
+b += text(150, 24, '(a) Domain &#123;1, 2&#125;', 'middle', 'small')
+b += ct_pl_ellipse(150, 130, 128, 72, 'region2')     # G holds of both objects
+b += ct_pl_ellipse(102, 130, 42, 42, 'region')        # F = {1}
+b += ct_pl_ellipse(198, 130, 42, 42, 'region')        # H = {2}
+b += ct_pl_dot(102, 126, '1')
+b += ct_pl_dot(198, 126, '2')
+b += text(76, 102, var('F'), 'middle')
+b += text(224, 102, var('H'), 'middle')
+b += text(150, 72, var('G') + ' (dashed)', 'middle')
+b += text(150, 228, var('F') + ' = &#123;1&#125;,  ' + var('G') + ' = &#123;1, 2&#125;,  ' + var('H') + ' = &#123;2&#125;', 'middle', 'small')
+# panel B: relational counter-model, domain {1, 2}
+b += text(470, 24, '(b) Domain &#123;1, 2&#125;', 'middle', 'small')
+x1, x2, y = 405, 535, 126
+b += ct_pl_dot(x1, y, '1')
+b += ct_pl_dot(x2, y, '2')
+b += f'  <path class="ln" d="M{x1+8},{y-8} Q{(x1+x2)/2},{y-62} {x2-8},{y-8}" marker-end="ARROW" />\n'
+b += f'  <path class="ln" d="M{x2-8},{y+8} Q{(x1+x2)/2},{y+62} {x1+8},{y+8}" marker-end="ARROW" />\n'
+b += text((x1+x2)/2, y-44, var('R') + '(1, 2)', 'middle', 'small')
+b += text((x1+x2)/2, y+56, var('R') + '(2, 1)', 'middle', 'small')
+b += text(470, 228, var('R') + ' = &#123;(1, 2), (2, 1)&#125;; no loops', 'middle', 'small')
+b += line([(310, 40), (310, 236)], 'grid')
+svg('CtPlCounterModels', 620, 244, 'Two counter-models with a two-element domain',
+    'Panel a: objects 1 and 2. The predicate F holds of 1 only, H holds of 2 only, and G holds of both. Something is both F and G, and something is both G and H, but nothing is both F and H. Panel b: objects 1 and 2 with arrows for the relation R from 1 to 2 and from 2 to 1 and no arrow from an object to itself. Every object has an arrow pointing into it, but no object has arrows to every object.',
+    b)
+
+# ---------- 08-scientific-reasoning-and-causation ----------
+
+# ---------- Critical thinking 8: fishbone (Ishikawa) diagram ----------
+def ct_sci_fishbone():
+    b = ''
+    sy = 170                      # spine height
+    b += arrow([(20, sy), (536, sy)], 'thick')
+    b += box(538, sy - 26, 96, 52, 'Parts', 'dropped')
+    bones = [
+        (200, -1, 'Machine', ['worn suction cup', 'vacuum hose leak']),
+        (360, -1, 'Method', ['approach too fast', 'stale pick offset']),
+        (520, -1, 'Material', ['oily part surface', 'tray out of spec']),
+        (200, 1, 'People', ['skipped cleaning', 'wrong recipe']),
+        (360, 1, 'Measurement', ['camera drift', 'loose vacuum limit']),
+        (520, 1, 'Environment', ['press vibration', 'dust on nozzle']),
+    ]
+    run, rise = 70, 115
+    for xs, sgn, name, causes in bones:
+        tip = (xs - run, sy + sgn * rise)
+        b += arrow([tip, (xs - 3, sy + sgn * 3)])
+        ly = tip[1] - 10 if sgn < 0 else tip[1] + 20
+        b += text(tip[0], ly, name, 'middle')
+        for frac in (0.3, 0.65):
+            y = sy + sgn * rise * (1 - frac)
+            x = xs - run * (1 - frac)
+            b += arrow([(x - 112, y), (x - 3, y)], 'mut')
+            b += text(x - 20, y - 5, causes[0 if frac == 0.3 else 1], 'end', 'small')
+    return b
+
+svg('CtSciFishbone', 640, 320, 'Fishbone diagram for a gripper that drops parts',
+    'A horizontal spine leads to the effect, parts dropped by a pick-and-place gripper. Six bones branch from the spine, three above and three below, '
+    'one for each category of cause: machine (worn suction cup, vacuum hose leak), method (approach too fast, stale pick offset), '
+    'material (oily part surface, tray out of specification), people (skipped cleaning, wrong recipe), measurement (camera drift, loose vacuum limit) '
+    'and environment (press vibration, dust on nozzle).',
+    ct_sci_fishbone())
+
+# ---------- 09-probability-and-statistical-reasoning ----------
+
+# ---------- Critical thinking 9: standard normal curve with two shaded tails ----------
+def ct_stat_phi(z):
+    return math.exp(-z * z / 2) / math.sqrt(2 * math.pi)
+
+def ct_stat_normal_tails():
+    P = Plot(56, 34, 540, 196, (-4, 4), (0, 0.42))
+    b = P.axes([-4, -3, -2, -1, 0, 1, 2, 3, 4], [0, 0.1, 0.2, 0.3, 0.4], 'standardized value  ' + var('z'), 'density  ' + var('φ(z)'))
+    zc = 1.96
+    for lo, hi in ((-4, -zc), (zc, 4)):
+        n = 60
+        pts = [(P.X(lo + i * (hi - lo) / n), P.Y(ct_stat_phi(lo + i * (hi - lo) / n))) for i in range(n + 1)]
+        d = f'M{P.X(lo):.1f},{P.Y(0):.1f} ' + ' '.join(f'L{x:.1f},{y:.1f}' for x, y in pts) + f' L{P.X(hi):.1f},{P.Y(0):.1f} Z'
+        b += f'  <path class="band" d="{d}" />\n'
+    for zz in (-zc, zc):
+        b += line([(P.X(zz), P.Y(0)), (P.X(zz), P.Y(0.3))], 'mut', ' stroke-dasharray="4 4"')
+        b += text(P.X(zz), P.Y(0.3) - 6, ('−' if zz < 0 else '') + '1.96', 'middle', 'small')
+    b += P.curve(ct_stat_phi)
+    b += text(P.X(0), P.Y(0.17), '95%', 'middle')
+    b += text(P.X(-2.75), P.Y(0.06), '2.5%', 'middle', 'small')
+    b += text(P.X(2.75), P.Y(0.06), '2.5%', 'middle', 'small')
+    return b
+
+svg('CtStatNormalTails', 620, 276, 'Standard normal density with the two 2.5 percent tails shaded',
+    'The bell-shaped standard normal density, computed from phi of z equals the exponential of minus z squared over 2 divided by the square root of 2 pi, '
+    'is plotted from z equals minus 4 to 4. Dashed lines at minus 1.96 and plus 1.96 enclose 95 percent of the area; the shaded tails beyond them hold 2.5 percent each.',
+    ct_stat_normal_tails())
+
+# ---------- Critical thinking 9: posterior probability against prior for three likelihood ratios ----------
+def ct_stat_posterior(prior, lr):
+    return lr * prior / (lr * prior + 1 - prior)
+
+def ct_stat_bayes_plot():
+    P = Plot(56, 34, 520, 210, (-3, 0), (0, 1))
+    b = ''
+    for v in (0, 0.25, 0.5, 0.75, 1):
+        b += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid')
+        b += text(P.x0 - 6, P.Y(v) + 4, f'{v:g}', 'end', 'small')
+    for e, lab in ((-3, '0.001'), (-2, '0.01'), (-1, '0.1'), (0, '1')):
+        b += text(P.X(e), P.y0 + P.h + 16, lab, 'middle', 'small')
+    b += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    b += text(P.x0 + P.w, P.y0 + P.h + 34, 'prior  ' + var('P(D)') + '  (log scale)', 'end', 'small')
+    b += text(P.x0, P.y0 - 12, 'posterior  ' + var('P(D | alarm)'), 'start', 'small')
+    for lr, cls in ((1, 'mut'), (49, 'acc'), (2401, 'acc')):
+        b += P.curve(lambda e, lr=lr: ct_stat_posterior(10 ** e, lr), cls=cls)
+    b += text(P.X(-0.55) - 10, P.Y(ct_stat_posterior(10 ** -0.55, 1)), 'LR = 1', 'end', 'small')
+    b += text(P.X(-1.9) + 8, P.Y(ct_stat_posterior(10 ** -1.9, 49)) + 14, 'LR = 49', 'start', 'small')
+    b += text(P.X(-1.6), P.Y(ct_stat_posterior(10 ** -1.6, 2401)) + 22, 'LR = 2401', 'start', 'small')
+    pr = 0.005
+    b += line([(P.X(math.log10(pr)), P.Y(0)), (P.X(math.log10(pr)), P.Y(1))], 'mut', ' stroke-dasharray="3 3"')
+    for lr in (49, 2401):
+        q = ct_stat_posterior(pr, lr)
+        b += f'  <circle class="dot" cx="{P.X(math.log10(pr)):.1f}" cy="{P.Y(q):.1f}" r="3.5" />\n'
+        b += text(P.X(math.log10(pr)) + 8, P.Y(q) + 4, f'{q:.2f}', 'start', 'small')
+    b += text(P.X(math.log10(pr)) + 8, P.Y(0.04), 'prior 0.005', 'start', 'small')
+    return b
+
+svg('CtStatBayesPosterior', 600, 290, 'Posterior probability of a defect as a function of the prior',
+    'Three curves show the posterior probability P of D given the evidence, computed from the odds form of Bayes theorem, against the prior P of D on a logarithmic axis from 0.001 to 1. '
+    'With a likelihood ratio of 1 the posterior equals the prior. With a likelihood ratio of 49, one alarm, a prior of 0.005 becomes 0.20; with 2401, two independent alarms, it becomes 0.92.',
+    ct_stat_bayes_plot())
+
+# ---------- 10-reasoning-about-values ----------
+
+# ---------- Critical thinking 10: Hohfeld's jural relations ----------
+def ct_val_square(ox, title, tl, tr, bl, br):
+    bw, bh, gap = 120, 40, 150
+    yt, yb = 62, 182
+    o = text(ox + (gap + bw) / 2, 36, title, 'middle')
+    o += box(ox, yt, bw, bh, tl)
+    o += box(ox + gap, yt, bw, bh, tr)
+    o += box(ox, yb, bw, bh, bl)
+    o += box(ox + gap, yb, bw, bh, br)
+    # correlatives: vertical solid lines
+    for cx in (ox + bw / 2, ox + gap + bw / 2):
+        o += line([(cx, yt + bh), (cx, yb)])
+    # opposites: dashed diagonals
+    o += line([(ox + bw, yt + bh), (ox + gap, yb)], 'region2')
+    o += line([(ox + gap, yt + bh), (ox + bw, yb)], 'region2')
+    return o
+
+b = ''
+b += text(14, 86, 'A holds', 'start', 'small')
+b += text(14, 206, 'B bears', 'start', 'small')
+b += ct_val_square(80, 'What A and B may do', 'Claim-right', 'Privilege', 'Duty', 'No-right')
+b += ct_val_square(370, 'Who can change that', 'Power', 'Immunity', 'Liability', 'Disability')
+b += line([(80, 252), (120, 252)])
+b += text(128, 256, 'correlatives: one relation seen from each side', 'start', 'small')
+b += line([(80, 276), (120, 276)], 'region2')
+b += text(128, 280, 'opposites: holding one means lacking the other', 'start', 'small')
+svg('CtValHohfeld', 650, 292, "Hohfeld's eight jural positions",
+    "Two squares. Left: A's claim-right is correlative with B's duty, and A's privilege with B's no-right; claim-right and no-right are opposites, as are privilege and duty. Right: A's power is correlative with B's liability, and A's immunity with B's disability; power and disability are opposites, as are immunity and liability.",
+    b)
+
+# ---------- 11-strategic-thinking-and-decisions ----------
+
+# ---------- Critical thinking 11: SWOT grid for a hypothetical robotics startup ----------
+def ct_strat_cell(x, y, w, h, title, items):
+    o = f'  <rect class="box" x="{x}" y="{y}" width="{w}" height="{h}" rx="3" />\n'
+    o += text(x + 12, y + 24, title)
+    for i, it in enumerate(items):
+        o += text(x + 12, y + 50 + 21 * i, '• ' + it, 'start', 'small')
+    return o
+
+b = ''
+x0, y0, cw, ch = 84, 44, 272, 132
+b += text(x0 + cw / 2, 30, 'Helpful to the goal', 'middle', 'small')
+b += text(x0 + cw * 1.5 + 8, 30, 'Harmful to the goal', 'middle', 'small')
+b += text(14, y0 + ch / 2 - 4, 'Internal', 'start', 'small')
+b += text(14, y0 + ch / 2 + 12, '(the team)', 'start', 'small')
+b += text(14, y0 + ch * 1.5 + 4, 'External', 'start', 'small')
+b += text(14, y0 + ch * 1.5 + 20, '(the market)', 'start', 'small')
+b += ct_strat_cell(x0, y0, cw, ch, 'Strengths',
+                   ['Navigation stack written in-house', 'Two pilot sites already running', 'Low hardware cost per robot', 'Fast release cycle'])
+b += ct_strat_cell(x0 + cw + 8, y0, cw, ch, 'Weaknesses',
+                   ['No certified safety case yet', 'One person knows the firmware', 'No dedicated sales staff', 'Thin test coverage on hardware'])
+b += ct_strat_cell(x0, y0 + ch + 8, cw, ch, 'Opportunities',
+                   ['Integrator looking for a robot partner', 'Cheaper lidar modules appearing', 'Night shifts hard to staff', 'Customers asking for open APIs'])
+b += ct_strat_cell(x0 + cw + 8, y0 + ch + 8, cw, ch, 'Threats',
+                   ['Large vendor entering the segment', 'Customer IT forbids cloud links', 'Long lead times on motor drivers', 'Liability if a robot hurts someone'])
+svg('CtStratSwot', 650, y0 + 2 * ch + 20, 'SWOT grid for a hypothetical warehouse-robot startup',
+    'A two-by-two grid. Columns separate factors helpful and harmful to the goal; rows separate internal factors, which the team controls, from external factors in the market. Strengths include an in-house navigation stack and two pilot sites; weaknesses include no certified safety case and a single person who knows the firmware; opportunities include an integrator seeking a partner and cheaper lidar; threats include a large vendor entering and customer bans on cloud links.',
+    b)
+
+# ---------- Critical thinking 11: expected value versus P(high demand) ----------
+def ct_strat_ev(name, q):
+    return {'Small': 47 - 20 * q, 'Medium': 59 - 10 * q, 'Large': 33 + 60 * q}[name]
+
+P = Plot(60, 30, 470, 210, (0, 0.7), (20, 80))
+b = P.axes([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [20, 40, 60, 80],
+           'probability of high demand  ' + var('q') + '  (P(low) = 0.3)', 'expected payoff (thousand dollars)')
+qb = 26 / 70
+b += line([(P.X(qb), P.Y(20)), (P.X(qb), P.Y(80))], 'mut', ' stroke-dasharray="3 3"')
+b += line([(P.X(0.2), P.Y(20)), (P.X(0.2), P.Y(80))], 'grid', ' stroke-dasharray="2 3"')
+b += P.curve(lambda q: ct_strat_ev('Small', q), cls='mut', extra=' stroke-dasharray="6 4"')
+b += P.curve(lambda q: ct_strat_ev('Medium', q), cls='ln')
+b += P.curve(lambda q: ct_strat_ev('Large', q), cls='acc')
+b += f'  <circle class="dot" cx="{P.X(qb):.1f}" cy="{P.Y(ct_strat_ev("Medium", qb)):.1f}" r="3.5" />\n'
+b += text(P.X(qb) + 6, P.Y(24), var('q') + ' ≈ 0.37', 'start', 'small')
+b += text(P.X(0.2) + 4, P.Y(77), 'estimate 0.2', 'start', 'small')
+b += text(P.X(0.7) + 6, P.Y(ct_strat_ev('Large', 0.7)) + 4, 'Large', 'start', 'small')
+b += text(P.X(0.7) + 6, P.Y(ct_strat_ev('Medium', 0.7)) + 4, 'Medium', 'start', 'small')
+b += text(P.X(0.7) + 6, P.Y(ct_strat_ev('Small', 0.7)) + 4, 'Small', 'start', 'small')
+svg('CtStratSensitivity', 600, 290, 'Expected payoff of three capacity options as the probability of high demand varies',
+    'Three straight lines. Medium falls slowly from 59 to 52, Small falls from 47 to 33, Large rises steeply from 33 to 75 as the probability of high demand goes from 0 to 0.7 with the probability of low demand held at 0.3. Large overtakes Medium at about 0.37; at the estimate 0.2 Medium is best.',
+    b)
+
+# ---------- 13-creativity-and-generating-ideas ----------
+
+# ---------- Critical thinking 13: divergent and convergent phases ----------
+
+def ct_cr_diamond(x0, x1, cy, half_h):
+    """Outline of one diverge-converge phase: a point at x0 widens to +-half_h at the midpoint and narrows to x1."""
+    xm = (x0 + x1) / 2
+    return line([(x0, cy), (xm, cy - half_h), (x1, cy), (xm, cy + half_h), (x0, cy)], 'ln')
+
+def ct_cr_dots(x0, x1, cy, half_h):
+    """Idea dots in columns: the count grows across the divergent half and shrinks to one across the convergent half."""
+    xm = (x0 + x1) / 2
+    cols = [(0.12, 1), (0.28, 2), (0.44, 3), (0.60, 4), (0.78, 5), (1.22, 3), (1.50, 2), (1.80, 1)]
+    out = ''
+    for f, n in cols:
+        x = x0 + f * (xm - x0)
+        lim = (x - x0) / (xm - x0) * half_h if f <= 1 else (x1 - x) / (x1 - xm) * half_h
+        span = min(lim - 12, 13 * (n - 1))
+        for i in range(n):
+            y = cy if n == 1 else cy - span + 2 * span * i / (n - 1)
+            out += f'  <circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="3.5" />\n'
+    return out
+
+b = ''
+cy, hh = 120, 70
+phases = [(30, 290, 'Understand the problem', 'Define it'), (330, 590, 'Generate solutions', 'Select and test')]
+for k, (x0, x1, left, right) in enumerate(phases):
+    xm = (x0 + x1) / 2
+    b += ct_cr_diamond(x0, x1, cy, hh)
+    b += line([(xm, cy - hh), (xm, cy + hh)], 'mut', ' stroke-dasharray="4 4"')
+    b += ct_cr_dots(x0, x1, cy, hh)
+    b += text((x0 + xm) / 2, cy - hh - 26, 'diverge', 'middle')
+    b += text((x0 + xm) / 2, cy - hh - 10, left, 'middle', 'small')
+    b += text((xm + x1) / 2, cy - hh - 26, 'converge', 'middle')
+    b += text((xm + x1) / 2, cy - hh - 10, right, 'middle', 'small')
+b += arrow([(290, cy), (330, cy)])
+b += arrow([(590, cy), (606, cy), (606, cy + hh + 30), (30, cy + hh + 30), (30, cy + 8)], 'mut')
+b += text(318, cy + hh + 46, 'a test exposes a new problem: start again with what was learned', 'middle', 'small')
+svg('CtDivergeConverge', 620, 250, 'Two diverge-converge phases in sequence',
+    'Two diamond shapes side by side. In each, the left half widens from a point and holds many idea dots: this is divergent thinking, where options are generated and judgment is deferred. The right half narrows to a point and holds only a few dots: this is convergent thinking, where options are evaluated and selected. The first diamond is about understanding and defining the problem, the second about generating and selecting solutions. An arrow from the end of the second diamond returns to the start of the first, because testing a solution often exposes a new problem.',
+    b)
