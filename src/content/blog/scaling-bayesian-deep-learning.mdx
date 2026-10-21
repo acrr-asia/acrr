@@ -23,7 +23,7 @@ The entry relies on the Laplace approximation and the generalized Gauss–Newton
 
 ### 1.1 Four sizes
 
-Four numbers determine the cost of approximate inference for a network. The **parameter count** $P$ fixes the size of one weight vector and of anything stored per weight. The **data size** $N$ fixes the cost of one pass over the training set. The **number of samples** $S$ (posterior samples, Monte Carlo draws or ensemble members) multiplies the cost of every prediction. Finally the **output size** $C$, the number of classes or output dimensions, enters wherever a Jacobian or a per-output covariance is formed.
+Four numbers determine the cost of approximate inference for a network. The **parameter count** $P$ fixes the size of one weight vector and of anything stored per weight. The **data size** $N$ fixes the cost of one pass over the training set. The **number of samples** $M$ (posterior samples or Monte Carlo draws), or the number of members $J$ of an ensemble, multiplies the cost of every prediction. Finally the **output size** $C$, the number of classes or output dimensions, enters wherever a Jacobian or a per-output covariance is formed.
 
 The dangerous terms are those that are quadratic or cubic in $P$. A full posterior covariance has $P^2$ entries. For $P = 10^7$, a modest network today, that is $10^{14}$ numbers or 400 terabytes (about 364 TiB), and inverting it costs on the order of $P^3 = 10^{21}$ floating-point operations. Everything in this entry is a way to avoid those terms: by restricting inference to a few parameters, by imposing structure on the covariance or by changing the model so that uncertainty comes from somewhere cheaper.
 
@@ -34,18 +34,18 @@ The table compares the methods of the series by the memory they need beyond one 
 | Method | Extra memory | Extra training cost | Cost per prediction |
 |---|---|---|---|
 | Maximum a posteriori (MAP) estimate, the baseline | none | one training run | 1 forward pass |
-| Full Laplace | $P^2$ | one pass over the data to build the curvature, $O(P^3)$ to factorize it | $S$ forward passes, or 1 linearized pass |
-| Diagonal Laplace | $P$ | one pass over the data | $S$ forward passes |
-| Kronecker-factored Laplace | $\sum_l (d_{\text{in},l}^2 + d_{\text{out},l}^2)$ | one pass, plus small eigendecompositions | $S$ forward passes |
+| Full Laplace | $P^2$ | one pass over the data to build the curvature, $O(P^3)$ to factorize it | $M$ forward passes, or 1 linearized pass |
+| Diagonal Laplace | $P$ | one pass over the data | $M$ forward passes |
+| Kronecker-factored Laplace | $\sum_l (d_{\text{in},l}^2 + d_{\text{out},l}^2)$ | one pass, plus small eigendecompositions | $M$ forward passes |
 | Last-layer Laplace or Bayesian linear regression | $K^2$ (regression), $K^2 C^2$ (full, $C$ outputs) | one pass to compute features, $O(K^3)$ | 1 forward pass plus $O(K^2)$ |
-| Monte Carlo dropout | none | training with dropout | $S$ forward passes |
-| Mean-field VI | $P$ (a variance per weight) | sampled weights at every step, usually more epochs | $S$ forward passes |
-| Stochastic weight averaging Gaussian (SWAG) | $P$ to $(r + 2) P$ for rank $r$ | a few extra epochs of stochastic gradient descent | $S$ forward passes |
-| Deep ensemble of $M$ members | $(M - 1) P$ | $M$ training runs | $M$ forward passes |
-| Stochastic-gradient Markov chain Monte Carlo (MCMC) | $(S - 1) P$ for stored samples | a long sampling run | $S$ forward passes |
+| Monte Carlo dropout | none | training with dropout | $M$ forward passes |
+| Mean-field VI | $P$ (a variance per weight) | sampled weights at every step, usually more epochs | $M$ forward passes |
+| Stochastic weight averaging Gaussian (SWAG) | $P$ to $(r + 2) P$ for rank $r$ | a few extra epochs of stochastic gradient descent | $M$ forward passes |
+| Deep ensemble of $J$ members | $(J - 1) P$ | $J$ training runs | $J$ forward passes |
+| Stochastic-gradient Markov chain Monte Carlo (MCMC) | $(M - 1) P$ for stored samples | a long sampling run | $M$ forward passes |
 | Single-pass distance-aware model | $K^2$ for the output layer | spectral normalization during training | 1 forward pass |
 | Exact Gaussian process (GP) | $N^2$ | $O(N^3)$ | $O(N)$ mean, $O(N^2)$ variance |
-| Sparse variational GP, $M$ inducing points | $M^2$ | $O(B M^2 + M^3)$ per minibatch of $B$ | $O(M^2)$ |
+| Sparse variational GP, $N_u$ inducing points | $N_u^2$ | $O(B N_u^2 + N_u^3)$ per mini-batch of $B$ | $O(N_u^2)$ |
 
 Here $l$ indexes layers with $d_{\text{in},l}$ inputs and $d_{\text{out},l}$ outputs, and $K$ is the width of the last hidden layer. SWAG (Maddox et al., 2019) fits a Gaussian to the iterates of stochastic gradient descent: a diagonal variance plus a low-rank term of rank $r$. Stochastic-gradient MCMC is the sampler of the [second entry](/blog/sampling-the-posterior-mcmc). The table already suggests the main design choice: either pay at training time (ensembles, VI, sampling) or at prediction time ($S$ forward passes), or find a structure that makes both cheap. The next sections describe the methods in the rows that are new in this entry.
 
@@ -149,7 +149,7 @@ The features are fixed. If the feature extractor maps an unfamiliar input onto t
 
 ### 3.1 Structured curvature
 
-The Laplace approximation of the [third entry](/blog/laplace-approximations) needs the precision matrix $H + \delta I$, where $H$ is the GGN matrix of the negative log likelihood at the MAP estimate and $\delta$ is the prior precision. That entry listed the structures that make it affordable: diagonal, Kronecker-factored, low-rank and restricted to a subset of the weights. This section looks at the two that matter most at scale in more detail.
+The Laplace approximation of the [third entry](/blog/laplace-approximations) needs the precision matrix $H + \alpha I$, where $H$ is the GGN matrix of the negative log likelihood at the MAP estimate and $\alpha = 1/s_0^2$ is the prior precision, as in Section 2. That entry listed the structures that make it affordable: diagonal, Kronecker-factored, low-rank and restricted to a subset of the weights. This section looks at the two that matter most at scale in more detail.
 
 The **Kronecker-factored** approximation (K-FAC) of the [third entry](/blog/laplace-approximations) was introduced for optimization by Martens and Grosse (2015) and applied to the Laplace approximation by Ritter, Botev and Barber (2018). It treats layers as independent and approximates the block of a fully connected layer with weight matrix $W \in \mathbb{R}^{d_\text{out} \times d_\text{in}}$, with the weights stacked column by column into $\operatorname{vec}(W)$, as a Kronecker product
 
@@ -163,13 +163,13 @@ The second structure restricts inference to a **subnetwork**. In their work on s
 
 ### 3.2 The Kronecker trick in code
 
-A Kronecker factorization is useful only if the posterior can be used without ever forming $A \otimes G$. The identity that makes this possible is that if $A = Q_A \Lambda_A Q_A^\top$ and $G = Q_G \Lambda_G Q_G^\top$ are eigendecompositions, then $A \otimes G + \delta I$ has eigenvectors $Q_A \otimes Q_G$ and eigenvalues $\lambda_{A,i} \lambda_{G,j} + \delta$. With column stacking, multiplying $\operatorname{vec}(V)$ by $Q_A \otimes Q_G$ is the same as computing $Q_G V Q_A^\top$, so the rotations act on $d_\text{out} \times d_\text{in}$ matrices. Solving a linear system, sampling or computing a log determinant then needs only the two small eigendecompositions. The listing checks the solve against a dense computation for a $20 \times 30$ layer.
+A Kronecker factorization is useful only if the posterior can be used without ever forming $A \otimes G$. The identity that makes this possible is that if $A = Q_A D_A Q_A^\top$ and $G = Q_G D_G Q_G^\top$ are eigendecompositions, then $A \otimes G + \alpha I$ has eigenvectors $Q_A \otimes Q_G$ and eigenvalues $\lambda_{A,i} \lambda_{G,j} + \alpha$. With column stacking, multiplying $\operatorname{vec}(V)$ by $Q_A \otimes Q_G$ is the same as computing $Q_G V Q_A^\top$, so the rotations act on $d_\text{out} \times d_\text{in}$ matrices. Solving a linear system, sampling or computing a log determinant then needs only the two small eigendecompositions. The listing checks the solve against a dense computation for a $20 \times 30$ layer.
 
 ```python
 import numpy as np
 
 rng = np.random.default_rng(5)
-d_in, d_out, B, delta = 30, 20, 500, 1.0
+d_in, d_out, B, alpha = 30, 20, 500, 1.0
 
 # Kronecker factors from a batch of B examples: layer inputs a and
 # gradients g of the loss with respect to the layer outputs.
@@ -179,7 +179,7 @@ A = a.T @ a / B                         # d_in x d_in
 G = g.T @ g / B                         # d_out x d_out
 
 # Full precision of vec(W), W is d_out x d_in stacked column by column.
-prec = np.kron(A, G) + delta * np.eye(d_out * d_in)
+prec = np.kron(A, G) + alpha * np.eye(d_out * d_in)
 V = rng.normal(size=(d_out, d_in))      # a vector to multiply by prec^-1
 direct = np.linalg.solve(prec, V.ravel(order="F"))
 
@@ -187,7 +187,7 @@ direct = np.linalg.solve(prec, V.ravel(order="F"))
 lA, QA = np.linalg.eigh(A)
 lG, QG = np.linalg.eigh(G)
 X = QG.T @ V @ QA                       # rotate into the joint eigenbasis
-X /= np.outer(lG, lA) + delta           # divide by the eigenvalues of prec
+X /= np.outer(lG, lA) + alpha           # divide by the eigenvalues of prec
 kron = (QG @ X @ QA.T).ravel(order="F") # rotate back
 
 print("max difference:", f"{np.abs(direct - kron).max():.1e}")
@@ -203,7 +203,7 @@ The two routes agree to rounding error, and the factors store 1300 numbers inste
 
 ### 3.3 Predicting and sampling at scale
 
-With a structured covariance, predictions come either from sampling weights and running $S$ forward passes, or from the linearized predictive of the third entry, which replaces the network by its first-order expansion around the MAP estimate. Immer, Korzepa and Bauer (2021) showed that the linearized predictive often works better than sampling the network itself under a GGN-based Laplace approximation, because the GGN is the exact curvature of the linearized model. The comparison by Daxberger et al. (2021) of these choices, which recommended last-layer approximations with Kronecker-factored or full curvature as a default, was discussed in the third entry.
+With a structured covariance, predictions come either from sampling weights and running $M$ forward passes, or from the linearized predictive of the third entry, which replaces the network by its first-order expansion around the MAP estimate. Immer, Korzepa and Bauer (2021) showed that the linearized predictive often works better than sampling the network itself under a GGN-based Laplace approximation, because the GGN is the exact curvature of the linearized model. The comparison by Daxberger et al. (2021) of these choices, which recommended last-layer approximations with Kronecker-factored or full curvature as a default, was discussed in the third entry.
 
 When even Kronecker factors are too coarse, the posterior of the linearized model can be sampled without storing a covariance at all. A sample from a Gaussian posterior of a linear model is the minimizer of a randomly perturbed least-squares objective, so drawing a sample costs about as much as one optimization run. Antorán et al. (2023) used this, with stochastic optimization in place of exact solves, to sample linearized Laplace posteriors of image classifiers that were too large for other covariance structures.
 
@@ -211,7 +211,7 @@ When even Kronecker factors are too coarse, the posterior of the linearized mode
 
 ### 4.1 Feature collapse and distance awareness
 
-Every method so far pays at prediction time with $S$ forward passes, or restricts inference to a layer whose features are fixed. **Single-forward-pass methods** instead change the model so that one deterministic forward pass yields both a prediction and an uncertainty. The idea is to make the output layer **distance-aware**: its uncertainty grows with the distance between the feature vector of a test input and the feature vectors of the training data, as the predictive variance of a GP with a stationary kernel does.
+Every method so far pays at prediction time with $M$ forward passes, or restricts inference to a layer whose features are fixed. **Single-forward-pass methods** instead change the model so that one deterministic forward pass yields both a prediction and an uncertainty. The idea is to make the output layer **distance-aware**: its uncertainty grows with the distance between the feature vector of a test input and the feature vectors of the training data, as the predictive variance of a GP with a stationary kernel does.
 
 Distance in feature space is only meaningful if the feature extractor preserves distances in input space. An unconstrained network need not: training for classification rewards mapping all inputs of a class to a compact region, and nothing prevents an input unlike any training input from being mapped into that region too. This is **feature collapse**, and it defeats every method that reads uncertainty off the features, including the last-layer model of Section 2. The remedy is to require the feature extractor to be **bi-Lipschitz**: for some constants $0 < L_1 \le L_2$,
 
@@ -235,9 +235,9 @@ These methods are fast at prediction time and, in the reported benchmarks, detec
 
 The exact GP of the sixth entry needs the $N \times N$ kernel matrix, $O(N^2)$ memory and $O(N^3)$ time. Two families of approximations bring this down.
 
-**Inducing-point methods** summarize the function by its values $u$ at $M \ll N$ locations $Z$, the inducing points. The sparse variational GP of Titsias (2009) treats $Z$ as variational parameters and fits a Gaussian $q(u)$ by maximizing an evidence lower bound (ELBO), at $O(N M^2 + M^3)$ cost. Hensman, Fusi and Lawrence (2013) wrote the bound as a sum over data points, so that it can be optimized with minibatches of size $B$ at $O(B M^2 + M^3)$ per step, which makes GPs usable on millions of examples. For $N = 10^6$, $M = 500$ and $B = 256$, a step costs about $1.9 \times 10^8$ operations against $10^{18}$ for one exact factorization. The quality of the approximation depends on whether $M$ inducing points can represent the function: a function with many fine features needs many of them.
+**Inducing-point methods** summarize the function by its values $u$ at $N_u \ll N$ locations $Z$, the inducing points. The sparse variational GP of Titsias (2009) treats $Z$ as variational parameters and fits a Gaussian $q(u)$ by maximizing an evidence lower bound (ELBO), at $O(N N_u^2 + N_u^3)$ cost. Hensman, Fusi and Lawrence (2013) wrote the bound as a sum over data points, so that it can be optimized with mini-batches of size $B$ at $O(B N_u^2 + N_u^3)$ per step, which makes GPs usable on millions of examples. For $N = 10^6$, $N_u = 500$ and $B = 256$, a step costs about $1.9 \times 10^8$ operations against $10^{18}$ for one exact factorization. The quality of the approximation depends on whether $N_u$ inducing points can represent the function: a function with many fine features needs many of them.
 
-**Low-rank and iterative methods** attack the linear algebra directly. The Nyström approximation (Williams and Seeger, 2001) and random features (Rahimi and Recht, 2007) replace the kernel by a rank-$M$ or rank-$K$ approximation, turning the GP into a Bayesian linear model like that of Section 2. Iterative solvers such as conjugate gradients compute the products and solves an exact GP needs using only matrix-vector products with the kernel matrix, which run fast on graphics processors; Gardner et al. (2018) built a GP library around this approach.
+**Low-rank and iterative methods** attack the linear algebra directly. The Nyström approximation (Williams and Seeger, 2001) and random features (Rahimi and Recht, 2007) replace the kernel by a rank-$N_u$ or rank-$K$ approximation, turning the GP into a Bayesian linear model like that of Section 2. Iterative solvers such as conjugate gradients compute the products and solves an exact GP needs using only matrix-vector products with the kernel matrix, which run fast on graphics processors; Gardner et al. (2018) built a GP library around this approach.
 
 ## 6. Compression and description length
 
@@ -274,7 +274,7 @@ The approximations of this entry share a pattern: each buys its speed by ignorin
 - **Fixed features.** Last-layer and single-pass methods inherit every blind spot of the feature extractor. Spectral normalization reduces feature collapse but does not make feature distances meaningful for the task.
 - **Independence assumptions.** Diagonal and Kronecker-factored curvature ignore correlations across layers, and K-FAC assumes that inputs and output gradients are independent; the resulting uncertainty depends strongly on the tuned prior precision.
 - **Too few inducing points or features.** Sparse GPs and random-feature models smooth over structure they cannot represent, and they become overconfident in ways that look like good calibration on smooth test functions.
-- **Cost moved, not removed.** $S$ forward passes at prediction time can cost more over a model's life than training did; a method that is cheap to fit can be expensive to deploy.
+- **Cost moved, not removed.** $M$ forward passes at prediction time can cost more over a model's life than training did; a method that is cheap to fit can be expensive to deploy.
 - **Comparisons are setting-dependent.** Rankings of scalable methods vary with architecture, data and metric; published comparisons cover a limited set of benchmarks.
 
 ## 9. Exercises
@@ -306,12 +306,12 @@ The identity requires the added term to be a multiple of the identity, which sha
 
 </details>
 
-**Exercise 4.** A sparse variational GP with $M = 1000$ inducing points is trained with minibatches of $B = 512$. What is the dominant term of the cost per step, and how does the cost change if $M$ is doubled?
+**Exercise 4.** A sparse variational GP with $N_u = 1000$ inducing points is trained with mini-batches of $B = 512$. What is the dominant term of the cost per step, and how does the cost change if $N_u$ is doubled?
 
 <details>
 <summary>Answer</summary>
 
-$B M^2 = 5.12 \times 10^8$ and $M^3 = 10^9$, so the $M^3$ term dominates. Doubling $M$ multiplies $B M^2$ by 4 and $M^3$ by 8, so the step cost grows from about $1.5 \times 10^9$ to $1.0 \times 10^{10}$, a factor of about 6.6.
+$B N_u^2 = 5.12 \times 10^8$ and $N_u^3 = 10^9$, so the $N_u^3$ term dominates. Doubling $N_u$ multiplies $B N_u^2$ by 4 and $N_u^3$ by 8, so the step cost grows from about $1.5 \times 10^9$ to $1.0 \times 10^{10}$, a factor of about 6.6.
 
 </details>
 
@@ -328,14 +328,14 @@ Its KL contribution is zero: it costs no bits, because the receiver can draw it 
 
 | Question | Answer |
 |---|---|
-| Which terms make Bayesian deep learning expensive? | Anything quadratic or cubic in the parameter count $P$, and $S$ forward passes per prediction. |
+| Which terms make Bayesian deep learning expensive? | Anything quadratic or cubic in the parameter count $P$, and $M$ forward passes per prediction. |
 | What is last-layer inference? | Bayesian linear regression (or a Laplace approximation) over the last layer, with fixed features. |
 | What did the worked example show? | Predictive sd 0.105 in the data, 0.226 in the gap, 0.975 far away, from one $200 \times 200$ factorization. |
 | How is the prior chosen there? | By the closed-form evidence, which peaked at $\alpha = 1$ on the grid. |
 | What does K-FAC store? | Two factors per layer, $d_\text{in}^2 + d_\text{out}^2$ numbers; 8 MiB instead of 4 TiB for a 1024-by-1024 layer. |
 | How is it used without forming the product? | Through the eigendecompositions of the factors. |
 | What do single-pass methods need? | A bi-Lipschitz feature extractor (residual blocks with spectral normalization) and a distance-aware output layer. |
-| How do GPs scale? | Inducing points with minibatches, $O(BM^2 + M^3)$ per step, or low-rank and iterative linear algebra. |
+| How do GPs scale? | Inducing points with mini-batches, $O(BN_u^2 + N_u^3)$ per step, or low-rank and iterative linear algebra. |
 | How does compression relate? | The negative ELBO is a description length; the KL term is the cost of the weights in nats. |
 
 Scaling comes down to deciding which part of the posterior to keep: the last layer, the correlations within each layer, a GP over learned features or a set of independently trained modes. Each choice is cheap where the earlier entries were expensive, and each can fail where the part it ignores matters. Whether a given approximation is good enough cannot be read from its derivation; it has to be measured. The [next entry](/blog/evaluating-and-using-uncertainty) turns to that measurement: calibration, proper scoring rules and selective prediction, and how predictive uncertainty is used in active learning and in large language models.

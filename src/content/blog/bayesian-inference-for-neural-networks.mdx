@@ -8,6 +8,7 @@ tags:
   - neural networks
   - uncertainty
   - machine learning
+  - bayesian deep learning
 series: bayesian-deep-learning
 seriesOrder: 1
 ---
@@ -49,7 +50,7 @@ The denominator $p(\mathcal{D})$ is the **marginal likelihood**, also called the
 
 ### 1.3 Regularized training is a special case
 
-The fundamentals series already used two Bayesian ideas without naming them. Its losses are negative log-likelihoods: the squared loss is, up to constants, $-\log p(y_n \mid x_n, \theta)$ for a Gaussian noise model, and the cross-entropy loss is exactly $-\log p(y_n \mid x_n, \theta)$ for a Bernoulli one. And its penalties are negative log-priors. Taking the logarithm of the posterior,
+The fundamentals series already used two Bayesian ideas without naming them. Its losses are negative log-likelihoods: the squared loss is, up to constants, $-\log p(y_n \mid x_n, \theta)$ for a Gaussian noise model, and the cross-entropy loss is exactly $-\log p(y_n \mid x_n, \theta)$ for a Bernoulli (or, with several classes, categorical) one. And its penalties are negative log-priors. Taking the logarithm of the posterior,
 
 $$
 -\log p(\theta \mid \mathcal{D}) = -\sum_{n=1}^{N} \log p(y_n \mid x_n, \theta) - \log p(\theta) + \log p(\mathcal{D}),
@@ -72,17 +73,17 @@ $$
 
 Each parameter vector votes with its own predictive distribution, weighted by how plausible it is after seeing the data. The procedure is called **Bayesian model averaging**. It is not the same as plugging one estimate into the model: $p(y^* \mid x^*, \hat{\theta}_{\text{MAP}})$ ignores every other plausible $\theta$, and for a nonlinear model the average of the predictions is not the prediction at the average parameters.
 
-Given $S$ samples $\theta^{(1)}, \dots, \theta^{(S)}$ from the posterior, the integral is estimated by the **Monte Carlo average**
+Given $M$ samples $\theta^{(1)}, \dots, \theta^{(M)}$ from the posterior, the integral is estimated by the **Monte Carlo average**
 
 $$
-p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{S}\sum_{s=1}^{S} p\big(y^* \mid x^*, \theta^{(s)}\big),
+p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{M}\sum_{s=1}^{M} p\big(y^* \mid x^*, \theta^{(s)}\big),
 $$
 
-whose error shrinks in proportion to $1/\sqrt{S}$ whatever the dimension $P$. That is the reason so many methods in this series end by producing samples, or something that can be sampled: once samples exist, prediction is easy. Producing them is the subject of the [next entry](/blog/sampling-the-posterior-mcmc).
+whose error shrinks in proportion to $1/\sqrt{M}$ whatever the dimension $P$. That is the reason so many methods in this series end by producing samples, or something that can be sampled: once samples exist, prediction is easy. Producing them is the subject of the [next entry](/blog/sampling-the-posterior-mcmc).
 
 ### 2.2 Epistemic and aleatoric uncertainty
 
-A predictive distribution can be wide for two different reasons, and they call for different responses. **Aleatoric uncertainty** is randomness in the data-generating process itself: measurement noise, or labels that are ambiguous even for a perfect model. It would remain with infinitely many training examples. **Epistemic uncertainty** is uncertainty about the model: the data seen so far do not pin down the parameters. It shrinks as data accumulate where the predictions are needed. The terms come from risk analysis (Der Kiureghian and Ditlevsen, 2009) and were brought into deep learning by Kendall and Gal (2017).
+A predictive distribution can be wide for two different reasons, and they call for different responses. **Aleatoric uncertainty** is randomness in the data-generating process itself: measurement noise, or labels that are ambiguous even for a perfect model. It would remain with infinitely many training examples. **Epistemic uncertainty** is uncertainty about the model: the data seen so far do not pin down the parameters. It shrinks as data accumulate where the predictions are needed. The distinction is long established in risk and reliability analysis (Der Kiureghian and Ditlevsen, 2009, discuss it) and was popularized in deep learning by Kendall and Gal (2017).
 
 For a regression model the split is exact. Write $\mu_\theta(x^*)$ and $\sigma^2_\theta(x^*)$ for the mean and variance of $p(y^* \mid x^*, \theta)$. The law of total variance gives
 
@@ -191,10 +192,10 @@ for xs in [-2.0, 0.0, 4.5]:
 
 # Log marginal likelihood for several prior scales
 for s in [0.1, 0.3, 1.0, 3.0, 10.0]:
-    C = s**2 * Phi @ Phi.T + sigma**2 * np.eye(x.size)
-    _, logdet = np.linalg.slogdet(C)
+    K = s**2 * Phi @ Phi.T + sigma**2 * np.eye(x.size)   # covariance of y
+    _, logdet = np.linalg.slogdet(K)
     print(f"s0 = {s:4.1f}: log p(D) = "
-          f"{-0.5 * (y @ np.linalg.solve(C, y) + logdet + x.size * np.log(2 * np.pi)):7.2f}")
+          f"{-0.5 * (y @ np.linalg.solve(K, y) + logdet + x.size * np.log(2 * np.pi)):7.2f}")
 
 # Monte Carlo check of the predictive at x* = 0 with 4000 posterior draws
 theta = rng.multivariate_normal(m, S, size=4000)
@@ -211,7 +212,7 @@ x* =  4.5: mean -0.110  epistemic sd 1.061  total sd 1.090
 s0 =  0.1: log p(D) =  -46.02
 s0 =  0.3: log p(D) =   -9.12
 s0 =  1.0: log p(D) =   -5.87
-s0 =  3.0: log p(D) =  -12.40
+s0 =  3.0: log p(D) =  -11.67
 s0 = 10.0: log p(D) =  -20.62
 Monte Carlo at x* = 0: mean  0.034  epistemic sd 0.632
 ```
@@ -220,9 +221,9 @@ Monte Carlo at x* = 0: mean  0.034  epistemic sd 0.632
 
 The three test inputs fall in the three regimes the data set was built to show.
 
-- **Inside the data**, at $x^* = -2$, the predictive mean is $-0.938$, close to $\sin(-2) = -0.909$. The epistemic standard deviation, $0.138$, is about half the noise level: nine nearby observations constrain the weights near $x = -2$. The total standard deviation is $\sqrt{0.138^2 + 0.25^2} = 0.286$, dominated by the aleatoric part.
+- **Inside the data**, at $x^* = -2$, the predictive mean is $-0.938$, close to $\sin(-2) = -0.909$. The epistemic standard deviation, $0.138$, is about half the noise level: the ten observations of the left cluster constrain the weights near $x = -2$. The total standard deviation is $\sqrt{0.138^2 + 0.25^2} = 0.286$, dominated by the aleatoric part.
 - **In the gap**, at $x^* = 0$, no observation lies within 1 of the input. The mean, $0.039$, happens to be close to $\sin 0 = 0$, but the model does not claim it is: the epistemic standard deviation has grown to $0.632$, now the larger of the two terms.
-- **Beyond the data**, at $x^* = 4.5$, the features that are active there carry weights that no observation has touched, so the posterior over them is still the prior. The mean returns to the prior mean, 0 (it is $-0.110$ because the bump at $c_k = 3$ still overlaps the data), and the epistemic standard deviation, $1.061$, is close to its prior value $s_0\lVert\phi(4.5)\rVert = 1.106$.
+- **Beyond the data**, at $x^* = 4.5$, the features that are active there carry weights that the data barely constrain, so the posterior over them is close to the prior. The mean returns almost to the prior mean, 0 (it is $-0.110$ because the bumps at $c_k = 3$ and $c_k = 4$ still overlap the data near $x = 3$), and the epistemic standard deviation, $1.061$, is close to its prior value $s_0\lVert\phi(4.5)\rVert = 1.106$.
 
 <Figure caption="Posterior predictive of the worked example. The dark band (±2 epistemic standard deviations) is narrow inside the two clusters of data, widens in the gap and grows to the prior width beyond x = ±3, where the mean returns to 0; the light band adds the constant noise.">
   <BdlPredictiveBand />
@@ -289,7 +290,7 @@ flowchart LR
 | Deep ensembles | A handful of independently trained networks, averaged | One full training run per member | Few members; Bayesian reading is debated | [Fifth](/blog/deep-ensembles) |
 | Function-space methods | A Gaussian process (GP) prior over functions, or a network's limit as it becomes infinitely wide | Cubic in $N$ for exact GPs | Kernel choice; scaling to large $N$ | [Sixth](/blog/gaussian-processes-and-kernels) |
 
-The families are not exclusive. A Laplace approximation of the last layer of a network turns that layer into the Bayesian linear regression of Section 3, with the network's penultimate activations as features. Ensembles of Laplace approximations combine several modes with local widths, and MCMC can be run in a low-dimensional subspace found by optimization. The [eighth entry](/blog/scaling-bayesian-deep-learning) collects these combinations when it deals with cost.
+The families are not exclusive. A Laplace approximation of the last layer of a regression network with Gaussian noise turns that layer into the Bayesian linear regression of Section 3, with the network's penultimate activations as features. Ensembles of Laplace approximations combine several modes with local widths, and MCMC can be run in a low-dimensional subspace found by optimization. The [eighth entry](/blog/scaling-bayesian-deep-learning) collects these combinations when it deals with cost.
 
 The primary sources for each family are cited in the entry that treats it. For orientation, MCMC for neural networks goes back to Neal (1996), and its stochastic-gradient form to Welling and Teh (2011). Variational inference for network weights was made practical by Blundell et al. (2015) and, in the form of dropout, by Gal and Ghahramani (2016). Deep ensembles were introduced by Lakshminarayanan et al. (2017), and Daxberger et al. (2021) give a modern account of Laplace approximations for networks. Rasmussen and Williams (2006) is the standard reference on Gaussian processes, Blei et al. (2017) review variational inference, and Bishop (2006) and Murphy (2023) treat the whole framework at textbook length.
 
@@ -372,16 +373,16 @@ The worked example produced the predictive at $x^* = 0$ in two ways: from a form
 - C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006.
 - D. M. Blei, A. Kucukelbir and J. D. McAuliffe, "Variational Inference: A Review for Statisticians," *Journal of the American Statistical Association*, vol. 112, no. 518, pp. 859–877, 2017.
 - C. Blundell, J. Cornebise, K. Kavukcuoglu and D. Wierstra, "Weight Uncertainty in Neural Networks," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
-- E. Daxberger et al., "Laplace Redux: Effortless Bayesian Deep Learning," in *Advances in Neural Information Processing Systems (NeurIPS)*, vol. 34, 2021.
+- E. Daxberger et al., "Laplace Redux: Effortless Bayesian Deep Learning," in *Advances in Neural Information Processing Systems 34*, 2021.
 - S. Depeweg, J. M. Hernández-Lobato, F. Doshi-Velez and S. Udluft, "Decomposition of Uncertainty in Bayesian Deep Learning for Efficient and Risk-sensitive Learning," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
 - A. Der Kiureghian and O. Ditlevsen, "Aleatory or epistemic? Does it matter?," *Structural Safety*, vol. 31, no. 2, pp. 105–112, 2009.
 - Y. Gal and Z. Ghahramani, "Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning," in *Proceedings of the 33rd International Conference on Machine Learning (ICML)*, 2016.
 - C. Guo, G. Pleiss, Y. Sun and K. Q. Weinberger, "On Calibration of Modern Neural Networks," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
-- A. Kendall and Y. Gal, "What Uncertainties Do We Need in Bayesian Deep Learning for Computer Vision?," in *Advances in Neural Information Processing Systems (NeurIPS)*, vol. 30, 2017.
-- B. Lakshminarayanan, A. Pritzel and C. Blundell, "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles," in *Advances in Neural Information Processing Systems (NeurIPS)*, vol. 30, 2017.
+- A. Kendall and Y. Gal, "What Uncertainties Do We Need in Bayesian Deep Learning for Computer Vision?," in *Advances in Neural Information Processing Systems 30*, 2017.
+- B. Lakshminarayanan, A. Pritzel and C. Blundell, "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles," in *Advances in Neural Information Processing Systems 30*, 2017.
 - D. J. C. MacKay, "A Practical Bayesian Framework for Backpropagation Networks," *Neural Computation*, vol. 4, no. 3, pp. 448–472, 1992.
 - K. P. Murphy, *Probabilistic Machine Learning: Advanced Topics*, MIT Press, 2023.
 - R. M. Neal, *Bayesian Learning for Neural Networks*, Lecture Notes in Statistics, vol. 118, Springer, 1996.
 - C. E. Rasmussen and C. K. I. Williams, *Gaussian Processes for Machine Learning*, MIT Press, 2006.
 - M. Welling and Y. W. Teh, "Bayesian Learning via Stochastic Gradient Langevin Dynamics," in *Proceedings of the 28th International Conference on Machine Learning (ICML)*, 2011.
-- A. G. Wilson and P. Izmailov, "Bayesian Deep Learning and a Probabilistic Perspective of Generalization," in *Advances in Neural Information Processing Systems (NeurIPS)*, vol. 33, 2020.
+- A. G. Wilson and P. Izmailov, "Bayesian Deep Learning and a Probabilistic Perspective of Generalization," in *Advances in Neural Information Processing Systems 33*, 2020.

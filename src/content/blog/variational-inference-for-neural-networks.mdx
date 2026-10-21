@@ -15,7 +15,7 @@ seriesOrder: 4
 import Figure from '../../components/Figure.astro';
 import BdlMeanFieldVi from '../../components/diagrams/BdlMeanFieldVi.astro';
 
-The [previous entry](/blog/laplace-approximations) approximated the posterior $p(\theta \mid \mathcal{D})$ by a Gaussian fixed entirely by the mode of the posterior and the curvature there. **Variational inference (VI)** keeps the idea of a tractable approximating distribution but chooses it differently: it defines a family of candidate distributions and picks the member closest to the posterior by solving an optimization problem. Inference becomes training with a new objective. The tools of the [gradient descent entry](/blog/gradient-descent-and-its-variants) (stochastic gradients, minibatches, adaptive step sizes) carry over to it.
+The [previous entry](/blog/laplace-approximations) approximated the posterior $p(\theta \mid \mathcal{D})$ by a Gaussian fixed entirely by the mode of the posterior and the curvature there. **Variational inference (VI)** keeps the idea of a tractable approximating distribution but chooses it differently: it defines a family of candidate distributions and picks the member closest to the posterior by solving an optimization problem. Inference becomes training with a new objective. The tools of the [gradient descent entry](/blog/gradient-descent-and-its-variants) (stochastic gradients, mini-batches, adaptive step sizes) carry over to it.
 
 This entry derives the objective, the evidence lower bound, and then works through the main families that have been applied to neural networks. They are factorized Gaussians trained with reparameterization gradients, dropout read as approximate inference, natural-gradient methods whose update resembles Adam and particle methods that move a set of networks together. Two further variants define the approximation over functions instead of weights, or update it as data arrive over time. A worked example on a model whose posterior is known exactly shows what the most common family gets right and what it systematically gets wrong.
 
@@ -25,7 +25,7 @@ The entry uses the series notation of the [first entry](/blog/bayesian-inference
 
 ### 1.1 Measuring closeness to the posterior
 
-To pick the member of a family $\mathcal{Q}$ closest to the posterior, VI needs a notion of distance between distributions. The standard choice is the **Kullback–Leibler (KL) divergence**
+To pick the member of a family $\mathcal{Q}$ closest to the posterior, VI needs a measure of discrepancy between distributions. The standard choice is the **Kullback–Leibler (KL) divergence**
 
 $$
 \mathrm{KL}\big(q \,\Vert\, p\big) = \int q(\theta) \log \frac{q(\theta)}{p(\theta \mid \mathcal{D})}\, d\theta ,
@@ -49,41 +49,41 @@ The two terms of the ELBO have a direct reading. The expected log-likelihood rew
 
 ### 1.3 Gradients of the ELBO
 
-The ELBO is an expectation under the distribution being optimized, so its gradient with respect to $\lambda$ cannot be moved inside the expectation directly. The **reparameterization trick** (Kingma and Welling, 2014; Rezende, Mohamed and Wierstra, 2014) writes a sample from $q_\lambda$ as a deterministic function of $\lambda$ and of noise with a fixed distribution. For a Gaussian with mean $\mu$ and standard deviations $\sigma$,
+The ELBO is an expectation under the distribution being optimized, so its gradient with respect to $\lambda$ cannot be moved inside the expectation directly. The **reparameterization trick** (Kingma and Welling, 2014; Rezende, Mohamed and Wierstra, 2014) writes a sample from $q_\lambda$ as a deterministic function of $\lambda$ and of noise with a fixed distribution. For a Gaussian with mean $\mu$ and standard deviations $\tau$,
 
 $$
-\theta = \mu + \sigma \odot \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, I),
+\theta = \mu + \tau \odot \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, I),
 $$
 
-where $\odot$ is elementwise multiplication. The expectation is now over $\varepsilon$, whose distribution does not depend on $\lambda$, and the gradient passes inside: $\nabla_\lambda \mathbb{E}_q[g(\theta)] = \mathbb{E}_\varepsilon[\nabla_\lambda g(\mu + \sigma \odot \varepsilon)]$ for any differentiable $g$. Averaging the gradient over a few samples of $\varepsilon$ gives an unbiased estimate, and automatic differentiation computes it. For models where reparameterization is not possible, for example with discrete latent variables, the score-function estimator (Ranganath, Gerrish and Blei, 2014) is unbiased too but has a much higher variance.
+where $\odot$ is elementwise multiplication. The expectation is now over $\varepsilon$, whose distribution does not depend on $\lambda$, and the gradient passes inside: $\nabla_\lambda \mathbb{E}_q[g(\theta)] = \mathbb{E}_\varepsilon[\nabla_\lambda g(\mu + \tau \odot \varepsilon)]$ for any differentiable $g$. Averaging the gradient over a few samples of $\varepsilon$ gives an unbiased estimate, and automatic differentiation computes it. For models where reparameterization is not possible, for example with discrete latent variables, the score-function estimator (Ranganath, Gerrish and Blei, 2014) is unbiased too but has a much higher variance.
 
-With $N$ examples and minibatches of size $B$, the expected log-likelihood is estimated by $N/B$ times its sum over the batch. The KL term is computed once per step, in closed form for Gaussians. Combining minibatches and reparameterization gives stochastic VI at the scale of ordinary training (Hoffman et al., 2013).
+With $N$ examples and mini-batches of size $B$, the expected log-likelihood is estimated by $N/B$ times its sum over the batch. The KL term is computed once per step, in closed form for Gaussians. Mini-batch estimates of the ELBO make VI scale to large data sets, as in stochastic variational inference (Hoffman et al., 2013); combined with reparameterization they give VI at the scale of ordinary training.
 
 ## 2. Mean-field Gaussian VI
 
 ### 2.1 The family and the algorithm
 
-The most widely used family for networks is the **mean-field Gaussian**: each parameter has its own independent Gaussian, $q(\theta) = \prod_{i=1}^P \mathcal{N}(\theta_i; \mu_i, \sigma_i^2)$. The variational parameters are $2P$ numbers, a mean and a standard deviation per weight, so memory doubles and every forward pass draws fresh weights. Graves (2011) applied this family to networks, and Blundell et al. (2015) popularized the reparameterized version under the name **Bayes by Backprop**. Each training step is:
+The most widely used family for networks is the **mean-field Gaussian**: each parameter has its own independent Gaussian, $q(\theta) = \prod_{i=1}^P \mathcal{N}(\theta_i; \mu_i, \tau_i^2)$. The variational parameters are $2P$ numbers, a mean and a standard deviation per weight, so memory doubles and every forward pass draws fresh weights. Graves (2011) applied this family to networks, and Blundell et al. (2015) popularized the reparameterized version under the name **Bayes by Backprop**. Each training step is:
 
-1. Draw $\varepsilon$ and set $\theta = \mu + \sigma \odot \varepsilon$, with $\sigma = \exp(\rho)$ or $\sigma = \log(1 + e^\rho)$ to keep it positive.
-2. Run the network with $\theta$ on a minibatch and compute $-\tfrac{N}{B}\sum \log p(y_n \mid x_n, \theta)$ plus the KL term.
+1. Draw $\varepsilon$ and set $\theta = \mu + \tau \odot \varepsilon$, with $\tau = \exp(\rho)$ or $\tau = \log(1 + e^\rho)$ to keep it positive.
+2. Run the network with $\theta$ on a mini-batch and compute $-\tfrac{N}{B}\sum \log p(y_n \mid x_n, \theta)$ plus the KL term.
 3. Backpropagate to $\mu$ and $\rho$ and take an optimizer step.
 
-At prediction time, the predictive distribution is the average of $S$ forward passes with independent draws of $\theta$. Sharing one weight sample across a minibatch makes the gradient noise of different examples correlated. The **local reparameterization trick** (Kingma, Salimans and Welling, 2015) reduces that variance by sampling the pre-activations of each example instead; for a Gaussian $q$ they are Gaussian with a computable mean and variance.
+At prediction time, the predictive distribution is the average of $M$ forward passes with independent draws of $\theta$. Sharing one weight sample across a mini-batch makes the gradient noise of different examples correlated. The **local reparameterization trick** (Kingma, Salimans and Welling, 2015) reduces that variance by sampling the pre-activations of each example instead; for a Gaussian $q$ they are Gaussian with a computable mean and variance.
 
 ### 2.2 What the factorization costs
 
 The independence assumption removes every correlation between parameters. For a Gaussian posterior with precision matrix $\Lambda$ (the inverse covariance), the mean-field optimum of the reverse KL has a closed form (Bishop, 2006): its means are the posterior means, and its variances are $1/\Lambda_{ii}$, the inverses of the diagonal entries of the precision. These are never larger than the posterior variances $(\Lambda^{-1})_{ii}$, and they are much smaller when parameters are strongly correlated. Mean-field VI underestimates marginal uncertainty, and the error grows with correlation.
 
-Networks have strongly correlated parameters: scaling one layer up and the next down leaves the function unchanged, and many weights trade off against each other. Foong et al. (2020) showed that for networks with one hidden layer, mean-field Gaussian approximations cannot express larger uncertainty between two separated clusters of data than at the clusters themselves, whatever the variational parameters. The KL term adds a second problem. A network has far more weights than the data can determine, and for each of them the cheapest way to raise the ELBO is to set $q$ equal to the prior. Many weights then become pure noise, which reduces the network's effective capacity and can make the model underfit. In practice the KL term is often downweighted, or the posterior tempered, a choice examined by Wenzel et al. (2020) and returned to in [Priors, Symmetries and Identifiability](/blog/priors-symmetries-and-identifiability).
+Networks have strongly correlated parameters: scaling one layer up and the next down leaves the function unchanged, and many weights trade off against each other. Foong et al. (2020) showed that for networks with one hidden layer, the predictive variance of a mean-field Gaussian approximation between two separated clusters of data is bounded by its variances at the clusters, whatever the variational parameters. Such an approximation cannot express the much larger in-between uncertainty that the exact posterior shows. The KL term adds a second problem. A network has far more weights than the data can determine, and for each of them the cheapest way to raise the ELBO is to set $q$ equal to the prior. Many weights then become pure noise, which reduces the network's effective capacity and can make the model underfit. In practice the KL term is often downweighted, or the posterior tempered, a choice examined by Wenzel et al. (2020) and returned to in [Priors, Symmetries and Identifiability](/blog/priors-symmetries-and-identifiability).
 
 ## 3. A worked example: linear regression
 
 ### 3.1 The setup
 
-To measure these effects, take a model whose posterior is known exactly: linear regression $y = b + w x + \varepsilon$ with parameters $\theta = (b, w)^\top$, noise $\varepsilon \sim \mathcal{N}(0, 0.5^2)$ of known variance and prior $\mathcal{N}(0, I)$. Twenty inputs are drawn uniformly on $[0, 4]$ and the outputs from the true line $b = 1$, $w = 0.8$. Because the inputs are all positive, the intercept and slope are strongly correlated in the posterior: a steeper line fits the data equally well if it starts lower.
+To measure these effects, take a model whose posterior is known exactly: linear regression $y = b + w x + \varepsilon$ with parameters $\theta = (b, w)^\top$, noise $\varepsilon \sim \mathcal{N}(0, \sigma^2)$ of known standard deviation $\sigma = 0.5$ and prior $\mathcal{N}(0, s_0^2 I)$ with prior standard deviation $s_0 = 1$. Twenty inputs are drawn uniformly on $[0, 4]$ and the outputs from the true line $b = 1$, $w = 0.8$. Because the inputs are all positive, the intercept and slope are strongly correlated in the posterior: a steeper line fits the data equally well if it starts lower.
 
-The listing computes the exact Gaussian posterior and log evidence in closed form, then runs mean-field Gaussian VI with the reparameterization gradients of Section 1.3. The gradient of the log joint $\log p(\mathcal{D} \mid \theta) + \log p(\theta)$ is evaluated at 10 samples per step. The standard deviations are parameterized as $\sigma = e^{\rho}$, so the gradient of the Gaussian entropy $\sum_i \log \sigma_i$ with respect to each $\rho_i$ is 1. The optimizer is Adam with a step size that decays from 0.02 to about 0.001 over 6000 steps.
+The listing computes the exact Gaussian posterior and log evidence in closed form, then runs mean-field Gaussian VI with the reparameterization gradients of Section 1.3. The gradient of the log joint $\log p(\mathcal{D} \mid \theta) + \log p(\theta)$ is evaluated at 10 samples per step. The standard deviations are parameterized as $\tau = e^{\rho}$, so the gradient of the Gaussian entropy $\sum_i \log \tau_i$ with respect to each $\rho_i$ is 1. The optimizer is Adam with a step size that decays from 0.02 to about 0.001 over 6000 steps.
 
 ```python
 import numpy as np
@@ -99,14 +99,14 @@ X = np.column_stack([np.ones(N), x])           # theta = (b, w)
 Lam = X.T @ X / s2 + np.eye(2)                 # posterior precision
 Sig = np.linalg.inv(Lam)
 m = Sig @ X.T @ y / s2
-C = s2 * np.eye(N) + X @ X.T                   # marginal covariance of y
-logZ = -0.5 * (y @ np.linalg.solve(C, y) + np.linalg.slogdet(2 * np.pi * C)[1])
+Ky = s2 * np.eye(N) + X @ X.T                  # marginal covariance of y
+logZ = -0.5 * (y @ np.linalg.solve(Ky, y) + np.linalg.slogdet(2 * np.pi * Ky)[1])
 
 def grad_log_joint(T):                         # rows of T are parameter vectors
     return (y - T @ X.T) @ X / s2 - T
 
-def elbo(mu, sd, S=200000, seed=0):            # Monte Carlo estimate
-    T = mu + sd * np.random.default_rng(seed).standard_normal((S, 2))
+def elbo(mu, sd, M=200000, seed=0):            # Monte Carlo estimate
+    T = mu + sd * np.random.default_rng(seed).standard_normal((M, 2))
     ll = -0.5 * ((y - T @ X.T) ** 2).sum(1) / s2 - 0.5 * N * np.log(2 * np.pi * s2)
     lp = -0.5 * (T**2).sum(1) - np.log(2 * np.pi)
     return (ll + lp).mean() + np.sum(np.log(sd)) + np.log(2 * np.pi * np.e)
@@ -170,7 +170,7 @@ The example is linear and two-dimensional, so it shows the mechanism and not its
 Dropout multiplies each unit of a layer by an independent Bernoulli variable during training, setting it to zero with probability $p$. Gal and Ghahramani (2016) showed that training a network with dropout and weight decay can be read as approximately maximizing an ELBO, for a variational family in which each row of a weight matrix is either a learned vector or zero. The predictive distribution then follows by keeping dropout active at test time and averaging $S$ stochastic forward passes, a procedure they called **Monte Carlo (MC) dropout**:
 
 $$
-p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{S} \sum_{s=1}^S p(y^* \mid f(x^*, \theta_s)), \qquad \theta_s \text{ obtained by sampling a dropout mask}.
+p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{M} \sum_{m=1}^M p(y^* \mid f(x^*, \theta_m)), \qquad \theta_m \text{ obtained by sampling a dropout mask}.
 $$
 
 The appeal is practical. Any network already trained with dropout gives an uncertainty estimate with no change to training, at the cost of $S$ forward passes.
@@ -185,36 +185,36 @@ The interpretation has been examined closely, and three caveats are established.
 
 The variational parameters of a Gaussian are not like ordinary weights. Changing a mean by 0.1 is a large change if the standard deviation is 0.01 and a negligible one if it is 10. Ordinary gradient descent ignores this, which is why the example of Section 3 needed thousands of steps and an adaptive optimizer. The **natural gradient** (Amari, 1998) measures step sizes by how much the distribution changes, with the Fisher information matrix of $q$ as the metric, instead of by how much its parameters change.
 
-For Gaussian $q$ the natural gradient of the ELBO has a closed form. Write $q = \mathcal{N}(m, S^{-1})$ with mean $m$ and precision matrix $S$, and let $L(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta)$ be the negative log joint. A natural-gradient step of size $\beta \in (0, 1]$ is
+For Gaussian $q$ the natural gradient of the ELBO has a closed form. Write $q = \mathcal{N}(m_q, \Lambda_q^{-1})$ with mean $m_q$ and precision matrix $\Lambda_q$, and let $L(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta)$ be the negative log joint. A natural-gradient step of size $\beta \in (0, 1]$ is
 
 $$
-S \leftarrow (1 - \beta)\, S + \beta\, \mathbb{E}_q\big[\nabla^2 L(\theta)\big], \qquad m \leftarrow m - \beta\, S^{-1}\, \mathbb{E}_q\big[\nabla L(\theta)\big].
+\Lambda_q \leftarrow (1 - \beta)\, \Lambda_q + \beta\, \mathbb{E}_q\big[\nabla^2 L(\theta)\big], \qquad m_q \leftarrow m_q - \beta\, \Lambda_q^{-1}\, \mathbb{E}_q\big[\nabla L(\theta)\big].
 $$
 
 This is a Newton step with the Hessian averaged over $q$ and with the precision updated as an exponential moving average. Khan and Rue (2023) derived this update and many others as instances of one principle, the **Bayesian learning rule**, which recovers gradient descent, Newton's method and several deep-learning optimizers by choosing the family of $q$ and approximating its expectations.
 
 ### 5.2 A check on the example
 
-The continuation of the listing runs this update with a full-covariance Gaussian on the regression of Section 3. Because the log joint is quadratic, $\mathbb{E}_q[\nabla L] = \nabla L(m)$ and $\mathbb{E}_q[\nabla^2 L]$ is the constant posterior precision, so no sampling is needed.
+The continuation of the listing runs this update with a full-covariance Gaussian on the regression of Section 3. Because the log joint is quadratic, $\mathbb{E}_q[\nabla L] = \nabla L(m_q)$ and $\mathbb{E}_q[\nabla^2 L]$ is the constant posterior precision, so no sampling is needed.
 
 ```python
-def kl_to_post(mq, Sq):                        # KL(N(mq, Sq^-1) || N(m, Sig))
+def kl_to_post(mq, Lq):                        # KL(N(mq, Lq^-1) || N(m, Sig))
     d = m - mq
-    P = np.linalg.inv(Sq)
-    return 0.5 * (np.trace(Lam @ P) + d @ Lam @ d - 2
-                  + np.linalg.slogdet(Sig)[1] - np.linalg.slogdet(P)[1])
+    Cq = np.linalg.inv(Lq)
+    return 0.5 * (np.trace(Lam @ Cq) + d @ Lam @ d - 2
+                  + np.linalg.slogdet(Sig)[1] - np.linalg.slogdet(Cq)[1])
 
-# Natural-gradient VI with a full-covariance Gaussian q = N(mq, Sq^-1).
+# Natural-gradient VI with a full-covariance Gaussian q = N(mq, Lq^-1).
 # The log joint is quadratic, so E_q[gradient] = gradient at mq and E_q[Hessian] is constant.
 hess = X.T @ X / s2 + np.eye(2)                # minus the Hessian of the log joint
 for beta in [1.0, 0.5, 0.1]:
-    mq, Sq = np.zeros(2), np.eye(2)            # start at the prior: mean 0, precision I
+    mq, Lq = np.zeros(2), np.eye(2)            # start at the prior: mean 0, precision I
     out = []
     for k in range(1, 21):
-        Sq = (1 - beta) * Sq + beta * hess     # precision update
-        mq = mq + beta * np.linalg.solve(Sq, grad_log_joint(mq[None])[0])
+        Lq = (1 - beta) * Lq + beta * hess     # precision update
+        mq = mq + beta * np.linalg.solve(Lq, grad_log_joint(mq[None])[0])
         if k in (1, 2, 5, 20):
-            out.append(f"{kl_to_post(mq, Sq):.1e}")
+            out.append(f"{kl_to_post(mq, Lq):.1e}")
     print(f"beta = {beta}: KL after 1, 2, 5, 20 steps:", ", ".join(out))
 ```
 
@@ -294,21 +294,21 @@ For a $2 \times 2$ covariance with variances $s_1^2$, $s_2^2$ and correlation $r
 
 </details>
 
-**Exercise 3.** A network is trained by mean-field VI on $N = 50\,000$ examples with minibatches of $B = 100$. By what factor is the minibatch log-likelihood multiplied, and what happens to the balance between the two ELBO terms if the factor is forgotten?
+**Exercise 3.** A network is trained by mean-field VI on $N = 50\,000$ examples with mini-batches of $B = 100$. By what factor is the mini-batch log-likelihood multiplied, and what happens to the balance between the two ELBO terms if the factor is forgotten?
 
 <details>
 <summary>Answer</summary>
 
-By $N/B = 500$, so that the minibatch sum estimates the full-data expected log-likelihood without bias. Without the factor the likelihood term is 500 times too small relative to the KL term, which amounts to using a prior 500 times stronger than intended. The variational distribution then stays close to the prior and the network underfits.
+By $N/B = 500$, so that the mini-batch sum estimates the full-data expected log-likelihood without bias. Without the factor the likelihood term is 500 times too small relative to the KL term, which amounts to weighting the whole KL term, the entropy of $q$ included, 500 times too heavily: the likelihood is tempered by a factor of 1/500. The variational distribution then stays close to the prior and the network underfits.
 
 </details>
 
-**Exercise 4.** Show that SVGD with one particle and the kernel $k(\theta, \theta') = \exp(-\lVert\theta - \theta'\rVert^2 / h)$ is gradient ascent on the log posterior.
+**Exercise 4.** Show that SVGD with one particle and the kernel $k(\theta, \theta') = \exp(-\lVert\theta - \theta'\rVert^2 / (2\ell^2))$ with lengthscale $\ell$ is gradient ascent on the log posterior.
 
 <details>
 <summary>Answer</summary>
 
-With $n = 1$ the sum has the single term $j = i$. The kernel gives $k(\theta_i, \theta_i) = 1$, and its gradient $\nabla_{\theta_j} k(\theta_j, \theta_i) = -\tfrac{2}{h}(\theta_j - \theta_i)\,k(\theta_j, \theta_i)$ is zero at $\theta_j = \theta_i$. The update is $\theta_i \leftarrow \theta_i + \epsilon \nabla \log p(\theta_i \mid \mathcal{D})$, gradient ascent toward the MAP estimate. The repulsive term, and with it the representation of uncertainty, appears only with two or more particles.
+With $n = 1$ the sum has the single term $j = i$. The kernel gives $k(\theta_i, \theta_i) = 1$, and its gradient $\nabla_{\theta_j} k(\theta_j, \theta_i) = -\tfrac{1}{\ell^2}(\theta_j - \theta_i)\,k(\theta_j, \theta_i)$ is zero at $\theta_j = \theta_i$. The update is $\theta_i \leftarrow \theta_i + \epsilon \nabla \log p(\theta_i \mid \mathcal{D})$, gradient ascent toward the MAP estimate. The repulsive term, and with it the representation of uncertainty, appears only with two or more particles.
 
 </details>
 
@@ -326,7 +326,7 @@ The variance of $f(2) = b + 2w$ is $\Sigma_{bb} + 4\Sigma_{bw} + 4\Sigma_{ww}$. 
 | Question | Answer |
 |---|---|
 | What does VI optimize? | The ELBO $\mathbb{E}_q[\log p(\mathcal{D} \mid \theta)] - \mathrm{KL}(q \,\Vert\, p(\theta))$, which equals $\log p(\mathcal{D})$ minus $\mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D}))$. |
-| How are its gradients computed? | With the reparameterization trick, $\theta = \mu + \sigma \odot \varepsilon$, minibatches scaled by $N/B$ and automatic differentiation. |
+| How are its gradients computed? | With the reparameterization trick, $\theta = \mu + \tau \odot \varepsilon$, mini-batches scaled by $N/B$ and automatic differentiation. |
 | What does mean-field Gaussian VI get wrong? | It drops correlations, underestimates marginal variances (by $1/\sqrt{1 - r^2}$ in the example) and can let many weights collapse to the prior. |
 | What is MC dropout? | Dropout kept on at test time, read as VI with a degenerate family; cheap, but the dropout rate fixes the uncertainty. |
 | What do natural gradients add? | Steps measured by change in distribution; for Gaussians a Newton-like update that leads to Adam-like optimizers. |
