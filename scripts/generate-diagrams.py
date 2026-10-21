@@ -842,7 +842,7 @@ def bdl_de_figure():
         'Five tanh networks trained from different random initializations pass through the data almost '
         'identically. Between the intervals and beyond them their curves fan apart, and the band of '
         'plus or minus two predictive standard deviations around the ensemble mean widens, but not enough: '
-        'from about x = 3.3 to 4.9, and below about x = -5, the dashed true function lies outside the band.',
+        'from about x = 3.2 to 5.0, below about x = -5.1 and above about x = 5.8, the dashed true function lies outside the band.',
         b)
 
 bdl_de_figure()
