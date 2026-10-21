@@ -1,0 +1,426 @@
+---
+title: "Lấy mẫu phân phối hậu nghiệm: từ HMC đến MCMC gradient ngẫu nhiên"
+description: "Xích Markov Monte Carlo rút mẫu từ phân phối hậu nghiệm của một mạng như thế nào: Metropolis–Hastings, Monte Carlo Hamilton, SGLD, SGHMC và các kiểu thất bại của chúng."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian inference
+  - markov chain monte carlo
+  - neural networks
+  - sampling
+  - bayesian deep learning
+series: bayesian-deep-learning
+seriesOrder: 2
+---
+
+import Figure from '../../../components/Figure.astro';
+import BdlSamplerPaths from '../../../components/diagrams/BdlSamplerPaths.astro';
+
+[Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) của loạt bài này đã định nghĩa phân phối hậu nghiệm (posterior) trên các tham số của mạng và cho thấy rằng, khi đã có các mẫu từ nó, phân phối dự đoán hậu nghiệm (posterior predictive) chỉ là một phép lấy trung bình đơn giản. Bài đó cũng cho thấy vì sao không thể rút trực tiếp các mẫu đối với một mạng nơ-ron: phân phối hậu nghiệm không có dạng đóng, và hằng số chuẩn hóa của nó là một tích phân trên hàng triệu chiều. Những gì tính được là logarit của phân phối hậu nghiệm chưa chuẩn hóa và gradient của nó, chính là các đại lượng mà quá trình huấn luyện sử dụng.
+
+Bài này xây dựng các bộ lấy mẫu xích Markov Monte Carlo (Markov chain Monte Carlo, MCMC) chỉ từ hai thành phần đó. Bài bắt đầu với thuật toán Metropolis–Hastings, công thức tổng quát chỉ cần tỉ số giữa các mật độ hậu nghiệm, và cho thấy vì sao dạng đơn giản nhất của nó bò rất chậm trong không gian nhiều chiều. Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC) dùng gradient để thực hiện những bước di chuyển dài và đúng hướng. MCMC gradient ngẫu nhiên (stochastic-gradient MCMC, SG-MCMC) thay gradient trên toàn bộ dữ liệu bằng một ước lượng trên lô nhỏ (mini-batch), giúp việc lấy mẫu trở nên khả thi với các tập dữ liệu lớn, với cái giá là một độ chệch mà bài này đo đạc. Các mục cuối bàn về các phân phối hậu nghiệm đa mode của các mạng thực, hiện tượng "hậu nghiệm lạnh" (cold posterior) và các phép chẩn đoán, đồng thời chỉ ra các bộ lấy mẫu cho những bối cảnh nằm ngoài phạm vi của bài.
+
+Ký hiệu là ký hiệu của loạt bài và của bài thứ nhất. Ngoài ra, $U(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta)$ là **năng lượng** (energy), sao cho phân phối hậu nghiệm là $\pi(\theta) \propto \exp(-U(\theta))$, và $h$ ký hiệu một bước (step size). Các ví dụ dùng lại hồi quy tuyến tính Bayes của bài thứ nhất, có phân phối hậu nghiệm là một phân phối Gauss đã biết, nên mọi bộ lấy mẫu đều có thể được kiểm tra với đáp án chính xác. Mã dùng Python 3.13 và NumPy 2.5.3 với các hạt giống được ghi rõ và cần khoảng 15 giây để chạy.
+
+## 1. Một bộ lấy mẫu phải cung cấp điều gì
+
+### 1.1 Các ước lượng, không phải hình vẽ
+
+Mục tiêu không phải là vẽ hình phân phối hậu nghiệm; mục tiêu là ước lượng các kỳ vọng theo nó, trước hết là trung bình dự đoán $\mathbb{E}_{\theta \mid \mathcal{D}}[p(y^* \mid x^*, \theta)]$. Với $M$ mẫu độc lập, ước lượng Monte Carlo của kỳ vọng của một hàm $g(\theta)$ có sai số chuẩn $\operatorname{sd}(g)/\sqrt{M}$, trong đó $\operatorname{sd}(g)$ là độ lệch chuẩn hậu nghiệm của $g$. Vì vậy vài trăm mẫu độc lập là đủ cho phần lớn các đại lượng dự đoán, bất kể số tham số $P$.
+
+Không phương pháp nào dưới đây cung cấp các mẫu độc lập. Mỗi phương pháp tạo ra một **xích Markov** (Markov chain), một dãy $\theta_1, \theta_2, \dots$ trong đó mỗi trạng thái được rút từ một phân phối chỉ phụ thuộc vào trạng thái trước đó. Giả sử xích được xây dựng sao cho $\pi$ là **phân phối dừng** (stationary distribution) của nó (một trạng thái rút từ $\pi$ được tiếp nối bởi một trạng thái cũng có phân phối $\pi$), và xích có thể đi đến mọi vùng của không gian tham số và không lặp theo chu kỳ (nó tối giản (irreducible) và không tuần hoàn (aperiodic)). Khi đó phân phối của $\theta_k$ tiến tới $\pi$ khi $k$ tăng và các trung bình dọc theo xích hội tụ về các kỳ vọng theo $\pi$. Đó là nguyên lý của **xích Markov Monte Carlo**. Phần đầu của xích, trước khi nó quên điểm xuất phát, được loại bỏ như **giai đoạn khởi động** (burn-in).
+
+### 1.2 Các mẫu tương quan và cỡ mẫu hiệu dụng
+
+Các trạng thái liên tiếp của một xích có tương quan với nhau, nên $M$ trạng thái mang ít thông tin hơn $M$ mẫu rút độc lập. **Cỡ mẫu hiệu dụng** (effective sample size, ESS) của một xích đối với một hàm $g$ là số mẫu độc lập cho cùng sai số chuẩn:
+
+$$
+\text{ESS} = \frac{M}{1 + 2\sum_{k=1}^{\infty} \rho_k},
+$$
+
+trong đó $\rho_k$ là hệ số tương quan giữa $g(\theta_t)$ và $g(\theta_{t+k})$ dọc theo xích. Trong thực hành, tổng được cắt tại chỗ các hệ số tương quan ước lượng trở thành nhiễu; đoạn mã ở mục 4 dùng một biến thể của quy tắc dãy dương ban đầu (initial positive sequence) của Geyer, dừng tại cặp độ trễ liên tiếp đầu tiên có tổng âm (Geyer, 1992). ESS trên mỗi đơn vị tính toán là thước đo chất lượng để so sánh các bộ lấy mẫu, và mục 4 đo đại lượng này.
+
+### 1.3 Cân bằng chi tiết
+
+Cách thông thường để làm cho $\pi$ là phân phối dừng là làm cho xích **khả nghịch** (reversible) đối với nó: xác suất đang ở $\theta$ và chuyển sang $\theta'$ bằng xác suất đang ở $\theta'$ và chuyển sang $\theta$,
+
+$$
+\pi(\theta)\, \mathcal{T}(\theta' \mid \theta) = \pi(\theta')\, \mathcal{T}(\theta \mid \theta'),
+$$
+
+trong đó $\mathcal{T}(\theta' \mid \theta)$ là mật độ chuyển trạng thái của xích. Điều kiện này, **cân bằng chi tiết** (detailed balance), kéo theo tính dừng: lấy tích phân hai vế theo $\theta$ cho thấy một bước xuất phát từ $\pi$ giữ nguyên $\pi$. Giá trị thực tế của nó là cả hai vế đều chứa $\pi$, nên hằng số chuẩn hóa chưa biết bị triệt tiêu.
+
+## 2. Metropolis–Hastings
+
+### 2.1 Thuật toán
+
+**Thuật toán Metropolis–Hastings (MH)** biến bất kỳ cơ chế đề xuất nào thành một xích có phân phối dừng $\pi$ (Metropolis và cộng sự, 1953; Hastings, 1970). Từ trạng thái hiện tại $\theta$, nó rút một ứng viên $\theta'$ từ một **phân phối đề xuất** (proposal distribution) $q(\theta' \mid \theta)$ và chấp nhận ứng viên đó với xác suất
+
+$$
+\alpha(\theta, \theta') = \min\!\left(1,\; \frac{\pi(\theta')\, q(\theta \mid \theta')}{\pi(\theta)\, q(\theta' \mid \theta)}\right)
+= \min\!\left(1,\; e^{\,U(\theta) - U(\theta')}\, \frac{q(\theta \mid \theta')}{q(\theta' \mid \theta)}\right).
+$$
+
+Nếu ứng viên bị bác bỏ, xích ở nguyên chỗ cũ và trạng thái hiện tại được tính thêm một lần nữa. Thay $\alpha$ vào phương trình cân bằng chi tiết sẽ kiểm chứng được nó trong một dòng. Chỉ có hiệu năng lượng xuất hiện, nên không bao giờ cần đến hằng số chuẩn hóa. Với một phân phối đề xuất đối xứng, $q(\theta' \mid \theta) = q(\theta \mid \theta')$, tỉ số đề xuất bằng 1: một bước đi xuống về năng lượng luôn được chấp nhận, và một bước đi lên một lượng $\Delta U$ được chấp nhận với xác suất $e^{-\Delta U}$.
+
+### 2.2 Bước ngẫu nhiên và lời nguyền của hướng hẹp nhất
+
+Phân phối đề xuất đơn giản nhất là một **bước ngẫu nhiên** (random walk), $\theta' = \theta + \delta\, \xi$ với $\xi \sim \mathcal{N}(0, I)$ và độ dài bước $\delta$. Nó dễ phát biểu nhưng khó điều chỉnh. Một bước dài hơn độ rộng hẹp nhất của phân phối hậu nghiệm hầu như luôn rơi vào chỗ có năng lượng cao hơn nhiều và bị bác bỏ. Một bước đủ ngắn để được chấp nhận thì làm xích di chuyển như một quá trình khuếch tán: sau $k$ bước được chấp nhận có độ dài $\delta$, xích thường chỉ đi được khoảng $\delta\sqrt{k}$, nên để băng qua một hướng có độ rộng $w_{\max}$ cần cỡ $(w_{\max}/\delta)^2$ bước. Khi $\delta$ bị hướng hẹp nhất quyết định, chi phí tăng theo bình phương tỉ số giữa độ rộng lớn nhất và nhỏ nhất của phân phối hậu nghiệm.
+
+Số chiều làm tình hình tệ hơn. Với các phân phối mục tiêu gồm nhiều thành phần độc lập, Roberts, Gelman và Gilks đã chỉ ra rằng bước phải giảm tỉ lệ với $P^{-1/2}$ để giữ tỉ lệ chấp nhận không tiến về không, và tỉ lệ chấp nhận hiệu quả là khoảng 0.234 (Roberts và cộng sự, 1997). Phân phối hậu nghiệm của một mạng vừa nhiều chiều vừa có điều kiện xấu (bài thứ nhất, mục 4.2), trường hợp tệ nhất về cả hai mặt. MH bước ngẫu nhiên vẫn hữu ích cho một vài siêu tham số; đối với các trọng số, nó là một mốc so sánh cần vượt qua.
+
+## 3. Monte Carlo Hamilton
+
+### 3.1 Thêm động lượng
+
+**Monte Carlo Hamilton** (Duane và cộng sự, 1987; Neal, 2011) thay bước ngẫu nhiên mù quáng bằng một quỹ đạo vật lý được mô phỏng. Nó thêm một vector **động lượng** (momentum) phụ $r \in \mathbb{R}^P$ và định nghĩa **hàm Hamilton** (Hamiltonian)
+
+$$
+H(\theta, r) = U(\theta) + \tfrac{1}{2}\, r^\top \Gamma^{-1} r,
+$$
+
+tổng của một thế năng $U$ và một động năng, với một **ma trận khối lượng** (mass matrix) xác định dương $\Gamma$. Mật độ đồng thời $\exp(-H(\theta, r))$ phân tích thành $\pi(\theta)$ nhân với một phân phối Gauss $\mathcal{N}(0, \Gamma)$ cho $r$, nên lấy mẫu cặp này rồi bỏ $r$ đi là lấy mẫu phân phối hậu nghiệm.
+
+Các phương trình Hamilton, $\dot{\theta} = \Gamma^{-1} r$ và $\dot{r} = -\nabla U(\theta)$, đưa cặp này đi dọc một đường trên đó $H$ không đổi. Hãy hình dung một viên đá trượt không ma sát trên bề mặt năng lượng: nó tăng tốc khi xuống dốc và chậm lại khi lên dốc, và nó có thể đi rất xa trong khi vẫn giữ nguyên tổng năng lượng. Một bước chuyển HMC rút một động lượng mới từ $\mathcal{N}(0, \Gamma)$, qua đó đặt một mức năng lượng mới, đi theo động lực học trong một khoảng thời gian, và lấy điểm cuối làm đề xuất. Vì quỹ đạo đi theo gradient, nó di chuyển dọc theo trục dài của một phân phối hậu nghiệm hẹp thay vì nảy qua nảy lại giữa các thành của nó.
+
+### 3.2 Bộ tích phân leapfrog và bước chấp nhận
+
+Động lực học được mô phỏng bằng **bộ tích phân leapfrog** (leapfrog integrator), đưa cặp này tiến một bước $h$ qua ba phần:
+
+$$
+r \leftarrow r - \tfrac{h}{2}\nabla U(\theta), \qquad
+\theta \leftarrow \theta + h\, \Gamma^{-1} r, \qquad
+r \leftarrow r - \tfrac{h}{2}\nabla U(\theta).
+$$
+
+Lặp lại điều này $L$ lần tốn $L$ lần tính gradient (các nửa bước của các lần lặp liên tiếp gộp lại với nhau). Leapfrog có hai tính chất khiến nó phù hợp với MCMC: nó **khả nghịch** (chạy nó với động lượng đổi dấu sẽ đi ngược lại đúng đường cũ) và **bảo toàn thể tích** (volume-preserving) (nó ánh xạ các vùng của không gian $(\theta, r)$ thành các vùng có thể tích bằng nhau). Nhờ đó, điểm cuối $(\theta', r')$ là một đề xuất MH hợp lệ với tỉ số đối xứng, và nó được chấp nhận với xác suất $\min(1, e^{-\Delta H})$, trong đó $\Delta H = H(\theta', r') - H(\theta, r)$. Động lực học chính xác sẽ bảo toàn $H$ và luôn được chấp nhận; sai số của bộ tích phân làm cho $\Delta H$ nhỏ nhưng khác không, và bước chấp nhận loại bỏ hoàn toàn độ chệch gây ra bởi sai số đó.
+
+### 3.3 Điều chỉnh
+
+HMC có ba thiết lập, và mỗi thiết lập có một kiểu thất bại đặc trưng.
+
+- **Bước $h$.** Với một phân phối mục tiêu Gauss và $\Gamma = I$, phép lặp leapfrog chỉ ổn định khi $h$ nhỏ hơn hai lần độ lệch chuẩn hẹp nhất của phân phối hậu nghiệm; vượt quá ngưỡng đó, $\Delta H$ bùng nổ và không có gì được chấp nhận. Trong ví dụ minh họa, độ lệch chuẩn hẹp nhất là $0.081$, nên $h$ phải nhỏ hơn $0.162$. Trong không gian nhiều chiều, bước chỉ cần giảm theo $P^{-1/4}$, chậm hơn nhiều so với bước ngẫu nhiên, và tỉ lệ chấp nhận hiệu quả là khoảng 0.65 (Beskos và cộng sự, 2013).
+- **Số bước $L$.** Quá ít thì HMC suy biến thành bước ngẫu nhiên; quá nhiều thì quỹ đạo lãng phí gradient vì uốn cong quay về điểm xuất phát. Tệ hơn, một độ dài quỹ đạo cố định có thể cộng hưởng với chu kỳ dao động theo một hướng nào đó: sau đúng một chu kỳ, quỹ đạo trở về điểm xuất phát theo hướng đó, và sau nửa chu kỳ nó đến ảnh đối xứng của điểm xuất phát, nên trong cả hai trường hợp hướng đó không bao giờ được khám phá. Làm ngẫu nhiên $h$ một chút ở mỗi bước chuyển sẽ phá vỡ sự cộng hưởng đó (Neal, 2011). Bộ lấy mẫu không quay đầu (No-U-Turn Sampler, NUTS) chọn độ dài một cách thích nghi, dừng một quỹ đạo khi nó bắt đầu quay ngược lại (Hoffman và Gelman, 2014).
+- **Ma trận khối lượng $\Gamma$.** Chọn $\Gamma$ gần với ma trận độ chính xác (precision) hậu nghiệm làm cho phân phối mục tiêu trông đẳng hướng đối với động lực học, qua đó loại bỏ vấn đề điều kiện xấu. Với các mạng, chỉ các ước lượng đường chéo hoặc hạng thấp là có chi phí chấp nhận được.
+
+<Figure caption="Một lần chạy của mỗi bộ lấy mẫu từ cùng một điểm xuất phát (vòng tròn) trên một phân phối Gauss hai chiều có hệ số tương quan 0.95. Bước ngẫu nhiên (trái) đi 120 bước ngắn và ở lại phần dưới của trục dài. HMC (phải) dùng cùng 120 lần tính gradient cho 8 bước chuyển; các quỹ đạo leapfrog nét đứt của nó đưa nó đi dọc theo hình elip, và các trạng thái của nó (chấm) phủ phần lớn hình elip.">
+  <BdlSamplerPaths />
+</Figure>
+
+Hình vẽ cho thấy sự khác biệt trên một phân phối mục tiêu đủ nhỏ để vẽ được. Bước 0.25 của bước ngẫu nhiên gần với độ rộng hẹp của hình elip (độ lệch chuẩn 0.22), nên nó không thể di chuyển nhanh hơn dọc theo trục dài (độ lệch chuẩn 1.40). Các quỹ đạo gồm 15 bước leapfrog cỡ 0.15 của HMC dao động qua lại theo hướng hẹp trong khi trôi dọc theo hướng dài.
+
+## 4. Ví dụ minh họa: ba bộ lấy mẫu đối chiếu với đáp án chính xác
+
+### 4.1 Thiết lập
+
+Phân phối mục tiêu là phân phối hậu nghiệm của hồi quy tuyến tính Bayes ở bài thứ nhất: 11 trọng số, 20 quan sát, độ lệch chuẩn nhiễu $\sigma = 0.25$ và độ lệch chuẩn tiên nghiệm $s_0 = 1$. Đó là một phân phối Gauss $\mathcal{N}(m_N, S_N)$ đã biết dưới dạng đóng, nên kết quả của bộ lấy mẫu có thể được so sánh với giá trị thật. Nó cũng có điều kiện xấu theo một cách giống phân phối hậu nghiệm của mạng. Dọc theo các hướng chính của nó, độ lệch chuẩn hậu nghiệm trải từ $0.081$, với các tổ hợp trọng số mà dữ liệu xác định chặt, đến 1.0, với các trọng số của những đặc trưng ở xa dữ liệu vẫn giữ độ rộng tiên nghiệm, tỉ số 12 giữa hướng rộng nhất và hướng hẹp nhất.
+
+Các đại lượng được kiểm tra là giá trị hàm dự đoán $f(x^*) = \phi(x^*)^\top\theta$ tại hai đầu vào của bài thứ nhất: $x^* = 0$, trong khoảng trống giữa các cụm dữ liệu, nơi phân phối hậu nghiệm rộng, và $x^* = -2$, bên trong một cụm, nơi nó hẹp. Mọi bộ lấy mẫu đều xuất phát tại $\theta = 0$, loại bỏ 20% đầu của xích và có ngân sách tương đương khoảng 20 000 lượt duyệt qua dữ liệu. Bộ lấy mẫu Langevin gradient ngẫu nhiên hoàn tất phép so sánh được giải thích ở mục 5; nó được đưa vào đây để mọi kết quả nằm trong một bảng.
+
+### 4.2 Mã
+
+```python
+import numpy as np
+
+# The model and data of the first entry (seed 0): exact posterior N(m, S) is known
+rng = np.random.default_rng(seed=0)
+sigma, s0 = 0.25, 1.0
+centers = np.arange(-5.0, 5.5, 1.0)
+features = lambda x: np.exp(-(x[:, None] - centers[None, :]) ** 2)
+x = np.concatenate([rng.uniform(-3, -1, 10), rng.uniform(1, 3, 10)])
+y = np.sin(x) + rng.normal(0.0, sigma, size=x.size)
+Phi, N, P = features(x), x.size, centers.size
+S = np.linalg.inv(Phi.T @ Phi / sigma**2 + np.eye(P) / s0**2)
+m = S @ Phi.T @ y / sigma**2
+
+def U(t):                                     # energy: -log posterior + const
+    return np.sum((y - Phi @ t) ** 2) / (2 * sigma**2) + t @ t / (2 * s0**2)
+
+def grad_U(t, idx=None):                      # idx: mini-batch indices, None = all
+    if idx is None:
+        idx = np.arange(N)
+    r = y[idx] - Phi[idx] @ t
+    return -(N / idx.size) * Phi[idx].T @ r / sigma**2 + t / s0**2
+
+def rw_mh(n, step, rng):
+    t, u, out, acc = np.zeros(P), U(np.zeros(P)), [], 0
+    for _ in range(n):
+        prop = t + step * rng.normal(size=P) # symmetric Gaussian proposal
+        u_prop = U(prop)
+        if np.log(rng.uniform()) < u - u_prop:
+            t, u, acc = prop, u_prop, acc + 1
+        out.append(t)
+    return np.array(out), acc / n
+
+def hmc(n, eps, L, rng):
+    t, out, acc = np.zeros(P), [], 0
+    for _ in range(n):
+        e = eps * rng.uniform(0.8, 1.2)      # jittered step size
+        r0 = rng.normal(size=P)              # fresh momentum, mass matrix I
+        q, r = t.copy(), r0 - 0.5 * e * grad_U(t)
+        for l in range(L):                   # leapfrog integration
+            q = q + e * r
+            if l < L - 1:
+                r = r - e * grad_U(q)
+        r = r - 0.5 * e * grad_U(q)
+        dH = U(q) + r @ r / 2 - U(t) - r0 @ r0 / 2
+        if np.log(rng.uniform()) < -dH:
+            t, acc = q, acc + 1
+        out.append(t)
+    return np.array(out), acc / n
+
+def sgld(n, step, batch, rng):
+    t, out = np.zeros(P), []
+    for _ in range(n):
+        idx = rng.choice(N, size=batch, replace=False)
+        t = t - step * grad_U(t, idx) + np.sqrt(2 * step) * rng.normal(size=P)
+        out.append(t)
+    return np.array(out)
+
+def ess(z):                                  # effective sample size, Geyer-style truncation
+    z = z - z.mean()
+    f = np.fft.rfft(z, 2 * z.size)
+    ac = np.fft.irfft(f * np.conj(f))[:z.size] / (z @ z)
+    s, k = 0.0, 1
+    while k + 1 < z.size and ac[k] + ac[k + 1] > 0:
+        s, k = s + ac[k] + ac[k + 1], k + 2
+    return z.size / (1 + 2 * s)
+
+phi = features(np.array([0.0, -2.0]))         # test inputs x* = 0 (gap) and x* = -2 (data)
+sd = np.sqrt(np.diag(phi @ S @ phi.T))
+print(f"exact          : mean f(0) {phi[0] @ m:6.3f}  sd f(0) {sd[0]:.3f}  sd f(-2) {sd[1]:.3f}")
+rng = np.random.default_rng(seed=1)
+runs = {"random-walk MH": rw_mh(20000, 0.06, rng),       # 20 000 full-data evaluations
+        "HMC":            hmc(1000, 0.06, 20, rng),        # 1000 x 20 full-data gradients
+        "SGLD h=2e-3":    (sgld(80000, 2e-3, 5, rng), None),  # 80 000 x 5/20 of the data
+        "SGLD h=2e-4":    (sgld(80000, 2e-4, 5, rng), None)}
+for name, (chain, acc) in runs.items():
+    f = chain[len(chain) // 5:] @ phi.T    # drop the first 20% as burn-in
+    a = "" if acc is None else f"  accepted {acc:.2f}"
+    print(f"{name:15s}: mean f(0) {f[:, 0].mean():6.3f}  sd f(0) {f[:, 0].std():.3f}  "
+          f"sd f(-2) {f[:, 1].std():.3f}  ESS f(0) {ess(f[:, 0]):5.0f}{a}")
+```
+
+Kết quả in ra:
+
+```text
+exact          : mean f(0)  0.039  sd f(0) 0.632  sd f(-2) 0.138
+random-walk MH : mean f(0)  0.004  sd f(0) 0.556  sd f(-2) 0.131  ESS f(0)    17  accepted 0.58
+HMC            : mean f(0)  0.013  sd f(0) 0.665  sd f(-2) 0.145  ESS f(0)   493  accepted 0.96
+SGLD h=2e-3    : mean f(0)  0.054  sd f(0) 0.596  sd f(-2) 0.150  ESS f(0)    47
+SGLD h=2e-4    : mean f(0)  0.366  sd f(0) 0.493  sd f(-2) 0.133  ESS f(0)    18
+```
+
+### 4.3 Đọc kết quả
+
+- **MH bước ngẫu nhiên.** Với bước 0.06, nhỏ hơn một chút so với độ lệch chuẩn hẹp nhất, 58% số đề xuất được chấp nhận, nhưng xích khuếch tán dọc theo các hướng rộng chậm đến mức 16 000 trạng thái được giữ lại chỉ có giá trị bằng khoảng 17 trạng thái độc lập. Ước lượng độ lệch chuẩn tại $x^* = 0$, 0.556, nhỏ hơn giá trị đúng 12%, vì xích chưa khám phá hết phần đuôi của các hướng rộng. Ước lượng khuếch tán ở mục 2.2 dự báo đúng bậc độ lớn này: với độ rộng 1 và bước 0.06, để băng qua cần khoảng $(1/0.06)^2 \approx 280$ bước được chấp nhận, và ESS đo được tương ứng với một mẫu độc lập trên mỗi 940 vòng lặp.
+- **HMC.** Với số lần tính gradient bằng số lần tính năng lượng của bước ngẫu nhiên, HMC cho ESS bằng 493 từ 800 trạng thái được giữ lại, nhiều mẫu hiệu dụng hơn gần 30 lần. Các ước lượng của nó khớp với giá trị chính xác trong phạm vi sai số chuẩn Monte Carlo: tại $x^* = 0$ sai số chuẩn của kỳ vọng là khoảng $0.632/\sqrt{493} \approx 0.028$, và ước lượng lệch 0.026.
+- **Động lực học Langevin gradient ngẫu nhiên (stochastic gradient Langevin dynamics, SGLD) với bước $2 \times 10^{-3}$.** Mỗi bước dùng một lô nhỏ gồm 5 ví dụ, một phần tư dữ liệu, nên 80 000 bước tốn cùng 20 000 lượt duyệt dữ liệu. Nó trộn (mix) tốt hơn bước ngẫu nhiên (ESS 47) nhưng độ lệch chuẩn của nó tại $x^* = -2$ là 0.150 so với giá trị chính xác 0.138: các hướng hẹp bị rộng quá mức. Đây không phải nhiễu Monte Carlo, như mục 5.3 cho thấy.
+- **SGLD với bước $2 \times 10^{-4}$.** Bước nhỏ hơn làm giảm độ chệch đó, và giá trị theo hướng hẹp, 0.133, giờ gần với giá trị chính xác, nhưng xích di chuyển chậm hơn mười lần theo các hướng rộng và chưa hội tụ trong cùng ngân sách: kỳ vọng tại $x^* = 0$ là 0.366 thay vì 0.039.
+
+Chạy cùng đoạn mã với bước cố định 0.06 cho thấy vì sao bước được làm nhiễu ngẫu nhiên (jitter). Với các hạt giống từ 0 đến 5, mỗi lần 4000 bước chuyển và bỏ 500 bước đầu, độ lệch chuẩn tại $x^* = -2$ dao động từ 0.140 đến 0.160, với trung bình 0.149 so với giá trị chính xác 0.138. Phiên bản có làm nhiễu bước dao động từ 0.134 đến 0.145, với trung bình 0.138.
+
+Nguyên nhân là hiện tượng cộng hưởng mô tả ở mục 3.3. Một hướng chính của phân phối hậu nghiệm có độ lệch chuẩn 0.382, và dọc theo hướng đó động lực học dao động với chu kỳ $2\pi \times 0.382 = 2.40$, nên độ dài quỹ đạo $20 \times 0.06 = 1.20$ bằng nửa chu kỳ. Sau nửa chu kỳ, một dao động Gauss đi đến ảnh đối xứng của độ lệch ban đầu so với kỳ vọng bất kể động lượng, nên độ lớn của độ lệch đó không bao giờ thay đổi từ bước chuyển này sang bước chuyển tiếp theo. Bộ ước lượng ESS chỉ thấy các lần đổi dấu và báo rằng hoàn toàn không có tương quan. Bài học này mang tính tổng quát: một bộ lấy mẫu có thể sai theo cách mà chính các phép chẩn đoán của nó không phát hiện ra, và kiểm tra nó trên một bài toán có đáp án đã biết là biện pháp bảo vệ rẻ nhất.
+
+## 5. MCMC gradient ngẫu nhiên
+
+### 5.1 Động lực học Langevin
+
+**Phép cập nhật Langevin** (Langevin update) là bộ lấy mẫu dựa trên gradient đơn giản nhất:
+
+$$
+\theta_{k+1} = \theta_k - h\, \nabla U(\theta_k) + \sqrt{2h}\; \xi_k, \qquad \xi_k \sim \mathcal{N}(0, I).
+$$
+
+Đó là một bước hạ gradient trên năng lượng cộng với nhiễu Gauss có phương sai $2h$ được khớp với bước. Trong giới hạn $h$ nhỏ, nó mô phỏng một phương trình vi phân ngẫu nhiên có phân phối dừng đúng bằng $\pi$. Với bước hữu hạn thì không: khi dùng mà không có bước chấp nhận, nó là **thuật toán Langevin không hiệu chỉnh** (unadjusted Langevin algorithm), và phân phối dừng của nó hơi sai. Thêm một bước hiệu chỉnh MH (thuật toán Langevin hiệu chỉnh Metropolis, Metropolis-adjusted Langevin algorithm) loại bỏ độ chệch, nhưng bước hiệu chỉnh đó cần năng lượng trên toàn bộ tập dữ liệu (Roberts và Tweedie, 1996).
+
+Với một phân phối mục tiêu Gauss, có thể tính được sai số. Viết năng lượng dưới dạng $U(\theta) = \frac{1}{2}(\theta - m)^\top \Lambda(\theta - m)$ với ma trận độ chính xác $\Lambda$. Khi đó phép cập nhật là tuyến tính, và hiệp phương sai dừng $\Sigma_h$ của nó thỏa mãn $\Sigma_h = (I - h\Lambda)\,\Sigma_h\,(I - h\Lambda) + 2h I$, từ đó
+
+$$
+\Sigma_h = \Big(\Lambda\,\big(I - \tfrac{h}{2}\Lambda\big)\Big)^{-1}.
+$$
+
+Mỗi phương sai hậu nghiệm $1/\lambda$, với $\lambda$ là một trị riêng của $\Lambda$, bị phóng đại bởi hệ số $1/(1 - h\lambda/2)$. Các hướng cứng (stiff) nhất, những hướng có $\lambda$ lớn nhất và độ rộng hậu nghiệm nhỏ nhất, bị biến dạng nhiều nhất. Bước cũng phải thỏa mãn $h < 2/\lambda_{\max}$, nếu không phép lặp sẽ phân kỳ, cùng giới hạn ổn định như hạ gradient.
+
+### 5.2 Động lực học Langevin gradient ngẫu nhiên
+
+**Động lực học Langevin gradient ngẫu nhiên** (Welling và Teh, 2011) thay $\nabla U$ trong phép cập nhật Langevin bằng ước lượng trên lô nhỏ của nó. Với một lô nhỏ $B$ gồm $\lvert B \rvert$ ví dụ,
+
+$$
+\nabla \tilde{U}(\theta) = -\frac{N}{\lvert B \rvert}\sum_{n \in B} \nabla \log p(y_n \mid x_n, \theta) - \nabla \log p(\theta),
+$$
+
+một ước lượng không chệch của $\nabla U(\theta)$, đúng như trong hạ gradient ngẫu nhiên (stochastic gradient descent, SGD). Thuật toán thu được là SGD với tốc độ học $h$ và nhiễu bổ sung có phương sai $2h$, và đó là lý do nó hấp dẫn đối với mạng nơ-ron: chi phí của nó không hơn chi phí huấn luyện.
+
+Lô nhỏ bổ sung một nguồn nhiễu thứ hai, bằng $h$ nhân với sai số gradient, có phương sai tỉ lệ với $h^2$. Nhiễu được bơm vào có phương sai $2h$, nên khi $h \to 0$ nhiễu bơm vào chiếm ưu thế và sai số lô nhỏ trở nên không đáng kể. Welling và Teh dùng các bước giảm dần theo vòng lặp $k$ sao cho $\sum_k h_k = \infty$ (xích có thể đi xa tùy ý) và $\sum_k h_k^2 < \infty$ (các sai số rời rạc hóa và sai số lô nhỏ tích lũy vẫn bị chặn), giống các điều kiện cổ điển của xấp xỉ ngẫu nhiên (stochastic approximation). Với những lịch bước như vậy, và các giả định chính quy phù hợp, các trung bình SGLD hội tụ về các kỳ vọng hậu nghiệm (Teh và cộng sự, 2016). Trong thực hành, một bước giảm dần làm xích chậm lại khi bước co nhỏ, và phần lớn các ứng dụng dùng một bước hằng nhỏ và chấp nhận một độ chệch.
+
+### 5.3 Đo độ chệch
+
+Ví dụ minh họa cho phép tách độ chệch thành hai phần của nó. Phần mở rộng dưới đây, được nối vào sau đoạn mã của mục 4, tính hiệp phương sai Langevin trên toàn bộ dữ liệu từ công thức ở mục 5.1 và chạy SGLD với $h = 2 \times 10^{-3}$ trong 200 000 bước, với lô nhỏ gồm 5 ví dụ và với cả 20 ví dụ.
+
+```python
+Lam = np.linalg.inv(S)                       # posterior precision
+h = 2e-3
+Sig = np.linalg.inv(Lam @ (np.eye(P) - h * Lam / 2))  # stationary covariance, full batch
+print(f"formula, full batch   : sd f(-2) {np.sqrt(phi[1] @ Sig @ phi[1]):.3f}")
+rng = np.random.default_rng(seed=5)
+for batch in [5, 20]:
+    f = sgld(200000, h, batch, rng)[20000:] @ phi[1]
+    print(f"simulated, batch {batch:2d}   : sd f(-2) {f.std():.3f}")
+```
+
+```text
+formula, full batch   : sd f(-2) 0.144
+simulated, batch  5   : sd f(-2) 0.156
+simulated, batch 20   : sd f(-2) 0.145
+```
+
+Độ lệch chuẩn hậu nghiệm chính xác tại $x^* = -2$ là 0.138. Riêng sai số rời rạc hóa, ở bước này, đã phóng đại nó lên 0.144 (công thức) hoặc 0.145 (mô phỏng, khớp trong phạm vi nhiễu của chính nó). Các lô nhỏ gồm 5 ví dụ phóng đại nó lên 0.156, nên ở bước này nhiễu gradient đóng góp sai số gấp khoảng hai lần sai số rời rạc hóa. Độ chệch ở đây khiêm tốn, khoảng 13% độ lệch chuẩn, nhưng nó mang tính hệ thống: chạy lâu hơn không làm giảm nó, và cả $\hat{R}$ lẫn cỡ mẫu hiệu dụng (mục 7) đều không phát hiện được nó nếu không có đáp án chính xác. Trị riêng lớn nhất của ma trận độ chính xác là 152, nên bước này bằng khoảng 15% (một phần bảy) giới hạn ổn định $2/152 = 0.013$.
+
+### 5.4 Monte Carlo Hamilton gradient ngẫu nhiên
+
+Dùng gradient trên lô nhỏ bên trong HMC không đơn giản như vẻ ngoài. Chen, Fox và Guestrin đã chỉ ra rằng động lực học HMC được điều khiển bởi các gradient có nhiễu, khi không có bước chấp nhận, không giữ phân phối hậu nghiệm là phân phối dừng: nhiễu gradient liên tục bơm năng lượng vào hệ (Chen và cộng sự, 2014). **HMC gradient ngẫu nhiên** (stochastic gradient HMC, SGHMC) của họ thêm một số hạng **ma sát** (friction) lấy bớt động lượng tỉ lệ với độ lớn của nó, cùng với nhiễu bơm vào, được chọn sao cho ma sát và nhiễu cân bằng nhau. Nếu nhiễu gradient được ước lượng, nhiễu bơm vào được giảm đi đúng lượng đó. Khi rời rạc hóa, SGHMC trông giống SGD với động lượng (phương pháp động lượng của loạt bài cơ sở) cộng thêm nhiễu, điều một lần nữa khiến nó dễ cài đặt vào mã huấn luyện có sẵn.
+
+Sau đó Ma, Chen và Fox mô tả một họ tổng quát các động lực học ngẫu nhiên có phân phối hậu nghiệm là phân phối dừng, chứa SGLD và SGHMC như các trường hợp riêng và đưa ra một công thức để xây dựng các động lực học khác, bao gồm các biến thể có tiền điều kiện (preconditioned) (Ma và cộng sự, 2015).
+
+## 6. Phân phối hậu nghiệm đa mode, bước tuần hoàn và hậu nghiệm lạnh
+
+### 6.1 Các xích ở lại trong một mode
+
+Ví dụ minh họa chỉ có một mode. Phân phối hậu nghiệm của một mạng có nhiều mode (bài thứ nhất, mục 4.2), ngăn cách bởi các vùng năng lượng cao mà một xích dựa trên gradient hiếm khi vượt qua. Một xích chạy với bước nhỏ khám phá tốt một mode và hoàn toàn không khám phá các mode khác. Đối với việc dự đoán, các bản sao sinh ra bởi tính đối xứng hoán vị không quan trọng, vì chúng cho cùng dự đoán; còn các mode phân biệt, cho dự đoán khác nhau, thì quan trọng. Câu trả lời thực tế thông thường là chạy nhiều xích từ các khởi tạo khác nhau, gần về tinh thần với các tổ hợp sâu (deep ensembles) của [bài thứ năm](/vi/blog/deep-ensembles).
+
+### 6.2 Bước tuần hoàn
+
+Zhang và cộng sự đề xuất thay vào đó là thay đổi bước theo chu kỳ (Zhang và cộng sự, 2020). Trong mỗi chu kỳ gồm $K$ bước, bước đi theo nửa đường cosin từ một giá trị lớn $h_0$ xuống gần bằng không,
+
+$$
+h_k = \frac{h_0}{2}\left[\cos\!\left(\frac{\pi\,(k \bmod K)}{K}\right) + 1\right],
+$$
+
+trong đó $k \bmod K$ là vị trí của bước $k$ trong chu kỳ của nó. Trong phần đầu, bước lớn, của mỗi chu kỳ, xích hành xử như một bộ tối ưu với tốc độ học cao và có thể rời khỏi mode hiện tại; trong phần cuối, bước nhỏ, nó lấy mẫu mode mà nó đã đến, và chỉ những trạng thái đó được giữ lại. Do đó mỗi chu kỳ đóng góp các mẫu từ một mode, có thể là một mode mới. Các tác giả báo cáo hiệu năng dự đoán tốt hơn SGLD với một bước giảm dần duy nhất trên các bộ dữ liệu chuẩn (benchmark) phân loại ảnh. Lịch bước này không bảo đảm rằng các mode được ghé thăm tỉ lệ với khối lượng hậu nghiệm của chúng, một tính chất mà không phương pháp nào đạt được ở quy mô này.
+
+### 6.3 Lấy mẫu có thể tốt đến mức nào?
+
+Izmailov và cộng sự đã chạy HMC trên toàn bộ dữ liệu cho các mạng phân loại ảnh hiện đại, với ngân sách tính toán lớn, để có một tham chiếu cho điều mà phân phối hậu nghiệm chính xác dự đoán (Izmailov và cộng sự, 2021). Các phép xấp xỉ rẻ hơn khác biệt đáng kể so với tham chiếu đó, và các tổ hợp sâu được báo cáo là gần với nó hơn một số phương pháp một mode; [bài thứ năm](/vi/blog/deep-ensembles) quay lại phép so sánh này. Những lần chạy tham chiếu như vậy rất hiếm, vì một mẫu HMC duy nhất của một mạng lớn tốn bằng nhiều lần huấn luyện. Chính chúng giúp ta có thể nói các phương pháp rẻ hơn của các bài sau tiến gần đến phân phối hậu nghiệm mà chúng xấp xỉ đến mức nào.
+
+### 6.4 Hiệu ứng hậu nghiệm lạnh
+
+Wenzel và cộng sự đã báo cáo một quan sát khó hiểu (Wenzel và cộng sự, 2020). Với SG-MCMC trên bài toán phân loại ảnh, các dự đoán được cải thiện khi phân phối hậu nghiệm được "làm lạnh", tức là được lấy mẫu từ
+
+$$
+\pi_T(\theta) \propto \exp\!\big(-U(\theta)/T\big)
+$$
+
+với một **nhiệt độ** (temperature) $T < 1$, làm phân phối hậu nghiệm nhọn hơn quanh các mode của nó; $T = 1$ là phân phối hậu nghiệm Bayes, và $T \to 0$ tiến tới tối ưu hóa. Nếu mô hình và tiên nghiệm là đúng, $T = 1$ sẽ là tối ưu, nên hiệu ứng này gợi ý rằng có điều gì đó bị đặc tả sai. Một số cách giải thích đã được đưa ra. Tăng cường dữ liệu (data augmentation) nhân số quan sát hiệu dụng lên mà không thay đổi hàm hợp lý tương ứng (Izmailov và cộng sự, 2021, quy phần lớn hiệu ứng cho nó). Các bộ dữ liệu chuẩn được tuyển chọn có ít nhiễu nhãn hơn mức hàm hợp lý giả định (Aitchison, 2021). Và các tiên nghiệm Gauss đẳng hướng trên trọng số có thể là những tiên nghiệm kém (Fortuin và cộng sự, 2022). Mức đóng góp của mỗi yếu tố phụ thuộc vào bối cảnh, và câu hỏi này chưa được giải quyết hoàn toàn. [Bài thứ bảy](/vi/blog/priors-symmetries-and-identifiability) bàn về phía tiên nghiệm.
+
+Bài học thực tế cho bài này hẹp hơn. Nhiệt độ là một núm vặn bổ sung làm thay đổi phân phối mục tiêu, nên các kết quả thu được với $T \neq 1$ không phải là các mẫu từ phân phối hậu nghiệm Bayes, và các báo cáo cần nêu nhiệt độ đã dùng.
+
+## 7. Chẩn đoán và thực hành
+
+Một xích không bao giờ tự thông báo rằng nó đã hội tụ. Các phép kiểm tra chuẩn tìm bằng chứng cho thấy nó chưa hội tụ.
+
+- **Nhiều xích.** Chạy ít nhất bốn xích từ các điểm xuất phát phân tán. **Hệ số giảm thang đo tiềm năng** (potential scale reduction) $\hat{R}$ so sánh phương sai giữa các xích với phương sai bên trong chúng, và các giá trị lớn hơn 1 rõ rệt cho thấy các xích chưa trộn lẫn (Gelman và Rubin, 1992). Vehtari và cộng sự khuyến nghị một phiên bản chuẩn hóa theo thứ hạng và ngưỡng 1.01 (Vehtari và cộng sự, 2021).
+- **Cỡ mẫu hiệu dụng** của mỗi đại lượng cần quan tâm, tính như ở mục 1.2, với mức tối thiểu thông thường là vài trăm.
+- **Theo dõi dự đoán, không theo dõi trọng số.** Do tính đối xứng hoán vị, từng trọng số của một mạng có thể nhảy giữa các giá trị tương đương trong khi dự đoán vẫn giữ nguyên, nên $\hat{R}$ trên trọng số có thể báo một vấn đề không ảnh hưởng đến phân phối dự đoán. Các giá trị hàm tại các đầu vào kiểm tra, như trong ví dụ minh họa, mới là những đại lượng quan trọng.
+- **Kiểm tra với một đáp án đã biết.** Như mục 4.3 đã cho thấy, một bộ lấy mẫu có một lỗi tinh vi hoặc một thiết lập tồi vẫn có thể vượt qua các phép kiểm tra nội tại. Một mô hình liên hợp, hoặc một tham chiếu chính xác ngắn, phát hiện được những gì các phép chẩn đoán bỏ sót.
+
+Với các mạng, việc lưu trữ cũng quan trọng: mỗi mẫu là một bản sao đầy đủ của các tham số. SG-MCMC trong thực tế giữ vài chục mẫu, cách xa nhau dọc theo xích (**tỉa mẫu**, thinning), và lấy trung bình các dự đoán của chúng.
+
+## 8. Ngoài việc lấy mẫu trọng số dựa trên gradient
+
+Các phương pháp ở trên lấy mẫu các tham số liên tục bằng gradient của một hàm hợp lý tính được. Một số họ liên quan nới lỏng một trong các giả định đó; loạt bài này không phát triển chúng thêm.
+
+- **Các bộ lấy mẫu Monte Carlo tuần tự** (sequential Monte Carlo, SMC) đưa một quần thể các mẫu có trọng số, gọi là các hạt (particle), đi qua một dãy phân phối từ tiên nghiệm đến hậu nghiệm, chẳng hạn bằng cách nâng hàm hợp lý lên một lũy thừa tăng dần từ 0 đến 1, với bước lấy mẫu lại và các bước MCMC giữa các giai đoạn (Del Moral và cộng sự, 2006). Quần thể chạy song song và các trọng số của nó cho một ước lượng của hàm hợp lý biên.
+- **Suy luận dựa trên mô phỏng** (simulation-based inference) giải quyết các mô hình có hàm hợp lý không tính được nhưng có thể mô phỏng, chẳng hạn các bộ mô phỏng khoa học. Các mạng nơ-ron được huấn luyện trên các cặp tham số và dữ liệu mô phỏng để xấp xỉ trực tiếp phân phối hậu nghiệm hoặc hàm hợp lý (Cranmer và cộng sự, 2020).
+- **Lấy mẫu độ chính xác thấp** (low-precision sampling) chạy SG-MCMC với trọng số hoặc gradient được lưu bằng ít bit, để giảm bộ nhớ và tính toán. Zhang, Wilson và De Sa đã phân tích SGLD với trọng số được lượng tử hóa và chỉ ra cách ngăn sai số lượng tử hóa làm chệch phân phối mục tiêu (Zhang và cộng sự, 2022).
+- **Lấy mẫu rời rạc** áp dụng khi một số tham số hoặc biến ẩn nhận giá trị rời rạc, như đối với các mặt nạ tỉa (pruning mask) hoặc các mạng nhị phân. Các đề xuất có thông tin (informed proposal) gán trọng số cho các trạng thái lân cận theo xác suất hậu nghiệm của chúng (Zanella, 2020), và gradient của một mở rộng liên tục của năng lượng có thể được dùng để chọn biến rời rạc nào cần thay đổi (Grathwohl và cộng sự, 2021).
+
+## 9. Bài tập
+
+**Bài tập 1.** Một xích MH bước ngẫu nhiên đề xuất một bước làm tăng năng lượng một lượng $\Delta U = 1.5$. Xác suất bước đó được chấp nhận là bao nhiêu? Nếu bước đó làm giảm năng lượng 1.5 thì sao?
+
+<details>
+<summary>Đáp án</summary>
+
+$e^{-1.5} = 0.223$ đối với bước đi lên. Bước đi xuống có tỉ số chấp nhận $e^{1.5} > 1$, nên nó được chấp nhận với xác suất 1.
+
+</details>
+
+**Bài tập 2.** Phân phối hậu nghiệm của một mô hình có độ lệch chuẩn trải từ 0.01 đến 2 dọc theo các hướng chính. Hãy ước lượng cần bao nhiêu bước ngẫu nhiên để băng qua hướng rộng nhất một lần, với độ dài bước bằng độ lệch chuẩn hẹp nhất.
+
+<details>
+<summary>Đáp án</summary>
+
+Khoảng $(2/0.01)^2 = 40\,000$ bước được chấp nhận, nhiều hơn nữa khi tính cả các lần bác bỏ. HMC với bước cùng cỡ sẽ băng qua cùng hướng đó trong khoảng $2/0.01 = 200$ bước leapfrog, vì chuyển động của nó dọc theo một quỹ đạo là có hướng chứ không khuếch tán.
+
+</details>
+
+**Bài tập 3.** Với ví dụ minh họa, hãy tính hệ số mà thuật toán Langevin không hiệu chỉnh với $h = 2 \times 10^{-3}$ phóng đại phương sai theo hướng cứng nhất ($\lambda_{\max} = 152$). Bước nào sẽ đưa mức phóng đại đó xuống còn 1%?
+
+<details>
+<summary>Đáp án</summary>
+
+$1/(1 - 0.002 \times 152/2) = 1/0.848 = 1.18$, phương sai bị phóng đại 18% (độ lệch chuẩn 9%). Để còn 1%, $h\lambda/2 \approx 0.01$, nên $h \approx 0.02/152 = 1.3 \times 10^{-4}$, nhỏ hơn khoảng 15 lần, và khi đó xích cần nhiều bước hơn khoảng 15 lần để đi được cùng quãng đường theo các hướng rộng.
+
+</details>
+
+**Bài tập 4.** Trong bảng ở mục 4.2, SGLD với bước nhỏ hơn có độ lệch chuẩn tại $x^* = -2$ chính xác hơn và kỳ vọng tại $x^* = 0$ kém chính xác hơn. Hãy giải thích cả hai.
+
+<details>
+<summary>Đáp án</summary>
+
+Bước nhỏ hơn làm giảm cả hai nguồn độ chệch của mục 5.3, vốn quan trọng nhất theo các hướng cứng quyết định $f(-2)$. Nhưng trong cùng số bước, xích đi được "thời gian" ít hơn mười lần ($80\,000 \times 2 \times 10^{-4} = 16$ so với 160), quá ngắn để đạt cân bằng theo các hướng rộng quyết định $f(0)$, có phương sai hậu nghiệm gần 1. Kỳ vọng ở đó vẫn phản ánh điểm xuất phát.
+
+</details>
+
+**Bài tập 5.** Dùng cân bằng chi tiết, chứng minh rằng một bước MH bước ngẫu nhiên xuất phát từ một trạng thái rút từ $\pi$ giữ nguyên phân phối $\pi$.
+
+<details>
+<summary>Đáp án</summary>
+
+Mật độ sau một bước là $\int \pi(\theta)\, \mathcal{T}(\theta' \mid \theta)\, d\theta$. Theo cân bằng chi tiết, đại lượng này bằng $\int \pi(\theta')\, \mathcal{T}(\theta \mid \theta')\, d\theta = \pi(\theta') \int \mathcal{T}(\theta \mid \theta')\, d\theta = \pi(\theta')$, vì một mật độ chuyển trạng thái có tích phân bằng 1 trên điểm đến của nó (trường hợp bác bỏ, ở lại $\theta'$, được bao gồm trong $\mathcal{T}$ dưới dạng một khối lượng điểm).
+
+</details>
+
+## 10. Tóm tắt
+
+| Phương pháp | Sử dụng | Chính xác trong giới hạn? | Điểm yếu chính |
+|---|---|---|---|
+| Metropolis–Hastings bước ngẫu nhiên | Hiệu năng lượng | Có | Khuếch tán; bước bị giới hạn bởi hướng hẹp nhất |
+| Monte Carlo Hamilton | Gradient và năng lượng trên toàn bộ dữ liệu | Có (bước chấp nhận) | Chi phí toàn bộ dữ liệu cho mỗi bước; điều chỉnh $h$, $L$, $\Gamma$ |
+| Langevin không hiệu chỉnh | Gradient trên toàn bộ dữ liệu | Chỉ khi $h \to 0$ | Phóng đại các hướng cứng nhất theo hệ số $1/(1 - h\lambda/2)$ |
+| SGLD | Gradient trên lô nhỏ | Chỉ với bước giảm dần | Độ chệch do rời rạc hóa cộng nhiễu gradient ở bước cố định |
+| SGHMC | Gradient trên lô nhỏ, ma sát | Chỉ khi $h \to 0$ | Cần một ước lượng nhiễu; cùng sự đánh đổi về độ chệch |
+| SG-MCMC tuần hoàn | Gradient trên lô nhỏ, $h$ tuần hoàn | Không có bảo đảm giữa các mode | Tỉ lệ giữa các mode không được kiểm soát |
+
+Ví dụ minh họa đã đo đúng những gì bảng nêu. Trên một phân phối hậu nghiệm đã biết với dải độ rộng chênh nhau 12 lần, HMC cho số mẫu hiệu dụng gần gấp 30 lần bước ngẫu nhiên với cùng chi phí và khớp với đáp án chính xác; SGLD rẻ trên mỗi bước nhưng bị chệch rõ rệt ở một bước có giá trị thực tế. Với các mạng, các bộ lấy mẫu này vẫn là tham chiếu để đánh giá các phép xấp xỉ, nhưng chi phí của chúng giới hạn chúng ở các mô hình nhỏ hoặc các ngân sách đặc biệt.
+
+Bài tiếp theo, [Xấp xỉ Laplace và phân phối dự đoán tuyến tính hóa](/vi/blog/laplace-approximations), đi theo con đường ngược lại. Thay vì khám phá phân phối hậu nghiệm, nó huấn luyện một mạng đến một mode và khớp một phân phối Gauss tại đó từ độ cong cục bộ, với chi phí chỉ cao hơn chi phí huấn luyện một chút.
+
+### Tài liệu tham khảo
+
+- L. Aitchison, "A statistical theory of cold posteriors in deep neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2021.
+- A. Beskos, N. Pillai, G. Roberts, J.-M. Sanz-Serna and A. Stuart, "Optimal tuning of the hybrid Monte Carlo algorithm," *Bernoulli*, vol. 19, no. 5A, pp. 1501–1534, 2013.
+- T. Chen, E. B. Fox and C. Guestrin, "Stochastic gradient Hamiltonian Monte Carlo," in *Proceedings of the 31st International Conference on Machine Learning (ICML)*, 2014.
+- K. Cranmer, J. Brehmer and G. Louppe, "The frontier of simulation-based inference," *Proceedings of the National Academy of Sciences*, vol. 117, no. 48, pp. 30055–30062, 2020.
+- P. Del Moral, A. Doucet and A. Jasra, "Sequential Monte Carlo samplers," *Journal of the Royal Statistical Society, Series B*, vol. 68, no. 3, pp. 411–436, 2006.
+- S. Duane, A. D. Kennedy, B. J. Pendleton and D. Roweth, "Hybrid Monte Carlo," *Physics Letters B*, vol. 195, no. 2, pp. 216–222, 1987.
+- V. Fortuin et al., "Bayesian neural network priors revisited," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- A. Gelman and D. B. Rubin, "Inference from iterative simulation using multiple sequences," *Statistical Science*, vol. 7, no. 4, pp. 457–472, 1992.
+- C. J. Geyer, "Practical Markov chain Monte Carlo," *Statistical Science*, vol. 7, no. 4, pp. 473–483, 1992.
+- W. Grathwohl, K. Swersky, M. Hashemi, D. Duvenaud and C. J. Maddison, "Oops I took a gradient: Scalable sampling for discrete distributions," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- W. K. Hastings, "Monte Carlo sampling methods using Markov chains and their applications," *Biometrika*, vol. 57, no. 1, pp. 97–109, 1970.
+- M. D. Hoffman and A. Gelman, "The No-U-Turn sampler: Adaptively setting path lengths in Hamiltonian Monte Carlo," *Journal of Machine Learning Research*, vol. 15, pp. 1593–1623, 2014.
+- P. Izmailov, S. Vikram, M. D. Hoffman and A. G. Wilson, "What are Bayesian neural network posteriors really like?," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- Y.-A. Ma, T. Chen and E. B. Fox, "A complete recipe for stochastic gradient MCMC," in *Advances in Neural Information Processing Systems 28*, 2015.
+- N. Metropolis, A. W. Rosenbluth, M. N. Rosenbluth, A. H. Teller and E. Teller, "Equation of state calculations by fast computing machines," *Journal of Chemical Physics*, vol. 21, no. 6, pp. 1087–1092, 1953.
+- R. M. Neal, "MCMC using Hamiltonian dynamics," in S. Brooks, A. Gelman, G. L. Jones and X.-L. Meng (eds.), *Handbook of Markov Chain Monte Carlo*, Chapman and Hall/CRC, 2011.
+- G. O. Roberts, A. Gelman and W. R. Gilks, "Weak convergence and optimal scaling of random walk Metropolis algorithms," *Annals of Applied Probability*, vol. 7, no. 1, pp. 110–120, 1997.
+- G. O. Roberts and R. L. Tweedie, "Exponential convergence of Langevin distributions and their discrete approximations," *Bernoulli*, vol. 2, no. 4, pp. 341–363, 1996.
+- Y. W. Teh, A. H. Thiery and S. J. Vollmer, "Consistency and fluctuations for stochastic gradient Langevin dynamics," *Journal of Machine Learning Research*, vol. 17, 2016.
+- A. Vehtari, A. Gelman, D. Simpson, B. Carpenter and P.-C. Bürkner, "Rank-normalization, folding, and localization: An improved R-hat for assessing convergence of MCMC," *Bayesian Analysis*, vol. 16, no. 2, pp. 667–718, 2021.
+- M. Welling and Y. W. Teh, "Bayesian learning via stochastic gradient Langevin dynamics," in *Proceedings of the 28th International Conference on Machine Learning (ICML)*, 2011.
+- F. Wenzel et al., "How good is the Bayes posterior in deep neural networks really?," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
+- G. Zanella, "Informed proposals for local MCMC in discrete spaces," *Journal of the American Statistical Association*, vol. 115, no. 530, pp. 852–865, 2020.
+- R. Zhang, C. Li, J. Zhang, C. Chen and A. G. Wilson, "Cyclical stochastic gradient MCMC for Bayesian deep learning," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2020.
+- R. Zhang, A. G. Wilson and C. De Sa, "Low-precision stochastic gradient Langevin dynamics," in *Proceedings of the 39th International Conference on Machine Learning (ICML)*, 2022.

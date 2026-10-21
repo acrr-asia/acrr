@@ -3,12 +3,13 @@
 - Series: `bayesian-deep-learning` (10 articles, status published, 0 planned entries)
 - Reviewed commit: 6cdf06e
 - Date: 2026-10-21
+- Content hash: sha256:9f8502ae020e344e5e0631a776381e85e000763e449bf900603e7ae31378a273
 
 ## Summary
 
 This is the independent second-pass review of the complete series. A first wave reviewed it before: findings D1–D37 covered entries 1–5 (6 blocking, 18 should fix, 13 optional) and E1–E28 covered entries 6–10 and the overview (0 blocking, 11 should fix including E25, which would have been blocking without the owner's confirmation, and 17 optional). All 65 were checked against the current text, and 61 are fully resolved. D21 and the E15/E26 notation alignment were applied incompletely, and D35 was resolved only approximately. These residues appear below as S4, S5 and S12. The series is technically strong. All ten listings run under Python 3.13.16 and NumPy 2.5.3 and reproduce their quoted output exactly. Every derived number checked in the prose is correct, including the memory figures of entry 8 (400 TB = 363.8 TiB; 4 TiB, 8 MiB and 17 MiB blocks). Three blocking problems remain. One is a false internal cross-reference in entry 5 left over from the section renumbering. The other two are single sentences that closely paraphrase the source collection, in entries 6 and 10. The should-fix findings are mostly about consistency: leftover symbols that the conventions file reserves, reference formats that differ from entry to entry and break the binding conventions, and one misdirected forward reference. The Kronecker product is also used without being introduced. The series is not ready as published until S1–S3 are fixed; the remaining findings are quick edits.
 
-Findings: 3 blocking, 8 should fix, 7 optional.
+Findings: 3 blocking, 9 should fix, 8 optional (second pass S1–S18 and third pass T1–T2; all blocking and should-fix findings are resolved, see Resolution).
 
 ## Resolution
 
@@ -80,7 +81,34 @@ First-wave findings (verified against commit 6cdf06e by this review):
 - E27: resolved. Sequence rationale stated.
 - E28: resolved. Python 3.13 and NumPy 2.5.3 stated once in the overview.
 
-Second-pass findings: to be resolved.
+### Second pass
+
+Second-pass findings (resolved in commit ae8d3c0, verified by the third pass below):
+
+- S1: resolved. Entry 5 Section 2.1 now refers to the average-noise term of Section 1.3.
+- S2: resolved. Entry 6 Section 5.1 prediction sentence rewritten ("For a test input $x^*$, the trained network is run once ..."); no n-gram hit on it against part05.
+- S3: resolved. Entry 10 Section 6.2 myopic and amortized sentences rewritten; no n-gram hit against part10.
+- S4: resolved. Entry 4 Section 4.1 writes $M$ in both prose occurrences.
+- S5: resolved. Entry 7 line 38 "$v_j$ has variance $s_v^2$"; entry 6 uses $s_v$, $s_w$, $s_b$ in Sections 3.1 and 3.3 (prose and displays). No $\sigma_v$, $\sigma_w$ or $\sigma_b$ remains in the series.
+- S6: resolved. Entry 6 Section 3.2 uses $V$ (variance and kurtosis formula), Section 3.3 $\Sigma^{(l)}$. Remaining $\Lambda$ uses are precisions or output-space curvatures.
+- S7: resolved. Entry 1 Section 5 says the eighth entry collects the first two combinations and links the tenth for subspace inference.
+- S8: resolved. NeurIPS volume numbers added in entries 3, 4, 7 and 8 (all pairs consistent: conference year − 1987, or the publication year for Williams (1997) vol. 9 and Williams and Seeger (2001) vol. 13); one ICLR form ("in *Proceedings of the International Conference on Learning Representations (ICLR)*") everywhere; sentence-case titles in all ten entries; Maddox et al. (2019) "W. J. Maddox, T. Garipov, P. Izmailov, D. Vetrov and A. G. Wilson" in entries 5 and 8; "D. Vetrov" throughout; Daxberger et al. (2021) in one form. A script finds no work cited in two forms. No pages or volumes beyond the NeurIPS numbers were added.
+- S9: resolved. Entry 3 Section 2.3 defines the Kronecker product; entry 8 Section 3.1 points to it.
+- S10: partly resolved. Entry 5 Section 1.4 uses $\mathbb{H}$ and $\log$, and entry 6 Sections 2.3–2.4 use $\log$; but entry 5 Section 8.1 still writes $\ln$ twice in prose under a display that now uses $\log$ (see T1).
+- S11: resolved. Entry 9 Section 4.1 and entry 6 Section 1.2 reworded; remaining n-gram hits on entry 6 line 37 are standard terms.
+- S12: resolved. Caption and generator `<desc>` give 3.2 to 5.0, below −5.1 and above 5.8; recomputed crossings −5.06, 3.23, 4.96 and 5.76 agree.
+- S13: resolved. Entry 3 Section 3.3 names *The evidence framework applied to classification networks*.
+- S14: resolved. Entry 10 *Open* items at lines 50, 190 and 236 now end in questions, with context first.
+- S15: resolved. Entry 4 Section 2.2 "with ReLU activations, scaling one layer up ...".
+- S16: resolved. Overview notation paragraph adds $s_0$ ($\alpha = 1/s_0^2$), $M$ and $J$.
+- S17: resolved. Entry 2 Section 5.3 "neither $\hat{R}$ nor the effective sample size (Section 7)".
+- S18: resolved. "post-hoc uncertainty", "parameterization" and "Gauss–Newton"; no variant remains.
+
+### Third pass (verification)
+
+An independent verifier checked commit ae8d3c0 against S1–S18, re-ran every listing, re-checked every cross-entry reference, repeated the originality scan and ran the site checks. Seventeen of the eighteen second-pass findings are fully resolved, and the renames are applied consistently: no $\sigma_v$, $\sigma_w$, $\sigma_b$, $\Lambda^{(l)}$, prose $S$ for a sample count, $H[\cdot]$ for entropy, "NeurIPS)" without volume, bare ICLR form, "D. P. Vetrov", "post hoc", "parametrization" or "Gauss-Newton" remains in the ten entries. The changed formulas are still correct (the Kronecker definition matches the column-stacked $\operatorname{vec}(W)$ of entry 8; the kurtosis formula with $V$ and the NNGP recursion with $\Sigma^{(l)}$ are unchanged in substance). All 22 listings reproduce their quoted output exactly. All cross-entry section references resolve to the current headings. The 6-word scan found no run of six or more words outside standard terms, formulas and generic phrases. One residue of S10 remains (T1, should fix), and entry 8 has one optional $\ln$ (T2). No blocking problem remains; the series is publishable once T1 is fixed.
+
+Resolution of the third pass (lead): T1 fixed: entry 5 Section 8.1 now writes $\log(2\sqrt{2000}/0.05) \approx 7.49$ and $\mathrm{KL} = \log 5 \approx 1.61$, matching the displayed bound. T2 applied: entry 8 Section 6 now writes $2000 / \log 2 \approx 2885$ bits. The same two edits were made in the Vietnamese translations. No `\ln` remains in the series; no blocking or should-fix finding remains open.
 
 ## Objectives coverage
 
@@ -114,6 +142,8 @@ Second-pass findings: to be resolved.
 | S16 | Optional | `src/content/series/bayesian-deep-learning.md` | line 22 | Overview completeness | The shared-notation paragraph omits the series-wide symbols $s_0$, $M$, $J$ and the reserved $S$ and $\Lambda$. |
 | S17 | Optional | `src/content/blog/sampling-the-posterior-mcmc.mdx` | Section 5.3 (line 278) | Writing quality | "neither diagnostic of Section 7": Section 7 lists four checks, two of which are diagnostics. |
 | S18 | Optional | entries 3 and 6 | entry 3 line 3; entry 6 lines 266, 268 | Terminology | "post hoc uncertainty" (modifier), "parametrization" and "Gauss-Newton" (hyphen) differ from the series forms "post-hoc", "parameterization" and "Gauss–Newton". |
+| T1 | Should fix | `src/content/blog/deep-ensembles.mdx` | Section 8.1 (line 315) | Notation | Residue of S10: the prose writes $\ln(2\sqrt{2000}/0.05)$ and $\mathrm{KL} = \ln 5$ directly under the bound at line 310, which now writes $\log$. |
+| T2 | Optional | `src/content/blog/scaling-bayesian-deep-learning.mdx` | Section 6 (line 252) | Notation | "$2000 / \ln 2 \approx 2885$ bits" is the only other $\ln$ in the series; the series writes $\log$ for natural logarithms. |
 
 ### S1. False section reference after renumbering
 - **Where:** `src/content/blog/deep-ensembles.mdx:75`, section "2.1 Setup"
@@ -224,6 +254,18 @@ Second-pass findings: to be resolved.
 - **Problem:** The series forms are "post-hoc" before a noun (E19), "parameterization" (entries 3 and 4) and "Gauss–Newton" with an en dash (entries 3 and 8).
 - **Recommended correction:** "post-hoc uncertainty"; "parameterization"; "Gauss–Newton".
 
+### T1. Natural logarithm still written $\ln$ in entry 5, Section 8.1
+- **Where:** `src/content/blog/deep-ensembles.mdx:315`, section "8.1 Frequentist bounds with a prior"
+- **Text:** "the logarithmic term is $\ln(2\sqrt{2000}/0.05) \approx 7.49$"; "costs $\mathrm{KL} = \ln 5 \approx 1.61$".
+- **Problem:** The S10 resolution changed the displayed bound at line 310 to $\log(2\sqrt{N}/\delta)$ and states that all $\ln$ in entry 5 became $\log$, but these two prose occurrences were missed. The same quantity is now written two ways in consecutive paragraphs. The numbers are correct (recomputed 7.489, 0.043 and 0.048).
+- **Recommended correction:** "$\log(2\sqrt{2000}/0.05) \approx 7.49$" and "$\mathrm{KL} = \log 5 \approx 1.61$".
+
+### T2. One $\ln$ in entry 8
+- **Where:** `src/content/blog/scaling-bayesian-deep-learning.mdx:252`
+- **Text:** "can be communicated in about $2000 / \ln 2 \approx 2885$ bits"
+- **Problem:** Correct (2885.4), and $\ln 2$ is a common way to write a nats-to-bits conversion, but the series otherwise writes $\log$ for natural logarithms.
+- **Recommended correction:** "$2000 / \log 2 \approx 2885$ bits", or leave as is.
+
 ## Concept introduction map
 
 | Concept | First used (path:line) | Introduced where (path:line, or "not introduced") | Assessment |
@@ -310,3 +352,15 @@ Second-pass findings: to be resolved.
   - Empirical results attributed to cited papers. Examples: Lee et al. (2018), Arora et al. (2019), Ovadia et al. (2019), Fort et al. (2019), Shen et al. (2024), Yang et al. (2024), Kadavath et al. (2022), Kuhn et al. (2023), Hollmann et al. (2025, "up to 10 000 samples"), Falck et al. (2024) and Tran et al. (2022).
   - Entry 8's SWAG memory row ("$P$ to $(r + 2)P$").
   - The overview's statement about who authored the source collection, which the owner confirmed.
+- Third pass (verification of commit ae8d3c0, 2026-10-21):
+  - `npm run build:local`: exit 0; `astro check` 0 errors; Pagefind indexed 2 languages and 138 pages; localhost warning from `check-site-url` as expected for a local build.
+  - `npm run check:links`: 417 pages and 13 204 internal references; all resolve.
+  - `npm run -s eos -- validate-site`: 417 pages; no issues.
+  - `npm run -s eos -- lint --quiet`: 86 files, 0 errors, 1 warning (`signals-and-systems-in-discrete-time.mdx:27`, outside this series). On the 11 series files: 0 errors, 0 warnings, 33 suggestions.
+  - Listings: all 22 Python blocks extracted afresh and run per entry under Python 3.13.16 and NumPy 2.5.3; every quoted output matches exactly (entry 2 15.8 s, entry 5 7.1 s, entry 7 50.0 s, the rest under 4 s).
+  - Recomputed: entry 5 band crossings −5.06, 3.23, 4.96 and 5.76 (scan of $[-7, 7]$ in steps of 0.005) agree with the new caption and `<desc>`; entry 5 PAC terms 7.489, 0.043 and 0.048; entry 8 2000 / ln 2 = 2885.4.
+  - Residue grep over the ten entries for $\sigma_v$, $\sigma_w$, $\sigma_b$, $\ln$, $H[$, "(NeurIPS)", the bare ICLR form, "D. P. Vetrov", "Laplace Redux", "minibatch", "post hoc", "parametrization" and "Gauss-Newton": only the two $\ln$ lines of T1 and T2.
+  - References: script check of the ten reference lists finds no work cited in two forms, no title-case title, no NeurIPS entry without volume and no non-standard ICLR form; every NeurIPS volume matches its year. The fix commit adds no pages.
+  - Cross-references: every "entry N, Section X" and "Section X of the [Nth entry]" reference re-checked against the current headings (e2→e1 §4.2 twice, e5→e1 §2.2, §3 and Exercise 1, e8→e3 §2.3, e9→e1 §2.2, e10→e9 §2 and §5, e10→e7 §4.2); all correct.
+  - Originality: `d15/ngram.py` (5-grams) and a maximal-run scan (6 words and more) of each entry body without code and references against its source parts (1: part01+part06; 2: part01; 3: part02; 4: part03; 5: part04; 6: part05; 7: part06+part07; 8: part08; 9: part09+part10; 10: part10). Longest run 9 words, "the true conditional distribution of y given x and" (entry 10:254, a standard formulation in an unrelated context); all other runs of 6–7 words are terms or generic phrases ("the maximum a posteriori MAP estimate", "known as the neural tangent kernel NTK", "a single GP with a stationary kernel"). No hit on the rewritten S2, S3 and S11 sentences.
+  - `eos status`: all 11 series files `needs-review` (no review records yet), as expected before recording.

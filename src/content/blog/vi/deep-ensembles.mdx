@@ -1,0 +1,410 @@
+---
+title: "Tập hợp mô hình sâu và cách diễn giải Bayes của chúng"
+description: "Huấn luyện một mạng nhiều lần từ các seed khác nhau cho một mốc so sánh mạnh về độ bất định; bài này hỏi nó xấp xỉ điều gì và khi nào nó thất bại."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - deep ensembles
+  - uncertainty
+  - pac-bayes
+series: bayesian-deep-learning
+seriesOrder: 5
+---
+import Figure from '../../../components/Figure.astro';
+import BdlEnsembleDisagreement from '../../../components/diagrams/BdlEnsembleDisagreement.astro';
+
+[Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) đã định nghĩa phân phối dự đoán hậu nghiệm (posterior predictive distribution), tức trung bình các dự đoán của mạng theo phân phối hậu nghiệm (posterior) $p(\theta \mid \mathcal{D})$. Ba bài tiếp theo xấp xỉ trung bình đó theo những cách khác nhau: [phương pháp Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC)](/vi/blog/sampling-the-posterior-mcmc) rút mẫu từ phân phối hậu nghiệm, [xấp xỉ Laplace](/vi/blog/laplace-approximations) khớp một phân phối Gauss tại một mode, và [suy luận biến phân (variational inference, VI)](/vi/blog/variational-inference-for-neural-networks) tối ưu hóa một thành viên của một họ phân phối dễ tính toán. Hai phương pháp sau cùng đều chỉ mô tả lân cận của một mode duy nhất.
+
+Bài này đi theo hướng ngược lại. Thay vì mô tả cẩn thận một mode, nó mô tả thô sơ nhiều mode, mỗi mode bằng một mạng đã huấn luyện. Lakshminarayanan, Pritzel và Blundell (2017) đề xuất công thức này, **tập hợp mô hình sâu** (deep ensemble), như một cách thu được độ bất định dự đoán mà không phải thay đổi mạng hay mã huấn luyện, và họ biện minh cho nó bằng kết quả chứ không bằng quy tắc Bayes. Từ đó nó đã trở thành một mốc so sánh chuẩn cho các phương pháp đo độ bất định khác, và thường đứng vững trong các so sánh đó (Ovadia et al., 2019). Bài này xây dựng một tập hợp mô hình trên một bài toán đơn giản và hỏi nó thực hiện những phần nào của suy luận Bayes và bỏ qua những phần nào. Sau đó bài trình bày ba phần mở rộng: neo các thành viên để chúng trở thành mẫu hậu nghiệm chính xác trong trường hợp tuyến tính – Gauss, thêm độ phân tán quanh mỗi thành viên, và chọn trọng số của các thành viên với một bảo đảm theo trường phái tần suất.
+
+Các ví dụ dùng Python 3.13 và NumPy 2.5.3, với các seed được ghi trong mã. Ký hiệu theo quy ước của loạt bài: $\theta$ là tham số, $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ là dữ liệu, $x^*$ và $y^*$ là một đầu vào kiểm tra và đầu ra của nó. Việc huấn luyện một mạng đơn lẻ dựa trên nội dung về [hạ gradient (gradient descent)](/blog/gradient-descent-and-its-variants) và [chính quy hóa (regularization)](/blog/generalization-overfitting-and-regularization) của loạt bài nền tảng.
+
+## 1. Nhiều mạng đã huấn luyện, một dự đoán
+
+### 1.1 Vì sao huấn luyện lại cho một mạng khác
+
+Khớp các mô hình tuyến tính của loạt bài nền tảng là một bài toán lồi: chỉ có một cực tiểu, và mọi điểm xuất phát đều dẫn tới nó. Huấn luyện một mạng thì không như vậy. Hàm mất mát của mạng có nhiều cực tiểu, và hạ gradient đi tới cực tiểu nào phụ thuộc vào khởi tạo ngẫu nhiên và thứ tự ngẫu nhiên của các mini-batch. Hai lần chạy đạt cùng một mất mát huấn luyện vẫn có thể tính những hàm khác nhau, vì dữ liệu chỉ ràng buộc hàm ở gần các đầu vào huấn luyện. Giữa các đầu vào đó và bên ngoài chúng, mỗi lần chạy điền vào hàm tùy theo nơi nó xuất phát. Tập hợp mô hình sâu biến sự khác biệt này, vốn thường bị coi là một phiền toái của huấn luyện, thành một thước đo độ bất định.
+
+### 1.2 Phân phối dự đoán của tập hợp
+
+Một tập hợp mô hình sâu gồm $J$ **thành viên** (member) là $J$ bản sao của một kiến trúc, được huấn luyện độc lập trên toàn bộ tập dữ liệu từ các khởi tạo ngẫu nhiên độc lập, cho các tham số $\hat\theta_1, \dots, \hat\theta_J$. Nó dự đoán bằng trung bình có trọng số bằng nhau của các phân phối dự đoán của các thành viên,
+
+$$
+p_{\text{ens}}(y^* \mid x^*) = \frac{1}{J} \sum_{j=1}^{J} p(y^* \mid x^*, \hat\theta_j).
+$$
+
+Khi hàm mục tiêu huấn luyện có một số hạng phạt trọng số, mỗi $\hat\theta_j$ là một ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP) cục bộ, như mục 2.1 sẽ chỉ rõ cho ví dụ đơn giản. Trong các thí nghiệm hồi quy của Lakshminarayanan et al. (2017), mỗi mạng có hai đầu ra, một giá trị trung bình và một phương sai, và được huấn luyện bằng cách cực tiểu hóa log-hàm hợp lý (likelihood) âm của phân phối Gauss. Hàm mất mát đó là một **quy tắc chấm điểm chuẩn** (proper scoring rule): giá trị kỳ vọng của nó nhỏ nhất khi phân phối dự đoán trùng với phân phối thật (Gneiting và Raftery, 2007), nên nó thưởng cho cả phương sai trung thực lẫn giá trị trung bình chính xác. Các tác giả cũng thử thêm các mẫu đối kháng (adversarial example) vào dữ liệu huấn luyện như một biện pháp làm trơn, và dùng năm thành viên trong phần lớn các thí nghiệm.
+
+Ý tưởng lấy trung bình các mạng được huấn luyện riêng rẽ có từ trước. Hansen và Salamon (1990) dùng nó để giảm sai số phân loại, và *bagging* (Breiman, 1996) cho mỗi thành viên một mẫu tái lấy bootstrap khác nhau của dữ liệu. Lakshminarayanan et al. nhận thấy việc tái lấy mẫu là không cần thiết với mạng nơ-ron: các seed và thứ tự dữ liệu khác nhau đã tạo đủ sự đa dạng, và mọi thành viên đều có thể dùng toàn bộ dữ liệu.
+
+Cái giá phải trả có mặt ở mọi giai đoạn. Năm thành viên ở mục 2 cần lượng tính toán huấn luyện gấp năm lần một mạng, bộ nhớ gấp năm lần và năm lượt lan truyền xuôi cho mỗi dự đoán. Huấn luyện chúng đồng thời trên năm thiết bị rút ngắn thời gian chờ nhưng không làm thay đổi tổng lượng tính toán.
+
+### 1.3 Tách phương sai dự đoán
+
+Trong hồi quy với hàm hợp lý Gauss, thành viên $j$ dự đoán $\mathcal{N}\big(\mu_j(x^*), \sigma_j^2(x^*)\big)$, trong đó $\sigma_j^2$ là phương sai nhiễu mà thành viên đó gán cho dữ liệu, được học hoặc cố định. Rút một mẫu từ phân phối dự đoán của tập hợp nghĩa là chọn ngẫu nhiên đều một thành viên rồi rút từ phân phối Gauss của nó. Giá trị trung bình của mẫu đó là trung bình các giá trị trung bình của các thành viên, $\bar\mu(x^*) = \frac{1}{J}\sum_j \mu_j(x^*)$. Mômen bậc hai của nó là trung bình các mômen bậc hai của các thành viên, $\frac{1}{J}\sum_j \big(\sigma_j^2 + \mu_j^2\big)$, và trừ đi $\bar\mu^2$ ta được phương sai
+
+$$
+v(x^*) = \underbrace{\frac{1}{J}\sum_{j=1}^J \sigma_j^2(x^*)}_{\text{average noise}} \;+\; \underbrace{\frac{1}{J}\sum_{j=1}^J \big(\mu_j(x^*) - \bar\mu(x^*)\big)^2}_{\text{disagreement}}.
+$$
+
+Số hạng thứ nhất (nhiễu trung bình) ước lượng phần **ngẫu nhiên** (aleatoric) của độ bất định, tức nhiễu mà các thành viên thấy trong dữ liệu. Số hạng thứ hai (độ bất đồng), độ phân tán của các giá trị trung bình của các thành viên, ước lượng phần **nhận thức** (epistemic), tức độ bất định về hàm mà thêm dữ liệu sẽ loại bỏ; [bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) đã giới thiệu cả hai. Hai con số này tóm tắt một phân phối dự đoán mà bản thân nó là một hỗn hợp của $J$ phân phối Gauss và có thể lệch hoặc có nhiều đỉnh.
+
+### 1.4 Phân loại: lấy trung bình các xác suất
+
+Trong phân loại, mỗi thành viên đưa ra một vector xác suất các lớp $p_j = p(y^* \mid x^*, \hat\theta_j)$, và tập hợp lấy trung bình các vector này, $\bar p = \frac{1}{J}\sum_j p_j$. Lấy trung bình các logit của các thành viên (đầu vào của hàm softmax) cho một bộ dự đoán khác và nói chung tự tin hơn, không phải hỗn hợp ở trên.
+
+[Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) (mục 2.2) đã tách entropy của một phân phối dự đoán hậu nghiệm thành entropy kỳ vọng (phần ngẫu nhiên) và thông tin tương hỗ (mutual information) giữa dự đoán và tham số (phần nhận thức; Depeweg et al., 2018). Cách tách tương tự áp dụng cho tập hợp, với trung bình theo phân phối hậu nghiệm được thay bằng trung bình theo các thành viên:
+
+$$
+\mathbb{H}[\bar p] = \underbrace{\frac{1}{J}\sum_{j=1}^J \mathbb{H}[p_j]}_{\text{expected entropy}} + \underbrace{\Big(\mathbb{H}[\bar p] - \frac{1}{J}\sum_{j=1}^J \mathbb{H}[p_j]\Big)}_{\text{mutual information}} ,
+$$
+
+trong đó $\mathbb{H}[p] = -\sum_c p_c \log p_c$ là entropy của một vector xác suất. Số hạng thứ hai bằng không khi mọi thành viên đồng ý và tăng theo mức bất đồng của chúng, nên nó đóng vai trò của số hạng bất đồng trong hồi quy. Với ba thành viên dự đoán $(0.8, 0.2)$, $(0.6, 0.4)$ và $(0.1, 0.9)$, trung bình là $(0.5, 0.5)$ với entropy $\log 2 \approx 0.693$ nat; entropy của các thành viên là 0.500, 0.673 và 0.325, với trung bình 0.499, nên thông tin tương hỗ là 0.194.
+
+## 2. Một tập hợp mô hình đơn giản
+
+### 2.1 Thiết lập
+
+Dữ liệu theo cách bố trí của ví dụ minh họa trong bài thứ nhất, với nhiều điểm hơn và ít nhiễu hơn: 40 mẫu có nhiễu của $\sin x$, rút thành hai cụm, $x \in [-3, -1]$ và $x \in [1, 3]$, với độ lệch chuẩn của nhiễu $\sigma = 0.1$. Mỗi thành viên là một mạng có một lớp ẩn gồm 50 đơn vị $\tanh$ (151 tham số), được huấn luyện bằng hạ gradient trên toàn bộ dữ liệu (full-batch) với hàm mục tiêu
+
+$$
+\frac{1}{2N}\sum_{n=1}^{N}\big(f_\theta(x_n) - y_n\big)^2 + \frac{\lambda}{2}\,\lVert\theta\rVert^2 , \qquad \lambda = 10^{-4},
+$$
+
+trong đó $f_\theta$ là đầu ra của mạng. Như bài thứ nhất đã chỉ ra (bài tập 1 của nó), đây là log-hậu nghiệm âm với nhiễu Gauss phương sai $\sigma^2$ và tiên nghiệm (prior) $\theta \sim \mathcal{N}(0, s_0^2 I)$, nhân với hệ số $\sigma^2/N$, với $\lambda = \sigma^2/(N s_0^2)$. Vậy $\lambda = 10^{-4}$ tương ứng với độ lệch chuẩn tiên nghiệm $s_0 = \sqrt{0.01/(40 \times 10^{-4})} \approx 1.58$. Các thành viên chỉ dự đoán giá trị trung bình, và phương sai nhiễu được cố định ở giá trị thật, nên số hạng nhiễu trung bình ở mục 1.3 bằng $\sigma^2 = 0.01$ ở mọi nơi.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+N, sigma = 40, 0.1
+x = np.concatenate([rng.uniform(-3, -1, N // 2), rng.uniform(1, 3, N // 2)])
+y = np.sin(x) + sigma * rng.normal(size=N)
+X = x[:, None]
+
+def init(seed, H=50):
+    r = np.random.default_rng(seed)
+    return [r.normal(0, 1, (1, H)), r.normal(0, 1, H),
+            r.normal(0, 1 / np.sqrt(H), (H, 1)), np.zeros(1)]
+
+def forward(p, X):
+    W1, b1, W2, b2 = p
+    h = np.tanh(X @ W1 + b1)
+    return h, (h @ W2 + b2).ravel()
+
+def train(seed, steps=20_000, lr=0.1, lam=1e-4):
+    p = init(seed)
+    for _ in range(steps):
+        h, f = forward(p, X)
+        r = (f - y)[:, None] / N                   # d/df of (1/2N) sum (f - y)^2
+        dh = (r @ p[2].T) * (1 - h ** 2)
+        g = [X.T @ dh, dh.sum(0), h.T @ r, r.sum(0)]
+        p = [w - lr * (gw + lam * w) for w, gw in zip(p, g)]  # weight decay = Gaussian prior
+    return p
+
+J = 5
+members = [train(seed) for seed in range(1, J + 1)]
+xs = np.array([-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0])
+F = np.array([forward(p, xs[:, None])[1] for p in members])   # J x len(xs)
+mean, spread = F.mean(0), F.std(0)
+total_sd = np.sqrt(sigma ** 2 + spread ** 2)
+print("train MSE per member:", np.round([np.mean((forward(p, X)[1] - y) ** 2) for p in members], 4))
+print("   x   sin(x)   mean   member sd   predictive sd")
+for i, x0 in enumerate(xs):
+    print(f"{x0:5.1f} {np.sin(x0):7.3f} {mean[i]:7.3f} {spread[i]:9.3f} {total_sd[i]:12.3f}")
+```
+
+Mã chạy trong khoảng năm giây và in ra:
+
+```text
+train MSE per member: [0.0109 0.0108 0.0108 0.0109 0.0109]
+   x   sin(x)   mean   member sd   predictive sd
+ -6.0   0.279   1.507     0.150        0.180
+ -4.0   0.757   0.682     0.032        0.105
+ -2.0  -0.909  -0.869     0.001        0.100
+  0.0   0.000  -0.080     0.087        0.132
+  2.0   0.909   0.922     0.002        0.100
+  4.0  -0.757  -0.305     0.057        0.115
+  6.0  -0.279  -0.928     0.174        0.201
+```
+
+### 2.2 Đọc kết quả
+
+Mọi thành viên đều đạt sai số bình phương trung bình (mean squared error, MSE) huấn luyện gần với phương sai nhiễu 0.01, nên không thành viên nào quá khớp nặng. Bên trong các cụm dữ liệu, tại $x = \pm 2$, các thành viên khớp nhau trong phạm vi 0.002, và độ lệch chuẩn dự đoán bằng mức nhiễu 0.100. Ở khoảng trống tại $x = 0$, độ phân tán giữa các thành viên tăng lên 0.087, gấp hơn 40 lần giá trị của nó trong vùng dữ liệu, và tại $x = \pm 6$ lên khoảng 0.15–0.17. Đây là hành vi khiến tập hợp mô hình hữu ích: sự bất đồng xuất hiện ở những nơi dữ liệu không xác định chặt hàm.
+
+Kết quả cũng cho thấy giới hạn của tín hiệu đó. Tại $x = 4$, giá trị trung bình của tập hợp là $-0.305$ trong khi giá trị thật là $-0.757$, sai số 0.452, gần bốn độ lệch chuẩn dự đoán. Tại $x = 6$ sai số là $0.649$, khoảng 3.2 độ lệch chuẩn. Năm mạng cùng kiến trúc, huấn luyện trên cùng dữ liệu, có chung thiên kiến quy nạp (inductive bias): tất cả đều ngoại suy bằng các đơn vị $\tanh$ bão hòa, nên chúng bất đồng ít hơn mức mà độ bất định thật đòi hỏi. Hình dưới cho thấy toàn cảnh.
+
+<Figure caption="Năm thành viên (nét xám mảnh), giá trị trung bình của chúng (màu nhấn) và một dải rộng hai độ lệch chuẩn dự đoán, với hàm thật vẽ nét đứt. Hãy nhìn vào khoảng trống quanh x = 0, nơi các thành viên tỏa ra, và vào các đoạn x từ khoảng 3.2 đến 5.0, dưới khoảng −5.1 và trên khoảng 5.8, nơi hàm thật nằm ngoài dải.">
+  <BdlEnsembleDisagreement />
+</Figure>
+
+## 3. Tập hợp mô hình là Bayes theo nghĩa nào?
+
+### 3.1 Một thí nghiệm hai mode
+
+Phân phối dự đoán hậu nghiệm của bài thứ nhất, $p(y^* \mid x^*, \mathcal{D}) = \int p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, d\theta$, còn được gọi là **trung bình mô hình Bayes** (Bayesian model average, BMA). Trung bình trên $J$ mẫu hậu nghiệm độc lập là một ước lượng không chệch của nó, và công thức của tập hợp có đúng dạng đó. Câu hỏi là các thành viên đã huấn luyện có hành xử như các mẫu hậu nghiệm hay không. Một phân phối một chiều đóng vai phân phối hậu nghiệm, đủ nhỏ để tính chính xác, trả lời câu hỏi này. Mật độ của nó là hỗn hợp của một phân phối Gauss hẹp tại $-1$ (độ lệch chuẩn 0.15, 70% khối lượng xác suất) và một phân phối rộng tại 2 (độ lệch chuẩn 0.6, 30%). Đoạn mã khởi động 10 000 lần chạy leo gradient (gradient ascent) trên log-mật độ từ các điểm ngẫu nhiên rút từ $\mathcal{N}(0, 1.5^2)$, giống như một tập hợp mô hình sẽ làm, rồi so sánh kết quả với phân phối hậu nghiệm chính xác.
+
+```python
+import numpy as np
+
+# A one-dimensional stand-in for a posterior with two modes:
+# 70% of the mass in a narrow mode at -1, 30% in a wide mode at 2.
+wt, mu, tau = np.array([0.7, 0.3]), np.array([-1.0, 2.0]), np.array([0.15, 0.6])
+
+def density(t):
+    return (wt / (np.sqrt(2 * np.pi) * tau) * np.exp(-0.5 * ((t[:, None] - mu) / tau) ** 2)).sum(1)
+
+def grad_log_density(t):
+    c = wt / tau * np.exp(-0.5 * ((t[:, None] - mu) / tau) ** 2)
+    return (c * (mu - t[:, None]) / tau ** 2).sum(1) / c.sum(1)
+
+rng = np.random.default_rng(7)
+t = rng.normal(0.0, 1.5, 10_000)                  # 10 000 random initializations
+for _ in range(2000):                             # gradient ascent to the nearest mode
+    t += 0.01 * grad_log_density(t)
+wide = t > 0.5
+print(f"posterior mass of the wide mode:       {wt[1]:.2f}")
+print(f"runs that end in the wide mode:        {wide.mean():.2f}")
+print("modes found:", np.round([t[~wide].mean(), t[wide].mean()], 3))
+
+grid = np.linspace(-4, 6, 20_001)
+p = density(grid); p /= p.sum()
+mean = (grid * p).sum(); sd = np.sqrt(((grid - mean) ** 2 * p).sum())
+print(f"posterior mean and sd:                 {mean:.3f} {sd:.3f}")
+print(f"all runs as one ensemble, mean and sd: {t.mean():.3f} {t.std():.3f}")
+```
+
+Mã in ra:
+
+```text
+posterior mass of the wide mode:       0.30
+runs that end in the wide mode:        0.57
+modes found: [-1.  2.]
+posterior mean and sd:                 -0.100 1.419
+all runs as one ensemble, mean and sd: 0.718 1.484
+```
+
+### 3.2 Thí nghiệm cho thấy điều gì
+
+Mỗi lần chạy tìm đúng một mode, nhưng các lần chạy phân bố theo một quy tắc sai. Một lần chạy kết thúc ở mode có miền hút (basin of attraction) chứa điểm xuất phát của nó, và mode rộng, thấp hơn nhưng trải rộng hơn, hút 57% số điểm xuất phát trong khi chỉ giữ 30% khối lượng xác suất. Vì vậy một tập hợp xây từ các lần chạy này gán trọng số cho các mode theo miền hút của chúng dưới cách khởi tạo đã chọn, chứ không theo xác suất hậu nghiệm của chúng. Nó cũng đặt mọi thành viên tại một đỉnh, nên độ phân tán bên trong mỗi mode, ở đây là 0.15 và 0.6, bị mất. Gộp lại, các sai lệch này đẩy giá trị trung bình của tập hợp lên 0.718, so với giá trị trung bình hậu nghiệm $-0.100$. Độ lệch chuẩn của nó, 1.484, tình cờ gần với 1.419 của phân phối hậu nghiệm, nhưng chỉ vì hai sai lệch bù trừ nhau một phần.
+
+Một mạng nơ-ron thêm vào một khác biệt mà một chiều không thể cho thấy. Trong $P$ chiều, phần lớn khối lượng xác suất của một phân phối nằm xa đỉnh của nó: một phân phối Gauss chuẩn trong $P$ chiều có cực đại mật độ tại gốc tọa độ, nhưng các mẫu của nó nằm cách gốc khoảng $\sqrt{P}$. Khi đó một mode là một điểm không điển hình, và các dự đoán tại mode có thể khác với dự đoán của các mẫu hậu nghiệm điển hình. Mục 4 bổ sung trường hợp cực đoan: khi hàm mất mát lồi, mọi thành viên là cùng một điểm. Như vậy, một tập hợp mô hình sâu là một hỗn hợp các dự đoán điểm với trọng số bằng nhau cố định, và không có gì trong cách xây dựng nó khiến các điểm đó trở thành mẫu hậu nghiệm.
+
+### 3.3 Vì sao tập hợp vẫn dự đoán tốt
+
+Dự đoán phụ thuộc vào hàm $f_\theta$, không vào bản thân $\theta$, và các hàm trong phân phối hậu nghiệm của một mạng được tổ chức khác với ví dụ đơn giản. Fort, Hu và Lakshminarayanan (2019) so sánh các mạng huấn luyện từ những seed khác nhau với các checkpoint của một lần huấn luyện duy nhất. Ở cùng độ chính xác, các mạng từ những seed khác nhau bất đồng trên nhiều dự đoán kiểm tra hơn hẳn so với các checkpoint của một lần chạy. Nếu di chuyển bên trong một miền hút ít làm thay đổi dự đoán còn di chuyển giữa các miền hút làm thay đổi nhiều, thì một nhóm nhỏ thành viên ở các miền hút khác nhau nắm bắt được nhiều biến thiên của BMA hơn nhiều mẫu từ một miền hút. Wilson và Izmailov (2020) dựa trên lập luận này để coi tập hợp mô hình sâu là một phép lấy biên Bayes xấp xỉ (approximate Bayesian marginalization), và đối chiếu chúng với các phương pháp chỉ mô tả một miền hút.
+
+Phép kiểm tra trực tiếp nhất dùng phương pháp Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC) trên toàn bộ dữ liệu với ngân sách tính toán lớn làm tham chiếu cho phân phối dự đoán hậu nghiệm của các bộ phân loại ảnh (Izmailov et al., 2021). Các phương pháp rẻ hơn khác biệt đáng kể so với tham chiếu đó, và tập hợp mô hình sâu được báo cáo là gần tham chiếu hơn một số phương pháp một mode, trong đó có VI trường trung bình (mean-field VI). Đây là bằng chứng cho những mạng và tập dữ liệu cụ thể, đo so với một tham chiếu mà bản thân nó cũng là xấp xỉ. Nó khiến tập hợp mô hình là một lựa chọn hợp lý khi chỉ đủ chi phí cho vài mạng. Nó không giải quyết câu hỏi một tập hợp so với một bộ lấy mẫu được cho đủ thời gian để trộn (mix) thì thế nào, và thí nghiệm hai mode cho thấy trọng số của tập hợp có thể sai nặng mỗi khi miền hút và khối lượng hậu nghiệm không khớp nhau.
+
+### 3.4 Kết hợp mô hình không phải là lấy trung bình theo chúng
+
+Một phần độ chính xác của tập hợp có thể không liên quan gì đến phép lấy biên. Giả sử hai thành viên dự đoán $\mathcal{N}(-1, 0.1^2)$ và $\mathcal{N}(1, 0.1^2)$ tại một đầu vào nào đó. Phân phối dự đoán của tập hợp có hai đỉnh và phương sai $0.01 + 1 = 1.01$, một hình dạng mà không thành viên nào, cũng như không phân phối Gauss đơn lẻ nào, tạo ra được. Tập hợp đã mở rộng họ các phân phối dự đoán. Lấy trung bình Bayes trên một tập giả thuyết cố định hành xử khác: khi dữ liệu tích lũy, tỉ số odds hậu nghiệm giữa một giả thuyết và giả thuyết khác thay đổi theo một hệ số tăng theo hàm mũ của $N$, nên cuối cùng BMA dự đoán gần như hoàn toàn bằng một trong số chúng. Minka (2000) dùng sự tương phản này để lập luận rằng lấy trung bình theo các mô hình và **kết hợp** (combining) các mô hình trả lời những câu hỏi khác nhau. Khi một tập hợp vượt trội các thành viên của nó, lợi ích có thể đến từ sự kết hợp cũng như từ việc lấy trung bình theo độ bất định.
+
+## 4. Biến một tập hợp thành một bộ lấy mẫu
+
+### 4.1 Nhiễu loạn rồi tối ưu hóa
+
+Với hàm mất mát lồi, mọi thành viên của một tập hợp thông thường hội tụ về cùng một cực tiểu, và tập hợp báo độ phân tán bằng không; trong một mạng nơ-ron, sự đa dạng chỉ đến từ tính không lồi của hàm mất mát. Một thay đổi nhỏ trong hàm mục tiêu của mỗi thành viên cho mỗi thành viên một đích riêng, và trong trường hợp tuyến tính – Gauss nó biến mỗi thành viên thành một mẫu hậu nghiệm chính xác.
+
+Xét hồi quy tuyến tính Bayes của [bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) (mục 3): $f_\theta(x) = \phi(x)^\top \theta$ với $P$ đặc trưng, ma trận thiết kế $\Phi \in \mathbb{R}^{N \times P}$, vector đích $\mathbf{y}$, nhiễu Gauss phương sai $\sigma^2$ và tiên nghiệm $\theta \sim \mathcal{N}(0, s_0^2 I)$. Phân phối hậu nghiệm của nó là $\mathcal{N}(m_N, S_N)$ với
+
+$$
+S_N = \Big(\tfrac{1}{\sigma^2}\Phi^\top\Phi + \tfrac{1}{s_0^2} I\Big)^{-1}, \qquad m_N = \tfrac{1}{\sigma^2} S_N \Phi^\top \mathbf{y} .
+$$
+
+Bây giờ cho thành viên $j$ rút một **điểm neo** (anchor) $\theta_{0,j} \sim \mathcal{N}(0, s_0^2 I)$ từ tiên nghiệm và một nhiễu loạn của các giá trị đích $\varepsilon_j \sim \mathcal{N}(0, \sigma^2 I_N)$, rồi cực tiểu hóa
+
+$$
+L_j(\theta) = \frac{1}{2\sigma^2}\lVert \mathbf{y} + \varepsilon_j - \Phi\theta\rVert^2 + \frac{1}{2s_0^2}\lVert\theta - \theta_{0,j}\rVert^2 .
+$$
+
+Đặt gradient bằng không cho $\hat\theta_j = S_N\big(\Phi^\top(\mathbf{y} + \varepsilon_j)/\sigma^2 + \theta_{0,j}/s_0^2\big)$. Đây là một hàm tuyến tính của các vector Gauss độc lập, nên nó có phân phối Gauss; giá trị trung bình của nó là $S_N\Phi^\top \mathbf{y}/\sigma^2 = m_N$, vì $\varepsilon_j$ và $\theta_{0,j}$ có trung bình bằng không. Ma trận hiệp phương sai của nó là
+
+$$
+S_N\Big(\frac{\Phi^\top (\sigma^2 I)\Phi}{\sigma^4} + \frac{s_0^2 I}{s_0^4}\Big)S_N = S_N\,S_N^{-1}S_N = S_N ,
+$$
+
+nên mỗi thành viên là một mẫu hậu nghiệm chính xác. Cách xây dựng **nhiễu loạn rồi tối ưu hóa** (perturb-then-optimize) này chỉ chính xác trong trường hợp tuyến tính – Gauss; Bardsley et al. (2014) đã phát triển một phương pháp liên quan, ngẫu nhiên hóa rồi tối ưu hóa (randomize-then-optimize), cho các bài toán ngược phi tuyến. Với mạng nơ-ron nó trở thành một phép xấp xỉ: Pearce et al. (2020) đề xuất các tập hợp có neo (anchored ensemble), chính quy hóa mỗi thành viên về phía điểm rút tiên nghiệm của riêng nó, còn Osband, Aslanides và Cassirer (2018) cộng thêm vào đầu ra của mỗi thành viên một "mạng tiên nghiệm" (prior network) cố định, khởi tạo ngẫu nhiên, có tác dụng tương tự.
+
+### 4.2 Một phép kiểm tra số
+
+Đoạn mã dưới đây khớp một đa thức bậc hai theo $x$ (các đặc trưng $1, x, x^2$) với 12 điểm có nhiễu và so sánh phân phối hậu nghiệm chính xác với 20 000 thành viên nhiễu loạn rồi tối ưu hóa. Vì mỗi $L_j$ là hàm bậc hai, các thành viên được tìm ở dạng đóng; với một mạng nơ-ron, mỗi thành viên sẽ được huấn luyện bằng hạ gradient.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+N, sigma, s = 12, 0.3, 1.0                       # data size, noise sd, prior sd
+x = rng.uniform(-1, 1, N)
+Phi = np.stack([np.ones(N), x, x ** 2], axis=1)   # features 1, x, x^2
+y = 0.5 - x + 0.8 * x ** 2 + sigma * rng.normal(size=N)
+
+# Exact Gaussian posterior (prior theta ~ N(0, s^2 I))
+A = Phi.T @ Phi / sigma ** 2 + np.eye(3) / s ** 2
+S_post = np.linalg.inv(A)
+m_post = S_post @ Phi.T @ y / sigma ** 2
+
+# Perturb-then-optimize: member j fits perturbed targets, anchored at a prior draw
+J = 20_000
+theta0 = rng.normal(0, s, (J, 3))                # anchors drawn from the prior
+eps = rng.normal(0, sigma, (J, N))               # perturbations of the targets
+members = (S_post @ (Phi.T @ (y + eps).T / sigma ** 2 + theta0.T / s ** 2)).T
+
+print("posterior mean     ", np.round(m_post, 3))
+print("ensemble mean      ", np.round(members.mean(0), 3))
+print("posterior sd       ", np.round(np.sqrt(np.diag(S_post)), 3))
+print("ensemble sd        ", np.round(members.std(0), 3))
+```
+
+Mã in ra:
+
+```text
+posterior mean      [ 0.502 -1.203  0.633]
+ensemble mean       [ 0.502 -1.202  0.636]
+posterior sd        [0.124 0.223 0.396]
+ensemble sd         [0.124 0.223 0.396]
+```
+
+Các giá trị trung bình khớp nhau trong phạm vi sai số Monte Carlo (khoảng $0.4/\sqrt{20\,000} \approx 0.003$ với hệ số thứ ba) và các độ lệch chuẩn khớp đến ba chữ số thập phân. Nếu không có điểm neo và nhiễu loạn, mọi thành viên sẽ là ước lượng MAP $m_N$ và tập hợp sẽ không báo chút độ bất định nào.
+
+## 5. Kết hợp tập hợp mô hình với các xấp xỉ cục bộ
+
+Thí nghiệm hai mode ở mục 3.1 đã bỏ độ rộng của mỗi mode ra khỏi dự đoán. Một cách khắc phục giữ tập hợp để tìm các miền hút và thay điểm duy nhất của mỗi thành viên bằng một phân phối trên miền hút của chính nó.
+
+- **MultiSWAG.** Sau khi huấn luyện thông thường, SWAG (Maddox et al., 2019) tiếp tục hạ gradient ngẫu nhiên với tốc độ học không đổi ở mức cao hoặc tốc độ học tuần hoàn, ghi lại các bước lặp và khớp một phân phối Gauss với chúng: giá trị trung bình là trung bình các bước lặp, và ma trận hiệp phương sai gồm một phần đường chéo từ phương sai của chúng cộng một phần hạng thấp từ độ lệch của các bước lặp gần nhất. MultiSWAG (Wilson và Izmailov, 2020) làm điều này cho nhiều lần huấn luyện độc lập và dự đoán bằng hỗn hợp có trọng số bằng nhau của các phân phối Gauss thu được.
+- **Hỗn hợp các xấp xỉ Laplace hoặc biến phân.** Một [xấp xỉ Laplace](/vi/blog/laplace-approximations) hoặc một [phân phối hậu nghiệm biến phân](/vi/blog/variational-inference-for-neural-networks) Gauss khớp tại mỗi thành viên cho cùng loại hỗn hợp với một ma trận hiệp phương sai cục bộ khác.
+- **Lấy mẫu bắt đầu tại các thành viên.** Một chuỗi [MCMC](/vi/blog/sampling-the-posterior-mcmc) bắt đầu tại một thành viên đã huấn luyện bỏ qua phần lớn giai đoạn khởi động (warm-up) mà một chuỗi bắt đầu ngẫu nhiên cần, rồi khám phá miền hút của thành viên đó. Một chuỗi cho mỗi thành viên phủ nhiều miền hút cùng lúc, điều mà một chuỗi đơn hiếm khi làm được vì nó ít khi vượt qua các vùng mật độ thấp giữa chúng.
+
+Cả ba đều giữ trọng số bằng nhau cho các miền hút, tức sai lệch về trọng số ở mục 3.2. Bằng cách rút các điểm quanh mỗi thành viên thay vì dùng chính thành viên đó, chúng khôi phục độ phân tán bên trong mỗi miền hút và đưa các điểm đánh giá ra xa các đỉnh.
+
+## 6. Những cách rẻ hơn để có các thành viên đa dạng
+
+Một số phương pháp nhắm tới phần lớn sự đa dạng của một tập hợp với một phần nhỏ chi phí.
+
+- **Tập hợp ảnh chụp nhanh** (snapshot ensembles; Huang et al., 2017) dùng lịch tốc độ học tuần hoàn và giữ lại mạng đạt được ở cuối mỗi chu kỳ, nên một lần huấn luyện cho nhiều thành viên.
+- **Tập hợp hình học nhanh** (fast geometric ensembling; Garipov et al., 2018) bắt đầu từ một mạng đã huấn luyện và thu thập các thành viên bằng các chu kỳ ngắn của tốc độ học tuần hoàn, khai thác các đường mất mát thấp nối giữa các mode mà cùng bài báo đó đã phát hiện.
+- **BatchEnsemble** (Wen, Tran và Ba, 2020) dùng chung một ma trận trọng số cho mọi thành viên và cho mỗi thành viên một thừa số nhân hạng một riêng, nên lượng tham số và bộ nhớ thêm vào là nhỏ.
+- **Dropout Monte Carlo** (Monte Carlo dropout), được trình bày ở [bài thứ tư](/vi/blog/variational-inference-for-neural-networks), lấy trung bình nhiều lượt lan truyền xuôi ngẫu nhiên của một mạng.
+
+Trong các so sánh được báo cáo cho những phương pháp này, các thành viên rẻ hơn thường kém đa dạng hơn các thành viên huấn luyện độc lập. Với một ngân sách tính toán cố định, một mạng đơn lớn hơn có thể đạt độ chính xác ngang một tập hợp, nhưng nó không cho tín hiệu bất đồng nào; [bài thứ sáu](/vi/blog/gaussian-processes-and-kernels) và [bài thứ tám](/vi/blog/scaling-bayesian-deep-learning) mô tả các cơ chế khác có cho tín hiệu đó và so sánh chúng theo chi phí.
+
+## 7. Tập hợp mô hình được dùng ở đâu
+
+Tập hợp mô hình là phương pháp đo độ bất định phổ biến nhất trong học sâu ứng dụng, phần lớn vì chúng không đòi hỏi thay đổi mô hình hay mã huấn luyện. Vài ứng dụng sau minh họa tín hiệu bất đồng hữu ích cho việc gì.
+
+- **Phát hiện dịch chuyển tập dữ liệu** (data set shift). Ovadia et al. (2019) so sánh một số phương pháp đo độ bất định trên các bộ phân loại ảnh và văn bản dưới các đầu vào bị hỏng và bị dịch chuyển. Tập hợp mô hình nhìn chung đứng đầu cả về hiệu chuẩn (calibration) lẫn độ chính xác, trong khi mọi phương pháp đều giảm chất lượng khi mức dịch chuyển tăng.
+- **Khám phá trong học tăng cường.** Các mạng Q sâu bootstrap (bootstrapped deep Q-networks; Osband et al., 2016) giữ nhiều đầu ra hàm giá trị (value-function head) và hành động tham lam theo một đầu ra được chọn ngẫu nhiên cho mỗi episode, nên tác tử khám phá ở những nơi các đầu ra bất đồng.
+- **Điều khiển dựa trên mô hình.** Chua et al. (2018) học một tập hợp các mô hình động lực học xác suất và lập kế hoạch thông qua nó, nhờ đó tách nhiễu trong hệ thống khỏi độ bất định của mô hình đã học và giảm lượng tương tác cần thiết trên các bài kiểm tra chuẩn (benchmark) của họ.
+- **Thời tiết và khí hậu.** Dự báo thời tiết số từ lâu đã phát hành các dự báo tổ hợp (ensemble forecast) từ các điều kiện ban đầu bị nhiễu loạn và các biến thể mô hình (Leutbecher và Palmer, 2008). Các mô hình dự báo được học cũng được đánh giá trong cùng khuôn khổ tổ hợp đó, khiến cách nhìn độ bất định dựa trên sự bất đồng trở nên tự nhiên ở đây.
+
+[Bài thứ chín](/vi/blog/evaluating-and-using-uncertainty) quay lại cách đánh giá và sử dụng độ bất định như vậy, kể cả trong học chủ động (active learning).
+
+## 8. Gán trọng số cho các thành viên bằng các cận tổng quát hóa
+
+### 8.1 Các cận tần suất có tiên nghiệm
+
+Trọng số bằng nhau là một mặc định, không phải một kết quả. Phân tích **PAC-Bayes** (probably approximately correct, đúng xấp xỉ với xác suất cao), do McAllester (1999) đưa ra, cho một cách có nguyên tắc để chọn trọng số với một bảo đảm đúng mà không cần giả định tiên nghiệm là đúng. Nó nghiên cứu một bộ dự đoán ngẫu nhiên hóa, với mỗi đầu vào mới, rút tham số từ một phân phối $\rho$ và dự đoán bằng chúng. Với một hàm mất mát bị chặn trong $[0, 1]$, ký hiệu $L(\theta)$ là mất mát kỳ vọng trên dữ liệu mới và $\hat L(\theta)$ là mất mát trung bình trên $N$ mẫu. Với mọi phân phối $\pi$ được chọn trước khi thấy $N$ mẫu đó, Seeger (2002) và Maurer (2004) chứng minh rằng với xác suất ít nhất $1 - \delta$ theo các mẫu, đồng thời với mọi $\rho$,
+
+$$
+\mathbb{E}_{\rho}[L(\theta)] \le \mathbb{E}_{\rho}[\hat L(\theta)] + \sqrt{\frac{\mathrm{KL}(\rho \,\Vert\, \pi) + \log(2\sqrt{N}/\delta)}{2N}} ,
+$$
+
+trong đó $\mathrm{KL}$ là độ phân kỳ Kullback–Leibler. (Cận trong các bài báo được trích dẫn chặt hơn; dạng này suy ra từ nó nhờ bất đẳng thức Pinsker.) Bất chấp cách gọi tên, $\pi$ không cần là niềm tin của ai cả; nó chỉ cần được cố định trước khi rút $N$ mẫu. Đại lượng ngẫu nhiên duy nhất trong phát biểu là mẫu đó, và vì bất đẳng thức đúng đồng thời với mọi $\rho$, ta có thể chọn $\rho$ sau khi xem dữ liệu, chẳng hạn bằng cách cực tiểu hóa vế phải.
+
+Với một tập hợp mô hình, lấy $\pi$ và $\rho$ là các phân phối trên $J$ thành viên và đánh giá $\hat L$ trên dữ liệu giữ lại (held-out) không dùng để huấn luyện chúng. Với $J = 5$, $N = 2000$ mẫu giữ lại và $\delta = 0.05$, số hạng logarit là $\log(2\sqrt{2000}/0.05) \approx 7.49$. Với $\rho = \pi$ đều, độ phân kỳ bằng không và cận cộng thêm $\sqrt{7.49/4000} \approx 0.043$ vào sai số trung bình trên dữ liệu giữ lại. Đặt toàn bộ trọng số lên một thành viên tốn $\mathrm{KL} = \log 5 \approx 1.61$ và chỉ nâng số hạng đó lên khoảng 0.048, nên với vài thành viên, cái giá của việc chọn trọng số là nhỏ.
+
+### 8.2 Bỏ phiếu đa số cần thông tin bậc hai
+
+Đại lượng ở trên chặn sai số của bộ dự đoán ngẫu nhiên hóa, không phải của phiếu bầu của tập hợp. Với bỏ phiếu đa số có trọng số $\mathrm{MV}_\rho$ trong phân loại với hàm mất mát không – một, phiếu bầu chỉ sai nếu các thành viên mang ít nhất một nửa trọng số sai, điều này cho $L(\mathrm{MV}_\rho) \le 2\,\mathbb{E}_\rho[L(\theta)]$. Xét các thành viên mỗi thành viên sai 10% số lần. Nếu tất cả cùng sai trên cùng các mẫu, phiếu bầu cũng sai 10% số lần; nếu chúng sai trên các mẫu khác nhau, phiếu bầu có thể chính xác hơn nhiều. Cận cho 0.20 trong cả hai trường hợp. Cận cặp đôi (tandem bound) dưới đây phân biệt được hai trường hợp này.
+
+Masegosa et al. (2020) dùng **mất mát cặp đôi** (tandem loss) $L(\theta, \theta')$, xác suất hai thành viên cùng sai trên cùng một mẫu, để chứng minh $L(\mathrm{MV}_\rho) \le 4\,\mathbb{E}_{\rho \times \rho}[L(\theta, \theta')]$, và biến nó thành một cận PAC-Bayes thực nghiệm có thể cực tiểu hóa theo $\rho$. Giả sử mỗi thành viên sai trên 10% số mẫu và một cặp rút từ $\rho \times \rho$ (kể cả một thành viên ghép với chính nó) trung bình cùng sai trên 4% số mẫu. Cận bậc một cho $2 \times 0.10 = 0.20$, cận cặp đôi cho $4 \times 0.04 = 0.16$. Nếu sai số của các thành viên tương quan hoàn toàn, mất mát cặp đôi sẽ bằng 0.10 và cận cặp đôi bằng 0.40, tệ hơn cận bậc một: cận bậc hai có lợi đúng khi các thành viên đa dạng. Các cận oracle này vẫn cần số hạng độ phức tạp ở mục 8.1 trước khi trở thành bảo đảm.
+
+## 9. Giới hạn và các kiểu thất bại
+
+- **Chi phí.** Huấn luyện, bộ nhớ và suy luận đều tăng theo $J$. Với các mô hình lớn, chi phí này thường quá đắt; [bài thứ tám](/vi/blog/scaling-bayesian-deep-learning) trình bày các phương án rẻ hơn.
+- **Thiên kiến quy nạp chung.** Các thành viên cùng kiến trúc ngoại suy giống nhau, như mục 2.2 đã cho thấy, nên sự bất đồng đánh giá thấp độ bất định ở xa dữ liệu. Với các bộ phân loại dùng hàm kích hoạt ReLU, Hein, Andriushchenko và Bitterwolf (2019) chứng minh rằng một mạng đơn trở nên tự tin tùy ý dọc theo hầu hết mọi tia đi xa khỏi dữ liệu. Lấy trung bình chỉ giúp được ở đó nếu các thành viên tình cờ nghiêng về các lớp khác nhau, và không có gì bảo đảm điều đó.
+- **Độ đa dạng thấp.** Khi các thành viên xuất phát từ cùng các trọng số tiền huấn luyện và được tinh chỉnh (fine-tune) trong thời gian ngắn, chúng có thể ở lại trong một miền hút và đồng ý với nhau quá mức. Độ đa dạng phải được kiểm tra, chẳng hạn bằng cách đo sự bất đồng trên dữ liệu giữ lại, chứ không được giả định.
+- **Trọng số bằng nhau và không có độ phân tán trong miền hút.** Mục 3.2 đã liệt kê những gì tập hợp thông thường không biểu diễn; các mục 4, 5 và 8 lần lượt giải quyết từng điểm với một chi phí thêm nhất định.
+- **Hiệu chuẩn không được bảo đảm.** Tập hợp mô hình thường được hiệu chuẩn tốt hơn các mạng đơn, nhưng dưới dịch chuyển mạnh, mức hiệu chuẩn của chúng cũng giảm (Ovadia et al., 2019). Hiệu chuẩn phải được đo trên dữ liệu giống với dữ liệu mà mô hình sẽ gặp.
+
+## 10. Bài tập
+
+**Bài tập 1.** Ba thành viên hồi quy dự đoán các giá trị trung bình 1.0, 1.4 và 0.6 tại một đầu vào, mỗi thành viên với phương sai nhiễu 0.04. Tính giá trị trung bình của tập hợp, phương sai dự đoán và tỉ lệ của phương sai đó do sự bất đồng gây ra.
+
+<details>
+<summary>Đáp án</summary>
+
+Giá trị trung bình là $(1.0 + 1.4 + 0.6)/3 = 1.0$. Số hạng bất đồng là $(0^2 + 0.4^2 + 0.4^2)/3 = 0.32/3 \approx 0.107$. Phương sai dự đoán là $0.04 + 0.107 = 0.147$, trong đó khoảng 73% là do bất đồng.
+
+</details>
+
+**Bài tập 2.** Trong tập hợp mô hình đơn giản, $\lambda = 10^{-4}$ tương ứng với độ lệch chuẩn tiên nghiệm khoảng 1.58. Với cùng $N$ và $\sigma$, $\lambda = 10^{-3}$ tương ứng với độ lệch chuẩn tiên nghiệm nào? Bạn sẽ chờ đợi nhiều hay ít bất đồng hơn ở khoảng trống?
+
+<details>
+<summary>Đáp án</summary>
+
+$s_0 = \sqrt{\sigma^2/(N\lambda)} = \sqrt{0.01/(40 \times 10^{-3})} = 0.5$. Số hạng phạt mạnh hơn kéo mọi thành viên về phía các trọng số nhỏ và các hàm trơn hơn, nên các thành viên trở nên giống nhau hơn và bất đồng ít hơn ở khoảng trống. (Chạy lại đoạn mã với $\lambda = 10^{-3}$ cho độ phân tán giữa các thành viên 0.005 tại $x = 0$, so với 0.087.)
+
+</details>
+
+**Bài tập 3.** Chứng minh rằng nếu mọi điểm neo ở mục 4.1 được đặt bằng không ($\theta_{0,j} = 0$) nhưng các giá trị đích vẫn bị nhiễu loạn, thì các thành viên sẽ có giá trị trung bình đúng và ma trận hiệp phương sai quá nhỏ.
+
+<details>
+<summary>Đáp án</summary>
+
+Khi đó $\hat\theta_j = S_N\Phi^\top(\mathbf{y} + \varepsilon_j)/\sigma^2$, với trung bình $m_N$ và hiệp phương sai $S_N(\Phi^\top\Phi/\sigma^2)S_N$. Vì $S_N^{-1} = \Phi^\top\Phi/\sigma^2 + I/s_0^2$, biểu thức này bằng $S_N(S_N^{-1} - I/s_0^2)S_N = S_N - S_N^2/s_0^2$, nhỏ hơn $S_N$ một lượng là ma trận nửa xác định dương $S_N^2/s_0^2$.
+
+</details>
+
+**Bài tập 4.** Hai bộ phân loại mỗi bộ sai trên 20% số mẫu. Cho biết mất mát cặp đôi nếu sai số của chúng không bao giờ trùng nhau và nếu chúng luôn trùng nhau, cùng các cận cặp đôi tương ứng cho phiếu bầu đa số của hai bộ.
+
+<details>
+<summary>Đáp án</summary>
+
+Với trọng số đều, $\mathbb{E}_{\rho\times\rho}[L(\theta,\theta')]$ lấy trung bình bốn cặp có thứ tự: hai cặp gồm một thành viên với chính nó (mỗi cặp mất mát cặp đôi 0.20) và hai cặp hỗn hợp. Nếu sai số không bao giờ trùng nhau, các cặp hỗn hợp có mất mát cặp đôi 0, trung bình là 0.10 và cận là 0.40. Nếu chúng luôn trùng nhau, mọi cặp có 0.20 và cận là 0.80. Cận bậc một là 0.40 trong cả hai trường hợp, nên cận cặp đôi chỉ có ích với các tập hợp lớn hơn gồm các thành viên đa dạng, nơi các cặp tự ghép chiếm tỉ trọng nhỏ hơn.
+
+</details>
+
+## 11. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| Tập hợp mô hình sâu là gì? | $J$ bản sao của một mạng huấn luyện từ các khởi tạo ngẫu nhiên khác nhau, có các phân phối dự đoán được lấy trung bình với trọng số bằng nhau. |
+| Độ bất định của nó được tách thế nào? | Hồi quy: nhiễu trung bình cộng phương sai của các giá trị trung bình của thành viên. Phân loại: entropy kỳ vọng cộng thông tin tương hỗ. |
+| Nó có phải là một bộ lấy mẫu hậu nghiệm không? | Không: các thành viên nằm tại các mode, được gán trọng số theo miền hút chứ không theo khối lượng hậu nghiệm, và không mang độ phân tán trong miền hút. |
+| Vì sao nó xấp xỉ BMA tốt? | Dự đoán biến thiên giữa các miền hút nhiều hơn bên trong một miền hút, nên vài mode phủ được phần lớn biến thiên dự đoán; các so sánh với tham chiếu HMC ủng hộ điều này cho những mạng đã được kiểm tra. |
+| Làm sao để nó chính xác? | Trong trường hợp tuyến tính – Gauss, bằng cách nhiễu loạn các giá trị đích và neo mỗi thành viên vào một điểm rút từ tiên nghiệm (nhiễu loạn rồi tối ưu hóa). |
+| Nó được kết hợp với các phương pháp cục bộ thế nào? | MultiSWAG, hỗn hợp các xấp xỉ Laplace hoặc biến phân, và các chuỗi MCMC bắt đầu tại các thành viên. |
+| Có thể chọn trọng số với một bảo đảm không? | Có: các cận PAC-Bayes trên dữ liệu giữ lại; với bỏ phiếu đa số, các cận bậc hai (cặp đôi) thưởng cho các thành viên đa dạng. |
+| Các kiểu thất bại chính? | Chi phí gấp $J$ lần, thiên kiến quy nạp chung ở xa dữ liệu, độ đa dạng thấp, mất hiệu chuẩn dưới dịch chuyển. |
+
+Tập hợp mô hình mô tả độ bất định qua một nhóm nhỏ các hàm đã huấn luyện. [Bài tiếp theo](/vi/blog/gaussian-processes-and-kernels) đưa cách nhìn đó đến tận cùng: nó đặt tiên nghiệm trực tiếp lên các hàm bằng một quá trình Gauss, suy ra phân phối hậu nghiệm chính xác cho hồi quy, và chỉ ra rằng một mạng khởi tạo ngẫu nhiên trở thành một quá trình Gauss khi độ rộng của nó tăng không giới hạn.
+
+### Tài liệu tham khảo
+
+- J. M. Bardsley, A. Solonen, H. Haario and M. Laine, "Randomize-then-optimize: A method for sampling from posterior distributions in nonlinear inverse problems," *SIAM Journal on Scientific Computing*, vol. 36, no. 4, pp. A1895–A1910, 2014.
+- L. Breiman, "Bagging predictors," *Machine Learning*, vol. 24, no. 2, pp. 123–140, 1996.
+- K. Chua, R. Calandra, R. McAllister and S. Levine, "Deep reinforcement learning in a handful of trials using probabilistic dynamics models," in *Advances in Neural Information Processing Systems 31*, 2018.
+- S. Depeweg, J. M. Hernández-Lobato, F. Doshi-Velez and S. Udluft, "Decomposition of uncertainty in Bayesian deep learning for efficient and risk-sensitive learning," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- S. Fort, H. Hu and B. Lakshminarayanan, "Deep ensembles: A loss landscape perspective," arXiv preprint, 2019.
+- T. Garipov, P. Izmailov, D. Podoprikhin, D. Vetrov and A. G. Wilson, "Loss surfaces, mode connectivity, and fast ensembling of DNNs," in *Advances in Neural Information Processing Systems 31*, 2018.
+- T. Gneiting and A. E. Raftery, "Strictly proper scoring rules, prediction, and estimation," *Journal of the American Statistical Association*, vol. 102, no. 477, pp. 359–378, 2007.
+- L. K. Hansen and P. Salamon, "Neural network ensembles," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, vol. 12, no. 10, pp. 993–1001, 1990.
+- M. Hein, M. Andriushchenko and J. Bitterwolf, "Why ReLU networks yield high-confidence predictions far away from the training data and how to mitigate the problem," in *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)*, 2019.
+- G. Huang, Y. Li, G. Pleiss, Z. Liu, J. E. Hopcroft and K. Q. Weinberger, "Snapshot ensembles: Train 1, get M for free," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2017.
+- P. Izmailov, S. Vikram, M. D. Hoffman and A. G. Wilson, "What are Bayesian neural network posteriors really like?," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- B. Lakshminarayanan, A. Pritzel and C. Blundell, "Simple and scalable predictive uncertainty estimation using deep ensembles," in *Advances in Neural Information Processing Systems 30*, 2017.
+- M. Leutbecher and T. N. Palmer, "Ensemble forecasting," *Journal of Computational Physics*, vol. 227, no. 7, pp. 3515–3539, 2008.
+- W. J. Maddox, T. Garipov, P. Izmailov, D. Vetrov and A. G. Wilson, "A simple baseline for Bayesian uncertainty in deep learning," in *Advances in Neural Information Processing Systems 32*, 2019.
+- A. Masegosa, S. Lorenzen, C. Igel and Y. Seldin, "Second order PAC-Bayesian bounds for the weighted majority vote," in *Advances in Neural Information Processing Systems 33*, 2020.
+- A. Maurer, "A note on the PAC Bayesian theorem," arXiv preprint, 2004.
+- D. A. McAllester, "PAC-Bayesian model averaging," in *Proceedings of the 12th Annual Conference on Computational Learning Theory (COLT)*, 1999.
+- T. P. Minka, "Bayesian model averaging is not model combination," technical note, MIT Media Lab, 2000.
+- I. Osband, J. Aslanides and A. Cassirer, "Randomized prior functions for deep reinforcement learning," in *Advances in Neural Information Processing Systems 31*, 2018.
+- I. Osband, C. Blundell, A. Pritzel and B. Van Roy, "Deep exploration via bootstrapped DQN," in *Advances in Neural Information Processing Systems 29*, 2016.
+- Y. Ovadia et al., "Can you trust your model's uncertainty? Evaluating predictive uncertainty under dataset shift," in *Advances in Neural Information Processing Systems 32*, 2019.
+- T. Pearce, F. Leibfried, A. Brintrup, M. Zaki and A. Neely, "Uncertainty in neural networks: Approximately Bayesian ensembling," in *Proceedings of the 23rd International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2020.
+- M. Seeger, "PAC-Bayesian generalisation error bounds for Gaussian process classification," *Journal of Machine Learning Research*, vol. 3, pp. 233–269, 2002.
+- Y. Wen, D. Tran and J. Ba, "BatchEnsemble: An alternative approach to efficient ensemble and lifelong learning," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2020.
+- A. G. Wilson and P. Izmailov, "Bayesian deep learning and a probabilistic perspective of generalization," in *Advances in Neural Information Processing Systems 33*, 2020.
