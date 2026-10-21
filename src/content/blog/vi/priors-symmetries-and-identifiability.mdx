@@ -1,0 +1,405 @@
+---
+title: "Tiên nghiệm, đối xứng và tính định danh được"
+description: "Một tiên nghiệm trên trọng số mạng nói gì về hàm, vì sao đối xứng của không gian trọng số làm tham số không định danh được và điều đó có ý nghĩa gì cho suy luận."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - symmetries
+  - identifiability
+series: bayesian-deep-learning
+seriesOrder: 7
+---
+
+import Figure from '../../../components/Figure.astro';
+import BdlPriorSamples from '../../../components/diagrams/BdlPriorSamples.astro';
+
+Cho đến nay, mọi phương pháp trong loạt bài này đều coi tiên nghiệm (prior) $p(\theta)$ là cho trước, thường là một phân phối Gauss đẳng hướng, và tập trung vào phân phối hậu nghiệm (posterior) $p(\theta \mid \mathcal{D})$. [Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) thiết lập phân phối hậu nghiệm và phân phối dự đoán hậu nghiệm, các bài từ [thứ hai](/vi/blog/sampling-the-posterior-mcmc) đến [thứ năm](/vi/blog/deep-ensembles) xấp xỉ chúng, và [bài thứ sáu](/vi/blog/gaussian-processes-and-kernels) cho thấy một mạng rộng với tiên nghiệm Gauss trên trọng số xác định một quá trình Gauss (Gaussian process, GP) trên các hàm. Bài này xem xét chính tiên nghiệm và một tính chất của mạng nơ-ron mà các bài trước chỉ nhắc qua: nhiều vector trọng số khác nhau tính ra đúng cùng một hàm.
+
+Hai chủ đề này gắn liền với nhau. Một tiên nghiệm trên trọng số chỉ là phương tiện để có một tiên nghiệm trên hàm, và ánh xạ từ trọng số sang hàm là nhiều – một. Nửa đầu của bài hỏi một tiên nghiệm trọng số nói gì về hàm, làm sao để kiểm tra nó và có những lựa chọn thay thế nào. Nửa sau đếm các đối xứng của một mạng, chỉ ra rằng chúng làm cho các tham số **không định danh được** (unidentifiable; dữ liệu không thể chỉ ra một vector tham số duy nhất, kể cả với vô hạn mẫu) và giải thích điều này tác động thế nào đến việc lấy mẫu, đến các phép chẩn đoán và đến việc diễn giải từng trọng số riêng lẻ. Một mục ngắn về học tiên nghiệm từ dữ liệu và một mục về các mô hình được thiết kế để định danh được khép lại bài.
+
+Xuyên suốt bài, mạng $f(x; \theta)$ là một perceptron nhiều lớp (multilayer perceptron, MLP) với đầu vào và đầu ra vô hướng, như trong các bài toán đơn giản của các bài trước. Mã dùng Python 3.13 và NumPy 2.5.3 với các seed được ghi trong mỗi đoạn mã.
+
+## 1. Một tiên nghiệm trên trọng số nói gì
+
+### 1.1 Phân phối dự đoán tiên nghiệm
+
+Không thể đánh giá một tiên nghiệm trên trọng số bằng cách nhìn vào các trọng số: không ai có ý kiến gì về giá trị của trọng số thứ 37 của lớp thứ hai. Điều mà người xây dựng mô hình thực sự có ý kiến là về các hàm: đầu ra nên lớn đến mức nào, trơn đến mức nào, nên hành xử ra sao ở xa dữ liệu. Đối tượng nối hai điều này là **phân phối dự đoán tiên nghiệm** (prior predictive distribution), tức phân phối của các giá trị hàm $f(x_1; \theta), \dots, f(x_n; \theta)$ tại các đầu vào được chọn khi $\theta$ được rút từ $p(\theta)$. Với các quan sát, nó thêm vào mô hình nhiễu: $p(y) = \int p(y \mid \theta)\, p(\theta)\, d\theta$, cùng tích phân với hàm hợp lý biên (marginal likelihood) ở mục 6, được tính trước khi thấy bất kỳ dữ liệu nào.
+
+Với một mạng hữu hạn, phân phối dự đoán tiên nghiệm không tính được ở dạng đóng, vì $f$ là một hàm phi tuyến của $\theta$, nhưng nó dễ lấy mẫu: rút $\theta$ từ tiên nghiệm, chạy mạng theo chiều xuôi và vẽ kết quả. Điều đó khiến nó trở thành công cụ thực hành chính để kiểm tra một tiên nghiệm. Nếu các hàm được lấy mẫu chẳng giống chút nào với các hàm mà bài toán có thể tạo ra một cách hợp lý, thì tiên nghiệm sai theo một cách mà không phép xấp xỉ hậu nghiệm cẩn thận nào sửa được khi dữ liệu khan hiếm.
+
+### 1.2 Tiên nghiệm Gauss và suy giảm trọng số
+
+Tiên nghiệm mặc định trong học sâu Bayes là phân phối Gauss đẳng hướng $p(\theta) = \mathcal{N}(\theta; 0, s_0^2 I)$ của [bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks), với độ lệch chuẩn tiên nghiệm $s_0$ cho mọi trọng số. Bài đó đã chỉ ra rằng ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP) dưới tiên nghiệm này là một mạng huấn luyện với suy giảm trọng số (weight decay), nên mỗi thiết lập suy giảm trọng số ngụ ý một thang tiên nghiệm và ngược lại. Sự tương ứng này có giới hạn. Suy giảm trọng số được chọn vì điểm tối ưu mà nó tạo ra, còn một tiên nghiệm được dùng vì toàn bộ phân phối mà nó sinh ra, và một giá trị chính quy hóa tốt vẫn có thể cho một phân phối dự đoán tiên nghiệm phi lý. Mục tiếp theo cho thấy các phân phối đó có thể khác nhau đến mức nào.
+
+### 1.3 Chia tỉ lệ theo độ rộng
+
+Xét một lớp ẩn gồm $H$ đơn vị, $f(x; \theta) = \sum_{j=1}^{H} v_j\, \phi(u_j x + b_j)$, với hàm kích hoạt $\phi$, trọng số đầu vào $u_j$, độ chệch (bias) $b_j$ và trọng số đầu ra $v_j$. Nếu cả ba có các tiên nghiệm độc lập với trung bình bằng không và $v_j$ có phương sai $s_v^2$, thì phương sai tiên nghiệm của đầu ra tại mọi đầu vào là
+
+$$
+\operatorname{Var}[f(x; \theta)] = H s_v^2\, \mathbb{E}\big[\phi(u x + b)^2\big],
+$$
+
+tăng tuyến tính theo độ rộng. Neal (1996) chỉ ra rằng cách sửa đúng là cho phương sai trọng số đầu ra giảm theo $s_v^2 = \omega^2 / H$ với một $\omega$ cố định. Khi đó phương sai giữ nguyên ở $\omega^2\, \mathbb{E}[\phi(ux + b)^2]$, và theo định lý giới hạn trung tâm, tiên nghiệm trên hàm tiến tới một quá trình Gauss khi $H \to \infty$, tức giới hạn quá trình Gauss của mạng nơ-ron (neural network Gaussian process, NNGP) ở [bài thứ sáu](/vi/blog/gaussian-processes-and-kernels). Cùng cách chia tỉ lệ theo số đầu vào (fan-in) đó, một phương sai trọng số chia cho số đầu vào của lớp, cũng là điều mà các sơ đồ khởi tạo thông dụng sử dụng, vì cùng lý do.
+
+## 2. Nhìn vào một tiên nghiệm
+
+### 2.1 Một ví dụ một lớp ẩn
+
+Đoạn mã dưới đây rút các hàm từ tiên nghiệm của một mạng tanh 50 đơn vị trên $x \in [-3, 3]$. Trọng số đầu vào và độ chệch có chung độ lệch chuẩn tiên nghiệm $s$, và trọng số đầu ra có phương sai $1/H$ như ở mục 1.3. Với ba giá trị của $s$, mã báo độ lệch chuẩn tiên nghiệm của $f$ tại $x = 0$ và tại $x = 3$, và hệ số tương quan giữa các giá trị tại $x = 0$ và $x = 0.5$ theo các lần rút. Cột cuối là số điểm đổi chiều trung bình của một hàm trên một lưới 301 điểm, một thước đo thô cho việc hàm đổi hướng thường xuyên đến mức nào.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+H, M = 50, 4000                         # hidden units, prior draws
+x = np.linspace(-3, 3, 301)
+
+def prior_functions(s, M):
+    """f(x) = sum_j v_j tanh(u_j x + b_j), with u, b ~ N(0, s^2), v ~ N(0, 1/H)."""
+    u = rng.normal(0, s, size=(M, H, 1))
+    b = rng.normal(0, s, size=(M, H, 1))
+    v = rng.normal(0, 1 / np.sqrt(H), size=(M, 1, H))
+    return (v @ np.tanh(u * x + b)).squeeze(1)      # shape (M, len(x))
+
+print(" s   sd f(0)  sd f(3)  corr(f(0), f(0.5))  turning points")
+for s in [0.5, 2.0, 8.0]:
+    f = prior_functions(s, M)
+    sd0, sd3 = f[:, 150].std(), f[:, -1].std()
+    r = np.corrcoef(f[:, 150], f[:, 175])[0, 1]
+    turns = (np.diff(np.sign(np.diff(f, axis=1)), axis=1) != 0).sum(1).mean()
+    print(f"{s:4.1f} {sd0:7.2f} {sd3:8.2f} {r:12.2f} {turns:16.1f}")
+```
+
+```text
+ s   sd f(0)  sd f(3)  corr(f(0), f(0.5))  turning points
+ 0.5    0.41     0.75         0.89              0.9
+ 2.0    0.79     0.94         0.85              3.2
+ 8.0    0.95     0.98         0.76              9.3
+```
+
+<Figure caption="Sáu hàm rút từ tiên nghiệm của mạng tanh 50 đơn vị với mỗi thang trọng số đầu vào s (một hàm được tô nổi). Thang đầu ra như nhau ở mọi khung; điều thay đổi là các hàm đổi chiều gắt và thường xuyên đến mức nào, và, với s lớn, các điểm đổi chiều dồn quanh x = 0.">
+  <BdlPriorSamples />
+</Figure>
+
+Có ba điều đọc được từ bảng và hình. Thứ nhất, một con số duy nhất, thang của trọng số đầu vào, quyết định tiên nghiệm ưa các hàm gần như tuyến tính ($s = 0.5$, trung bình ít hơn một điểm đổi chiều) hay các hàm trông như tổng của các bậc thang ($s = 8$, hơn chín điểm). Chọn "$s_0 = 1$ cho mọi trọng số" là đưa ra quyết định đó một cách ngầm định, và nó định hình phân phối hậu nghiệm ở mọi nơi dữ liệu thưa thớt.
+
+Thứ hai, tiên nghiệm không dừng (stationary): với $s = 0.5$, độ lệch chuẩn là 0.41 tại $x = 0$ và 0.75 tại $x = 3$, vì $\tanh(ux + b)$ có nhiều chỗ để biến thiên hơn ở nơi $|x|$ lớn. Một hàm nhân (kernel) dừng như hàm nhân mũ bình phương của bài thứ sáu đối xử với mọi vị trí đầu vào như nhau; tiên nghiệm này thì không.
+
+Thứ ba, các chuyển tiếp dồn quanh gốc tọa độ với mọi $s$, dù chỉ với $s$ lớn chúng mới đủ gắt để thấy được như các điểm đổi chiều. Đơn vị $j$ chuyển từ giá trị bão hòa này sang giá trị bão hòa kia ở gần $x = -b_j / u_j$, và tỉ số của hai biến Gauss độc lập có trung bình bằng không và cùng độ lệch chuẩn có phân phối Cauchy chuẩn, bất kể độ lệch chuẩn đó là bao nhiêu. Vì vậy một nửa số chuyển tiếp nằm trong $[-1, 1]$ với mọi $s$; thang chỉ quyết định chúng gắt đến mức nào. Nếu các đầu vào không được định tâm và chia tỉ lệ, vùng mà tiên nghiệm chờ đợi có cấu trúc và vùng có dữ liệu có thể cách xa nhau.
+
+### 2.2 Độ sâu làm thay đổi bức tranh
+
+Thêm lớp không tự động cho một tiên nghiệm phong phú hơn. Đoạn mã dưới đây rút từ các mạng tanh độ rộng 50 và độ sâu từ 1 đến 16, với trọng số có phương sai $s_w^2$ chia cho số đầu vào và độ chệch có phương sai đơn vị, và báo hệ số tương quan giữa $f(-3)$ và $f(3)$ theo các lần rút cùng số điểm đổi chiều.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(1)
+H, M = 50, 2000                        # width, prior draws
+x = np.linspace(-3, 3, 301)
+
+def deep_prior(depth, sw):
+    """Tanh network; weights N(0, sw^2 / fan_in), biases N(0, 1)."""
+    h, fan_in = np.broadcast_to(x, (M, 1, x.size)), 1
+    for _ in range(depth):
+        W = rng.normal(0, sw / np.sqrt(fan_in), size=(M, H, fan_in))
+        b = rng.normal(0, 1, size=(M, H, 1))
+        h, fan_in = np.tanh(W @ h + b), H
+    v = rng.normal(0, 1 / np.sqrt(H), size=(M, 1, H))
+    return (v @ h).squeeze(1)
+
+print("sw  depth  corr(f(-3), f(3))  turning points")
+for sw in [1.0, 3.0]:
+    for depth in [1, 2, 4, 8, 16]:
+        f = deep_prior(depth, sw)
+        r = np.corrcoef(f[:, 0], f[:, -1])[0, 1]
+        turns = (np.diff(np.sign(np.diff(f, axis=1)), axis=1) != 0).sum(1).mean()
+        print(f"{sw:3.0f} {depth:5d} {r:12.2f} {turns:16.1f}")
+```
+
+```text
+sw  depth  corr(f(-3), f(3))  turning points
+  1     1        -0.68              1.7
+  1     2         0.26              2.0
+  1     4         0.89              2.1
+  1     8         1.00              2.2
+  1    16         1.00              2.1
+  3     1        -0.92              2.8
+  3     2        -0.60              4.8
+  3     4        -0.12              9.6
+  3     8         0.26             25.4
+  3    16         0.36             85.3
+```
+
+Với $s_w = 1$, các giá trị ở hai đầu khoảng trở nên tương quan hoàn toàn từ độ sâu 8: mỗi hàm được lấy mẫu gần với một hằng số, và biến thiên dọc theo $x$ rất nhỏ so với biến thiên giữa các lần rút. Với $s_w = 3$ thì điều ngược lại xảy ra, và số điểm đổi chiều tăng nhanh theo độ sâu (ở độ sâu 16 nó bị giới hạn bởi lưới, nên 85.3 là một cận dưới). Duvenaud et al. (2014) đã mô tả bệnh lý thứ nhất cho các tiên nghiệm sâu. Phân tích về sự lan truyền tín hiệu (signal propagation) của Poole et al. (2016) và Schoenholz et al. (2017) giải thích cả hai chế độ: tùy theo phương sai của trọng số và độ chệch, tương quan giữa các đầu vào hoặc hội tụ về một (chế độ trật tự, ordered regime) hoặc suy giảm (chế độ hỗn loạn, chaotic regime) khi chúng đi qua các lớp. Một tiên nghiệm hợp lý ở độ sâu 2 có thể suy biến ở độ sâu 16 với cùng các thiết lập cho từng lớp.
+
+## 3. Chọn một tiên nghiệm
+
+### 3.1 Tiên nghiệm đuôi nặng và tiên nghiệm tạo tính thưa
+
+Một tiên nghiệm Gauss co mọi trọng số về không theo cùng một tỉ lệ tương đối. Hai họ tiên nghiệm thay đổi điều đó. Một **tiên nghiệm tạo tính thưa** (sparsity-inducing prior) đặt nhiều khối lượng xác suất gần không và đồng thời có đuôi nặng, nên phần lớn trọng số bị đẩy về không trong khi một số ít được giữ lớn. Tiên nghiệm spike-and-slab (Mitchell và Beauchamp, 1988) trộn một khối lượng điểm tại không với một phân phối "slab" rộng, và tiên nghiệm horseshoe (Carvalho, Polson và Scott, 2010) đạt hiệu quả tương tự bằng một hỗn hợp tỉ lệ liên tục. Áp dụng cho mọi trọng số đi ra từ một đơn vị ẩn hay một đầu vào, chúng đóng vai trò lựa chọn tự động các đơn vị hay các đặc trưng, điều mà Ghosh, Yao và Doshi-Velez (2019) dùng để chọn độ rộng của mạng nơ-ron Bayes. Phương pháp xác định mức liên quan tự động (automatic relevance determination) cũ hơn của Neal (1996), xây dựng trên các hằng số suy giảm trọng số riêng cho từng nhóm trọng số trong *A practical Bayesian framework for backpropagation networks* (1992) của MacKay, làm điều tương tự với một phương sai tiên nghiệm cho mỗi nhóm trọng số, được học từ dữ liệu.
+
+Đuôi nặng cũng quan trọng khi không có tính thưa. Fortuin et al. (2022) khảo sát trọng số của các mạng đã huấn luyện và thấy đuôi nặng hơn phân phối Gauss trong các lớp kết nối đầy đủ và tương quan không gian trong các bộ lọc tích chập, và báo cáo rằng các tiên nghiệm có những tính chất đó cải thiện một số phân phối hậu nghiệm. Hiệu ứng phụ thuộc vào kiến trúc, nên đó là bằng chứng về những tiên nghiệm nào phù hợp, không phải một quy tắc phổ quát.
+
+### 3.2 Tiên nghiệm có thông tin và tiên nghiệm dựa trên dữ liệu
+
+Một **tiên nghiệm có thông tin** (informative prior) mã hóa hiểu biết về bài toán. Viết tay một tiên nghiệm như vậy chỉ khả thi với các tham số có ý nghĩa: chẳng hạn, độ chệch đầu ra của một mạng hồi quy có thể nhận một tiên nghiệm đặt tâm tại một giá trị cơ sở đã biết với độ trải phản ánh mức độ hiểu biết về giá trị cơ sở đó. Với hàng triệu trọng số còn lại, hiểu biết phải đến từ dữ liệu. Một cách phổ biến lấy một mạng đã tiền huấn luyện trên một tác vụ liên quan và dùng các trọng số của nó, cùng một độ bất định được khớp theo mức chúng biến thiên trong lần huấn luyện đó, làm giá trị trung bình và ma trận hiệp phương sai tiên nghiệm cho tác vụ mới. Shwartz-Ziv et al. (2022) đã làm như vậy và báo cáo kết quả tốt hơn so với tiên nghiệm Gauss chuẩn trong học chuyển giao. Một tiên nghiệm như vậy là "thực nghiệm" (empirical) theo nghĩa nó dùng dữ liệu, điều này chấp nhận được chừng nào dữ liệu dùng cho tiên nghiệm không bị tính thêm một lần nữa trong hàm hợp lý (likelihood).
+
+### 3.3 Tiên nghiệm trên hàm
+
+Vì điều quan trọng là phân phối trên hàm, một cách khác là phát biểu tiên nghiệm trực tiếp ở đó, chẳng hạn như một GP với một hàm nhân được chọn, rồi buộc mạng tuân theo nó. Có hai chiến lược. Chiến lược thứ nhất giữ một tiên nghiệm trọng số nhưng điều chỉnh các siêu tham số của nó (phương sai từng lớp, hoặc một phân phối phong phú hơn) sao cho phân phối dự đoán tiên nghiệm sinh ra khớp với các mẫu từ quá trình đích. Tran et al. (2022) cực tiểu hóa một khoảng cách Wasserstein giữa hai phân phối tại các vị trí đầu vào được lấy mẫu và báo cáo rằng các tiên nghiệm được khớp cho phân phối hậu nghiệm tốt hơn các tiên nghiệm Gauss mặc định trong các thí nghiệm của họ. Chiến lược thứ hai bỏ hẳn tiên nghiệm trọng số và thực hiện suy luận trong không gian hàm: suy luận biến phân (variational inference, VI) hàm (Sun et al., 2019) thay độ phân kỳ Kullback–Leibler (KL) giữa các phân phối trọng số bằng độ phân kỳ giữa các phân phối của giá trị hàm tại một tập các điểm đo.
+
+Độ phân kỳ KL trong không gian hàm giữa một mạng và một GP là vấn đề tinh tế (chúng có thể bằng vô cùng), và các bộ ước lượng thực tế dựa vào các điểm đo được lấy mẫu; phương pháp cho kết quả hữu ích nhưng có ít bảo đảm hơn so với phiên bản trong không gian trọng số.
+
+### 3.4 Tiên nghiệm quan trọng đến mức nào
+
+Với một mô hình có tham số định danh được, định lý Bernstein–von Mises phát biểu rằng, khi lượng dữ liệu tăng, phân phối hậu nghiệm trở nên xấp xỉ Gauss quanh tham số thật và quên đi tiên nghiệm, miễn là tiên nghiệm có mật độ dương tại đó (van der Vaart, 1998). Mạng nơ-ron không thỏa các điều kiện của định lý: tham số của chúng không định danh được (mục 5) và chúng thường có nhiều tham số hơn số mẫu. Vì vậy tiên nghiệm vẫn giữ ảnh hưởng của nó trong chế độ mà học sâu Bayes được sử dụng.
+
+Hiệu ứng hậu nghiệm lạnh (cold posterior effect) của [bài thứ hai](/vi/blog/sampling-the-posterior-mcmc), do Wenzel et al. (2020) báo cáo, là một dấu hiệu của điều này: các phân phối hậu nghiệm được điều nhiệt (tempered) dự đoán tốt hơn phân phối hậu nghiệm Bayes cho các bộ phân loại ảnh với tiên nghiệm Gauss. Một tiên nghiệm kém là một trong các lời giải thích được đề xuất, bên cạnh tăng cường dữ liệu (data augmentation) và dữ liệu được tuyển chọn, và các tiên nghiệm đuôi nặng ở mục 3.1 là một phản hồi cho nó.
+
+## 4. Các đối xứng của không gian trọng số
+
+### 4.1 Hoán vị các đơn vị ẩn
+
+[Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) đã lưu ý rằng hoán vị các đơn vị ẩn hoặc đổi dấu các đơn vị tanh giữ nguyên mạng. Mục này suy ra các đối xứng đó, bổ sung các đối xứng khác và kiểm tra chúng bằng số. Một **đối xứng không gian trọng số** (weight-space symmetry) là một phép biến đổi $T$ của các tham số giữ nguyên hàm của mạng: $f(x; T(\theta)) = f(x; \theta)$ với mọi đầu vào $x$. Đối xứng đơn giản nhất xuất hiện vì các đơn vị của một lớp ẩn không có thứ tự. Viết một lớp ẩn có $m$ đơn vị là $h = \phi(W_1 a + b_1)$, cấp cho tiền kích hoạt tiếp theo $W_2 h + b_2$, trong đó $a$ là đầu vào của lớp, $W_1$ và $b_1$ là ma trận trọng số đi vào và vector độ chệch của nó, $W_2$ là ma trận trọng số đi ra và $\phi$ tác động theo từng phần tử. Với mọi ma trận hoán vị $\Pi$ cỡ $m \times m$, thay $W_1$ bằng $\Pi W_1$, $b_1$ bằng $\Pi b_1$ và $W_2$ bằng $W_2 \Pi^\top$ cho
+
+$$
+W_2 \Pi^\top \phi(\Pi W_1 a + \Pi b_1) = W_2 \Pi^\top \Pi\, \phi(W_1 a + b_1) = W_2\, \phi(W_1 a + b_1),
+$$
+
+vì một hàm tác động theo từng phần tử giao hoán với phép sắp xếp lại và $\Pi^\top \Pi = I$. Mỗi một trong $m!$ cách sắp thứ tự các đơn vị đều tính cùng một hàm. Cấu trúc của các hoán vị này, và của các phép đổi dấu dưới đây, đã được Chen, Lu và Hecht-Nielsen (1993) làm rõ.
+
+### 4.2 Đổi dấu và chia lại tỉ lệ
+
+Hàm kích hoạt bổ sung các đối xứng riêng của nó. Với một hàm kích hoạt lẻ như tanh, $\phi(-z) = -\phi(z)$, nên đổi dấu các trọng số đi vào và độ chệch của một đơn vị cùng các trọng số đi ra của nó giữ nguyên đầu ra. Kết hợp với các hoán vị, điều này cho nhóm các hoán vị có dấu (signed permutation), cấp $2^m m!$ cho mỗi lớp ẩn, và với một mạng có các độ rộng ẩn $m_1, \dots, m_L$
+
+$$
+|G| = \prod_{l=1}^{L} 2^{m_l}\, m_l!.
+$$
+
+Sussmann (1992) chứng minh rằng với các mạng tanh một lớp ẩn không có đơn vị thừa (không có đơn vị nào có trọng số bằng không và không có hai đơn vị nào lặp lại hoặc triệt tiêu lẫn nhau), đây là các phép biến đổi duy nhất bảo toàn ánh xạ đầu vào – đầu ra. Với các mạng sâu hơn và các vector tham số suy biến, có thể có nhiều hơn.
+
+Đơn vị tuyến tính chỉnh lưu (rectified linear unit, ReLU), $\phi(z) = \max(0, z)$, không lẻ nhưng thuần nhất dương: $\phi(cz) = c\,\phi(z)$ với $c > 0$. Vì vậy, nhân các trọng số đi vào và độ chệch của một đơn vị với $c$ và chia các trọng số đi ra của nó cho $c$ giữ nguyên hàm với mọi $c > 0$. Đây là một đối xứng liên tục: mỗi hàm không tương ứng với một tập hữu hạn vector tham số mà với cả những đường cong gồm các vector đó, mỗi đơn vị ẩn có một thang tự do. Dinh et al. (2017) dùng điều này để chỉ ra rằng các thước đo "độ sắc" (sharpness) của một cực tiểu có thể bị làm lớn tùy ý mà không thay đổi hàm, nên độ sắc không phải là tính chất của riêng hàm. Một ví dụ cuối cùng nằm ở đầu ra: cộng cùng một hằng số vào mọi logit của một bộ phân loại softmax giữ nguyên các xác suất lớp.
+
+### 4.3 Đếm và kiểm tra các đối xứng
+
+Với một mạng tanh có các độ rộng ẩn 4 và 3, công thức cho $(2^4 \cdot 4!)(2^3 \cdot 3!) = 384 \cdot 48 = 18\,432$ vector tham số tương đương. Với hai lớp ẩn 8 đơn vị, con số là khoảng $1.07 \times 10^{14}$, và với hai lớp 100 đơn vị là khoảng $1.4 \times 10^{376}$. Đoạn mã áp dụng toàn bộ 18 432 hoán vị có dấu cho một mạng ngẫu nhiên có các độ rộng 1, 4, 3 và 1, rồi kiểm tra rằng các vector tham số khác nhau còn đầu ra thì không. Mã cũng ánh xạ mỗi vector tới một **đại diện chính tắc** (canonical representative) của lớp của nó: đổi dấu mỗi đơn vị ẩn sao cho độ chệch của nó dương, rồi sắp xếp các đơn vị của mỗi lớp theo độ chệch.
+
+```python
+import itertools, math
+import numpy as np
+
+rng = np.random.default_rng(7)
+widths = [1, 4, 3, 1]                  # input, hidden 1, hidden 2, output
+params = [(rng.normal(size=(m, n)), rng.normal(size=m))
+          for n, m in zip(widths[:-1], widths[1:])]
+
+def forward(params, x):                # x has shape (batch, 1)
+    h = x.T
+    for i, (W, b) in enumerate(params):
+        h = W @ h + b[:, None]
+        if i < len(params) - 1:
+            h = np.tanh(h)
+    return h.T
+
+def act_on_layer(params, l, p, s):
+    """Permute (p) and sign-flip (s) the units of hidden layer l."""
+    T = np.diag(s)[p]                  # signed permutation matrix
+    out = list(params)
+    W, b = out[l]
+    out[l] = (T @ W, T @ b)            # incoming weights and biases
+    W2, b2 = out[l + 1]
+    out[l + 1] = (W2 @ T.T, b2)        # outgoing weights
+    return out
+
+def flat(params):
+    return np.concatenate([np.r_[W.ravel(), b] for W, b in params])
+
+def group(m):                          # all 2^m m! signed permutations
+    for p in itertools.permutations(range(m)):
+        for s in itertools.product([1.0, -1.0], repeat=m):
+            yield np.array(p), np.array(s)
+
+def canonical(params):
+    """Representative of the orbit: positive hidden biases, sorted."""
+    for l in range(len(params) - 1):
+        b = params[l][1]
+        s = np.sign(b)
+        params = act_on_layer(params, l, np.argsort(s * b), s)
+    return params
+
+x = np.linspace(-3, 3, 201)[:, None]
+y0 = forward(params, x)
+vecs, canon, worst = set(), set(), 0.0
+for g1, g2 in itertools.product(group(4), group(3)):
+    q = act_on_layer(act_on_layer(params, 0, *g1), 1, *g2)
+    worst = max(worst, np.abs(forward(q, x) - y0).max())
+    vecs.add(tuple(np.round(flat(q), 12)))
+    canon.add(tuple(np.round(flat(canonical(q)), 12)))
+print("2^4 4! 2^3 3! =", 2**4 * math.factorial(4) * 2**3 * math.factorial(3))
+print("distinct weight vectors:", len(vecs))
+print(f"largest output difference: {worst:.1e}")
+print("distinct canonical vectors:", len(canon))
+```
+
+```text
+2^4 4! 2^3 3! = 18432
+distinct weight vectors: 18432
+largest output difference: 4.4e-16
+distinct canonical vectors: 1
+```
+
+Toàn bộ 18 432 vector tham số đều khác nhau, chênh lệch lớn nhất giữa các đầu ra của chúng trên 201 đầu vào ở mức sai số làm tròn dấu phẩy động, và ánh xạ chính tắc đưa mọi vector về cùng một vector. Dạng chính tắc dùng được ở đây vì các độ chệch của một mạng ngẫu nhiên tổng quát là khác không và khác nhau; mục 5.3 quay lại trường hợp chúng không như vậy.
+
+## 5. Tính định danh được và phân phối hậu nghiệm
+
+### 5.1 Các bản sao đối xứng của mọi mode
+
+Một mô hình là **định danh được** (identifiable) khi các giá trị tham số khác nhau cho các phân phối dữ liệu khác nhau. Mục 4 cho thấy một mạng nơ-ron không như vậy: hàm hợp lý thỏa $p(\mathcal{D} \mid T(\theta)) = p(\mathcal{D} \mid \theta)$ với mọi đối xứng $T$. Tiên nghiệm Gauss đẳng hướng cũng bất biến, vì một ma trận hoán vị có dấu là trực giao và $\lVert T(\theta) \rVert = \lVert \theta \rVert$. Mọi tiên nghiệm đối xử với các đơn vị của một lớp một cách hoán đổi được (exchangeably) và đối xứng quanh không đều có tính chất này. Theo quy tắc Bayes, khi đó phân phối hậu nghiệm cũng bất biến,
+
+$$
+p(T(\theta) \mid \mathcal{D}) = p(\theta \mid \mathcal{D}) \quad \text{for every } T \in G,
+$$
+
+nên mỗi mode của phân phối hậu nghiệm đi kèm tới $|G| - 1$ bản sao chính xác ở những phần khác của không gian trọng số. Với hàm kích hoạt ReLU, đối xứng chia tỉ lệ bổ sung các sống núi (ridge) liên tục dọc theo đó hàm hợp lý không đổi. Một tiên nghiệm Gauss không bất biến với phép chia lại tỉ lệ, nên nó làm nghiêng mỗi sống núi về phía điểm mà tại đó trọng số đi vào và đi ra của một đơn vị có chuẩn cân bằng (bài tập 4), nhưng nó không thể loại bỏ một bản sao hoán vị.
+
+Phân phối dự đoán hậu nghiệm không bị ảnh hưởng bởi bất kỳ điều nào trong số này. Vì $f(x^*; T(\theta)) = f(x^*; \theta)$, tích phân
+
+$$
+p(y^* \mid x^*, \mathcal{D}) = \int p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, d\theta
+$$
+
+có cùng giá trị dù được tính trên toàn không gian hay trên một vùng chứa đúng một đại diện của mỗi lớp, với phân phối hậu nghiệm được chuẩn hóa lại trên vùng đó. Các bản sao đối xứng không thêm dự đoán mới nào. Một phương pháp chỉ khám phá một bản sao của mỗi mode không mất gì; một phương pháp phí công sức vào các bản sao không được gì.
+
+### 5.2 Đối xứng tác động thế nào đến suy luận
+
+Hệ quả khác nhau tùy phương pháp. Các xấp xỉ cục bộ, tức xấp xỉ Laplace của [bài thứ ba](/vi/blog/laplace-approximations) và các họ biến phân Gauss của [bài thứ tư](/vi/blog/variational-inference-for-neural-networks), nằm trong một miền hút (basin) và không bao giờ thấy các bản sao. Với chúng, đối xứng là vô hại, và các bản sao chỉ có nghĩa là các hằng số chuẩn hóa mà chúng ước lượng thiếu một hệ số như nhau cho mọi mode tương đương về hàm. Các thành viên của một [tập hợp mô hình sâu](/vi/blog/deep-ensembles) rơi vào các miền hút khác nhau; một phần sự đa dạng của chúng có thể chỉ là đánh nhãn lại, nhưng các thành viên huấn luyện độc lập cũng khác nhau về hàm, đó là lý do tập hợp mô hình (ensemble) có ích.
+
+Phương pháp Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC), chủ đề của [bài thứ hai](/vi/blog/sampling-the-posterior-mcmc), bị ảnh hưởng nhiều nhất. Một chuỗi bắt đầu trong một miền hút gần như không bao giờ vượt sang một bản sao hoán vị, vì các bản sao bị ngăn cách bởi các vùng mật độ hậu nghiệm thấp. Thất bại đó không ảnh hưởng đến dự đoán, nhưng nó phá vỡ các phép chẩn đoán thông thường. Hệ số giảm thang tiềm năng (potential scale reduction factor) $\hat{R}$ so sánh độ trải của một tham số bên trong và giữa các chuỗi; hai chuỗi lấy mẫu cùng một hàm trong hai bản sao hoán vị cho $\hat{R}$ lớn với mọi trọng số dù các phân phối dự đoán của chúng khớp nhau. Ngược lại, một vết (trace) trọng số trông có vẻ trộn tốt không nói gì về việc chuỗi đã khám phá các mode khác nhau về hàm, vốn là điều quan trọng, hay chưa. Vì vậy các phép chẩn đoán cho mạng nơ-ron Bayes nên được tính trên các đại lượng bất biến với các đối xứng: dự đoán tại các đầu vào kiểm tra, log-hàm hợp lý hoặc các đại diện chính tắc ở mục 4.3.
+
+### 5.3 Loại bỏ hoặc bỏ qua các đối xứng
+
+Có hai hướng ứng phó chung. Hướng thứ nhất loại bỏ các đối xứng bằng cách ràng buộc các tham số: đòi hỏi độ chệch dương (hoặc trọng số đi ra dương) và một thứ tự của các đơn vị, như ánh xạ chính tắc làm. Khi đó mỗi quỹ đạo (orbit) chỉ có một điểm, nhưng vùng bị ràng buộc có các biên (độ chệch bằng nhau, một độ chệch bằng không) nơi phân phối hậu nghiệm bị cắt đột ngột, điều này gây trở ngại cho các bộ lấy mẫu dựa trên gradient. Loại bỏ các đối xứng chia tỉ lệ của mạng ReLU đòi hỏi một phép chuẩn hóa, chẳng hạn cố định chuẩn của các trọng số đi vào của mỗi đơn vị. Không ràng buộc nào trong số này có sẵn cho các lớp tích chập, lớp chú ý (attention) hay lớp chuẩn hóa, vốn có các đối xứng riêng của chúng.
+
+Hướng thứ hai chấp nhận các đối xứng và chạy nhiều chuỗi ngắn hơn từ các điểm xuất phát độc lập, để cùng nhau chúng ghé thăm nhiều mode khác nhau về hàm; mỗi chuỗi sau đó được đánh giá bằng các phép chẩn đoán trên hàm. Đây là phiên bản nhiều chuỗi tương ứng với một tập hợp mô hình sâu và là thực hành thông thường. Một hướng nghiên cứu liên quan xét **tính liên thông giữa các mode** (mode connectivity): Garipov et al. (2018) và Draxler et al. (2018) tìm thấy các đường cong có mất mát thấp nối các lời giải huấn luyện độc lập. Entezari et al. (2022) phỏng đoán, với các thí nghiệm hỗ trợ, rằng khi đã tính đến các hoán vị, nhiều lời giải như vậy được nối với nhau bằng các đường gần như thẳng có mất mát thấp. Ainsworth, Hayase và Srinivasa (2023) đưa ra các thuật toán tìm hoán vị căn chỉnh. Nếu phỏng đoán này đúng một cách rộng rãi, phần lớn tính đa mode biểu kiến của phân phối hậu nghiệm là do đối xứng, và phần khác biệt thực sự về hàm nhỏ hơn và liên thông tốt hơn so với những gì không gian trọng số gợi ý; việc điều đó có đúng trên các kiến trúc và tập dữ liệu khác nhau hay không vẫn còn là câu hỏi mở.
+
+## 6. Học tiên nghiệm từ dữ liệu
+
+### 6.1 Hàm hợp lý biên
+
+Khi tiên nghiệm có các siêu tham số $\eta$, như thang $s$ ở mục 2 hay phương sai của từng lớp, có thể chọn chúng bằng kiểm định chéo (cross-validation), như trong [Evaluating Models Honestly](/blog/evaluating-models-honestly) thuộc loạt bài Machine Learning Fundamentals, hoặc bằng cách cực đại hóa hàm hợp lý biên (hay bằng chứng, evidence) đã giới thiệu ở [bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks),
+
+$$
+p(\mathcal{D} \mid \eta) = \int p(\mathcal{D} \mid \theta)\, p(\theta \mid \eta)\, d\theta,
+$$
+
+tức xác suất mà phân phối dự đoán tiên nghiệm ở mục 1.1 gán cho dữ liệu quan sát được. MacKay dùng nó để đặt cường độ suy giảm trọng số, cho các mô hình tuyến tính trong *Bayesian interpolation* (1992) và cho mạng nơ-ron trong *A practical Bayesian framework for backpropagation networks* (1992), nơi ông cũng so sánh các kiến trúc mạng theo bằng chứng của chúng. Cả hai đều dựa vào dao cạo Occam (Occam's razor) mô tả ở bài thứ nhất: bằng chứng ưa tiên nghiệm hẹp nhất mà vẫn phủ được những gì đã quan sát. Với một mô hình tuyến tính trên các đặc trưng cố định, bằng chứng có dạng đóng, và [bài tiếp theo](/vi/blog/scaling-bayesian-deep-learning) tính nó cho một mô hình lớp cuối. Với một mạng đầy đủ, nó được xấp xỉ, thường nhất bằng xấp xỉ Laplace của [bài thứ ba](/vi/blog/laplace-approximations), mà Immer et al. (2021) đã làm cho mở rộng được bằng các xấp xỉ độ cong có cấu trúc.
+
+### 6.2 Học các tính bất biến
+
+Cùng công cụ đó có thể học cấu trúc, không chỉ các thang. Một tính bất biến (invariance), chẳng hạn không nhạy với các phép quay nhỏ của một ảnh, có thể được xây vào một mô hình bằng cách lấy trung bình đầu ra của nó trên các bản sao đã biến đổi của đầu vào, với phạm vi của các phép biến đổi là một siêu tham số. Mất mát huấn luyện không thể chọn phạm vi đó: một mô hình không có tính bất biến luôn khớp dữ liệu huấn luyện ít nhất cũng tốt bằng. Hàm hợp lý biên thì có thể, vì một mô hình bất biến cho các dự đoán sắc nét hơn về dữ liệu có tính bất biến. Van der Wilk et al. (2018) đã chứng minh điều này cho GP, và Immer et al. (2022) cho mạng sâu với một xấp xỉ Laplace khả vi của bằng chứng.
+
+Cách tiếp cận này có những giới hạn đã được ghi nhận. Lotfi et al. (2022) chỉ ra rằng hàm hợp lý biên chấm điểm một mô hình theo mức nó dự đoán tốt từng mẫu huấn luyện từ các mẫu đứng trước, bắt đầu từ tiên nghiệm. Một mô hình dự đoán kém khi có ít dữ liệu nhưng tốt khi có nhiều dữ liệu bị phạt vì các lỗi ban đầu của nó, nên bằng chứng có thể xếp hạng các mô hình khác với hiệu năng kiểm tra của chúng; họ báo cáo các trường hợp như vậy, và cả hiện tượng quá khớp khi nhiều siêu tham số được tinh chỉnh theo bằng chứng. Bằng chứng trả lời câu hỏi "tiên nghiệm nào làm cho dữ liệu này có xác suất cao", gần với nhưng không giống câu hỏi "mô hình nào sẽ dự đoán dữ liệu mới tốt nhất".
+
+## 7. Khi tính định danh được là mục tiêu
+
+Trong một mạng nơ-ron, trọng số là phương tiện để có dự đoán, và việc chúng không định danh được chỉ là một phiền toái cho suy luận. Trong một mô hình mà tham số được dùng để diễn giải, tính định danh được là một phần của câu hỏi khoa học. Ví dụ kinh điển là mô hình hỗn hợp hữu hạn (finite mixture model). Các thành phần của nó có thể được đánh nhãn lại mà không thay đổi hàm hợp lý, cùng đối xứng hoán vị như ở mục 4.1, và một bộ lấy mẫu MCMC có chuyển qua lại giữa các cách đánh nhãn cho một trung bình hậu nghiệm của tham số mỗi thành phần là trung bình trên mọi thành phần và không có ý nghĩa gì. Stephens (2000) phân tích vấn đề **hoán đổi nhãn** (label switching) này và đề xuất đánh nhãn lại các mẫu sau khi lấy mẫu theo một thứ tự nhất quán, một ánh xạ chính tắc theo nghĩa của mục 4.3.
+
+Một **hỗn hợp chuyên gia** (mixture of experts; Jacobs et al., 1991) kết hợp cả hai bối cảnh. Một mạng cổng (gating network) $g_k(x)$ gán cho mỗi đầu vào một phân phối xác suất trên $K$ chuyên gia, và dự đoán là $\sum_k g_k(x)\, p_k(y \mid x)$, trong đó $p_k$ là phân phối dự đoán của chuyên gia $k$. Đó là một mô hình hỗn hợp có trọng số phụ thuộc vào đầu vào, nên nó thừa hưởng hiện tượng hoán đổi nhãn, và với các cổng softmax thì cả đối xứng dịch chuyển ở mục 4.2. Các cách xử lý Bayes thường cố định tham số của một cổng bằng không và áp đặt một thứ tự lên các chuyên gia, hoặc đánh nhãn lại các mẫu, trước khi diễn giải chuyên gia nào xử lý vùng nào. Các nghiên cứu về mô hình biến ẩn sâu định danh được có thể được hiểu là đi theo cùng khuôn mẫu: chúng tìm các ràng buộc cấu trúc, chẳng hạn tính thưa trong cách các biến ẩn ảnh hưởng đến quan sát, mà dưới đó các tham số được xác định bởi phân phối dữ liệu sai khác một tập nhỏ các đối xứng đã biết. Cái giá là một mô hình bị hạn chế; cái được là các phát biểu về từng tham số riêng lẻ mang ý nghĩa.
+
+## 8. Giới hạn và các kiểu thất bại
+
+Các hạn chế chính của nội dung trong bài này là:
+
+- **Tiên nghiệm trọng số được chọn vì tiện lợi.** Một phân phối Gauss đẳng hướng với thang mặc định ngầm cam kết những điều về độ trơn, tính dừng và hành vi theo độ sâu (mục 2). Hãy kiểm tra phân phối dự đoán tiên nghiệm ở thang và độ sâu được dùng, với đầu vào được chia tỉ lệ như khi huấn luyện.
+- **Cách xử lý đối xứng phụ thuộc kiến trúc.** Các phép đếm và ánh xạ chính tắc ở mục 4 bao quát các lớp tanh và ReLU kết nối đầy đủ. Các lớp khác có các đối xứng khác, và các vector tham số suy biến (đơn vị bằng không hoặc lặp lại) có nhóm đối xứng lớn hơn.
+- **Chẩn đoán trong không gian trọng số gây hiểu lầm.** Các thống kê về độ trộn của từng trọng số phản ánh đối xứng không kém gì sự hội tụ; hãy đánh giá việc lấy mẫu bằng các dự đoán.
+- **Hàm hợp lý biên là một tiêu chí có thiên lệch riêng.** Nó cần xấp xỉ với mạng nơ-ron, và kể cả khi chính xác, nó đo một điều khác với hiệu năng kiểm tra.
+
+## 9. Bài tập
+
+**Bài tập 1.** Một mạng tanh có các độ rộng ẩn 3 và 5 có bao nhiêu hoán vị có dấu? Nếu thay tanh bằng ReLU, những đối xứng rời rạc nào còn lại và đối xứng liên tục có bao nhiêu tham số thang tự do?
+
+<details>
+<summary>Đáp án</summary>
+
+$(2^3 \cdot 3!)(2^5 \cdot 5!) = 48 \cdot 3840 = 184\,320$. ReLU không lẻ, nên các phép đổi dấu không còn là đối xứng; $3! \cdot 5! = 720$ hoán vị vẫn còn. Mỗi đơn vị trong $3 + 5 = 8$ đơn vị ẩn có hệ số thang dương riêng, nên đối xứng liên tục có 8 tham số tự do.
+
+</details>
+
+**Bài tập 2.** Trong mạng ở mục 2.1 với thang trọng số đầu vào $s = 8$, bao nhiêu phần các đơn vị có chuyển tiếp nằm trong khoảng được vẽ $[-3, 3]$? Đáp án có thay đổi với $s = 0.5$ không?
+
+<details>
+<summary>Đáp án</summary>
+
+Chuyển tiếp của đơn vị $j$ nằm tại $-b_j / u_j$, một biến Cauchy chuẩn, nên tỉ lệ là $P(\lvert X \rvert < 3) = (2/\pi) \arctan 3 \approx 0.795$, khoảng 80%. Tỉ lệ này như nhau với $s = 0.5$, vì tỉ số không phụ thuộc vào thang chung. Điều thay đổi là độ dốc $u_j$ tại chuyển tiếp: với $s = 0.5$, phần lớn các chuyển tiếp thoai thoải đến mức đơn vị gần như tuyến tính trên toàn khoảng.
+
+</details>
+
+**Bài tập 3.** Tiên nghiệm nào trong các tiên nghiệm sau bất biến dưới các hoán vị có dấu của một lớp tanh: (a) $\mathcal{N}(0, s_0^2 I)$; (b) các phân phối Laplace độc lập với thang chung; (c) các phân phối Gauss độc lập có phương sai khác nhau giữa các đơn vị ẩn; (d) các phân phối Gauss độc lập với trung bình chung $\mu \neq 0$?
+
+<details>
+<summary>Đáp án</summary>
+
+(a) và (b) bất biến: cả hai đối xử với mọi trọng số như nhau và đối xứng quanh không. (c) bất biến dưới phép đổi dấu nhưng không dưới hoán vị, vì chuyển một đơn vị tới vị trí có phương sai khác làm thay đổi mật độ; nó định danh được một phần thứ tự của các đơn vị. (d) bất biến dưới hoán vị nhưng không dưới phép đổi dấu, vì đổi dấu các trọng số đẩy chúng ra xa $\mu$.
+
+</details>
+
+**Bài tập 4.** Một đơn vị ReLU có trọng số đi vào và độ chệch với bình phương chuẩn $a$ và trọng số đi ra với bình phương chuẩn $c$. Dưới phép chia lại tỉ lệ ở mục 4.2 với hệ số $k > 0$, log-mật độ của một tiên nghiệm $\mathcal{N}(0, s_0^2 I)$ thay đổi thế nào, và với $k$ nào thì nó lớn nhất?
+
+<details>
+<summary>Đáp án</summary>
+
+Log-tiên nghiệm bằng $-(k^2 a + c / k^2) / (2 s_0^2)$ cộng một hằng số. Đặt đạo hàm theo $k^2$ bằng không cho $a = c / k^4$, nên $k^2 = \sqrt{c / a}$, khi đó cả hai bình phương chuẩn bằng $\sqrt{ac}$. Tiên nghiệm chọn phép chia lại tỉ lệ cân bằng dọc theo mỗi sống núi và do đó loại bỏ đối xứng chia tỉ lệ khỏi mode hậu nghiệm, nhưng nó vẫn để phân phối hậu nghiệm trải dọc theo sống núi.
+
+</details>
+
+## 10. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| Nên đánh giá một tiên nghiệm trọng số thế nào? | Qua phân phối dự đoán tiên nghiệm của nó: lấy mẫu trọng số, chạy mạng, nhìn vào các hàm. |
+| Các chuyển tiếp của một tiên nghiệm tanh một lớp nằm ở đâu? | Tại $-b_j / u_j$, có phân phối Cauchy chuẩn với mọi thang $s$. |
+| Vì sao chia tỉ lệ phương sai đầu ra theo $1/H$? | Để giữ phương sai đầu ra hữu hạn khi độ rộng tăng; giới hạn là NNGP. |
+| Thang trọng số đầu vào điều khiển điều gì? | Các hàm tiên nghiệm đổi chiều gắt và thường xuyên đến mức nào (từ 0.9 đến 9.3 điểm đổi chiều với $s$ từ 0.5 đến 8 ở mục 2.1). |
+| Điều gì trục trặc khi tăng độ sâu? | Các hàm trở nên gần như hằng số hoặc thất thường, tùy theo phương sai của trọng số và độ chệch. |
+| Có những lựa chọn nào thay cho phân phối Gauss? | Tiên nghiệm tạo tính thưa và tiên nghiệm đuôi nặng, tiên nghiệm có thông tin dựa trên dữ liệu, tiên nghiệm phát biểu trong không gian hàm. |
+| Một mạng tanh có bao nhiêu vector trọng số tương đương? | Ít nhất $\prod_l 2^{m_l} m_l!$; 18 432 với các độ rộng ẩn 4 và 3. |
+| Đối xứng tác động gì đến phân phối hậu nghiệm? | Sao chép mọi mode; phân phối dự đoán không đổi, còn các phép chẩn đoán MCMC trong không gian trọng số thì bị ảnh hưởng. |
+| Làm sao học các siêu tham số và tính bất biến? | Bằng cách cực đại hóa hàm hợp lý biên, cẩn trọng với điều mà nó đo. |
+| Khi nào tính định danh được quan trọng? | Khi tham số được diễn giải, như trong mô hình hỗn hợp và hỗn hợp chuyên gia (hoán đổi nhãn). |
+
+Một tiên nghiệm trên trọng số là một tiên nghiệm trên hàm nhìn qua một ánh xạ nhiều – một, và cả hai nửa của bài này đều suy ra từ điều đó. Phân phối dự đoán tiên nghiệm là nơi để kiểm tra tiên nghiệm nói gì, còn các đại lượng bất biến là nơi để kiểm tra một bộ lấy mẫu đã tìm thấy gì. Các phương pháp cho đến nay được minh họa trên các mạng đơn giản, nơi mọi phép tính đều rẻ. [Bài tiếp theo](/vi/blog/scaling-bayesian-deep-learning) hỏi mỗi phương pháp tốn bao nhiêu với một mạng có hàng triệu tham số, và những phép xấp xỉ nào (suy luận lớp cuối, độ cong có cấu trúc, các phương pháp một lượt lan truyền xuôi và GP thưa) giảm được chi phí đó.
+
+### Tài liệu tham khảo
+
+- S. K. Ainsworth, J. Hayase and S. Srinivasa, "Git Re-Basin: Merging models modulo permutation symmetries," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- C. M. Carvalho, N. G. Polson and J. G. Scott, "The horseshoe estimator for sparse signals," *Biometrika*, vol. 97, no. 2, pp. 465–480, 2010.
+- A. M. Chen, H. Lu and R. Hecht-Nielsen, "On the geometry of feedforward neural network error surfaces," *Neural Computation*, vol. 5, no. 6, 1993.
+- L. Dinh, R. Pascanu, S. Bengio and Y. Bengio, "Sharp minima can generalize for deep nets," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
+- F. Draxler, K. Veschgini, M. Salmhofer and F. A. Hamprecht, "Essentially no barriers in neural network energy landscape," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- D. Duvenaud, O. Rippel, R. P. Adams and Z. Ghahramani, "Avoiding pathologies in very deep networks," in *Proceedings of the 17th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2014.
+- R. Entezari, H. Sedghi, O. Saukh and B. Neyshabur, "The role of permutation invariance in linear mode connectivity of neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- V. Fortuin et al., "Bayesian neural network priors revisited," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- T. Garipov, P. Izmailov, D. Podoprikhin, D. Vetrov and A. G. Wilson, "Loss surfaces, mode connectivity, and fast ensembling of DNNs," in *Advances in Neural Information Processing Systems 31*, 2018.
+- S. Ghosh, J. Yao and F. Doshi-Velez, "Model selection in Bayesian neural networks via horseshoe priors," *Journal of Machine Learning Research*, vol. 20, 2019.
+- A. Immer, M. Bauer, V. Fortuin, G. Rätsch and M. E. Khan, "Scalable marginal likelihood estimation for model selection in deep learning," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- A. Immer, T. F. A. van der Ouderaa, G. Rätsch, V. Fortuin and M. van der Wilk, "Invariance learning in deep neural networks with differentiable Laplace approximations," in *Advances in Neural Information Processing Systems 35*, 2022.
+- R. A. Jacobs, M. I. Jordan, S. J. Nowlan and G. E. Hinton, "Adaptive mixtures of local experts," *Neural Computation*, vol. 3, no. 1, pp. 79–87, 1991.
+- S. Lotfi, P. Izmailov, G. Benton, M. Goldblum and A. G. Wilson, "Bayesian model selection, the marginal likelihood, and generalization," in *Proceedings of the 39th International Conference on Machine Learning (ICML)*, 2022.
+- D. J. C. MacKay, "Bayesian interpolation," *Neural Computation*, vol. 4, no. 3, pp. 415–447, 1992.
+- D. J. C. MacKay, "A practical Bayesian framework for backpropagation networks," *Neural Computation*, vol. 4, no. 3, pp. 448–472, 1992.
+- T. J. Mitchell and J. J. Beauchamp, "Bayesian variable selection in linear regression," *Journal of the American Statistical Association*, vol. 83, no. 404, pp. 1023–1032, 1988.
+- R. M. Neal, *Bayesian Learning for Neural Networks*, Lecture Notes in Statistics, vol. 118, Springer, 1996.
+- B. Poole, S. Lahiri, M. Raghu, J. Sohl-Dickstein and S. Ganguli, "Exponential expressivity in deep neural networks through transient chaos," in *Advances in Neural Information Processing Systems 29*, 2016.
+- S. S. Schoenholz, J. Gilmer, S. Ganguli and J. Sohl-Dickstein, "Deep information propagation," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2017.
+- R. Shwartz-Ziv et al., "Pre-train your loss: Easy Bayesian transfer learning with informative priors," in *Advances in Neural Information Processing Systems 35*, 2022.
+- M. Stephens, "Dealing with label switching in mixture models," *Journal of the Royal Statistical Society, Series B*, vol. 62, no. 4, pp. 795–809, 2000.
+- S. Sun, G. Zhang, J. Shi and R. Grosse, "Functional variational Bayesian neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2019.
+- H. J. Sussmann, "Uniqueness of the weights for minimal feedforward nets with a given input-output map," *Neural Networks*, vol. 5, no. 4, 1992.
+- B.-H. Tran, S. Rossi, D. Milios and M. Filippone, "All you need is a good functional prior for Bayesian deep learning," *Journal of Machine Learning Research*, vol. 23, 2022.
+- A. W. van der Vaart, *Asymptotic Statistics*, Cambridge University Press, 1998.
+- M. van der Wilk, M. Bauer, S. T. John and J. Hensman, "Learning invariances using the marginal likelihood," in *Advances in Neural Information Processing Systems 31*, 2018.
+- F. Wenzel et al., "How good is the Bayes posterior in deep neural networks really?," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.

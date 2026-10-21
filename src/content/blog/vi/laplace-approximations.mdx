@@ -1,0 +1,395 @@
+---
+title: "Xấp xỉ Laplace và phân phối dự đoán tuyến tính hóa"
+description: "Xấp xỉ Laplace khớp một phân phối Gauss tại mode của một mạng đã huấn luyện từ độ cong của nó, cho độ bất định sau huấn luyện và một ước lượng của hàm hợp lý biên."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - uncertainty
+  - model selection
+series: bayesian-deep-learning
+seriesOrder: 3
+---
+
+import Figure from '../../../components/Figure.astro';
+import BdlLaplaceLogistic from '../../../components/diagrams/BdlLaplaceLogistic.astro';
+
+[Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) đã định nghĩa phân phối hậu nghiệm (posterior) $p(\theta \mid \mathcal{D})$ trên các tham số của một mạng và phân phối dự đoán hậu nghiệm (posterior predictive) lấy trung bình các đầu ra của mạng theo phân phối đó. [Bài thứ hai](/vi/blog/sampling-the-posterior-mcmc) đã xấp xỉ phép lấy trung bình đó bằng các mẫu. Lấy mẫu chính xác trong giới hạn nhưng tốn kém: mỗi mẫu là một bản sao đầy đủ của các tham số, và mỗi dự đoán cần một lượt truyền xuôi cho mỗi mẫu. Bài này trình bày phương án thay thế lâu đời nhất và rẻ nhất, **xấp xỉ Laplace** (Laplace approximation), thay phân phối hậu nghiệm bằng một phân phối Gauss duy nhất đặt tâm tại các tham số của một mạng đã huấn luyện và có hình dạng do độ cong của hàm mất mát tại đó quyết định.
+
+Phép xấp xỉ này hấp dẫn với bất kỳ ai đã quen huấn luyện mạng. Nó bắt đầu từ các tham số mà quá trình huấn luyện thông thường trả về, nên lần huấn luyện không thay đổi, và nó chỉ thêm một bước sau huấn luyện: tính một ma trận độ cong và nghịch đảo nó, hoặc một phép xấp xỉ của nó. Đổi lại, nó cho một phân phối dự đoán kèm thanh sai số và một ước lượng của hàm hợp lý biên (marginal likelihood) $p(\mathcal{D})$, có thể dùng để điều chỉnh siêu tham số mà không cần tập kiểm định. Cái giá phải trả là phép xấp xỉ mang tính cục bộ. Nó chỉ nhìn thấy phân phối hậu nghiệm qua các đạo hàm tại một điểm, và nó có thể sai theo những cách mà độ cong không thể tiết lộ.
+
+Bài này xây dựng trên hàm mục tiêu huấn luyện có chính quy hóa của bài [Generalization, Overfitting and Regularization](/blog/generalization-overfitting-and-regularization) (Tổng quát hóa, quá khớp và chính quy hóa) và các gradient của bài [Gradient Descent and Its Variants](/blog/gradient-descent-and-its-variants) (Hạ gradient và các biến thể). Bài dùng ký hiệu của loạt bài: $\theta \in \mathbb{R}^P$ là $P$ tham số, $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ là dữ liệu huấn luyện, $p(\theta)$ là tiên nghiệm, $p(\mathcal{D} \mid \theta)$ là hàm hợp lý, còn $x^*$, $y^*$ là một đầu vào kiểm tra và đầu ra của nó. Vector là vector cột. Ví dụ chạy trên Python 3.13 với NumPy 2.5.3 và các hạt giống cố định.
+
+## 1. Một phân phối Gauss tại mode
+
+### 1.1 Ý tưởng
+
+**Ước lượng hậu nghiệm cực đại** (maximum a posteriori, MAP) $\hat{\theta}$ là vector tham số tại đó mật độ hậu nghiệm lớn nhất. Huấn luyện một mạng với suy giảm trọng số (weight decay) sẽ tìm ra nó, hoặc ít nhất là một phiên bản cục bộ của nó: cực tiểu hóa hàm mất mát có chính quy hóa
+
+$$
+L(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta) = \sum_{n=1}^N \ell(f(x_n, \theta), y_n) - \log p(\theta)
+$$
+
+tương đương với cực đại hóa $\log p(\theta \mid \mathcal{D}) = -L(\theta) - \log p(\mathcal{D})$, vì $\log p(\mathcal{D})$ không phụ thuộc vào $\theta$. Ở đây $f(x, \theta) \in \mathbb{R}^C$ là đầu ra của mạng ($C$ logit của một bộ phân loại, hoặc kỳ vọng của một mô hình hồi quy) và $\ell$ là logarit âm của hàm hợp lý cho từng ví dụ. Với một tiên nghiệm Gauss $p(\theta) = \mathcal{N}(0, s_0^2 I)$ có độ lệch chuẩn $s_0$, ở đây được viết qua **độ chính xác tiên nghiệm** (prior precision) $\alpha = 1/s_0^2$ vì các công thức độ cong đơn giản hơn khi viết theo nó, số hạng $-\log p(\theta)$ là hàm phạt suy giảm trọng số $\tfrac{\alpha}{2}\lVert\theta\rVert^2$ cộng một hằng số.
+
+Gần $\hat{\theta}$, khai triển $L$ đến bậc hai. Gradient bằng không tại một cực tiểu, nên
+
+$$
+L(\theta) \approx L(\hat{\theta}) + \tfrac{1}{2}(\theta - \hat{\theta})^\top H (\theta - \hat{\theta}), \qquad H = \nabla^2_\theta L(\hat{\theta}).
+$$
+
+Lấy lũy thừa của $-L$ cho một mật độ tỉ lệ với một phân phối Gauss. Xấp xỉ Laplace chính là phân phối Gauss đó:
+
+$$
+p(\theta \mid \mathcal{D}) \approx q(\theta) = \mathcal{N}(\theta;\ \hat{\theta},\ \Sigma), \qquad \Sigma = H^{-1}.
+$$
+
+Kỳ vọng là vector tham số đã huấn luyện và hiệp phương sai là nghịch đảo của độ cong. Các hướng mà hàm mất mát tăng dốc là các hướng mà dữ liệu xác định chặt, và chúng nhận phương sai nhỏ; các hướng mà hàm mất mát phẳng nhận phương sai lớn. Ý tưởng này bắt nguồn từ công trình của Laplace về các tích phân dạng $\int e^{-n g(\theta)}\,d\theta$ với $n$ lớn. MacKay (1992) đã phát triển nó cho các mô hình nội suy và đưa nó vào mạng nơ-ron, cho cả dự đoán lẫn so sánh mô hình, trong hồi quy và trong phân loại. Tierney và Kadane (1986) đã phân tích độ chính xác của nó đối với các mô-men hậu nghiệm trong thống kê.
+
+### 1.2 Công thức và những gì nó bỏ qua
+
+Phép xấp xỉ chia công việc thành hai phần có chi phí không đều nhau. Phần tốn kém, tìm $\hat{\theta}$, là việc huấn luyện thông thường và không phải lặp lại. Phần mới là một lượt duyệt qua tập huấn luyện để tích lũy một ma trận độ cong tại $\hat{\theta}$, tiếp theo là một phép phân tích ma trận đó: đại số tuyến tính, không cần tối ưu hóa thêm và không cần lấy mẫu ngẫu nhiên. Vì độ cong là một tổng theo các ví dụ huấn luyện, phần thứ hai cần dữ liệu, nhưng nó không phụ thuộc vào cách $\hat{\theta}$ được tìm ra. Daxberger và cộng sự (2021) nhấn mạnh sự tách biệt khỏi quá trình huấn luyện này như điểm hấp dẫn thực tế chính của phương pháp.
+
+Cách xây dựng cũng ấn định những gì phép xấp xỉ có thể biểu diễn, và ba hệ quả của nó lặp lại xuyên suốt bài:
+
+- **Một điểm tiếp xúc.** Mọi thứ đều đến từ giá trị và các đạo hàm của $L$ tại $\hat{\theta}$. Một phân phối hậu nghiệm lệch, một đuôi nặng hay một mode thứ hai không để lại dấu vết nào ở đó và vô hình đối với phép xấp xỉ.
+- **Một dạng đóng.** Một kỳ vọng và một hiệp phương sai xác định toàn bộ phép xấp xỉ. Phương sai dự đoán ở mục 3 và bằng chứng (evidence) ở mục 5 là các công thức theo hai đại lượng đó, không phải các trung bình Monte Carlo.
+- **Giả định có một cực tiểu.** Phép khai triển giả định $\nabla L(\hat{\theta}) = 0$ và $H$ xác định dương. Các mạng hiếm khi được huấn luyện đến đúng một điểm dừng, và mục 2 cho thấy ma trận Hesse chính xác của một mạng thường không xác định dấu.
+
+Phép xấp xỉ là chính xác khi $L$ là hàm bậc hai, như trong trường hợp hồi quy tuyến tính với tiên nghiệm Gauss và nhiễu Gauss. Với các mô hình khác, độ chính xác của nó cải thiện khi $N$ tăng, vì phân phối hậu nghiệm tập trung lại và trở nên xấp xỉ Gauss dưới các điều kiện chính quy (định lý Bernstein–von Mises). Một mạng với hàng triệu tham số ở rất xa chế độ đó: nhiều hướng hầu như không bị dữ liệu ràng buộc, và các tính đối xứng của mạng (bài thứ bảy, [Tiên nghiệm, tính đối xứng và tính khả định danh](/vi/blog/priors-symmetries-and-identifiability), quay lại vấn đề này) tạo ra nhiều mode tương đương.
+
+## 2. Độ cong cho một mạng nơ-ron
+
+### 2.1 Ma trận Hesse và các vấn đề của nó
+
+Lựa chọn hiển nhiên cho $H$ là ma trận Hesse (Hessian) chính xác của $L$. Viết $J_n = \partial f(x_n, \theta)/\partial\theta \in \mathbb{R}^{C \times P}$ cho ma trận Jacobi (Jacobian) của đầu ra mạng tại đầu vào thứ $n$ và $\Lambda_n = \nabla^2_f \ell(f, y_n) \in \mathbb{R}^{C \times C}$ cho ma trận Hesse của hàm mất mát theo đầu ra, quy tắc dây chuyền cho
+
+$$
+\nabla^2_\theta L = \sum_{n=1}^N J_n^\top \Lambda_n J_n \;+\; \sum_{n=1}^N \sum_{c=1}^C \frac{\partial \ell}{\partial f_c}\, \nabla^2_\theta f_c(x_n, \theta) \;+\; \nabla^2_\theta\big(-\log p(\theta)\big).
+$$
+
+Số hạng thứ hai chứa các đạo hàm bậc hai của chính mạng, với trọng số là các phần dư $\partial \ell / \partial f_c$. Nó có hai nhược điểm. Nó có thể âm theo một số hướng, nên tổng không nhất thiết xác định dương và $H^{-1}$ không nhất thiết là một hiệp phương sai. Và đối với một mạng đã huấn luyện, nó tốn kém để tính và lưu trữ: $H$ có $P^2$ phần tử.
+
+### 2.2 Ma trận Gauss–Newton tổng quát
+
+**Ma trận Gauss–Newton tổng quát** (generalized Gauss–Newton, GGN) giữ số hạng thứ nhất và bỏ số hạng thứ hai (Schraudolph, 2002):
+
+$$
+H_{\mathrm{GGN}} = \sum_{n=1}^N J_n^\top \Lambda_n J_n + \alpha I .
+$$
+
+Với các hàm mất mát thông dụng, $\Lambda_n$ nửa xác định dương: với sai số bình phương và phương sai nhiễu $\sigma^2$ nó là $I/\sigma^2$, và với đầu ra sigmoid hoặc softmax cùng entropy chéo (cross-entropy) nó là hiệp phương sai của phân phối lớp được dự đoán ($p(1-p)$ trong trường hợp nhị phân). Khi đó số hạng tiên nghiệm $\alpha I$ làm cho $H_{\mathrm{GGN}}$ xác định dương, bất kể trạng thái huấn luyện. Số hạng bị bỏ nhỏ ở nơi các phần dư nhỏ hoặc nơi mạng gần tuyến tính theo $\theta$, và nó triệt tiêu đối với một mô hình tuyến tính theo tham số.
+
+Với các hàm hợp lý thuộc họ mũ cùng hàm liên kết chính tắc (canonical link) của chúng (hồi quy Gauss, phân loại logistic và softmax), GGN bằng **ma trận thông tin Fisher** (Fisher information matrix), kỳ vọng của tích ngoài của gradient logarit hàm hợp lý theo chính phân phối dự đoán của mô hình (Martens, 2020). Một ma trận khác, **ma trận Fisher thực nghiệm** (empirical Fisher), dùng các nhãn quan sát được thay vì các nhãn rút từ mô hình, $\sum_n \nabla_\theta \ell_n \nabla_\theta \ell_n^\top$. Nó rẻ hơn nhưng không có chung các tính chất của GGN; gần một mode được khớp tốt, nơi các gradient nhỏ, nó có thể đánh giá thấp nghiêm trọng độ cong (Kunstner, Balles và Hennig, 2019). Bài này dùng GGN.
+
+### 2.3 Làm cho độ cong có chi phí chấp nhận được
+
+Một mạng với $10^7$ tham số có GGN gồm $10^{14}$ phần tử, vượt xa mọi bộ nhớ. Các xấp xỉ Laplace thực tế hạn chế cấu trúc của độ cong hoặc tập tham số mà nó bao phủ:
+
+- **Đường chéo.** Chỉ giữ đường chéo của $H_{\mathrm{GGN}}$. Chi phí và bộ nhớ là $O(P)$, nhưng mọi tương quan giữa các tham số bị mất, điều này có xu hướng phóng đại phương sai dự đoán.
+- **Độ cong xấp xỉ phân tích Kronecker** (Kronecker-factored approximate curvature, K-FAC). Với mỗi lớp, xấp xỉ khối của GGN bằng một tích Kronecker $A \otimes G$, trong đó $A$ là hiệp phương sai của các kích hoạt đầu vào của lớp và $G$ là hiệp phương sai của các gradient theo đầu ra của lớp (Martens và Grosse, 2015). **Tích Kronecker** (Kronecker product) $A \otimes G$ của một ma trận $A$ cỡ $m \times m$ và một ma trận $G$ cỡ $n \times n$ là ma trận khối cỡ $mn \times mn$ có khối thứ $(i, j)$ là $A_{ij} G$. Khi đó một lớp cỡ $d_{\mathrm{in}} \times d_{\mathrm{out}}$ cần một ma trận $d_{\mathrm{in}} \times d_{\mathrm{in}}$ và một ma trận $d_{\mathrm{out}} \times d_{\mathrm{out}}$ thay vì một ma trận vuông cạnh $d_{\mathrm{in}} d_{\mathrm{out}}$. Ritter, Botev và Barber đã dùng cấu trúc này cho các xấp xỉ Laplace mở rộng được vào năm 2018.
+- **Hạng thấp.** Giữ các vector riêng dẫn đầu của số hạng dữ liệu và để tiên nghiệm xử lý phần còn lại, hoặc không bao giờ lập ma trận mà làm việc với các tích ma trận – vector $H v$, mà vi phân tự động tính được với chi phí vài lần tính gradient (Schraudolph, 2002).
+- **Một tập con tham số.** Coi phần lớn mạng là cố định và áp dụng xấp xỉ Laplace đầy đủ cho một phần nhỏ của nó, thường nhất là lớp cuối. Xấp xỉ **Laplace lớp cuối** (last-layer Laplace) này rẻ, có độ cong chính xác cho lớp đó khi đầu ra tuyến tính theo nó, và thường cạnh tranh được trong thực tế (Kristiadi, Hein và Hennig, 2020; Daxberger và cộng sự, 2021).
+
+Nghiên cứu của Daxberger và cộng sự (2021) so sánh các lựa chọn này trên các bộ dữ liệu chuẩn (benchmark) và khuyến nghị K-FAC lớp cuối hoặc độ cong đầy đủ lớp cuối làm mặc định. Khuyến nghị của họ là một phát hiện thực nghiệm về các bộ dữ liệu chuẩn mà họ đã chạy; bài thứ tám, [Mở rộng quy mô học sâu Bayes](/vi/blog/scaling-bayesian-deep-learning), quay lại các sự đánh đổi ở quy mô lớn.
+
+## 3. Phân phối dự đoán
+
+### 3.1 Lấy mẫu trọng số và cái bẫy của nó
+
+Cho $q(\theta)$, phân phối dự đoán hậu nghiệm được xấp xỉ bởi
+
+$$
+p(y^* \mid x^*, \mathcal{D}) \approx \int p(y^* \mid f(x^*, \theta))\, q(\theta)\, d\theta \approx \frac{1}{M} \sum_{m=1}^M p(y^* \mid f(x^*, \theta_m)), \qquad \theta_m \sim q,
+$$
+
+với $M$ mẫu rút từ phân phối Gauss. Cách này hoạt động với các mô hình nhỏ nhưng thường thất bại đối với một mạng có xấp xỉ Laplace dựa trên GGN: dự đoán của các mạng được lấy mẫu có thể tệ hơn nhiều so với dự đoán của $\hat{\theta}$, nên phép lấy trung bình Bayes bị khớp thiếu (underfit). Nguyên nhân là sự không khớp giữa độ cong và mô hình. GGN mô tả hàm mất mát của một mạng tuyến tính theo $\theta$ quanh $\hat{\theta}$; còn các tham số được lấy mẫu lại được đưa qua toàn bộ mạng phi tuyến, mà với nó cùng phân phối Gauss đó có thể chạm đến các vùng có mất mát cao. Các hướng mà GGN coi là không bị ràng buộc (chỉ tiên nghiệm giới hạn chúng) là nơi sự không khớp tệ nhất.
+
+### 3.2 Phân phối dự đoán tuyến tính hóa
+
+Immer, Korzepa và Bauer (2021) đã giải quyết sự không khớp bằng cách làm cho phân phối dự đoán nhất quán với độ cong. Thay mạng bằng khai triển Taylor bậc nhất của nó theo các tham số:
+
+$$
+f_{\mathrm{lin}}(x, \theta) = f(x, \hat{\theta}) + J(x)\,(\theta - \hat{\theta}), \qquad J(x) = \left.\frac{\partial f(x, \theta)}{\partial \theta}\right|_{\theta = \hat{\theta}}.
+$$
+
+Hai sự thật khiến đây là bạn đồng hành tự nhiên của GGN. Thứ nhất, ma trận Hesse chính xác của hàm mất mát có chính quy hóa của $f_{\mathrm{lin}}$ tại $\hat{\theta}$ là $H_{\mathrm{GGN}}$, vì số hạng đạo hàm bậc hai bị bỏ đi bằng không đối với một mô hình tuyến tính theo $\theta$. Do đó xấp xỉ Laplace dùng GGN chính là xấp xỉ Laplace thông thường của mô hình tuyến tính hóa. Thứ hai, một hàm tuyến tính của một biến Gauss có phân phối Gauss, nên đầu ra tại một đầu vào kiểm tra có phân phối dạng đóng:
+
+$$
+f_{\mathrm{lin}}(x^*, \theta) \sim \mathcal{N}\big(f(x^*, \hat{\theta}),\ J(x^*)\, \Sigma\, J(x^*)^\top\big), \qquad \theta \sim q .
+$$
+
+Kỳ vọng dự đoán là đầu ra của mạng đã huấn luyện, không thay đổi. Hiệp phương sai dự đoán lớn ở nơi đầu vào kiểm tra làm đầu ra di chuyển theo các hướng mà dữ liệu để lại bất định. Với hồi quy có nhiễu Gauss phương sai $\sigma^2$, phân phối dự đoán của $y^*$ cộng thêm $\sigma^2$ vào đường chéo của hiệp phương sai đó.
+
+Cùng công thức đó định nghĩa một hiệp phương sai giữa các đầu ra tại hai đầu vào, $k(x, x') = J(x)\, \Sigma\, J(x')^\top$. Vì vậy xấp xỉ Laplace tuyến tính hóa biến một mạng đã huấn luyện thành một quá trình Gauss (Gaussian process, GP) có hàm kỳ vọng là mạng và có hàm nhân (kernel) được xây dựng từ các ma trận Jacobi của mạng (Khan và cộng sự, 2019). Bài thứ sáu, [Quá trình Gauss, hàm nhân và mạng rộng vô hạn](/vi/blog/gaussian-processes-and-kernels), phát triển riêng hàm nhân $J(x)J(x')^\top$, được gọi là nhân tiếp tuyến nơ-ron (neural tangent kernel, NTK).
+
+### 3.3 Phân loại và xấp xỉ probit
+
+Với một bộ phân loại nhị phân có logit $f$, xác suất dự đoán là $\int \mathrm{sig}(f)\, \mathcal{N}(f; \mu, s^2)\, df$, trong đó $\mathrm{sig}(z) = 1/(1 + e^{-z})$ là hàm sigmoid logistic còn $\mu$ và $s^2$ là kỳ vọng và phương sai của logit tuyến tính hóa. Tích phân không có dạng đóng, nhưng thay hàm sigmoid bằng một hàm phân phối tích lũy Gauss được co giãn cho một phép xấp xỉ chính xác (MacKay, *The evidence framework applied to classification networks*, 1992; Bishop, 2006):
+
+$$
+p(y^* = 1 \mid x^*, \mathcal{D}) \approx \mathrm{sig}\!\left(\frac{\mu}{\sqrt{1 + \pi s^2 / 8}}\right).
+$$
+
+Tác dụng là kéo logit về phía không tỉ lệ với độ bất định của nó: một dự đoán tự tin được đưa ra trong một vùng bất định sẽ được điều hòa về phía 0.5. Với $C$ lớp, người ta dùng một phép co giãn tương tự cho từng lớp đối với các logit softmax, hoặc một vài mẫu Monte Carlo của các logit Gauss.
+
+## 4. Ví dụ minh họa: hồi quy logistic
+
+### 4.1 Bài toán
+
+Một mô hình hai tham số làm cho phép xấp xỉ kiểm tra được, vì phân phối hậu nghiệm chính xác có thể được tính trên một lưới. Xét hồi quy logistic nhị phân với các đặc trưng $\phi(x) = (1, x)^\top$, tham số $\theta = (b, w)^\top$ (một hệ số chặn và một hệ số góc), logit $f(x, \theta) = b + w x$ và tiên nghiệm $\mathcal{N}(0, \alpha^{-1} I)$ với $\alpha = 1$. Dữ liệu gồm 20 điểm với $x$ phân phối đều trên $[-3, 3]$ và các nhãn rút từ mô hình thật với $b = 0.5$ và $w = 1.5$. Mô hình tuyến tính theo $\theta$, nên $J(x) = \phi(x)^\top$, GGN bằng ma trận Hesse chính xác và phân phối dự đoán tuyến tính hóa là chính xác đối với phân phối Gauss $q$. Điều còn lại cần kiểm tra là chính phân phối Gauss đó.
+
+Đoạn mã tìm $\hat{\theta}$ bằng phương pháp Newton, vốn dùng cùng ma trận $H$ cho bước của nó, dựng xấp xỉ Laplace và so sánh nó với phân phối hậu nghiệm chính xác trên một lưới $601 \times 601$ phủ $[-6, 8]^2$. Sau đó nó so sánh bốn xác suất dự đoán: dự đoán thay thế trực tiếp (plug-in) $\mathrm{sig}(f(x^*, \hat{\theta}))$, xấp xỉ probit của mục 3.3, một trung bình Monte Carlo trên 20 000 mẫu rút từ $q$ và trung bình hậu nghiệm chính xác từ lưới.
+
+```python
+import numpy as np
+
+def sig(z):
+    return 1 / (1 + np.exp(-z))
+
+# Toy data: 20 points, true theta = (0.5, 1.5); features phi(x) = [1, x]
+rng = np.random.default_rng(8)
+N = 20
+x = rng.uniform(-3, 3, N)
+y = (rng.uniform(size=N) < sig(0.5 + 1.5 * x)).astype(float)
+X = np.column_stack([np.ones(N), x])
+
+def log_joint(T, alpha):                      # log p(D|theta) + log p(theta), rows of T
+    Z = T @ X.T
+    return ((Z * y - np.logaddexp(0, Z)).sum(-1)
+            - 0.5 * alpha * (T**2).sum(-1) - np.log(2 * np.pi / alpha))
+
+def laplace(alpha):
+    t = np.zeros(2)
+    for _ in range(50):                       # Newton's method for the MAP estimate
+        p = sig(X @ t)
+        g = X.T @ (y - p) - alpha * t
+        H = X.T @ (X * (p * (1 - p))[:, None]) + alpha * np.eye(2)  # GGN (= Hessian)
+        t = t + np.linalg.solve(H, g)
+    p = sig(X @ t)
+    H = X.T @ (X * (p * (1 - p))[:, None]) + alpha * np.eye(2)
+    logZ = log_joint(t, alpha) + np.log(2 * np.pi) - 0.5 * np.linalg.slogdet(H)[1]
+    return t, np.linalg.inv(H), logZ
+
+# Reference: the exact posterior on a 601 x 601 grid
+g1 = np.linspace(-6, 8, 601)
+B, W = np.meshgrid(g1, g1, indexing="ij")
+G = np.stack([B.ravel(), W.ravel()], 1)
+dA = (g1[1] - g1[0]) ** 2
+
+def exact(alpha):
+    lj = log_joint(G, alpha)
+    m = lj.max()
+    post = np.exp(lj - m)
+    return post / post.sum(), m + np.log(post.sum() * dA)
+
+alpha = 1.0
+t, S, logZ = laplace(alpha)
+post, logZ_ex = exact(alpha)
+mean = post @ G
+sd = np.sqrt(post @ (G - mean) ** 2)
+print("MAP theta*   :", t.round(3), " Laplace sd:", np.sqrt(np.diag(S)).round(3))
+print("exact mean   :", mean.round(3), " exact sd  :", sd.round(3))
+print(f"log p(D)     : Laplace {logZ:.3f}, exact {logZ_ex:.3f}")
+
+draws = np.random.default_rng(0).multivariate_normal(t, S, 20000)
+print("  x*   plug-in  probit  MC-Laplace  exact")
+for xs in [-8.0, -2.0, 0.0, 2.0, 8.0]:
+    phi = np.array([1.0, xs])
+    mu, s2 = phi @ t, phi @ S @ phi
+    print(f"{xs:5.0f}   {sig(mu):.3f}   {sig(mu / np.sqrt(1 + np.pi * s2 / 8)):.3f}"
+          f"     {sig(draws @ phi).mean():.3f}     {post @ sig(G @ phi):.3f}")
+```
+
+```text
+MAP theta*   : [0.363 1.326]  Laplace sd: [0.536 0.498]
+exact mean   : [0.407 1.479]  exact sd  : [0.55  0.514]
+log p(D)     : Laplace -9.466, exact -9.443
+  x*   plug-in  probit  MC-Laplace  exact
+   -8   0.000   0.019     0.008     0.002
+   -2   0.092   0.123     0.123     0.100
+    0   0.590   0.585     0.584     0.594
+    2   0.953   0.913     0.917     0.939
+    8   1.000   0.980     0.991     0.998
+```
+
+Hàm `log_joint` bao gồm hằng số chuẩn hóa của tiên nghiệm, $-\log(2\pi/\alpha)$ cho hai tham số, để `logZ` là một logarit hàm hợp lý biên và có thể được so sánh giữa các giá trị của $\alpha$ ở mục 5.
+
+### 4.2 Đọc kết quả
+
+Các độ lệch chuẩn gần nhau: 0.536 và 0.498 từ xấp xỉ Laplace so với 0.550 và 0.514 từ lưới. Các kỳ vọng thì không. Kỳ vọng hậu nghiệm chính xác của hệ số góc là 1.479, giá trị MAP là 1.326, và xấp xỉ Laplace không có cách nào biết về sự khác biệt đó. Phân phối hậu nghiệm chính xác của $w$ lệch về bên phải, như ô bên trái của hình vẽ cho thấy: với 20 điểm, các hệ số góc lớn (một biên quyết định sắc nét) vẫn hợp lý, trong khi các hệ số góc nhỏ bị loại trừ nhanh chóng. Một phân phối Gauss đối xứng quanh mode của nó và đặt quá nhiều khối lượng vào các hệ số góc nhỏ và quá ít vào các hệ số góc lớn.
+
+Bảng dự đoán cho thấy hệ quả. Gần dữ liệu ($x^* = \pm 2$), dự đoán thay thế trực tiếp hơi quá tự tin và phân phối dự đoán Laplace thiếu tự tin nhiều hơn một chút: tại $x^* = 2$ ba giá trị là 0.953, 0.917 và giá trị chính xác 0.939. Ở xa dữ liệu, dự đoán thay thế trực tiếp tiến tới 0 và 1, trong khi phân phối dự đoán Laplace chững lại. Khi $x^* \to \infty$, trung bình Monte Carlo tiến tới xác suất để hệ số góc dương dưới $q$, tức $\Phi(\hat{w}/s_w) = \Phi(1.326/0.498) \approx 0.996$, với $\Phi$ là hàm phân phối tích lũy chuẩn tắc và $s_w$ là độ lệch chuẩn Laplace của hệ số góc. Xấp xỉ probit tiến tới $\mathrm{sig}\big(\hat{w}/(s_w\sqrt{\pi/8})\big) \approx 0.986$. Phân phối hậu nghiệm chính xác, có khối lượng trên các hệ số góc nhỏ ít hơn, tự tin hơn cả hai.
+
+<Figure caption="Xấp xỉ Laplace của hồi quy logistic hai tham số. Trái: phân phối hậu nghiệm biên chính xác của hệ số góc w (nét liền) lệch về bên phải mode của nó; phân phối Gauss Laplace (nét đứt) đặt tâm tại giá trị MAP và bỏ sót độ lệch. Phải: xác suất dự đoán của lớp 1 ở xa phần lớn dữ liệu. Đường MAP thay thế trực tiếp tiến tới 1 nhanh nhất, phân phối dự đoán chính xác nằm ngay bên dưới nó và phân phối dự đoán Laplace chững lại ở mức thấp nhất.">
+  <BdlLaplaceLogistic />
+</Figure>
+
+Hai bài học áp dụng được cho các mạng. Ở nơi phân phối hậu nghiệm gần Gauss, xấp xỉ Laplace khôi phục tốt độ phân tán của nó từ một ma trận. Ở nơi nó bị lệch, phép xấp xỉ sai theo một hướng dự đoán được: nó đặt tâm tại mode, không phải tại kỳ vọng, và các đuôi đối xứng của nó đặt sai xác suất. Trong ví dụ này, sai số làm cho các dự đoán kém tự tin hơn so với phân phối hậu nghiệm chính xác. Đó là hướng an toàn hơn đối với nhiều ứng dụng, nhưng nói chung không được bảo đảm.
+
+Cột probit cũng cho thấy phép xấp xỉ chính xác ở nơi các xác suất ở mức trung bình (0.123 so với 0.123 tại $x^* = -2$) và mất độ chính xác tương đối ở các đuôi (0.019 so với 0.008 tại $x^* = -8$). Bài tập 3 quay lại điểm này.
+
+## 5. Hàm hợp lý biên và lựa chọn mô hình
+
+### 5.1 Ước lượng Laplace của bằng chứng
+
+Cùng tích phân Gauss chuẩn hóa $q$ cho một ước lượng của **hàm hợp lý biên** (marginal likelihood), hay **bằng chứng** (evidence), $p(\mathcal{D}) = \int p(\mathcal{D} \mid \theta)\, p(\theta)\, d\theta$. Lấy tích phân khai triển bậc hai của mục 1.1 cho
+
+$$
+\log p(\mathcal{D}) \approx \log p(\mathcal{D} \mid \hat{\theta}) + \log p(\hat{\theta}) + \frac{P}{2} \log 2\pi - \frac{1}{2} \log \det H .
+$$
+
+Số hạng thứ nhất thưởng cho độ khớp. Ba số hạng cuối cùng nhau tạo thành logarit của cái mà MacKay gọi là **hệ số Occam** (Occam factor): tỉ số giữa thể tích của phân phối hậu nghiệm và thể tích của tiên nghiệm. Một mô hình có tiên nghiệm rải khối lượng lên nhiều bộ tham số, mà chỉ một vùng nhỏ trong đó khớp dữ liệu, phải chịu một hình phạt lớn. Một mô hình có tiên nghiệm chặt đến mức không khớp được thì trả giá qua số hạng thứ nhất. Bằng chứng đạt cực đại ở giữa hai trường hợp đó.
+
+Trong ví dụ, ước lượng Laplace là $-9.466$ so với giá trị chính xác $-9.443$, sai số 0.023 nat. Một cách hiểu là bằng chứng phụ thuộc vào thể tích của phân phối hậu nghiệm, điều mà phân phối Gauss khớp tốt, nhiều hơn là vào vị trí của nó, điều mà phân phối Gauss bỏ sót.
+
+### 5.2 Chọn độ chính xác tiên nghiệm
+
+Bằng chứng phụ thuộc vào các siêu tham số như $\alpha$, và cực đại hóa nó sẽ chọn chúng chỉ từ dữ liệu huấn luyện, không cần tập giữ riêng. MacKay đã suy ra một phép cập nhật điểm bất động cho $\alpha$ bằng cách cho đạo hàm của bằng chứng Laplace bằng không trong khi coi số hạng dữ liệu của $H$ là hằng số:
+
+$$
+\alpha \leftarrow \frac{\gamma}{\lVert \hat{\theta} \rVert^2}, \qquad \gamma = P - \alpha \operatorname{tr}(\Sigma).
+$$
+
+Đại lượng $\gamma$ là **số tham số hiệu dụng** (effective number of parameters): mỗi hướng riêng của $H$ đóng góp gần 1 nếu dữ liệu xác định nó và gần 0 nếu tiên nghiệm xác định nó. Đoạn mã tiếp nối đoạn mã trước: nó tính cả hai bằng chứng trên một dải giá trị $\alpha$, tìm cực đại của ước lượng Laplace trên một lưới mịn của $\log\alpha$ và chạy phép cập nhật điểm bất động.
+
+```python
+print(" alpha   Laplace   exact")
+for alpha in [0.01, 0.1, 0.3, 1.0, 3.0, 10.0]:
+    print(f"{alpha:6.2f}  {laplace(alpha)[2]:8.3f}  {exact(alpha)[1]:7.3f}")
+
+alphas = np.exp(np.linspace(np.log(0.01), np.log(10), 301))
+best = max(alphas, key=lambda a: laplace(a)[2])
+print(f"search over alpha: alpha = {best:.3f}, log p(D) = {laplace(best)[2]:.3f}")
+
+alpha = 1.0                                   # MacKay's fixed-point update
+for _ in range(30):
+    t, S, logZ = laplace(alpha)
+    gamma = 2 - alpha * np.trace(S)           # effective number of parameters
+    alpha = gamma / (t @ t)
+print(f"fixed point:       alpha = {alpha:.3f}, log p(D) = {laplace(alpha)[2]:.3f}, gamma = {gamma:.3f}")
+```
+
+```text
+ alpha   Laplace   exact
+  0.01   -11.543  -11.417
+  0.10    -9.692   -9.612
+  0.30    -9.289   -9.241
+  1.00    -9.466   -9.443
+  3.00   -10.240  -10.228
+ 10.00   -11.552  -11.546
+search over alpha: alpha = 0.407, log p(D) = -9.267
+fixed point:       alpha = 0.650, log p(D) = -9.320, gamma = 1.562
+```
+
+Cả hai đường cong có hình dạng mà lập luận Occam dự báo: một tiên nghiệm rộng ($\alpha = 0.01$) và một tiên nghiệm chặt ($\alpha = 10$) đều bị phạt, và cực đại nằm ở giữa. Các giá trị Laplace và chính xác chênh nhau nhiều nhất 0.126 nat và xếp hạng sáu giá trị của $\alpha$ theo cùng một thứ tự. Phép tìm kiếm đặt điểm tối ưu Laplace tại $\alpha \approx 0.41$, nằm giữa 0.3 và 1 trong bảng.
+
+Phép cập nhật điểm bất động dừng tại $\alpha = 0.650$, không phải tại điểm tối ưu. Cách suy ra nó coi $\sum_n J_n^\top \Lambda_n J_n$ là độc lập với $\alpha$, điều này chính xác đối với hồi quy tuyến tính – Gauss, nơi $\Lambda_n = I/\sigma^2$ và, vì mô hình tuyến tính theo $\theta$, các $J_n$ không phụ thuộc vào $\hat{\theta}$. Với hồi quy logistic, các trọng số $p(1-p)$ thay đổi khi $\hat{\theta}$ dịch chuyển theo $\alpha$, và điểm bất động chỉ là một xấp xỉ của điểm dừng. Một phép tìm kiếm dựa trên gradient hoặc trên lưới đối với chính bằng chứng Laplace tránh được vấn đề này, với cái giá là phải tính lại $H$.
+
+### 5.3 Hàm hợp lý biên cho các mạng
+
+Với các mạng, cùng hàm mục tiêu đó có thể điều chỉnh độ chính xác tiên nghiệm của từng lớp, và phương sai nhiễu của một mô hình hồi quy, bằng phép tăng gradient (gradient ascent) trên bằng chứng Laplace trong khi huấn luyện (Immer và cộng sự, 2021). Khi đó độ cong phải được tính lại định kỳ, và các cấu trúc mở rộng được của mục 2.3 làm cho việc đó có chi phí chấp nhận được.
+
+Có hai điều cần lưu ý. Thứ nhất, bằng chứng Laplace thừa hưởng các sai số của độ cong: chẳng hạn một xấp xỉ đường chéo đánh giá sai $\log\det H$ và có thể ưu tiên mô hình sai. Thứ hai, hàm hợp lý biên trả lời một câu hỏi cụ thể, dữ liệu huấn luyện có xác suất bao nhiêu dưới tiên nghiệm, điều này không giống với việc mô hình sẽ dự đoán dữ liệu mới tốt đến đâu sau khi được huấn luyện. Lotfi và cộng sự (2022) mô tả những trường hợp mà hai điều này bất đồng và đề xuất một biến thể có điều kiện chấm điểm một mô hình trên một phần dữ liệu sau khi huấn luyện trên phần còn lại. Bằng chứng là một công cụ hữu ích cho các siêu tham số điều khiển tiên nghiệm; nó không phải là sự thay thế tổng quát cho việc kiểm định.
+
+## 6. Hình học và giới hạn của một phép xấp xỉ cục bộ
+
+### 6.1 Độ cong như một metric
+
+GGN có một cách hiểu hình học. Số hạng $J_n^\top \Lambda_n J_n$ đo một bước nhỏ $\delta\theta$ làm dịch chuyển phân phối dự đoán của mạng tại $x_n$ bao xa: $\delta\theta^\top J_n^\top \Lambda_n J_n\, \delta\theta$, đến bậc hai, bằng hai lần độ phân kỳ Kullback–Leibler (KL) giữa các phân phối dự đoán trước và sau bước đó đối với các hàm hợp lý của mục 2.2. Lấy tổng trên dữ liệu, GGN là một metric trên không gian tham số đo khoảng cách bằng sự thay đổi của dự đoán, chứ không phải bằng sự thay đổi của các con số trong $\theta$. Hiệp phương sai Laplace là nghịch đảo của metric đó, được chính quy hóa bởi tiên nghiệm.
+
+Từ đó suy ra hai hệ quả. Mọi hướng $v$ có $J_n v = 0$ với mọi đầu vào huấn luyện đều giữ nguyên các dự đoán huấn luyện đến bậc nhất. Theo một hướng như vậy, dữ liệu không đóng góp gì vào $H_{\mathrm{GGN}}$ và phương sai hậu nghiệm bằng phương sai tiên nghiệm $1/\alpha$. Các mạng có nhiều hướng như vậy, nên độ chính xác tiên nghiệm có ảnh hưởng mạnh đến phân phối dự đoán Laplace ở xa dữ liệu, và đó là một lý do để điều chỉnh nó bằng bằng chứng. Thứ hai, metric phụ thuộc vào cách tham số hóa. Dinh và cộng sự (2017) đã chỉ ra rằng việc co giãn lại các trọng số của một mạng dùng đơn vị tuyến tính chỉnh lưu (rectified linear unit) làm thay đổi tùy ý ma trận Hesse tại một cực tiểu mà không làm thay đổi hàm. Vì vậy các phát biểu về các cực tiểu "phẳng", và sự ưu tiên của hệ số Occam đối với chúng, là các phát biểu về một cách tham số hóa và một tiên nghiệm cùng nhau.
+
+### 6.2 Những gì một phân phối Gauss duy nhất bỏ sót
+
+Các kiểu thất bại của phép xấp xỉ suy ra từ tính cục bộ của nó:
+
+- **Độ lệch và đuôi nặng.** Như ở mục 4, phân phối Gauss đặt tâm tại mode và đối xứng, nên nó đặt sai khối lượng khi phân phối hậu nghiệm không như vậy.
+- **Các thung lũng cong.** Các vùng có mất mát thấp của mạng thường cong. Di chuyển theo một đường thẳng từ $\hat{\theta}$ theo một hướng có độ cong thấp có thể rời khỏi thung lũng và đi vào một vùng có mất mát cao. Bergamin và cộng sự (2023) thay các đường thẳng bằng các đường đi theo độ cong của bề mặt mất mát, một xấp xỉ Laplace Riemann. Phân phối dự đoán tuyến tính hóa tránh vấn đề này theo một cách khác, bằng cách không bao giờ tính mạng phi tuyến tại các tham số được lấy mẫu.
+- **Nhiều mode.** Một phân phối Gauss mô tả một mode. Các bản sao đối xứng của một mode cho dự đoán giống hệt nhau và không quan trọng đối với phân phối dự đoán, nhưng các mode thực sự khác nhau thì quan trọng. Kết hợp nhiều xấp xỉ Laplace tại các mode của các mạng được huấn luyện độc lập là một cách khắc phục; bài thứ năm, [Tổ hợp sâu và cách hiểu theo Bayes](/vi/blog/deep-ensembles), trình bày về tổ hợp mô hình.
+- **Không có điểm dừng.** Huấn luyện bằng gradient ngẫu nhiên dừng lại gần một cực tiểu, chứ không đúng tại đó. Dù sao GGN vẫn xác định dương, nhưng khi đó phép khai triển được đặt tâm tại một điểm không phải là mode của bất cứ thứ gì cụ thể.
+- **Các xấp xỉ độ cong.** Các xấp xỉ đường chéo, K-FAC và hạng thấp đều làm thay đổi hiệp phương sai, và sai số của chúng lan truyền vào cả phân phối dự đoán lẫn bằng chứng.
+
+### 6.3 Nó được dùng vào việc gì
+
+Bất chấp những giới hạn này, dạng giải tích làm cho xấp xỉ Laplace hữu ích ở một số chỗ:
+
+- **Điều hòa sự quá tự tin.** Hein, Andriushchenko và Bitterwolf (2019) đã chỉ ra rằng các mạng có hàm kích hoạt tuyến tính từng khúc trở nên tự tin tùy ý khi một đầu vào được co giãn ra xa dữ liệu. Kristiadi, Hein và Hennig (2020) đã chứng minh rằng chỉ riêng một xấp xỉ Laplace của lớp cuối cũng giữ độ tự tin của một mạng như vậy cách xa 1 trong giới hạn đó. Ví dụ ở mục 4 cho thấy cùng cơ chế trên logit: độ lệch chuẩn của nó tăng tỉ lệ với $\lvert x^* \rvert$, nhanh bằng kỳ vọng của nó, nên logit được điều hòa tiến tới một hằng số.
+- **Học liên tục** (continual learning). Một xấp xỉ Laplace của phân phối hậu nghiệm sau một nhiệm vụ có thể đóng vai trò tiên nghiệm cho nhiệm vụ tiếp theo. Hợp nhất trọng số đàn hồi (elastic weight consolidation, EWC) dùng một ma trận Fisher đường chéo làm độ chính xác của tiên nghiệm đó, biến nó thành một hàm phạt bậc hai bảo vệ các tham số quan trọng đối với các nhiệm vụ trước (Kirkpatrick và cộng sự, 2017).
+- **Lựa chọn siêu tham số.** Bằng chứng của mục 5, được tính mà không cần tập kiểm định.
+- **Ra quyết định trong điều kiện bất định.** Một phương sai dự đoán dạng giải tích có thể cung cấp đầu vào cho các hàm thu nhận (acquisition function) trong học chủ động (active learning) và tối ưu hóa Bayes (Bayesian optimization), chủ đề của một phần bài thứ chín, [Đánh giá và sử dụng độ bất định dự đoán](/vi/blog/evaluating-and-using-uncertainty).
+
+## 7. Bài tập
+
+**Bài tập 1.** Một đồng xu được tung $n = 4$ lần và ra mặt ngửa $k = 3$ lần. Tiên nghiệm trên xác suất ra mặt ngửa $\rho$ là phân phối đều trên $[0, 1]$. Hãy tính xấp xỉ Laplace của phân phối hậu nghiệm của $\rho$, so sánh kỳ vọng và độ lệch chuẩn của nó với phân phối hậu nghiệm chính xác và tính xác suất mà phép xấp xỉ gán cho $\rho > 1$.
+
+<details>
+<summary>Đáp án</summary>
+
+Logarit âm của phân phối hậu nghiệm là $-3\log\rho - \log(1-\rho)$ cộng một hằng số. Cực tiểu của nó nằm tại $\hat{\rho} = k/n = 0.75$, và đạo hàm bậc hai tại đó là $3/\hat{\rho}^2 + 1/(1-\hat{\rho})^2 = 5.33 + 16 = 21.33$, nên $q = \mathcal{N}(0.75, 0.2165^2)$. Phân phối hậu nghiệm chính xác là $\mathrm{Beta}(4, 2)$, với kỳ vọng $4/6 = 0.667$ và độ lệch chuẩn $\sqrt{8/252} = 0.178$. Phép xấp xỉ đặt tâm tại mode, đánh giá quá cao độ phân tán và đặt $1 - \Phi(0.25/0.2165) = 1 - \Phi(1.155) \approx 0.124$ khối lượng của nó lên các giá trị bất khả trên 1. Một xấp xỉ Laplace theo logarit tỉ số odds $\log(\rho/(1-\rho))$, một tham số không bị chặn, tránh được vấn đề cuối cùng.
+
+</details>
+
+**Bài tập 2.** Chứng minh rằng xấp xỉ Laplace là chính xác đối với hồi quy tuyến tính $y = \phi(x)^\top \theta + \varepsilon$ với $\varepsilon \sim \mathcal{N}(0, \sigma^2)$ và tiên nghiệm $\mathcal{N}(0, \alpha^{-1} I)$, và cho biết hiệp phương sai của nó.
+
+<details>
+<summary>Đáp án</summary>
+
+Với $X$ là ma trận $N \times P$ có các hàng là $\phi(x_n)^\top$, logarit âm của phân phối đồng thời là $\frac{1}{2\sigma^2}\lVert y - X\theta \rVert^2 + \frac{\alpha}{2}\lVert\theta\rVert^2$ cộng một hằng số. Nó đúng là bậc hai theo $\theta$, nên khai triển bậc hai không có phần dư và $q$ bằng phân phối hậu nghiệm. Ma trận Hesse là $H = X^\top X/\sigma^2 + \alpha I$ và hiệp phương sai là $H^{-1}$. Ở đây GGN, ma trận Hesse và ma trận Fisher đều trùng nhau, vì $J_n = \phi(x_n)^\top$ không phụ thuộc vào $\theta$.
+
+</details>
+
+**Bài tập 3.** Trong kết quả của mục 4.1, xấp xỉ probit và trung bình Monte Carlo khớp nhau đến ba chữ số thập phân tại $x^* = -2$ nhưng cho 0.019 và 0.008 tại $x^* = -8$. Xấp xỉ probit có sai ở đó không, và điều đó có quan trọng không?
+
+<details>
+<summary>Đáp án</summary>
+
+Phép xấp xỉ thay hàm sigmoid logistic bằng một hàm phân phối tích lũy Gauss được co giãn lại. Hai hàm khớp nhau sát sao gần tâm và khác nhau ở các đuôi, nơi hàm sigmoid giảm như $e^{z}$ còn hàm Gauss giảm nhanh hơn. Tại $x^* = -8$, sai số tuyệt đối là 0.011, nhỏ, nhưng sai số tương đối lớn hơn hai lần. Điều này quan trọng khi chính các xác suất nhỏ là đại lượng cần quan tâm, chẳng hạn khi chấm điểm các lớp hiếm hoặc logarit xác suất của các kết cục ít khả năng. Vài trăm mẫu Monte Carlo của logit Gauss một chiều, hoặc cầu phương Gauss–Hermite, loại bỏ sai số với chi phí không đáng kể.
+
+</details>
+
+**Bài tập 4.** Một bộ phân loại có $10^7$ tham số, và lớp cuối của nó ánh xạ 512 đặc trưng sang 10 lớp với một hệ số chặn. Ở dấu phẩy động 32 bit, GGN đầy đủ cần bao nhiêu bộ nhớ, đường chéo của nó cần bao nhiêu và một GGN đầy đủ của lớp cuối cần bao nhiêu?
+
+<details>
+<summary>Đáp án</summary>
+
+GGN đầy đủ có $10^{14}$ phần tử, 400 terabyte (TB) với 4 byte mỗi phần tử, theo đơn vị thập phân ($1\ \mathrm{TB} = 10^{12}$ byte). Đường chéo của nó có $10^7$ phần tử, 40 megabyte (MB). Lớp cuối có $512 \times 10 + 10 = 5130$ tham số, nên GGN của nó có $5130^2 \approx 2.63 \times 10^7$ phần tử, khoảng 105 MB. Một phiên bản K-FAC của cùng lớp đó cần một ma trận $513 \times 513$ và một ma trận $10 \times 10$, khoảng 1 MB.
+
+</details>
+
+## 8. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| Xấp xỉ Laplace là gì? | Một phân phối Gauss $\mathcal{N}(\hat{\theta}, H^{-1})$ tại ước lượng MAP, với độ cong của logarit âm của phân phối đồng thời làm độ chính xác. |
+| Độ cong nào được dùng cho các mạng? | GGN $\sum_n J_n^\top \Lambda_n J_n + \alpha I$, xác định dương và bằng ma trận Fisher đối với các hàm hợp lý có hàm liên kết chính tắc. |
+| Làm sao để chi phí chấp nhận được? | Cấu trúc đường chéo, K-FAC hoặc hạng thấp, hoặc độ cong đầy đủ cho một tập con tham số như lớp cuối. |
+| Nên dự đoán như thế nào? | Với mạng tuyến tính hóa: các đầu ra Gauss có kỳ vọng $f(x^*, \hat{\theta})$ và hiệp phương sai $J(x^*)\Sigma J(x^*)^\top$; xấp xỉ probit cho phân loại. |
+| Ngoài dự đoán, nó còn cho gì? | Một ước lượng của $\log p(\mathcal{D})$ để điều chỉnh các siêu tham số như $\alpha$ mà không cần dữ liệu kiểm định. |
+| Nó thất bại ở đâu? | Các phân phối hậu nghiệm lệch, đuôi nặng, cong hoặc đa mode; nó đặt tâm tại mode và chỉ thấy độ cong cục bộ. |
+
+Xấp xỉ Laplace biến một mạng đã huấn luyện thành một phân phối hậu nghiệm xấp xỉ với một bước bổ sung và không thay đổi gì trong quá trình huấn luyện. Phân phối Gauss của nó được ấn định bởi một mode và một độ cong, và ví dụ minh họa đã cho thấy cả điểm mạnh của nó (độ phân tán được khôi phục với sai lệch vài phần trăm) lẫn điểm mù của nó (độ lệch của phân phối hậu nghiệm là vô hình đối với nó). Bài tiếp theo, [Suy luận biến phân cho mạng nơ-ron](/vi/blog/variational-inference-for-neural-networks), giữ ý tưởng về một họ xấp xỉ dễ tính nhưng chọn phần tử của họ đó bằng tối ưu hóa trên toàn bộ phân phối hậu nghiệm thay vì bằng các đạo hàm tại một điểm.
+
+### Tài liệu tham khảo
+
+- F. Bergamin, P. Moreno-Muñoz, S. Hauberg and G. Arvanitidis, "Riemannian Laplace approximations for Bayesian neural networks," in *Advances in Neural Information Processing Systems 36*, 2023.
+- C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006.
+- E. Daxberger, A. Kristiadi, A. Immer, R. Eschenhagen, M. Bauer and P. Hennig, "Laplace redux – effortless Bayesian deep learning," in *Advances in Neural Information Processing Systems 34*, 2021.
+- L. Dinh, R. Pascanu, S. Bengio and Y. Bengio, "Sharp minima can generalize for deep nets," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
+- M. Hein, M. Andriushchenko and J. Bitterwolf, "Why ReLU networks yield high-confidence predictions far away from the training data and how to mitigate the problem," in *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)*, 2019.
+- A. Immer, M. Bauer, V. Fortuin, G. Rätsch and M. E. Khan, "Scalable marginal likelihood estimation for model selection in deep learning," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- A. Immer, M. Korzepa and M. Bauer, "Improving predictions of Bayesian neural nets via local linearization," in *Proceedings of the 24th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2021.
+- M. E. Khan, A. Immer, E. Abedi and M. Korzepa, "Approximate inference turns deep networks into Gaussian processes," in *Advances in Neural Information Processing Systems 32*, 2019.
+- J. Kirkpatrick et al., "Overcoming catastrophic forgetting in neural networks," *Proceedings of the National Academy of Sciences*, vol. 114, no. 13, pp. 3521–3526, 2017.
+- A. Kristiadi, M. Hein and P. Hennig, "Being Bayesian, even just a bit, fixes overconfidence in ReLU networks," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
+- F. Kunstner, L. Balles and P. Hennig, "Limitations of the empirical Fisher approximation for natural gradient descent," in *Advances in Neural Information Processing Systems 32*, 2019.
+- S. Lotfi, P. Izmailov, G. Benton, M. Goldblum and A. G. Wilson, "Bayesian model selection, the marginal likelihood, and generalization," in *Proceedings of the 39th International Conference on Machine Learning (ICML)*, 2022.
+- D. J. C. MacKay, "Bayesian interpolation," *Neural Computation*, vol. 4, no. 3, pp. 415–447, 1992.
+- D. J. C. MacKay, "A practical Bayesian framework for backpropagation networks," *Neural Computation*, vol. 4, no. 3, pp. 448–472, 1992.
+- D. J. C. MacKay, "The evidence framework applied to classification networks," *Neural Computation*, vol. 4, no. 5, pp. 720–736, 1992.
+- J. Martens, "New insights and perspectives on the natural gradient method," *Journal of Machine Learning Research*, vol. 21, no. 146, pp. 1–76, 2020.
+- J. Martens and R. Grosse, "Optimizing neural networks with Kronecker-factored approximate curvature," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
+- H. Ritter, A. Botev and D. Barber, "A scalable Laplace approximation for neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2018.
+- N. N. Schraudolph, "Fast curvature matrix-vector products for second-order gradient descent," *Neural Computation*, vol. 14, no. 7, pp. 1723–1738, 2002.
+- L. Tierney and J. B. Kadane, "Accurate approximations for posterior moments and marginal densities," *Journal of the American Statistical Association*, vol. 81, no. 393, pp. 82–86, 1986.
