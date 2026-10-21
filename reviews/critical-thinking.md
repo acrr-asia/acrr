@@ -3,12 +3,13 @@
 - Series: `critical-thinking` (13 articles, status published, 0 planned entries)
 - Reviewed commit: b7cf217
 - Date: 2026-10-20
+- Content hash: sha256:b6f234eb71b18df07005cd512a1146ed1e7d50c1affb8af81edc5d9ff4eb6c75
 
 ## Summary
 
 The series is a coherent thirteen-entry course that moves from meaning and argument, through a four-entry short course in formal logic, to evidence, values, decisions, fallacies and creativity. Its technical content is in good shape: every worked number, verdict, derivation and counter-model recomputed in this pass is correct, and all three Python listings reproduce their quoted output exactly. A first review wave (reviewers A, B and C) raised 90 findings, 84 on the entries and the overview and 6 on the Vietnam AI strategy insight: 30 blocking, 30 should fix and 30 optional (A: 27, of which 11 blocking, 6 should fix and 10 optional; B: 33, with 13, 10 and 10; C: 30, with 6, 14 and 10). All were applied except four optional or allowed items (B31, C21 and C30 were left by choice, and C24 was not addressed); see the Resolution section. This independent second pass found two blocking problems that the first wave missed, both originality defects against the HKU source modules. The tenth entry still paraphrases the HKU values module in its definitions of value, its descriptive and normative contrast, its intrinsic-value points and its accounts of relativism, absolutism, contextualism and formal justice (S1). The ninth entry reuses the HKU worked example of two dice and "at least one six" (S2). The other second-pass findings are residues of the corrections: summary rows that no longer match rewritten bodies (S3, S6, S11), a few borderline paraphrases (S5, S8, S13), two factual slips (S7, S9), one cross-reference that points to the wrong entry (S12) and minor consistency items. The series is not ready to stamp until S1 and S2 are resolved.
 
-Findings (second pass): 2 blocking, 11 should fix, 12 optional.
+Findings: 2 blocking, 12 should fix, 12 optional (second pass S1–S25 and third pass T1; all blocking and should-fix findings are resolved, see Resolution).
 
 ## Resolution
 
