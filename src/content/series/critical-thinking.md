@@ -13,6 +13,8 @@ objectives:
 
 The series is written for readers who want to reason more carefully about technical and everyday questions alike: what a claim means, whether the evidence for it is good, and what follows from it. It assumes no background in philosophy or logic. Entries four, nine and twelve include a few short Python 3 listings, and the probability and statistics entries use school algebra; nothing else beyond the site's usual prerequisites is needed.
 
+The series is an introduction, not a full course in any one of its fields. It leaves out modal and other non-classical logics, the proof theory and metatheory of logic beyond a statement of the main results, statistical methods beyond basic significance tests and confidence intervals, and the history and schools of ethics beyond what is needed to reason about a value judgment.
+
 The order follows the order in which a careful reasoner meets a claim. The first entry says what critical thinking is and why intuition alone is not enough. The second deals with meaning, because a claim that is ambiguous or vague cannot yet be evaluated. The third introduces arguments: premises and conclusions, hidden assumptions and the difference between deductive validity and inductive strength.
 
 Entries four to seven are a short course in formal logic. The fourth explains what logic studies and why validity depends on form. The fifth treats categorical statements and syllogisms with Venn diagrams. The sixth builds sentential logic, from truth tables to natural-deduction proofs, and the seventh extends it to predicate logic with quantifiers.
