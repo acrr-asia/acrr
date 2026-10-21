@@ -274,6 +274,9 @@ and status phrases (`401 Unauthorized`) are code and stay in English.
 
 ### Critical thinking and logic
 
+"Bias" in data or sampling is *sai lệch*; *thiên kiến* is kept for cognitive biases. Link texts that
+name another entry of the series use that entry's Vietnamese title (the part before the colon).
+
 | English | Tiếng Việt |
 |---|---|
 | critical thinking, reasoning | tư duy phản biện (critical thinking), lập luận |
@@ -281,28 +284,56 @@ and status phrases (`401 Unauthorized`) are code and stay in English.
 | meaning, ambiguity, vagueness | ý nghĩa, tính mơ hồ (ambiguity), tính không rõ ranh giới (vagueness) |
 | definition, necessary / sufficient condition | định nghĩa, điều kiện cần / điều kiện đủ |
 | argument, premise, conclusion | lập luận (argument), tiền đề (premise), kết luận (conclusion) |
-| hidden assumption, argument map | giả định ẩn (hidden assumption), sơ đồ lập luận (argument map) |
+| hidden assumption, argument map, principle of charity | giả định ẩn (hidden assumption), sơ đồ lập luận (argument map), nguyên tắc thiện chí |
 | deductive, inductive, analogical argument | lập luận diễn dịch, lập luận quy nạp, lập luận loại suy |
 | valid, sound, inductively strong, cogent | hợp lệ (valid), đúng đắn (sound), mạnh về quy nạp (inductively strong), thuyết phục (cogent) |
-| consistency, contradiction, logical form | tính nhất quán, mâu thuẫn, hình thức logic (logical form) |
+| consistency, contradiction, logical form, self-defeating | tính nhất quán, mâu thuẫn, hình thức logic (logical form), tự bác bỏ |
+| contrary / contradictory, logical truth, topic neutrality, logically equivalent | đối chọi / mâu thuẫn, chân lý logic, tính trung lập về chủ đề, tương đương logic |
 | entailment, logical consequence, counterexample | kéo theo (entailment), hệ quả logic, phản ví dụ (counterexample) |
-| categorical statement, syllogism, subject / predicate term | mệnh đề định danh (categorical statement), tam đoạn luận (syllogism), thuật ngữ chủ ngữ / vị ngữ |
-| Venn diagram, existential import | biểu đồ Venn, hàm ý tồn tại (existential import) |
+| categorical logic / statement / syllogism, subject / predicate term | logic định danh, mệnh đề định danh (categorical statement), tam đoạn luận định danh, thuật ngữ chủ ngữ / vị ngữ |
+| major / minor / middle term, distribution, universe of discourse | thuật ngữ lớn / nhỏ / giữa, chu diên, miền thảo luận |
+| undistributed middle, illicit major / minor, exclusive premises, existential fallacy | thuật ngữ giữa không chu diên, mở rộng bất hợp lệ thuật ngữ lớn / nhỏ, hai tiền đề phủ định, ngụy biện tồn tại |
+| Venn diagram, existential import, conversion, contraposition | biểu đồ Venn, hàm ý tồn tại (existential import), phép đảo (mệnh đề đảo), phép phản đảo (mệnh đề phản đảo) |
 | sentential (propositional) logic, connective, well-formed formula (WFF) | logic mệnh đề (sentential logic), liên từ logic (connective), công thức đúng cú pháp (well-formed formula, WFF) |
-| negation, conjunction, disjunction, conditional, biconditional | phủ định, hội (conjunction), tuyển (disjunction), điều kiện (conditional), song điều kiện (biconditional) |
-| material conditional, antecedent, consequent | điều kiện vật chất (material conditional), tiền kiện (antecedent), hậu kiện (consequent) |
-| truth table, truth value, assignment | bảng chân trị, giá trị chân lý, phép gán (assignment) |
+| negation, conjunction, disjunction (inclusive / exclusive), conditional, biconditional | phủ định, hội (conjunction), tuyển (disjunction; bao hàm / loại trừ), điều kiện (conditional), song điều kiện (biconditional) |
+| material conditional, antecedent, consequent, only if, unless | điều kiện vật chất (material conditional), tiền kiện (antecedent), hậu kiện (consequent), chỉ khi, trừ khi |
+| truth table, truth value, truth-functional, assignment | bảng chân trị, giá trị chân lý, hàm chân trị, phép gán (assignment) |
 | tautology, contradiction, contingent | hằng đúng (tautology), hằng sai (contradiction), khả biến (contingent) |
-| natural deduction, derivation, rule of inference | suy diễn tự nhiên (natural deduction), dẫn xuất (derivation), quy tắc suy luận |
-| modus ponens, modus tollens | modus ponens, modus tollens (kept) |
-| soundness, completeness (of a proof system) | tính đúng đắn (soundness), tính đầy đủ (completeness) |
+| affirming the consequent, denying the antecedent | khẳng định hậu kiện, phủ định tiền kiện |
+| hypothetical / disjunctive syllogism, constructive dilemma, modus ponens / tollens | tam đoạn luận giả định / tam đoạn luận tuyển, song đề kiến tạo, modus ponens / modus tollens (kept) |
+| natural deduction, derivation, rule of inference, derived rule, discharge | suy diễn tự nhiên (natural deduction), dẫn xuất (derivation), quy tắc suy luận, quy tắc phái sinh (derived rule), giải phóng (giả định) |
+| soundness, completeness (of a proof system), decidable | tính đúng đắn (soundness), tính đầy đủ (completeness), khả quyết |
 | predicate logic, quantifier (universal / existential), variable, domain | logic vị từ (predicate logic), lượng từ (toàn thể / tồn tại), biến, miền (domain) |
 | interpretation, model, counter-model, extension | diễn giải (interpretation), mô hình (model), phản mô hình (counter-model), ngoại diên (extension) |
-| hypothesis, falsifiability, confounder | giả thuyết, tính khả bác bỏ (falsifiability), biến gây nhiễu (confounder) |
-| correlation, causation, controlled experiment | tương quan, quan hệ nhân quả, thí nghiệm có đối chứng |
-| probability, conditional probability, base rate | xác suất, xác suất có điều kiện, tỉ lệ nền (base rate) |
-| sample, sampling bias, statistical significance, p-value | mẫu, sai lệch chọn mẫu (sampling bias), ý nghĩa thống kê, giá trị p (p-value) |
-| value judgment, fact–value distinction | phán đoán giá trị (value judgment), phân biệt sự kiện – giá trị |
-| decision matrix, expected value, SWOT analysis | ma trận quyết định, giá trị kỳ vọng, phân tích SWOT |
-| fallacy, cognitive bias | ngụy biện (fallacy), thiên kiến nhận thức (cognitive bias) |
-| creativity, divergent / convergent thinking | sáng tạo, tư duy phân kỳ / tư duy hội tụ |
+| hypothesis, test implication, auxiliary hypothesis, hypothetico-deductive method | giả thuyết, hệ quả kiểm tra, giả thuyết phụ trợ, phương pháp giả thuyết – diễn dịch |
+| confirm / disconfirm, falsifiability, burden of proof, Occam's razor | xác nhận / làm suy yếu, tính khả bác bỏ (falsifiability), nghĩa vụ chứng minh, dao cạo Occam |
+| correlation, association, causation, confounder, controlled experiment | tương quan, mối liên hệ, quan hệ nhân quả, biến gây nhiễu (confounder), thí nghiệm có đối chứng |
+| INUS condition, causal field, standing condition, trigger, mechanism | điều kiện INUS, trường nhân quả, điều kiện thường trực, yếu tố kích hoạt, cơ chế |
+| Mill's methods: agreement, difference, joint method, residues, concomitant variations | phương pháp tương đồng, khác biệt, kết hợp, phần dư, biến thiên đồng hành |
+| causal network, chain / fork / collider, mediator, fishbone diagram | mạng nhân quả, chuỗi / rẽ nhánh / hội tụ, biến trung gian, biểu đồ xương cá |
+| randomization, A/B test, blind / double-blind, placebo, observational study | ngẫu nhiên hóa, kiểm thử A/B, mù / mù đôi, giả dược, nghiên cứu quan sát |
+| probability, conditional probability, odds, mutually exclusive, addition / multiplication rule | xác suất, xác suất có điều kiện, tỉ số cược, xung khắc, quy tắc cộng / quy tắc nhân |
+| base rate, prior, likelihood, posterior, likelihood ratio, false-positive rate, natural frequencies | tỉ lệ nền (base rate), tiên nghiệm, hàm hợp lý, hậu nghiệm, tỉ số hợp lý, tỉ lệ dương tính giả, tần số tự nhiên |
+| sample, population, sampling / selection / survivorship / publication bias | mẫu, tổng thể, sai lệch chọn mẫu / sai lệch chọn lọc / sai lệch kẻ sống sót / sai lệch công bố |
+| sampling error, standard error, margin of error, confidence interval | sai số chọn mẫu, sai số chuẩn, biên sai số, khoảng tin cậy |
+| statistical significance, p-value, null / alternative hypothesis, Type I / II error, power | ý nghĩa thống kê, giá trị p (p-value), giả thuyết không / giả thuyết đối, sai lầm loại I / II, lực kiểm định |
+| regression to the mean, Simpson's paradox | hồi quy về giá trị trung bình, nghịch lý Simpson |
+| value judgment, descriptive / normative claim, thick ethical concept | phán đoán giá trị (value judgment), nhận định mô tả / nhận định chuẩn tắc, khái niệm đạo đức dày |
+| instrumental / intrinsic value, means / end | giá trị công cụ / giá trị nội tại, phương tiện / mục đích |
+| is-ought gap, bridging premise, naturalistic fallacy | khoảng cách giữa "là" và "nên", tiền đề bắc cầu, ngụy biện tự nhiên chủ nghĩa |
+| moral relativism / absolutism / contextualism, reflective equilibrium, formal justice | thuyết tương đối / thuyết tuyệt đối / thuyết ngữ cảnh đạo đức, cân bằng phản tư, công bằng hình thức |
+| utility, utilitarianism, virtue ethics | độ hữu dụng, thuyết vị lợi, đạo đức học đức hạnh |
+| Hohfeld: claim-right, duty, privilege, no-right, power, liability, immunity, disability | quyền yêu cầu, nghĩa vụ, đặc quyền, không-quyền, quyền năng, chịu tác động, quyền miễn trừ, vô năng |
+| problem statement, decomposition, flowchart, swimlane flowchart | phát biểu vấn đề, phân rã, lưu đồ, lưu đồ làn bơi |
+| decision matrix (weighted), expected value, SWOT analysis, 7-S framework | ma trận quyết định (có trọng số), giá trị kỳ vọng, phân tích SWOT, khung 7-S |
+| payoff table, regret, minimax regret, decisions under uncertainty / risk | bảng lợi ích, độ hối tiếc, minimax hối tiếc, quyết định trong điều kiện bất định / rủi ro |
+| decision tree, chance node, expected value of perfect information (EVPI) | cây quyết định, nút ngẫu nhiên, giá trị kỳ vọng của thông tin hoàn hảo (EVPI) |
+| fallacy (formal / informal), cognitive bias | ngụy biện (hình thức / phi hình thức), thiên kiến nhận thức (cognitive bias) |
+| begging the question, equivocation, straw man, red herring | lấy kết luận làm tiền đề, đánh tráo khái niệm, (ngụy biện) người rơm, đánh lạc hướng |
+| false dilemma, loaded question, slippery slope, appeal to ignorance | song đề giả, câu hỏi đánh bẫy, dốc trượt, viện dẫn sự thiếu hiểu biết |
+| gambler's fallacy, base-rate neglect, hasty generalization, quantifier shift | ngụy biện của người đánh bạc, bỏ qua tỉ lệ nền, khái quát hóa vội vàng, hoán vị lượng từ |
+| heuristic (in judgment / in problem solving), availability, representativeness | lối tắt tư duy / gợi ý tìm tòi (heuristic), tính sẵn có, tính đại diện |
+| anchoring, framing, confirmation / outcome / hindsight bias, planning / sunk cost fallacy | hiệu ứng mỏ neo, hiệu ứng khung, thiên kiến xác nhận / kết quả / nhìn lại, ngụy biện lập kế hoạch / chi phí chìm |
+| creativity, divergent / convergent thinking (production) | sáng tạo, tư duy (tạo sinh) phân kỳ / hội tụ |
+| incubation, fixation, functional fixedness | ấp ủ, sự cố định tư duy, sự cố định chức năng |
+| brainstorming, production blocking, evaluation apprehension, groupthink | động não, tắc nghẽn tạo sinh, lo ngại bị đánh giá, tư duy nhóm |
