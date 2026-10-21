@@ -11,7 +11,9 @@ objectives:
   - "Nhận diện các ngụy biện (fallacy) và thiên kiến nhận thức (cognitive bias) thường gặp trong lập luận thực tế, và áp dụng các kỹ thuật có cấu trúc để tạo ra và phát triển ý tưởng mới."
 ---
 
-Loạt bài này viết cho người đọc muốn lập luận cẩn thận hơn về cả câu hỏi kỹ thuật lẫn câu hỏi đời thường: một nhận định có nghĩa là gì, bằng chứng cho nó có tốt không, và điều gì suy ra được từ nó. Loạt bài không đòi hỏi kiến thức nền về triết học hay logic. Các bài về xác suất và thống kê dùng đại số phổ thông và vài đoạn mã Python 3 ngắn; ngoài các kiến thức nền thông thường của trang, không cần gì thêm.
+Loạt bài này viết cho người đọc muốn lập luận cẩn thận hơn về cả câu hỏi kỹ thuật lẫn câu hỏi đời thường: một nhận định có nghĩa là gì, bằng chứng cho nó có tốt không, và điều gì suy ra được từ nó. Loạt bài không đòi hỏi kiến thức nền về triết học hay logic. Các bài thứ tư, thứ chín và thứ mười hai có vài đoạn mã Python 3 ngắn, và các bài về xác suất và thống kê dùng đại số phổ thông; ngoài các kiến thức nền thông thường của trang, không cần gì thêm.
+
+Loạt bài là một phần nhập môn, không phải một khóa học đầy đủ về bất kỳ lĩnh vực nào trong số đó. Loạt bài không bàn đến logic tình thái (modal logic) và các logic phi cổ điển khác, lý thuyết chứng minh và siêu lý thuyết của logic ngoài việc phát biểu các kết quả chính, các phương pháp thống kê ngoài các kiểm định ý nghĩa và khoảng tin cậy cơ bản, cũng như lịch sử và các trường phái đạo đức học ngoài những gì cần để lập luận về một phán đoán giá trị.
 
 Thứ tự các bài theo thứ tự mà một người lập luận cẩn thận gặp một nhận định. Bài thứ nhất nói tư duy phản biện là gì và vì sao chỉ dựa vào trực giác là chưa đủ. Bài thứ hai bàn về ý nghĩa, vì một nhận định mơ hồ (ambiguous) hay không rõ ranh giới (vague) thì chưa thể đánh giá được. Bài thứ ba giới thiệu lập luận: tiền đề và kết luận, giả định ẩn và sự khác nhau giữa tính hợp lệ diễn dịch và độ mạnh quy nạp.
 
