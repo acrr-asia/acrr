@@ -12,7 +12,7 @@ Findings (second pass): 2 blocking, 11 should fix, 12 optional.
 
 ## Resolution
 
-First-wave findings, as resolved by the authors (condensed from their resolution notes). No section of any entry was renumbered; renamed headings are noted. The entries have no Vietnamese translations. The Vietnamese series file was updated with the shared reference change, and the Vietnamese insight was updated for C25 to C29.
+First-wave findings, as resolved by the authors (condensed from their resolution notes). No section of any entry was renumbered; renamed headings are noted. Vietnamese translations of the entries were made after the second-pass fixes, from the corrected English text; every later English correction was applied to them in the same commit. The Vietnamese series file was updated with the shared reference change, and the Vietnamese insight was updated for C25 to C29.
 
 Group A (entries 1 to 5):
 - A1: Entry 1 §1.2 rewritten as "What it adds to knowledge and to criticism", with three new topic sentences and engineering examples; the rules-versus-creativity contrast was removed; §1.1 definition attributed to Lau (2011).
@@ -101,7 +101,41 @@ Group C (entries 10 to 13, overview and insight):
 - C25 to C29 (insight): SMEs, missing targets and "at least", baseline sentence, model tiers and clean power corrected in English and Vietnamese.
 - C30 (insight): No change, as allowed.
 
-Second-pass findings: to be resolved.
+### Second pass
+
+Second-pass findings, as resolved by the authors (condensed from their resolution notes) and confirmed against the current text in the third pass. Section numbers were kept in every entry.
+
+- S1: Entry 10 rewritten around its own examples and primary sources. §1.1 reads one judgment ("this design is bad") three ways instead of the three-family taxonomy; §1.2 uses a post-incident-report table and Williams's thick concepts (survey point gone, Exercise 1 matched); §2.2 is about means outliving their conditions (two-approval rule); §2.3 is Moore's isolation test; §3.2 is organized around the attack surface of a valid argument; §3.3 is a table with engineering counterexamples; §4 starts from Plato's question and a coding-standard case ("rules are compressed reasons"); §5.1 gives a new definition and sets out the argument from disagreement as invalid; §5.3 contrasts an exceptionless universal with a default with conditions, and the situation with the judge; §6.1 uses two release decisions. The top-level topic order still follows the module, which the overview discloses ("topics and their order were suggested by").
+- S2: Entry 9 §2.1 uses an independent nightly-build example (0.2 and 0.3, so 0.44, not 0.5); listing 1 counts a 10 × 10 grid and prints 11/25.
+- S3: Entry 1 summary rows replaced ("What does it add?"; "willingness to reconsider").
+- S4: Entry 2 §6 renamed "Unclear claims: ambiguity, vagueness and incomplete meaning"; "obscurity" now names only the definition defect.
+- S5: Entry 2 §6.3 opens from the Rust example with an original table of engineering words; §7.4 opens from a migration risk register and covers hedges, truth by meaning and truth by logical form.
+- S6: Entry 4 summary row now matches §2.1.
+- S7: Wason task now described as P and Q chosen, not-Q skipped.
+- S8: Entry 8 §6.1 is a table of causal-graph structures in a new order with replication as the check for chance; the placebo appears only in §8.2.
+- S9: Hill now said to exempt none of his viewpoints, temporality included.
+- S10: Publication-bias sentence rewritten.
+- S11: Entry 10 summary row qualified to a substantive normative conclusion.
+- S12: Entry 12 opening credits the third entry (Section 4.2) and the fourth for form.
+- S13: Entry 12 §1.1 draws the fact/reasoning contrast inside the regulator argument; the broad sense rests on discussion moves; §1.3 illustrates a bias by availability.
+- S14: Entry 3 references in alphabetical order.
+- S15: Weston is 4th ed., Hackett, 2009 in both entries 3 and 12; "drivers?," fixed. Not done (optional): the in-text Copi form in entry 8 (line 127) and the Kuhn page range.
+- S16: Declined (optional): figures are numbered only where the text cites them by number. Justified.
+- S17: Three-predicate instance in entry 7 §6.2.
+- S18: Entry 3 §8 item 2 now names the two cases it covers and sends the third to condition 1.
+- S19: Bayesian network: a distribution per node conditional on its parents.
+- S20: "the flowcharts in this series".
+- S21: Entry 11 §2.2 is one timed decomposition of the CI pipeline (21 minutes; savings 0, 4 and 3.5).
+- S22: Overview paragraph on what the series leaves out added.
+- S23: Rephrased as "the equation $2 + 2 = 5$".
+- S24: Entry 9 §9.1 links "positively correlated" to entry 8's "associated" (Section 6.1).
+- S25: Entry 6 §3.3 cites "The fourth entry, Section 4.5".
+
+### Third pass (verification)
+
+An independent verifier checked every S resolution against the current text of the named files, re-ran the n-gram scans and a structural read for S1 and S2, re-ran both entry 9 listings, recomputed the new numbers, checked every section cross-reference in the 13 entries and ran the linter (details in the Verification log). All 25 S findings are resolved or justifiably declined, apart from two optional S15 items. One residue of the is-ought qualification remains, recorded as **T1** (Should fix): the introduction of entry 10 (`src/content/blog/reasoning-about-values.mdx:20`) still says the entry "explains why facts alone never yield an 'ought'", the unqualified claim that C3 corrected in §3.1 and S11 corrected in the summary. Paste-ready correction: "explains why facts alone do not yield a substantive 'ought'". Optional residues, not blocking: S15's Copi in-text form in entry 8 and the Kuhn page range; entry 2 §7.4 ("The sixth entry gives tautology a precise definition") names no section. Until T1 is fixed, the series has one open Should fix finding.
+
+Resolution of the third pass (lead): T1 fixed: the introduction of entry 10 now reads "explains why facts alone do not yield a substantive 'ought'", matching §3.1 and the summary (Vietnamese translation updated to match). Two optional residues from the verification were also applied: entry 8 now cites "(Mill, 1843; Copi et al., 2011)", and entry 2 §7.4 now names "the sixth entry (Section 3.1)". Two translator observations were applied to entry 11 (English and Vietnamese): the dangling "where they are" in §6.1 now reads "where probabilities for the states are available", and Peters and Waterman (1982), already in the reference list, is now cited in §3.2. No blocking or should-fix finding remains open.
 
 ## Objectives coverage
 
@@ -142,6 +176,7 @@ Second-pass findings: to be resolved.
 | S23 | Optional | `src/content/blog/what-logic-studies.mdx` | §2.1 (line 57) | Publishing | The opening quotation mark before the inline math "$2 + 2 = 5$" renders as a straight `"` in `dist/`, while every other quotation mark is typographic. |
 | S24 | Optional | `src/content/blog/probability-and-statistical-reasoning.mdx` | §9.1 (line 322); entry 8 line 164 | Terminology | Entry 8 defines **association** and says entry 9 §9.1 "states it in terms of probability", but §9.1 defines **correlated** without linking the two terms. |
 | S25 | Optional | `src/content/blog/sentential-logic.mdx` | §3.3 (line 120) | Cross-article references | "The fourth entry showed, where it compared validity with consistency" names no section (it is §4.5). |
+| T1 | Should fix | `src/content/blog/reasoning-about-values.mdx` | Introduction (line 20) | Consistency / accuracy | "explains why facts alone never yield an 'ought'" restates the unqualified is-ought claim corrected in §3.1 (C3) and the summary (S11). Replace with "explains why facts alone do not yield a substantive 'ought'". |
 
 ### S1. Entry 10 paraphrases the HKU values module
 
@@ -429,3 +464,10 @@ Second-pass findings: to be resolved.
   - Hill's exact wording, which is quoted in S9 from memory of Hill (1965, p. 299). The point that he did not exempt temporality is held with confidence, but the exact page was not checked here.
   - Bibliographic details of references added in the first wave (Govier 7th ed. 2010; Rosenthal 1979; Kuhn 1977; Svenson 1981; Boden 2004; Campbell 1960; Gentner 1983; Jansson and Smith 1991): consistent with what is known, but not checked against catalog records.
   - The URL of the *Critical Thinking Web* was not fetched.
+- Third pass (independent verification, English text at commit 4c5f134; later commits add only Vietnamese translations, which were not reviewed here):
+  - S resolutions: each of S1 to S25 checked against the current text of the named file and line. All resolved or justifiably declined (S16), except the optional S15 items (Copi in-text form in entry 8, Kuhn page range). New finding T1 (Should fix), `reasoning-about-values.mdx:20`.
+  - Originality: 6-word n-gram scan of all 13 entries against their HKU modules (critical, meaning, arg, logic, venn, sl, pl, sci, stat, value, strategy, fallacy, creativity). Every run of 6 or more words is a standard term or definition ("deciding what to believe or do", "if and only if there is no possible situation", "X is a necessary condition for Y", "it is not the case that", "there is at least one x such that", "lie within one standard deviation of the mean", "after this, therefore because of this", the Hohfeld schemas), a truth-table row or formula, the cited bat-and-ball item, Franklin's quoted sentence, or a reference title. 5-word scan of entries 9 and 10: only formulas, standard phrases and reference titles. Side-by-side read of entry 10 against `value.md` U01 to U06: the flagged devices are gone and the examples are the entry's own; the top-level order follows U01 to U10, as the overview discloses. Entry 9 §2.1 and listing 1 no longer share an example with `stat.md`.
+  - Listings re-run with Python 3.13.16 (`python3 -I`), extracted from the article: entry 9 listing 1 (`11/25`, `0.5177`, `0.4914`, `0.333` / `0.667`) and listing 2 identical to the quoted output. Entries 10 and 11 have no listings.
+  - Recomputed: entry 9 §2.1, 0.2 + 0.3 − 0.06 = 0.44 = 1 − 0.8 × 0.7 = 11/25; entry 11 §2.2, 1 + 4 + 6 + max(9, 5) + 1 = 21, halving the short shard saves 0, the long shard 4 (max(4.5, 5) = 5), caching 4 → 0.5 saves 3.5. All correct.
+  - Cross-references: a script extracted every "Section X.Y" reference (prefix and "of the Nth entry" forms) in the 13 entries and resolved it against the target's current headings: 219 resolved; the five unresolved hits were parser mis-attributions, each checked by hand and correct. Cross-entry references were read in context (for example e12:15 → e3 §4.2, e12:145 → e8 §9.1 and e9 §3.4, e9:324 → e8 §6.1, e6:120 → e4 §4.5, e10:41 → e2 §7.1, e11:29 → e10 §2.1); all say what they claim.
+  - `npm run eos -- lint --quiet`: 90 files, 0 errors, 1 warning (in `signals-and-systems-in-discrete-time.mdx`, outside this series). Lint of the 13 entries, the series file and the insight: 0 errors, 0 warnings, 66 suggestions.
