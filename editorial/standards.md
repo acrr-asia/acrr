@@ -209,7 +209,7 @@ As a series entry, without the series links. A short research note may omit exer
 
 ### 6.4 Insight
 
-Front matter `kind` names the genre (Comparison, Concept explanation, Research question, Methodological note, Engineering observation, Emerging idea). The body has one framing paragraph (what question the insight addresses and why it matters to the reader) followed by exactly three sections in this order: `## Established`, `## Interpretation`, `## Open questions`. "Established" contains only claims that are established and verifiable; "Interpretation" is explicitly ACRR's reading; "Open questions" are genuine questions with what would answer them. An insight links to the articles that treat its subject in depth.
+Front matter `kind` names the genre (Comparison, Concept explanation, Research question, Methodological note, Engineering observation, Emerging idea, Policy analysis). The body has one framing paragraph (what question the insight addresses and why it matters to the reader) followed by exactly three sections in this order: `## Established`, `## Interpretation`, `## Open questions`. "Established" contains only claims that are established and verifiable; "Interpretation" is explicitly ACRR's reading; "Open questions" are genuine questions with what would answer them. An insight links to the articles that treat its subject in depth.
 
 ### 6.5 Series overview page
 

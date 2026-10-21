@@ -189,6 +189,7 @@ const KIND_VI: Record<string, string> = {
   'Research question': 'Câu hỏi nghiên cứu',
   'Methodological note': 'Ghi chú phương pháp',
   'Emerging idea': 'Ý tưởng mới',
+  'Policy analysis': 'Phân tích chính sách',
 };
 export function kindLabel(kind: string, lang: Lang): string {
   return lang === 'vi' ? (KIND_VI[kind] ?? kind) : kind;
