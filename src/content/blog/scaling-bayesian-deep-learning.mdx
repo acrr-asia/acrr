@@ -25,7 +25,7 @@ The entry relies on the Laplace approximation and the generalized Gauss–Newton
 
 Four numbers determine the cost of approximate inference for a network. The **parameter count** $P$ fixes the size of one weight vector and of anything stored per weight. The **data size** $N$ fixes the cost of one pass over the training set. The **number of samples** $S$ (posterior samples, Monte Carlo draws or ensemble members) multiplies the cost of every prediction. Finally the **output size** $C$, the number of classes or output dimensions, enters wherever a Jacobian or a per-output covariance is formed.
 
-The dangerous terms are those that are quadratic or cubic in $P$. A full posterior covariance has $P^2$ entries. For $P = 10^7$, a modest network today, that is $10^{14}$ numbers or 400 terabytes, and inverting it costs on the order of $P^3 = 10^{21}$ floating-point operations. Everything in this entry is a way to avoid those terms: by restricting inference to a few parameters, by imposing structure on the covariance or by changing the model so that uncertainty comes from somewhere cheaper.
+The dangerous terms are those that are quadratic or cubic in $P$. A full posterior covariance has $P^2$ entries. For $P = 10^7$, a modest network today, that is $10^{14}$ numbers or 400 terabytes (about 364 TiB), and inverting it costs on the order of $P^3 = 10^{21}$ floating-point operations. Everything in this entry is a way to avoid those terms: by restricting inference to a few parameters, by imposing structure on the covariance or by changing the model so that uncertainty comes from somewhere cheaper.
 
 ### 1.2 A cost table
 
@@ -77,7 +77,7 @@ What is new at scale is the cost. Forming $\Phi^\top \Phi$ costs $O(N K^2)$ in o
 
 ### 2.3 A worked example
 
-The listing below uses 200 fixed random cosine features in place of a trained feature extractor. They are random Fourier features (Rahimi and Recht, 2007), whose inner products approximate a radial basis function kernel with length scale 1, so the example is also a cheap approximation to the GP of the sixth entry. The data are 40 noisy observations of $\sin(2x)$ in two clusters with a gap at $x = 0$. The code computes the posterior for five prior precisions, reports the log marginal likelihood of each and then predicts at four test inputs with $\alpha = 1$. In the code, `A` is the posterior precision $S_N^{-1}$ and `m` is $m_N$.
+The listing below uses 200 fixed random cosine features in place of a trained feature extractor. They are random Fourier features (Rahimi and Recht, 2007), whose inner products approximate the squared-exponential kernel of the sixth entry with lengthscale 1, so the example is also a cheap approximation to the GP of the sixth entry. The data are 40 noisy observations of $\sin(2x)$ in two clusters with a gap at $x = 0$. The code computes the posterior for five prior precisions, reports the log marginal likelihood of each and then predicts at four test inputs with $\alpha = 1$. In the code, `prec` is the posterior precision $S_N^{-1}$ and `m` is $m_N$.
 
 ```python
 import numpy as np
@@ -90,17 +90,17 @@ x = np.r_[rng.uniform(-3, -1, N // 2), rng.uniform(1, 3, N // 2)]
 y = np.sin(2 * x) + sigma * rng.normal(size=N)
 
 # Fixed random features: the stand-in for a trained network body.
-omega = rng.normal(0, 1.0, size=K)         # frequencies, length scale 1
+omega = rng.normal(0, 1.0, size=K)         # frequencies, lengthscale 1
 phase = rng.uniform(0, 2 * np.pi, size=K)
 def features(x):
     return np.sqrt(2 / K) * np.cos(np.outer(x, omega) + phase)
 
 def fit(alpha):
-    """Posterior N(m, A^-1) over last-layer weights with prior N(0, I/alpha)."""
+    """Posterior N(m, prec^-1) over last-layer weights with prior N(0, I/alpha)."""
     Phi = features(x)
-    A = alpha * np.eye(K) + Phi.T @ Phi / sigma**2   # posterior precision
-    L = np.linalg.cholesky(A)
-    m = np.linalg.solve(A, Phi.T @ y) / sigma**2
+    prec = alpha * np.eye(K) + Phi.T @ Phi / sigma**2   # posterior precision
+    L = np.linalg.cholesky(prec)
+    m = np.linalg.solve(prec, Phi.T @ y) / sigma**2
     # log evidence log p(y | alpha, sigma), Bishop (2006), Section 3.5
     E = np.sum((y - Phi @ m) ** 2) / (2 * sigma**2) + alpha * m @ m / 2
     logev = (K * np.log(alpha) - N * np.log(2 * np.pi * sigma**2)) / 2 \
@@ -113,7 +113,7 @@ for alpha in [0.01, 0.1, 1.0, 10.0, 100.0]:
 m, L, _ = fit(1.0)
 xs = np.array([-2.0, 0.0, 2.0, 6.0])
 Phis = features(xs)
-V = np.linalg.solve(L, Phis.T)             # z^T A^-1 z = |L^-1 z|^2
+V = np.linalg.solve(L, Phis.T)             # z^T prec^-1 z = |L^-1 z|^2
 sd = np.sqrt(sigma**2 + (V**2).sum(0))
 for xi, mu, s in zip(xs, Phis @ m, sd):
     print(f"x* = {xi:4.1f}  mean = {mu:6.3f}  sd = {s:5.3f}  sin(2x*) = {np.sin(2*xi):6.3f}")
@@ -151,10 +151,10 @@ The features are fixed. If the feature extractor maps an unfamiliar input onto t
 
 The Laplace approximation of the [third entry](/blog/laplace-approximations) needs the precision matrix $H + \delta I$, where $H$ is the GGN matrix of the negative log likelihood at the MAP estimate and $\delta$ is the prior precision. That entry listed the structures that make it affordable: diagonal, Kronecker-factored, low-rank and restricted to a subset of the weights. This section looks at the two that matter most at scale in more detail.
 
-A **Kronecker-factored** approximation (KFAC) was introduced for optimization by Martens and Grosse (2015) and applied to the Laplace approximation by Ritter, Botev and Barber (2018). It treats layers as independent and approximates the block of a fully connected layer with weight matrix $W \in \mathbb{R}^{d_\text{out} \times d_\text{in}}$ as a Kronecker product (written here with the gradient factor first, to match the row-major ordering of the code below)
+The **Kronecker-factored** approximation (K-FAC) of the [third entry](/blog/laplace-approximations) was introduced for optimization by Martens and Grosse (2015) and applied to the Laplace approximation by Ritter, Botev and Barber (2018). It treats layers as independent and approximates the block of a fully connected layer with weight matrix $W \in \mathbb{R}^{d_\text{out} \times d_\text{in}}$, with the weights stacked column by column into $\operatorname{vec}(W)$, as a Kronecker product
 
 $$
-H_W \approx G \otimes A, \qquad A = \mathbb{E}[a a^\top], \qquad G = \mathbb{E}[g g^\top],
+H_W \approx A \otimes G, \qquad A = \mathbb{E}[a a^\top], \qquad G = \mathbb{E}[g g^\top],
 $$
 
 where $a \in \mathbb{R}^{d_\text{in}}$ is the input to the layer, $g \in \mathbb{R}^{d_\text{out}}$ is the gradient of the loss with respect to the layer's output and the expectations are averages over the training data. The approximation assumes that activations and output gradients are independent, which is not exact, but it keeps the dominant correlations within a layer. For a layer with 1024 inputs and 1024 outputs, the exact block would have $2^{40}$ entries (4 TiB); the two factors have $2 \times 2^{20}$ entries (8 MiB), twice the diagonal (4 MiB).
@@ -163,7 +163,7 @@ The second structure restricts inference to a **subnetwork**. In their work on s
 
 ### 3.2 The Kronecker trick in code
 
-A Kronecker factorization is useful only if the posterior can be used without ever forming $G \otimes A$. The identity that makes this possible is that if $A = Q_A \Lambda_A Q_A^\top$ and $G = Q_G \Lambda_G Q_G^\top$ are eigendecompositions, then $G \otimes A + \delta I$ has eigenvectors $Q_G \otimes Q_A$ and eigenvalues $\lambda_{G,i} \lambda_{A,j} + \delta$. Solving a linear system, sampling or computing a log determinant then needs only the two small eigendecompositions. The listing checks the solve against a dense computation for a $20 \times 30$ layer.
+A Kronecker factorization is useful only if the posterior can be used without ever forming $A \otimes G$. The identity that makes this possible is that if $A = Q_A \Lambda_A Q_A^\top$ and $G = Q_G \Lambda_G Q_G^\top$ are eigendecompositions, then $A \otimes G + \delta I$ has eigenvectors $Q_A \otimes Q_G$ and eigenvalues $\lambda_{A,i} \lambda_{G,j} + \delta$. With column stacking, multiplying $\operatorname{vec}(V)$ by $Q_A \otimes Q_G$ is the same as computing $Q_G V Q_A^\top$, so the rotations act on $d_\text{out} \times d_\text{in}$ matrices. Solving a linear system, sampling or computing a log determinant then needs only the two small eigendecompositions. The listing checks the solve against a dense computation for a $20 \times 30$ layer.
 
 ```python
 import numpy as np
@@ -178,24 +178,24 @@ g = rng.normal(size=(B, d_out)) @ rng.normal(size=(d_out, d_out)) / 5
 A = a.T @ a / B                         # d_in x d_in
 G = g.T @ g / B                         # d_out x d_out
 
-# Full precision of vec(W) (row-major, W is d_out x d_in), for checking.
-P = np.kron(G, A) + delta * np.eye(d_out * d_in)
-V = rng.normal(size=(d_out, d_in))      # a vector to multiply by P^-1
-direct = np.linalg.solve(P, V.ravel())
+# Full precision of vec(W), W is d_out x d_in stacked column by column.
+prec = np.kron(A, G) + delta * np.eye(d_out * d_in)
+V = rng.normal(size=(d_out, d_in))      # a vector to multiply by prec^-1
+direct = np.linalg.solve(prec, V.ravel(order="F"))
 
-# Kronecker route: two small eigendecompositions, never forming P.
+# Kronecker route: two small eigendecompositions, never forming prec.
 lA, QA = np.linalg.eigh(A)
 lG, QG = np.linalg.eigh(G)
 X = QG.T @ V @ QA                       # rotate into the joint eigenbasis
-X /= np.outer(lG, lA) + delta           # divide by the eigenvalues of P
-kron = (QG @ X @ QA.T).ravel()          # rotate back
+X /= np.outer(lG, lA) + delta           # divide by the eigenvalues of prec
+kron = (QG @ X @ QA.T).ravel(order="F") # rotate back
 
 print("max difference:", f"{np.abs(direct - kron).max():.1e}")
-print("numbers stored: full", P.size, " Kronecker", A.size + G.size)
+print("numbers stored: full", prec.size, " Kronecker", A.size + G.size)
 ```
 
 ```text
-max difference: 4.4e-15
+max difference: 4.9e-15
 numbers stored: full 360000  Kronecker 1300
 ```
 
@@ -227,7 +227,7 @@ Two techniques are used. A residual block $x \mapsto x + r(x)$ whose branch $r$ 
 
 ### 4.3 Output layers that measure distance
 
-Several output layers turn preserved distances into uncertainty. Deterministic uncertainty quantification (DUQ) (van Amersfoort et al., 2020) compares the feature vector with one learned centroid per class through a radial basis function kernel and reports low confidence when it is far from all centroids. The spectral-normalized neural Gaussian process (SNGP) (Liu et al., 2020) replaces the output layer with a GP approximated by random Fourier features, the construction of Section 2.3 applied to learned features. It computes the posterior covariance with a Laplace approximation accumulated during the final training epoch. Deep deterministic uncertainty (DDU) (Mukhoti et al., 2023) keeps an ordinary softmax head but fits a Gaussian density to the training features of each class after training; a low feature density signals epistemic uncertainty, and the entropy of the softmax signals aleatoric uncertainty.
+Several output layers turn preserved distances into uncertainty. Deterministic uncertainty quantification (DUQ) (van Amersfoort et al., 2020) compares the feature vector with one learned centroid per class through a squared-exponential kernel and reports low confidence when it is far from all centroids. The spectral-normalized neural Gaussian process (SNGP) (Liu et al., 2020) replaces the output layer with a GP approximated by random Fourier features, the construction of Section 2.3 applied to learned features. It computes the posterior covariance with a Laplace approximation accumulated during the final training epoch. Deep deterministic uncertainty (DDU) (Mukhoti et al., 2023) keeps an ordinary softmax head but fits a Gaussian density to the training features of each class after training; a low feature density signals epistemic uncertainty, and the entropy of the softmax signals aleatoric uncertainty.
 
 These methods are fast at prediction time and, in the reported benchmarks, detect inputs far from the training data well. Their uncertainty is only as good as the distance in feature space: bi-Lipschitz bounds rule out total collapse, but they do not guarantee that the feature distance reflects the differences that matter for the task. They also approximate the posterior over a small part of the model only, so they say little about uncertainty that arises from the feature extractor's own parameters.
 
@@ -257,7 +257,7 @@ The cost table and the sections above suggest the decision sequence below. It re
 
 ```mermaid
 flowchart TD
-    A["Retraining allowed?"] -->|no| B["Post hoc: last-layer<br/>or KFAC Laplace"]
+    A["Retraining allowed?"] -->|no| B["Post hoc: last-layer<br/>or K-FAC Laplace"]
     A -->|yes| C["One forward pass<br/>at test time?"]
     C -->|yes| D["Distance-aware model<br/>(SNGP, DUQ, DDU)"]
     C -->|no| E["Several training<br/>runs affordable?"]
@@ -265,14 +265,14 @@ flowchart TD
     E -->|no| G["Laplace, SWAG or<br/>Monte Carlo dropout"]
 ```
 
-The post hoc route is attractive because it leaves an existing training pipeline untouched. Train as usual, compute the curvature of the last layer or of the whole network with Kronecker factors in one extra pass and tune the prior precision on the evidence or on validation data. Ensembles remain the most reliable choice when several training runs are affordable, as the fifth entry discussed, and combining them with a Laplace approximation per member costs little extra.
+The post-hoc route is attractive because it leaves an existing training pipeline untouched. Train as usual, compute the curvature of the last layer or of the whole network with Kronecker factors in one extra pass and tune the prior precision on the evidence or on validation data. Ensembles remain the most reliable choice when several training runs are affordable, as the fifth entry discussed, and combining them with a Laplace approximation per member costs little extra, as the fifth entry describes.
 
 ## 8. Limits and failure modes
 
 The approximations of this entry share a pattern: each buys its speed by ignoring part of the posterior, and the part it ignores determines where it fails.
 
 - **Fixed features.** Last-layer and single-pass methods inherit every blind spot of the feature extractor. Spectral normalization reduces feature collapse but does not make feature distances meaningful for the task.
-- **Independence assumptions.** Diagonal and Kronecker-factored curvature ignore correlations across layers, and KFAC assumes that inputs and output gradients are independent; the resulting uncertainty depends strongly on the tuned prior precision.
+- **Independence assumptions.** Diagonal and Kronecker-factored curvature ignore correlations across layers, and K-FAC assumes that inputs and output gradients are independent; the resulting uncertainty depends strongly on the tuned prior precision.
 - **Too few inducing points or features.** Sparse GPs and random-feature models smooth over structure they cannot represent, and they become overconfident in ways that look like good calibration on smooth test functions.
 - **Cost moved, not removed.** $S$ forward passes at prediction time can cost more over a model's life than training did; a method that is cheap to fit can be expensive to deploy.
 - **Comparisons are setting-dependent.** Rankings of scalable methods vary with architecture, data and metric; published comparisons cover a limited set of benchmarks.
@@ -302,7 +302,7 @@ Far from the data, the training features carry little information about $z^*$, s
 <details>
 <summary>Answer</summary>
 
-The identity requires the added term to be a multiple of the identity, which shares every eigenvector with $G \otimes A$. A diagonal matrix with unequal entries does not, so $G \otimes A + D$ no longer has eigenvectors $Q_G \otimes Q_A$. Approximations exist, for example adding a damping term to each factor, but they change the posterior.
+The identity requires the added term to be a multiple of the identity, which shares every eigenvector with $A \otimes G$. A diagonal matrix with unequal entries does not, so $A \otimes G + D$ no longer has eigenvectors $Q_A \otimes Q_G$. Approximations exist, for example adding a damping term to each factor, but they change the posterior.
 
 </details>
 
@@ -332,7 +332,7 @@ Its KL contribution is zero: it costs no bits, because the receiver can draw it 
 | What is last-layer inference? | Bayesian linear regression (or a Laplace approximation) over the last layer, with fixed features. |
 | What did the worked example show? | Predictive sd 0.105 in the data, 0.226 in the gap, 0.975 far away, from one $200 \times 200$ factorization. |
 | How is the prior chosen there? | By the closed-form evidence, which peaked at $\alpha = 1$ on the grid. |
-| What does KFAC store? | Two factors per layer, $d_\text{in}^2 + d_\text{out}^2$ numbers; 8 MiB instead of 4 TiB for a 1024-by-1024 layer. |
+| What does K-FAC store? | Two factors per layer, $d_\text{in}^2 + d_\text{out}^2$ numbers; 8 MiB instead of 4 TiB for a 1024-by-1024 layer. |
 | How is it used without forming the product? | Through the eigendecompositions of the factors. |
 | What do single-pass methods need? | A bi-Lipschitz feature extractor (residual blocks with spectral normalization) and a distance-aware output layer. |
 | How do GPs scale? | Inducing points with minibatches, $O(BM^2 + M^3)$ per step, or low-rank and iterative linear algebra. |
