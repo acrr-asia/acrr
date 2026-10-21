@@ -1,13 +1,13 @@
 ---
 title: "Học sâu Bayes"
-description: "Mang lại độ bất định được hiệu chỉnh cho mạng nơ-ron: phân phối hậu nghiệm, lấy mẫu, Laplace, suy luận biến phân, tổ hợp mô hình, quá trình Gauss, tiên nghiệm và mở rộng quy mô."
+description: "Độ bất định được hiệu chuẩn cho mạng nơ-ron: hậu nghiệm, lấy mẫu, Laplace, suy luận biến phân, tổ hợp mô hình, quá trình Gauss, tiên nghiệm và quy mô."
 category: "AI and Machine Learning"
 status: "published"
 objectives:
   - "Giải thích phân phối hậu nghiệm (posterior distribution) trên các tham số hoặc các hàm của mạng là gì, phân phối dự đoán hậu nghiệm (posterior predictive) được hình thành như thế nào, và độ bất định nhận thức (epistemic uncertainty) khác độ bất định ngẫu nhiên (aleatoric uncertainty) ra sao."
-  - "So sánh các họ suy luận xấp xỉ (approximate inference) chính cho mạng nơ-ron (xích Markov Monte Carlo, xấp xỉ Laplace, suy luận biến phân và tổ hợp mô hình) theo giả định, chi phí và các kiểu thất bại của chúng."
-  - "Liên hệ mạng nơ-ron với quá trình Gauss (Gaussian process) và các phương pháp nhân (kernel method), và giải thích tiên nghiệm (prior), tính đối xứng (symmetry) và tính khả định danh (identifiability) định hình một mạng nơ-ron Bayes như thế nào."
-  - "Chọn một phương pháp mở rộng được cho một mô hình và một tập dữ liệu cho trước, và đánh giá độ bất định dự đoán bằng độ hiệu chỉnh (calibration), quy tắc chấm điểm thích đáng (proper scoring rule) và dự đoán có chọn lọc (selective prediction)."
+  - "So sánh các họ suy luận xấp xỉ (approximate inference) chính cho mạng nơ-ron (Monte Carlo xích Markov, xấp xỉ Laplace, suy luận biến phân và tổ hợp mô hình) theo giả định, chi phí và các kiểu thất bại của chúng."
+  - "Liên hệ mạng nơ-ron với quá trình Gauss (Gaussian process) và các phương pháp hàm nhân (kernel method), và giải thích tiên nghiệm (prior), tính đối xứng (symmetry) và tính khả định danh (identifiability) định hình một mạng nơ-ron Bayes như thế nào."
+  - "Chọn một phương pháp mở rộng được cho một mô hình và một tập dữ liệu cho trước, và đánh giá độ bất định dự đoán bằng hiệu chuẩn (calibration), quy tắc chấm điểm thích đáng (proper scoring rule) và dự đoán có chọn lọc (selective prediction)."
   - "Mô tả các hướng nghiên cứu hiện nay của học sâu Bayes và nêu các bài toán mở mà mỗi hướng giải quyết."
 ---
 

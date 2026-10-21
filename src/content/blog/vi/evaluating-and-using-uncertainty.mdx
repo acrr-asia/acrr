@@ -1,6 +1,6 @@
 ---
 title: "Đánh giá và sử dụng độ bất định dự đoán"
-description: "Cách chấm điểm độ bất định dự đoán bằng quy tắc tính điểm thích đáng và sai số hiệu chuẩn, và cách dùng nó để từ chối trả lời, chọn dữ liệu cần gán nhãn và tinh chỉnh mô hình ngôn ngữ."
+description: "Chấm điểm độ bất định bằng quy tắc chấm điểm thích đáng và sai số hiệu chuẩn; dùng nó để từ chối trả lời, chọn dữ liệu gán nhãn, tinh chỉnh mô hình ngôn ngữ."
 publishedAt: "2026-10-21"
 category: "AI and Machine Learning"
 tags:
@@ -18,9 +18,9 @@ import BdlRiskCoverage from '../../../components/diagrams/BdlRiskCoverage.astro'
 
 Các bài trước đã xây dựng những phép xấp xỉ cho phân phối dự đoán hậu nghiệm (posterior predictive) $p(y^* \mid x^*, \mathcal{D})$. Chúng dùng các mẫu từ phân phối hậu nghiệm ở [bài thứ hai](/vi/blog/sampling-the-posterior-mcmc), một phân phối Gauss tại một mode ở [bài thứ ba](/vi/blog/laplace-approximations), một họ phân phối được tối ưu ở [bài thứ tư](/vi/blog/variational-inference-for-neural-networks), các mạng được huấn luyện độc lập ở [bài thứ năm](/vi/blog/deep-ensembles), và các biến thể rẻ hơn của tất cả những phương pháp đó ở [bài thứ tám](/vi/blog/scaling-bayesian-deep-learning). Mỗi phương pháp cho ra một phân phối xác suất trên đầu ra thay vì một câu trả lời duy nhất. Bài này đặt ra hai câu hỏi thực tế về những phân phối như vậy. Làm sao biết chúng có tốt hay không? Và khi chúng tốt thì có thể làm gì với chúng?
 
-Nửa đầu trả lời câu hỏi đánh giá bằng quy tắc tính điểm thích đáng (proper scoring rule), hiệu chuẩn (calibration) và sai số hiệu chuẩn kỳ vọng, và cho thấy rằng các đại lượng này đo những điều khác nhau. Nửa sau bàn về ba cách sử dụng độ bất định dự đoán: từ chối trả lời với những đầu vào mà mô hình không chắc chắn (phân lớp có chọn lọc), chọn dữ liệu nào cần gán nhãn tiếp theo (học chủ động) và gắn độ bất định cho các mô hình ngôn ngữ lớn. Một mục ngắn liệt kê các loại phần mềm cài đặt những phương pháp của loạt bài.
+Nửa đầu trả lời câu hỏi đánh giá bằng quy tắc chấm điểm thích đáng (proper scoring rule), hiệu chuẩn (calibration) và sai số hiệu chuẩn kỳ vọng, và cho thấy rằng các đại lượng này đo những điều khác nhau. Nửa sau bàn về ba cách sử dụng độ bất định dự đoán: từ chối trả lời với những đầu vào mà mô hình không chắc chắn (phân loại có chọn lọc), chọn dữ liệu nào cần gán nhãn tiếp theo (học chủ động) và gắn độ bất định cho các mô hình ngôn ngữ lớn. Một mục ngắn liệt kê các loại phần mềm cài đặt những phương pháp của loạt bài.
 
-Bài này giả định người đọc đã biết loạt bài [Cơ sở học máy](/vi/series/machine-learning-fundamentals), đặc biệt là việc tách biệt dữ liệu huấn luyện, thẩm định và kiểm tra trong bài [Evaluating Models Honestly](/blog/evaluating-models-honestly), cùng ký hiệu của loạt bài. Logarit là logarit tự nhiên, nên entropy tính bằng nat. Mã dùng Python 3.13 và NumPy 2.5.3 với các hạt giống ngẫu nhiên (seed) ghi bên cạnh. Mọi dự đoán trong các ví dụ đều là tổng hợp, được sinh ra sao cho biết trước xác suất thật của các lớp.
+Bài này giả định người đọc đã biết loạt bài [Cơ sở học máy](/vi/series/machine-learning-fundamentals), đặc biệt là việc tách biệt dữ liệu huấn luyện, kiểm định và kiểm tra trong bài [Evaluating Models Honestly](/blog/evaluating-models-honestly), cùng ký hiệu của loạt bài. Logarit là logarit tự nhiên, nên entropy tính bằng nat. Mã dùng Python 3.13 và NumPy 2.5.3 với các hạt giống ngẫu nhiên (seed) ghi bên cạnh. Mọi dự đoán trong các ví dụ đều là tổng hợp, được sinh ra sao cho biết trước xác suất thật của các lớp.
 
 ## 1. Một phân phối dự đoán tốt làm được gì
 
@@ -28,27 +28,27 @@ Bài này giả định người đọc đã biết loạt bài [Cơ sở học 
 
 Một phân phối dự đoán có thể sai theo nhiều cách khác nhau, và hiếm khi một con số duy nhất nắm bắt được tất cả. Có ba tính chất đáng được tách riêng.
 
-- **Hiệu chuẩn** là sự khớp nhau giữa các xác suất được nêu ra và tần suất quan sát được: trong số mọi đầu vào mà một bộ phân lớp nói "lớp 3 với xác suất 0.8", lớp 3 phải xuất hiện khoảng 80% số lần. Đó là tính chất chung của các dự đoán và dữ liệu, không bao giờ là tính chất của riêng một dự đoán.
-- **Độ sắc nét** (sharpness) là mức độ tập trung của các dự đoán. Một bộ phân lớp luôn trả về tần suất các lớp trong tập huấn luyện thì được hiệu chuẩn hoàn hảo nhưng vô dụng; các dự đoán sắc nét thì dứt khoát đưa ra câu trả lời.
-- **Khả năng phân biệt** (discrimination), hay chất lượng xếp hạng, là việc độ tin cậy cao hơn có đi kèm khả năng đúng cao hơn hay không, để các dự đoán tự tin đáng tin hơn các dự đoán do dự.
+- **Hiệu chuẩn** là sự khớp nhau giữa các xác suất được nêu ra và tần suất quan sát được: trong số mọi đầu vào mà một bộ phân loại nói "lớp 3 với xác suất 0.8", lớp 3 phải xuất hiện khoảng 80% số lần. Đó là tính chất chung của các dự đoán và dữ liệu, không bao giờ là tính chất của riêng một dự đoán.
+- **Độ sắc nét** (sharpness) là mức độ tập trung của các dự đoán. Một bộ phân loại luôn trả về tần suất các lớp trong tập huấn luyện thì được hiệu chuẩn hoàn hảo nhưng vô dụng; các dự đoán sắc nét thì dứt khoát đưa ra câu trả lời.
+- **Khả năng phân biệt** (discrimination), hay chất lượng xếp hạng, là việc độ tự tin cao hơn có đi kèm khả năng đúng cao hơn hay không, để các dự đoán tự tin đáng tin hơn các dự đoán do dự.
 
 Gneiting, Balabdaoui và Raftery (2007) phát biểu mục tiêu của dự báo xác suất là cực đại hóa độ sắc nét với ràng buộc được hiệu chuẩn. Độ chính xác (accuracy) không đo tính chất nào trong ba tính chất này: nó chỉ hỏi lớp có xác suất cao nhất có phải là lớp đúng hay không.
 
 ### 1.2 Dữ liệu đánh giá
 
-Mọi đại lượng trong bài này đều là ước lượng tính từ các mẫu được giữ lại, nên các quy tắc của bài [Evaluating Models Honestly](/blog/evaluating-models-honestly) vẫn áp dụng nguyên vẹn. Bất cứ thứ gì được khớp để cải thiện độ bất định (một nhiệt độ, một ngưỡng từ chối, một tổ hợp các điểm số) đều được khớp trên dữ liệu thẩm định, và tập kiểm tra chỉ được dùng một lần. Một độ hiệu chuẩn đo trên chính dữ liệu dùng để điều chỉnh nó là lạc quan, vì cùng lý do với một sai số kiểm tra đo trên tập huấn luyện.
+Mọi đại lượng trong bài này đều là ước lượng tính từ các mẫu được giữ lại, nên các quy tắc của bài [Evaluating Models Honestly](/blog/evaluating-models-honestly) vẫn áp dụng nguyên vẹn. Bất cứ thứ gì được khớp để cải thiện độ bất định (một nhiệt độ, một ngưỡng từ chối, một tổ hợp các điểm số) đều được khớp trên dữ liệu kiểm định, và tập kiểm tra chỉ được dùng một lần. Một mức hiệu chuẩn đo trên chính dữ liệu dùng để điều chỉnh nó là lạc quan, vì cùng lý do với một sai số kiểm tra đo trên tập huấn luyện.
 
-## 2. Quy tắc tính điểm thích đáng
+## 2. Quy tắc chấm điểm thích đáng
 
 ### 2.1 Định nghĩa
 
-Một **quy tắc tính điểm** (scoring rule) $\mathcal{S}(q, y)$ gán một con số cho một phân phối dự đoán $q$ trên đầu ra và đầu ra $y$ đã xảy ra. Bài này dùng chiều mất mát, trong đó thấp hơn là tốt hơn. Nếu các đầu ra được rút từ một phân phối $p$, điểm kỳ vọng của dự báo $q$ là $\mathcal{S}(q, p) = \mathbb{E}_{y \sim p}[\mathcal{S}(q, y)]$. Quy tắc là **thích đáng** (proper) nếu $\mathcal{S}(p, p) \le \mathcal{S}(q, p)$ với mọi $q$, tức là báo cáo phân phối thật không bao giờ tệ hơn báo cáo bất cứ thứ gì khác, và là **thích đáng chặt** (strictly proper) nếu đẳng thức chỉ xảy ra khi $q = p$ (Gneiting và Raftery, 2007).
+Một **quy tắc chấm điểm** (scoring rule) $\mathcal{S}(q, y)$ gán một con số cho một phân phối dự đoán $q$ trên đầu ra và đầu ra $y$ đã xảy ra. Bài này dùng chiều mất mát, trong đó thấp hơn là tốt hơn. Nếu các đầu ra được rút từ một phân phối $p$, điểm kỳ vọng của dự báo $q$ là $\mathcal{S}(q, p) = \mathbb{E}_{y \sim p}[\mathcal{S}(q, y)]$. Quy tắc là **thích đáng** (proper) nếu $\mathcal{S}(p, p) \le \mathcal{S}(q, p)$ với mọi $q$, tức là báo cáo phân phối thật không bao giờ tệ hơn báo cáo bất cứ thứ gì khác, và là **thích đáng chặt** (strictly proper) nếu đẳng thức chỉ xảy ra khi $q = p$ (Gneiting và Raftery, 2007).
 
 Tính thích đáng là điều làm cho một điểm số an toàn để tối ưu và để so sánh các mô hình: một mô hình không thể cải thiện một điểm số thích đáng chặt bằng cách bóp méo các xác suất của nó khỏi điều nó tin. Khớp một mô hình bằng cách cực tiểu hóa một điểm số thích đáng chặt, hoặc so sánh hai phép xấp xỉ Bayes theo điểm trung bình của chúng trên dữ liệu kiểm tra, sẽ thưởng cho phân phối dự đoán trung thực.
 
 ### 2.2 Điểm log và điểm Brier
 
-Với một bộ phân lớp trên $C$ lớp trả về các xác suất $q = (q_1, \dots, q_C)$, hai điểm số thường dùng là
+Với một bộ phân loại trên $C$ lớp trả về các xác suất $q = (q_1, \dots, q_C)$, hai điểm số thường dùng là
 
 $$
 \mathcal{S}_{\log}(q, y) = -\log q_y,
@@ -56,7 +56,7 @@ $$
 \mathcal{S}_{\text{Brier}}(q, y) = \sum_{k=1}^{C} \big(q_k - \mathbb{1}[y = k]\big)^2,
 $$
 
-trong đó $\mathbb{1}[\cdot]$ bằng 1 khi đối số của nó đúng và bằng 0 trong trường hợp ngược lại. **Điểm log** (log score) là log hợp lý âm (negative log-likelihood, NLL) của nhãn quan sát được; lấy trung bình trên một tập kiểm tra, nó chính là entropy chéo (cross-entropy) kiểm tra. **Điểm Brier** (Brier score) là bình phương khoảng cách giữa $q$ và vector one-hot của nhãn (Brier, 1950); nó nằm trong khoảng từ 0 đến 2.
+trong đó $\mathbb{1}[\cdot]$ bằng 1 khi đối số của nó đúng và bằng 0 trong trường hợp ngược lại. **Điểm log** (log score) là logarit âm của hàm hợp lý (negative log-likelihood, NLL) của nhãn quan sát được; lấy trung bình trên một tập kiểm tra, nó chính là entropy chéo (cross-entropy) kiểm tra. **Điểm Brier** (Brier score) là bình phương khoảng cách giữa $q$ và vector one-hot của nhãn (Brier, 1950); nó nằm trong khoảng từ 0 đến 2.
 
 Cả hai đều thích đáng chặt, và các điểm kỳ vọng cho thấy lý do. Lấy kỳ vọng theo $y \sim p$,
 
@@ -78,39 +78,39 @@ Giả sử với một đầu vào nào đó, xác suất thật của hai lớp
 | $(0.9, 0.1)$, quá tự tin | 0.765 | 0.500 | 1 |
 | $(0.5, 0.5)$, thiếu tự tin | 0.693 | 0.500 | ngang nhau |
 
-Cả hai điểm số đều xếp dự báo thật lên đầu. Độ chính xác hoàn toàn không phân biệt được hai hàng đầu, vì cả hai đều dự đoán lớp 1; một mô hình có thể trở nên quá tự tin tùy ý mà không mất độ chính xác. Hai điểm số cũng không đồng ý với nhau về việc phạt điều gì. Điểm log phạt sự quá tự tin nặng hơn một sai lệch bằng như vậy về phía 0.5, trong khi điểm Brier, vốn là hàm bậc hai của $q - p$, ở đây phạt cả hai như nhau.
+Cả hai điểm số đều xếp dự báo thật lên đầu. Độ chính xác hoàn toàn không phân biệt được hai hàng đầu, vì cả hai đều dự đoán lớp 1; một mô hình có thể trở nên quá tự tin tùy ý mà không mất độ chính xác. Hai điểm số cũng không đồng ý với nhau về việc phạt điều gì. Điểm log phạt sự quá tự tin nặng hơn một sai số bằng như vậy về phía 0.5, trong khi điểm Brier, vốn là hàm bậc hai của $q - p$, ở đây phạt cả hai như nhau.
 
 Khác biệt còn rõ hơn với một sai lầm tự tin. Nếu một dự báo gán cho nhãn quan sát được xác suất 0.01, điểm log của nó là $-\log 0.01 = 4.61$, trong khi điểm Brier của nó không thể vượt quá 2. Do đó điểm log nhạy với những sai lầm tự tin hiếm gặp; đó là ưu điểm khi những sai lầm như vậy gây tổn thất lớn, và là điều phiền toái khi một vài mẫu kiểm tra bị gán nhãn sai chi phối giá trị trung bình. Báo cáo cả hai là thông lệ phổ biến.
 
 ## 3. Hiệu chuẩn và sai số hiệu chuẩn kỳ vọng
 
-### 3.1 Độ tin cậy và hiệu chuẩn theo nhãn hàng đầu
+### 3.1 Độ tự tin và hiệu chuẩn theo nhãn hàng đầu
 
-Với một bộ phân lớp, ký hiệu $\hat{y} = \arg\max_k q_k$ là lớp được dự đoán và $c = \max_k q_k$ là **độ tin cậy** (confidence) của nó. Bộ phân lớp được **hiệu chuẩn theo nhãn hàng đầu** (top-label calibrated) nếu với mọi giá trị $c_0$, xác suất dự đoán đúng khi biết độ tin cậy bằng $c_0$ là $c_0$:
+Với một bộ phân loại, ký hiệu $\hat{y} = \arg\max_k q_k$ là lớp được dự đoán và $c = \max_k q_k$ là **độ tự tin** (confidence) của nó. Bộ phân loại được **hiệu chuẩn theo nhãn hàng đầu** (top-label calibrated) nếu với mọi giá trị $c_0$, xác suất dự đoán đúng khi biết độ tự tin bằng $c_0$ là $c_0$:
 
 $$
 \Pr\big(\hat{y} = y \mid c = c_0\big) = c_0 .
 $$
 
-Điều này yếu hơn hiệu chuẩn đầy đủ của vector xác suất, vốn đòi hỏi mọi thành phần $q_k$ phải khớp với một tần suất, nhưng đó là tính chất quan trọng khi thứ người dùng nhìn thấy là dự đoán và độ tin cậy của nó.
+Điều này yếu hơn hiệu chuẩn đầy đủ của vector xác suất, vốn đòi hỏi mọi thành phần $q_k$ phải khớp với một tần suất, nhưng đó là tính chất quan trọng khi thứ người dùng nhìn thấy là dự đoán và độ tự tin của nó.
 
 ### 3.2 Bộ ước lượng
 
-Vì $c$ là liên tục, xác suất có điều kiện không thể đọc trực tiếp từ một tập kiểm tra hữu hạn. **Sai số hiệu chuẩn kỳ vọng** (expected calibration error, ECE) gom $n$ dự đoán kiểm tra vào $B$ ngăn (bin) theo độ tin cậy, thường có độ rộng bằng nhau trên $[0, 1]$, và so sánh độ chính xác trung bình với độ tin cậy trung bình trong mỗi ngăn (Naeini, Cooper và Hauskrecht, 2015; Guo et al., 2017):
+Vì $c$ là liên tục, xác suất có điều kiện không thể đọc trực tiếp từ một tập kiểm tra hữu hạn. **Sai số hiệu chuẩn kỳ vọng** (expected calibration error, ECE) gom $n$ dự đoán kiểm tra vào $B$ ngăn (bin) theo độ tự tin, thường có độ rộng bằng nhau trên $[0, 1]$, và so sánh độ chính xác trung bình với độ tự tin trung bình trong mỗi ngăn (Naeini, Cooper và Hauskrecht, 2015; Guo và cộng sự, 2017):
 
 $$
 \mathrm{ECE} = \sum_{b=1}^{B} \frac{\lvert \mathcal{B}_b \rvert}{n} \,\big\lvert \mathrm{acc}(\mathcal{B}_b) - \mathrm{conf}(\mathcal{B}_b) \big\rvert ,
 $$
 
-trong đó $\mathcal{B}_b$ là tập các dự đoán trong ngăn $b$, $\lvert \mathcal{B}_b \rvert$ là kích thước của nó, $\mathrm{acc}(\mathcal{B}_b)$ là tỉ lệ dự đoán đúng trong số đó và $\mathrm{conf}(\mathcal{B}_b)$ là độ tin cậy trung bình của chúng. Một **biểu đồ độ tin cậy** (reliability diagram) vẽ $\mathrm{acc}(\mathcal{B}_b)$ theo $\mathrm{conf}(\mathcal{B}_b)$; một bộ phân lớp được hiệu chuẩn nằm trên đường chéo, còn một bộ phân lớp quá tự tin nằm bên dưới nó.
+trong đó $\mathcal{B}_b$ là tập các dự đoán trong ngăn $b$, $\lvert \mathcal{B}_b \rvert$ là kích thước của nó, $\mathrm{acc}(\mathcal{B}_b)$ là tỉ lệ dự đoán đúng trong số đó và $\mathrm{conf}(\mathcal{B}_b)$ là độ tự tin trung bình của chúng. Một **biểu đồ độ tin cậy** (reliability diagram) vẽ $\mathrm{acc}(\mathcal{B}_b)$ theo $\mathrm{conf}(\mathcal{B}_b)$; một bộ phân loại được hiệu chuẩn nằm trên đường chéo, còn một bộ phân loại quá tự tin nằm bên dưới nó.
 
 ### 3.3 Co giãn nhiệt độ
 
-Guo et al. (2017) nhận thấy các bộ phân lớp ảnh hiện đại quá tự tin và đề xuất một cách sửa chỉ với một tham số. **Co giãn nhiệt độ** (temperature scaling) chia các logit $\ell$ (đầu vào của softmax) cho một số vô hướng $T > 0$ trước softmax, $q = \mathrm{softmax}(\ell / T)$, và chọn $T$ để cực tiểu hóa điểm log trên dữ liệu thẩm định. Nhiệt độ lớn hơn 1 làm mềm các xác suất; nhỏ hơn 1 làm chúng sắc nét hơn. Chia cho một hằng số dương không thay đổi logit nào lớn nhất, nên lớp được dự đoán và độ chính xác không đổi. Co giãn nhiệt độ không phải là phương pháp Bayes, nhưng nó là mốc so sánh mà mọi phương pháp Bayes trong loạt bài này phải được đối chiếu: nếu một phép xấp xỉ hậu nghiệm không được hiệu chuẩn tốt hơn một ước lượng điểm đã co giãn nhiệt độ, chi phí bổ sung của nó mua được rất ít về hiệu chuẩn.
+Guo và cộng sự (2017) nhận thấy các bộ phân loại ảnh hiện đại quá tự tin và đề xuất một cách sửa chỉ với một tham số. **Co giãn nhiệt độ** (temperature scaling) chia các logit $\ell$ (đầu vào của softmax) cho một số vô hướng $T > 0$ trước softmax, $q = \mathrm{softmax}(\ell / T)$, và chọn $T$ để cực tiểu hóa điểm log trên dữ liệu kiểm định. Nhiệt độ lớn hơn 1 làm mềm các xác suất; nhỏ hơn 1 làm chúng sắc nét hơn. Chia cho một hằng số dương không thay đổi logit nào lớn nhất, nên lớp được dự đoán và độ chính xác không đổi. Co giãn nhiệt độ không phải là phương pháp Bayes, nhưng nó là mốc so sánh mà mọi phương pháp Bayes trong loạt bài này phải được đối chiếu: nếu một phép xấp xỉ hậu nghiệm không được hiệu chuẩn tốt hơn một ước lượng điểm đã co giãn nhiệt độ, chi phí bổ sung của nó mua được rất ít về hiệu chuẩn.
 
-### 3.4 Ví dụ tính toán: một bộ phân lớp quá tự tin
+### 3.4 Ví dụ tính toán: một bộ phân loại quá tự tin
 
-Đoạn mã dựng 6000 đầu vào tổng hợp với bốn lớp. Mỗi đầu vào có các logit thật $z$ với các thành phần chuẩn tắc độc lập nhân với 1.5, xác suất thật $\mathrm{softmax}(z)$, và một nhãn được rút từ đó. "Mô hình đã huấn luyện" nhìn thấy $z$ qua nhiễu có độ lệch chuẩn 0.5 rồi nhân với 2.5, khiến nó quá tự tin ngay từ cách dựng. 3000 đầu vào đầu tiên là tập thẩm định, chỉ dùng để chọn $T$ trên một lưới giá trị; 3000 đầu vào còn lại là tập kiểm tra.
+Đoạn mã dựng 6000 đầu vào tổng hợp với bốn lớp. Mỗi đầu vào có các logit thật $z$ với các thành phần chuẩn tắc độc lập nhân với 1.5, xác suất thật $\mathrm{softmax}(z)$, và một nhãn được rút từ đó. "Mô hình đã huấn luyện" nhìn thấy $z$ qua nhiễu có độ lệch chuẩn 0.5 rồi nhân với 2.5, khiến nó quá tự tin ngay từ cách dựng. 3000 đầu vào đầu tiên là tập kiểm định, chỉ dùng để chọn $T$ trên một lưới giá trị; 3000 đầu vào còn lại là tập kiểm tra.
 
 ```python
 import numpy as np
@@ -168,29 +168,29 @@ T = 2.86  acc 0.594  NLL 0.991  Brier 0.543  ECE 0.021
 truth     acc 0.616  NLL 0.932  Brier 0.510  ECE 0.014
 ```
 
-Độ tin cậy của mô hình vượt độ chính xác của nó trung bình khoảng 24 điểm phần trăm. Co giãn nhiệt độ với $T = 2.86$ giữ độ chính xác ở 0.594, giảm NLL kiểm tra từ 1.455 xuống 0.991 và ECE từ 0.236 xuống 0.021. Nhiệt độ được chọn lớn hơn một chút so với hệ số 2.5 dùng để dựng mô hình, vì nhiễu cộng vào $z$ cũng làm các logit trải rộng ra. Hàng cuối chấm điểm các xác suất thật, thứ mà không mô hình nào có thể vượt qua theo kỳ vọng: NLL 0.932 và điểm Brier 0.510 của chúng là các số hạng không thể giảm của Mục 2.2, được ước lượng trên 3000 nhãn.
+Độ tự tin của mô hình vượt độ chính xác của nó trung bình khoảng 24 điểm phần trăm. Co giãn nhiệt độ với $T = 2.86$ giữ độ chính xác ở 0.594, giảm NLL kiểm tra từ 1.455 xuống 0.991 và ECE từ 0.236 xuống 0.021. Nhiệt độ được chọn lớn hơn một chút so với hệ số 2.5 dùng để dựng mô hình, vì nhiễu cộng vào $z$ cũng làm các logit trải rộng ra. Hàng cuối chấm điểm các xác suất thật, thứ mà không mô hình nào có thể vượt qua theo kỳ vọng: NLL 0.932 và điểm Brier 0.510 của chúng là các số hạng không thể giảm của mục 2.2, được ước lượng trên 3000 nhãn.
 
-<Figure caption="Biểu đồ độ tin cậy của ví dụ tính toán, từ 10 ngăn có độ rộng bằng nhau, mỗi ngăn có ít nhất 20 dự đoán kiểm tra. Trước khi co giãn, mọi ngăn có độ tin cậy trên 0.5 đều nằm dưới đường chéo; sau khi chia các logit cho 2.86, các ngăn bám theo đường chéo.">
+<Figure caption="Biểu đồ độ tin cậy của ví dụ tính toán, từ 10 ngăn có độ rộng bằng nhau, mỗi ngăn có ít nhất 20 dự đoán kiểm tra. Trước khi co giãn, mọi ngăn có độ tự tin trên 0.5 đều nằm dưới đường chéo; sau khi chia các logit cho 2.86, các ngăn bám theo đường chéo.">
   <BdlReliabilityDiagram />
 </Figure>
 
 ### 3.5 Những gì ECE không cho biết
 
-Hàng cuối của kết quả cho thấy hạn chế thứ nhất: các xác suất thật, vốn được hiệu chuẩn theo cách dựng, có ECE bằng 0.014, không phải 0. Bộ ước lượng theo ngăn bị chệch lên trên với mẫu hữu hạn, vì giá trị tuyệt đối biến nhiễu lấy mẫu trong mỗi ngăn thành một đóng góp dương, và giá trị của nó phụ thuộc vào số lượng và vị trí các ngăn (Nixon et al., 2019). Những khác biệt về ECE có độ lớn cỡ độ chệch này không nên được hiểu là khác biệt về hiệu chuẩn.
+Hàng cuối của kết quả cho thấy hạn chế thứ nhất: các xác suất thật, vốn được hiệu chuẩn theo cách dựng, có ECE bằng 0.014, không phải 0. Bộ ước lượng theo ngăn bị chệch lên trên với mẫu hữu hạn, vì giá trị tuyệt đối biến nhiễu lấy mẫu trong mỗi ngăn thành một đóng góp dương, và giá trị của nó phụ thuộc vào số lượng và vị trí các ngăn (Nixon và cộng sự, 2019). Những khác biệt về ECE có độ lớn cỡ độ chệch này không nên được hiểu là khác biệt về hiệu chuẩn.
 
-Hạn chế thứ hai nghiêm trọng hơn: ECE không phải là một quy tắc tính điểm thích đáng. Một bộ phân lớp bỏ qua đầu vào và trả về tần suất các lớp trong tập huấn luyện có ECE gần bằng không và hoàn toàn không có khả năng phân biệt. ECE đo một tính chất, hiệu chuẩn, và phải được báo cáo cùng với độ chính xác và một điểm số thích đáng. Một điểm số thích đáng còn thưởng cho độ sắc nét. Các điểm số thích đáng chứa hiệu chuẩn như một thành phần. Murphy (1973) tách điểm Brier thành ba số hạng. Một số hạng độ tin cậy (reliability) bằng không với các dự báo được hiệu chuẩn; một số hạng độ phân giải (resolution), được trừ đi, thưởng cho việc tách được các trường hợp có tần suất kết quả khác nhau; số hạng cuối là độ bất định không thể giảm của các nhãn.
+Hạn chế thứ hai nghiêm trọng hơn: ECE không phải là một quy tắc chấm điểm thích đáng. Một bộ phân loại bỏ qua đầu vào và trả về tần suất các lớp trong tập huấn luyện có ECE gần bằng không và hoàn toàn không có khả năng phân biệt. ECE đo một tính chất, hiệu chuẩn, và phải được báo cáo cùng với độ chính xác và một điểm số thích đáng. Một điểm số thích đáng còn thưởng cho độ sắc nét. Các điểm số thích đáng chứa hiệu chuẩn như một thành phần. Murphy (1973) tách điểm Brier thành ba số hạng. Một số hạng độ tin cậy (reliability) bằng không với các dự báo được hiệu chuẩn; một số hạng độ phân giải (resolution), được trừ đi, thưởng cho việc tách được các trường hợp có tần suất kết quả khác nhau; số hạng cuối là độ bất định không thể giảm của các nhãn.
 
-Thứ ba, hiệu chuẩn trên phân phối kiểm tra không nói gì về hiệu chuẩn khi có dịch chuyển phân phối (distribution shift). Ovadia et al. (2019) so sánh một số phương pháp của loạt bài này trên các bộ đánh giá chuẩn về ảnh và văn bản với mức dịch chuyển tăng dần, và báo cáo rằng hiệu chuẩn của tất cả các phương pháp đều suy giảm khi dịch chuyển tăng, trong đó tập hợp mô hình sâu cho kết quả tốt nhất về tổng thể trong các thí nghiệm của họ. Một phép đánh giá độ bất định dự đoán có ý nghĩa cho triển khai phải bao gồm dữ liệu từ những kiểu dịch chuyển mà quá trình triển khai sẽ gặp.
+Thứ ba, hiệu chuẩn trên phân phối kiểm tra không nói gì về hiệu chuẩn khi có dịch chuyển phân phối (distribution shift). Ovadia và cộng sự (2019) so sánh một số phương pháp của loạt bài này trên các bộ dữ liệu chuẩn về ảnh và văn bản với mức dịch chuyển tăng dần, và báo cáo rằng hiệu chuẩn của tất cả các phương pháp đều suy giảm khi dịch chuyển tăng, trong đó tổ hợp sâu cho kết quả tốt nhất về tổng thể trong các thí nghiệm của họ. Một phép đánh giá độ bất định dự đoán có ý nghĩa cho triển khai phải bao gồm dữ liệu từ những kiểu dịch chuyển mà quá trình triển khai sẽ gặp.
 
-## 4. Phân lớp có chọn lọc
+## 4. Phân loại có chọn lọc
 
 ### 4.1 Tùy chọn từ chối
 
-Một bộ phân lớp có **tùy chọn từ chối** (reject option) có thể từ chối trả lời một đầu vào thay vì dự đoán, chẳng hạn bằng cách chuyển nó cho một người. Chow (1970) phân tích sự đánh đổi giữa sai lầm và từ chối. Giả sử đã biết các xác suất hậu nghiệm thật của các lớp, một sai lầm tốn 1 và một lần từ chối tốn $r$ với $0 < r < 1$ (với hai lớp, từ chối chỉ có ích nếu $r < 1/2$; xem Bài tập 3). Khi đó quy tắc cực tiểu hóa chi phí kỳ vọng sẽ dự đoán lớp có xác suất cao nhất khi xác suất đó ít nhất bằng $1 - r$, và từ chối trong trường hợp ngược lại. Trong thực tế, phân phối hậu nghiệm thật được thay bằng phân phối dự đoán của mô hình, và điều quan trọng là độ tin cậy của nó có tách được những đầu vào nó đoán đúng khỏi những đầu vào nó đoán sai hay không.
+Một bộ phân loại có **tùy chọn từ chối** (reject option) có thể từ chối trả lời một đầu vào thay vì dự đoán, chẳng hạn bằng cách chuyển nó cho một người. Chow (1970) phân tích sự đánh đổi giữa sai lầm và từ chối. Giả sử đã biết các xác suất hậu nghiệm thật của các lớp, một sai lầm tốn 1 và một lần từ chối tốn $r$ với $0 < r < 1$ (với hai lớp, từ chối chỉ có ích nếu $r < 1/2$; xem Bài tập 3). Khi đó quy tắc cực tiểu hóa chi phí kỳ vọng sẽ dự đoán lớp có xác suất cao nhất khi xác suất đó ít nhất bằng $1 - r$, và từ chối trong trường hợp ngược lại. Trong thực tế, phân phối hậu nghiệm thật được thay bằng phân phối dự đoán của mô hình, và điều quan trọng là độ tự tin của nó có tách được những đầu vào nó đoán đúng khỏi những đầu vào nó đoán sai hay không.
 
 ### 4.2 Độ phủ và rủi ro chọn lọc
 
-Một **bộ phân lớp có chọn lọc** (selective classifier) ghép một bộ phân lớp với một điểm số $s(x)$ và một ngưỡng $\tau$, và chỉ trả lời khi $s(x) \ge \tau$. Hai đại lượng mô tả nó (Geifman và El-Yaniv, 2017):
+Một **bộ phân loại có chọn lọc** (selective classifier) ghép một bộ phân loại với một điểm số $s(x)$ và một ngưỡng $\tau$, và chỉ trả lời khi $s(x) \ge \tau$. Hai đại lượng mô tả nó (Geifman và El-Yaniv, 2017):
 
 - **độ phủ** (coverage), tỉ lệ các đầu vào mà nó trả lời;
 - **rủi ro chọn lọc** (selective risk), tỉ lệ lỗi của nó trên các đầu vào được trả lời.
@@ -199,7 +199,7 @@ Hạ $\tau$ làm tăng độ phủ và, với một điểm số tốt, làm tă
 
 ### 4.3 Ví dụ tính toán: từ chối những đầu vào kém tự tin nhất
 
-Đoạn mã tiếp nối đoạn mã trước và dùng độ tin cậy sau co giãn nhiệt độ làm điểm số.
+Đoạn mã tiếp nối đoạn mã trước và dùng độ tự tin sau co giãn nhiệt độ làm điểm số.
 
 ```python
 p = softmax(logits[test] / T)
@@ -234,7 +234,7 @@ AURC scaled 0.275  unscaled 0.277  true probabilities 0.238  oracle 0.097
 
 Chỉ trả lời nửa số đầu vào tự tin nhất làm giảm tỉ lệ lỗi từ 0.406 xuống 0.294; chỉ trả lời một phần năm tự tin nhất làm nó giảm xuống 0.180. Hai nhận xét tiếp theo có giá trị hơn bản thân các con số.
 
-Thứ nhất, co giãn nhiệt độ hầu như không làm thay đổi AURC (0.277 trước, 0.275 sau), dù nó đã cải thiện ECE gấp mười lần. Hiệu chuẩn và xếp hạng là những tính chất khác nhau: một phép co giãn đơn điệu của độ tin cậy sửa được tính chất thứ nhất và hầu như không động đến tính chất thứ hai. (Với hai lớp, nó giữ nguyên hoàn toàn thứ hạng; với nhiều lớp hơn, chia các logit cho $T$ có thể đổi thứ tự của một vài đầu vào.)
+Thứ nhất, co giãn nhiệt độ hầu như không làm thay đổi AURC (0.277 trước, 0.275 sau), dù nó đã cải thiện ECE gấp mười lần. Hiệu chuẩn và xếp hạng là những tính chất khác nhau: một phép co giãn đơn điệu của độ tự tin sửa được tính chất thứ nhất và hầu như không động đến tính chất thứ hai. (Với hai lớp, nó giữ nguyên hoàn toàn thứ hạng; với nhiều lớp hơn, chia các logit cho $T$ có thể đổi thứ tự của một vài đầu vào.)
 
 Thứ hai, ngay cả các xác suất thật cũng chỉ đạt AURC 0.238, còn xa mức 0.097 của oracle. Các nhãn trong ví dụ này được rút ngẫu nhiên từ các xác suất thật, nên nhiều lỗi là **ngẫu nhiên** (aleatoric): không mô hình nào có thể lường trước chúng, và không điểm số nào có thể từ chối chúng một cách có chọn lọc. Khoảng cách giữa mô hình đã co giãn và các xác suất thật, 0.275 so với 0.238, là phần mà mô hình hóa tốt hơn vẫn có thể giành lại.
 
@@ -244,9 +244,9 @@ Thứ hai, ngay cả các xác suất thật cũng chỉ đạt AURC 0.238, còn
 
 ### 4.4 Chọn điểm số và ngưỡng
 
-Ngưỡng được chọn trên dữ liệu thẩm định để đạt một mục tiêu, hoặc là rủi ro chọn lọc tối đa, hoặc là độ phủ tối thiểu, rồi được kiểm tra một lần trên tập kiểm tra. Geifman và El-Yaniv (2017) đưa ra một quy trình chọn ngưỡng với bảo đảm xác suất cao về rủi ro chọn lọc. Dự đoán conformal (conformal prediction), vốn trả về các tập nhãn thay vì từ chối trả lời, cung cấp một bảo đảm khác, không phụ thuộc phân phối, về độ phủ của nhãn thật (Vovk, Gammerman và Shafer, 2005).
+Ngưỡng được chọn trên dữ liệu kiểm định để đạt một mục tiêu, hoặc là rủi ro chọn lọc tối đa, hoặc là độ phủ tối thiểu, rồi được kiểm tra một lần trên tập kiểm tra. Geifman và El-Yaniv (2017) đưa ra một quy trình chọn ngưỡng với bảo đảm xác suất cao về rủi ro chọn lọc. Dự đoán conformal (conformal prediction), vốn trả về các tập nhãn thay vì từ chối trả lời, cung cấp một bảo đảm khác, không phụ thuộc phân phối, về độ phủ của nhãn thật (Vovk, Gammerman và Shafer, 2005).
 
-Về điểm số, xác suất lớn nhất của phân phối dự đoán hậu nghiệm là lựa chọn mặc định tự nhiên và entropy của nó là một phương án thay thế phổ biến; điểm số nào tách lỗi tốt nhất là một câu hỏi thực nghiệm đối với từng mô hình và tập dữ liệu. Khi các đầu vào cần từ chối bao gồm những đầu vào khác hẳn dữ liệu huấn luyện, một điểm số tách riêng phần nhận thức (epistemic) của độ bất định (Mục 5) có cơ sở tốt hơn, dù không được bảo đảm là hoạt động tốt hơn.
+Về điểm số, xác suất lớn nhất của phân phối dự đoán hậu nghiệm là lựa chọn mặc định tự nhiên và entropy của nó là một phương án thay thế phổ biến; điểm số nào tách lỗi tốt nhất là một câu hỏi thực nghiệm đối với từng mô hình và tập dữ liệu. Khi các đầu vào cần từ chối bao gồm những đầu vào khác hẳn dữ liệu huấn luyện, một điểm số tách riêng phần nhận thức (epistemic) của độ bất định (mục 5) có cơ sở tốt hơn, dù không được bảo đảm là hoạt động tốt hơn.
 
 ## 5. Học chủ động và thông tin tương hỗ
 
@@ -268,9 +268,9 @@ $$
 \underbrace{I\big(y; \theta \mid x, \mathcal{D}\big)}_{\text{mutual information (epistemic)}} ,
 $$
 
-trong đó $\mathbb{H}[\cdot]$ là entropy của một phân phối trên $y$ và $I(y; \theta \mid x, \mathcal{D})$ là thông tin tương hỗ (mutual information) giữa nhãn của $x$ và các tham số. Ba nhãn dưới các dấu ngoặc lần lượt là: tổng; entropy kỳ vọng (ngẫu nhiên, aleatoric); thông tin tương hỗ (nhận thức, epistemic). Với học chủ động, số hạng thứ hai còn có một cách đọc nữa: nó là mức giảm kỳ vọng của entropy của phân phối hậu nghiệm trên $\theta$ khi quan sát $y$, tức lượng thông tin thu được (information gain) mà Lindley (1956) đề xuất để chọn thí nghiệm. Houlsby et al. (2011) chỉ ra rằng tính nó trong không gian đầu ra, như viết ở trên, rẻ hơn nhiều so với trong không gian tham số, và đặt tên cho hàm thu nhận này là **học chủ động Bayes qua bất đồng** (Bayesian active learning by disagreement, BALD). Gal, Islam và Ghahramani (2017) áp dụng nó cho các bộ phân lớp ảnh với dropout Monte Carlo.
+trong đó $\mathbb{H}[\cdot]$ là entropy của một phân phối trên $y$ và $I(y; \theta \mid x, \mathcal{D})$ là thông tin tương hỗ (mutual information) giữa nhãn của $x$ và các tham số. Ba nhãn dưới các dấu ngoặc lần lượt là: tổng; entropy kỳ vọng (ngẫu nhiên, aleatoric); thông tin tương hỗ (nhận thức, epistemic). Với học chủ động, số hạng thứ hai còn có một cách đọc nữa: nó là mức giảm kỳ vọng của entropy của phân phối hậu nghiệm trên $\theta$ khi quan sát $y$, tức lượng thông tin thu được (information gain) mà Lindley (1956) đề xuất để chọn thí nghiệm. Houlsby và cộng sự (2011) chỉ ra rằng tính nó trong không gian đầu ra, như viết ở trên, rẻ hơn nhiều so với trong không gian tham số, và đặt tên cho hàm thu nhận này là **học chủ động Bayes qua bất đồng** (Bayesian active learning by disagreement, BALD). Gal, Islam và Ghahramani (2017) áp dụng nó cho các bộ phân loại ảnh với dropout Monte Carlo.
 
-Với $M$ mẫu $\theta_1, \dots, \theta_M$ từ một phân phối hậu nghiệm xấp xỉ, hoặc $J$ thành viên của một tập hợp mô hình (khi đó $M = J$), mỗi mẫu cho các xác suất lớp $p_m = p(y \mid x, \theta_m)$, ước lượng là
+Với $M$ mẫu $\theta_1, \dots, \theta_M$ từ một phân phối hậu nghiệm xấp xỉ, hoặc $J$ thành viên của một tổ hợp mô hình (khi đó $M = J$), mỗi mẫu cho các xác suất lớp $p_m = p(y \mid x, \theta_m)$, ước lượng là
 
 $$
 \widehat{\mathrm{BALD}}(x) = \mathbb{H}\!\left[\frac{1}{M}\sum_{m=1}^{M} p_m\right] - \frac{1}{M}\sum_{m=1}^{M} \mathbb{H}[p_m] .
@@ -314,7 +314,7 @@ Một số khó khăn ngăn cách bức tranh gọn gàng này với học chủ
 - **Theo lô.** Việc gán nhãn thường diễn ra theo lô, và $b$ đầu vào đứng đầu theo BALD thường gần như trùng lặp, mang cùng một thông tin. BatchBALD chấm điểm đồng thời thông tin tương hỗ của cả lô để tránh điều này (Kirsch, van Amersfoort và Gal, 2019).
 - **Mục tiêu.** BALD thưởng cho thông tin về $\theta$, kể cả về những tham số không ảnh hưởng đến dự đoán trên các đầu vào quan trọng. Lượng thông tin dự đoán kỳ vọng thu được (expected predictive information gain) thì đo thông tin về các dự đoán trên một phân phối đầu vào mục tiêu (Bickford Smith, Kirsch, Farquhar, Gal, Foster và Rainforth, 2023).
 - **Chất lượng của phân phối hậu nghiệm.** Thông tin tương hỗ chỉ tốt bằng các mẫu đứng sau nó. Với ít mẫu, hoặc với một phép xấp xỉ đánh giá thấp độ trải rộng của phân phối hậu nghiệm (như VI trường trung bình thường mắc phải, xem [bài thứ tư](/vi/blog/variational-inference-for-neural-networks)), số hạng nhận thức bị đánh giá thấp.
-- **Dữ liệu bị chệch.** Các nhãn được chọn chủ động không phải là một mẫu độc lập cùng phân phối (i.i.d.), nên mất mát huấn luyện trung bình trên chúng là một ước lượng chệch của rủi ro. Farquhar, Gal và Rainforth (2021) phân tích khi nào độ chệch này đáng kể và đưa ra các trọng số hiệu chỉnh.
+- **Dữ liệu bị sai lệch.** Các nhãn được chọn chủ động không phải là một mẫu độc lập cùng phân phối (i.i.d.), nên mất mát huấn luyện trung bình trên chúng là một ước lượng chệch của rủi ro. Farquhar, Gal và Rainforth (2021) phân tích khi nào độ chệch này đáng kể và đưa ra các trọng số hiệu chỉnh.
 - **Chi phí và khởi đầu lạnh.** Huấn luyện lại sau mỗi lô rất đắt với các mạng lớn, và khi chỉ có một ít nhãn ban đầu thì phân phối hậu nghiệm, và do đó hàm thu nhận, không đáng tin cậy. Chọn ngẫu nhiên là mốc so sánh mà mọi mức cải thiện được báo cáo phải vượt qua.
 
 ## 6. Mô hình ngôn ngữ lớn
@@ -323,19 +323,19 @@ Một số khó khăn ngăn cách bức tranh gọn gàng này với học chủ
 
 Các mô hình ngôn ngữ lớn (large language model, LLM) mang lại ba phức tạp. Số tham số, cỡ hàng tỉ, khiến suy luận trên mọi trọng số bằng các phương pháp của loạt bài này là không thực tế. Đầu ra là một chuỗi token, nên phân phối dự đoán nằm trên một không gian rời rạc khổng lồ. Và nhiều chuỗi khác nhau có thể là câu trả lời đúng như nhau, khiến "xác suất của đầu ra đúng" không được định nghĩa rõ.
 
-Có báo cáo cho rằng các mô hình ngôn ngữ tiền huấn luyện được hiệu chuẩn khá tốt trên các câu hỏi trắc nghiệm khi xác suất câu trả lời của chúng được đọc trực tiếp (Kadavath et al., 2022). Mặt khác, tinh chỉnh (fine-tuning) một mô hình lớn trên một tập dữ liệu nhỏ của một tác vụ có thể khiến nó quá tự tin, và đó là chỗ phần lớn các nghiên cứu Bayes tập trung vào.
+Có báo cáo cho rằng các mô hình ngôn ngữ tiền huấn luyện được hiệu chuẩn khá tốt trên các câu hỏi trắc nghiệm khi xác suất câu trả lời của chúng được đọc trực tiếp (Kadavath và cộng sự, 2022). Mặt khác, tinh chỉnh (fine-tuning) một mô hình lớn trên một tập dữ liệu nhỏ của một tác vụ có thể khiến nó quá tự tin, và đó là chỗ phần lớn các nghiên cứu Bayes tập trung vào.
 
 ### 6.2 Tinh chỉnh Bayes và huấn luyện biến phân
 
-**Thích ứng hạng thấp** (low-rank adaptation, LoRA) tinh chỉnh một ma trận trọng số tiền huấn luyện $W$ đã được đóng băng bằng cách học một cập nhật hạng thấp $\Delta W = BA$, trong đó $B$ và $A$ có chiều trong nhỏ $r$ (Hu et al., 2022). Các bộ thích ứng (adapter) có ít tham số, nên các phương pháp của những bài trước áp dụng được cho chúng. Yang et al. (2024) khớp một xấp xỉ Laplace trên các tham số LoRA sau khi tinh chỉnh, tức cách tiếp cận sau huấn luyện của [bài thứ ba](/vi/blog/laplace-approximations), và báo cáo hiệu chuẩn tốt hơn rõ rệt trên các tác vụ suy luận trắc nghiệm nhỏ với rất ít tổn thất về độ chính xác. Tập hợp các bộ thích ứng được tinh chỉnh độc lập là ứng dụng tương ứng của [bài thứ năm](/vi/blog/deep-ensembles), và rẻ để lưu trữ vì chỉ các bộ thích ứng là khác nhau.
+**Thích ứng hạng thấp** (low-rank adaptation, LoRA) tinh chỉnh một ma trận trọng số tiền huấn luyện $W$ đã được đóng băng bằng cách học một cập nhật hạng thấp $\Delta W = BA$, trong đó $B$ và $A$ có chiều trong nhỏ $r$ (Hu và cộng sự, 2022). Các bộ thích ứng (adapter) có ít tham số, nên các phương pháp của những bài trước áp dụng được cho chúng. Yang và cộng sự (2024) khớp một xấp xỉ Laplace trên các tham số LoRA sau khi tinh chỉnh, tức cách tiếp cận sau huấn luyện của [bài thứ ba](/vi/blog/laplace-approximations), và báo cáo hiệu chuẩn tốt hơn rõ rệt trên các tác vụ suy luận trắc nghiệm nhỏ với rất ít tổn thất về độ chính xác. Tổ hợp các bộ thích ứng được tinh chỉnh độc lập là ứng dụng tương ứng của [bài thứ năm](/vi/blog/deep-ensembles), và rẻ để lưu trữ vì chỉ các bộ thích ứng là khác nhau.
 
-Học biến phân cũng đã được chạy ở quy mô đầy đủ. Shen et al. (2024) huấn luyện các mô hình ngôn ngữ lớn cỡ mô hình transformer tiền huấn luyện sinh (generative pre-trained transformer, GPT) GPT-2 bằng một phương pháp biến phân dùng gradient tự nhiên gọi là Newton trực tuyến biến phân cải tiến (improved variational online Newton, IVON). Chi phí gần với chi phí của bộ tối ưu Adam, và họ báo cáo hiệu năng dự đoán và hiệu chuẩn tương đương hoặc tốt hơn Adam. Liệu những phương pháp như vậy có mang lại lợi ích lớn ở các quy mô lớn nhất hay không vẫn là một câu hỏi thực nghiệm còn bỏ ngỏ.
+Học biến phân cũng đã được chạy ở quy mô đầy đủ. Shen và cộng sự (2024) huấn luyện các mô hình ngôn ngữ lớn cỡ mô hình transformer tiền huấn luyện sinh (generative pre-trained transformer, GPT) GPT-2 bằng một phương pháp biến phân dùng gradient tự nhiên gọi là Newton trực tuyến biến phân cải tiến (improved variational online Newton, IVON). Chi phí gần với chi phí của bộ tối ưu Adam, và họ báo cáo hiệu năng dự đoán và hiệu chuẩn tương đương hoặc tốt hơn Adam. Liệu những phương pháp như vậy có mang lại lợi ích lớn ở các quy mô lớn nhất hay không vẫn là một câu hỏi thực nghiệm còn bỏ ngỏ.
 
 ### 6.3 Độ bất định của văn bản được sinh ra
 
 Với đầu ra dạng chuỗi, một mô hình có thể lấy trung bình các phân phối theo từng token của nhiều mẫu hậu nghiệm trong khi sinh (lấy trung bình mức token) hoặc lấy trung bình xác suất của các chuỗi hoàn chỉnh (lấy trung bình mức chuỗi). Hai cách này định nghĩa hai phân phối dự đoán khác nhau; Malinin và Gales (2021) phân tích cả hai, cùng với các ước lượng entropy và thông tin tương hỗ của chúng.
 
-Một vấn đề nữa là nhiều chuỗi có cùng ý nghĩa. Giả sử một mô hình trả lời "Paris", "It is Paris." và "The capital is Paris", mỗi câu với xác suất một phần ba. Khi đó entropy trên các chuỗi cao, dù mô hình chắc chắn về câu trả lời. **Entropy ngữ nghĩa** (semantic entropy) gom các câu trả lời được lấy mẫu thành các cụm có ý nghĩa tương đương, dùng một mô hình riêng để đánh giá sự tương đương, rồi tính entropy trên các cụm (Kuhn, Gal và Farquhar, 2023). Các tác giả báo cáo rằng nó dự đoán tính đúng của câu trả lời cho các câu hỏi dạng tự do tốt hơn entropy mức chuỗi. Giống như phép phân tách của Mục 5.2, nó có thể được kết hợp với các mẫu hậu nghiệm để tách riêng phần nhận thức, dù phần lớn các ứng dụng cho đến nay áp dụng nó cho một mô hình ước lượng điểm duy nhất.
+Một vấn đề nữa là nhiều chuỗi có cùng ý nghĩa. Giả sử một mô hình trả lời "Paris", "It is Paris." và "The capital is Paris", mỗi câu với xác suất một phần ba. Khi đó entropy trên các chuỗi cao, dù mô hình chắc chắn về câu trả lời. **Entropy ngữ nghĩa** (semantic entropy) gom các câu trả lời được lấy mẫu thành các cụm có ý nghĩa tương đương, dùng một mô hình riêng để đánh giá sự tương đương, rồi tính entropy trên các cụm (Kuhn, Gal và Farquhar, 2023). Các tác giả báo cáo rằng nó dự đoán tính đúng của câu trả lời cho các câu hỏi dạng tự do tốt hơn entropy mức chuỗi. Giống như phép phân tách của mục 5.2, nó có thể được kết hợp với các mẫu hậu nghiệm để tách riêng phần nhận thức, dù phần lớn các ứng dụng cho đến nay áp dụng nó cho một mô hình ước lượng điểm duy nhất.
 
 ## 7. Độ bất định truyền cho các mô hình phía sau
 
@@ -343,33 +343,33 @@ Một vấn đề nữa là nhiều chuỗi có cùng ý nghĩa. Giả sử mộ
 
 - **Dữ liệu bị thiếu.** Rút nhiều phương án điền cho các giá trị bị thiếu của một bản ghi từ một phân phối dự đoán, rồi phân tích từng tập dữ liệu đã điền, sẽ đưa độ bất định về các giá trị đó vào kết quả; một giá trị điền duy nhất che giấu nó. Cách làm này có hợp lệ hay không phụ thuộc vào lý do dữ liệu bị thiếu (Rubin, 1976). Các mô hình sinh sâu như bộ tự mã hóa biến phân (variational autoencoder) (Kingma và Welling, 2014) có thể học phân phối dự đoán cho các bản ghi nhiều chiều, chẳng hạn bản ghi y sinh.
 - **Dự báo không gian – thời gian.** Các quyết định về giá trị cực đoan cần xác suất của một giá trị cực đoan tại một địa điểm và thời điểm, điều mà một dự báo điểm không cho được. Quá trình Gauss ([bài thứ sáu](/vi/blog/gaussian-processes-and-kernels)) hoặc mạng nơ-ron Bayes cung cấp nó; các điểm số thích đáng đánh giá nó.
-- **Tối ưu Bayes.** Một mô hình thay thế (surrogate) xác suất dự đoán một hàm tốn kém cùng độ bất định của nó tại các điểm chưa thử, và một hàm thu nhận như cải thiện kỳ vọng (expected improvement) cân đối hai thứ đó để chọn lần đánh giá tiếp theo (Jones, Schonlau và Welch, 1998).
+- **Tối ưu hóa Bayes.** Một mô hình thay thế (surrogate) xác suất dự đoán một hàm tốn kém cùng độ bất định của nó tại các điểm chưa thử, và một hàm thu nhận như cải thiện kỳ vọng (expected improvement) cân đối hai thứ đó để chọn lần đánh giá tiếp theo (Jones, Schonlau và Welch, 1998).
 
-Trong mỗi trường hợp, kết quả phía sau chỉ đáng tin cậy bằng mức hiệu chuẩn của độ bất định được đưa vào, và đó là lý do phép đánh giá ở Mục 2 và 3 phải đi trước.
+Trong mỗi trường hợp, kết quả phía sau chỉ đáng tin cậy bằng mức hiệu chuẩn của độ bất định được đưa vào, và đó là lý do phép đánh giá ở mục 2 và 3 phải đi trước.
 
 ## 8. Phần mềm
 
 Các ví dụ trong loạt bài này chỉ dùng NumPy, để mọi phép tính đều hiện rõ. Các mô hình lớn hơn được phục vụ tốt hơn bởi bốn loại thư viện.
 
-- **Ngôn ngữ lập trình xác suất** (probabilistic programming language) cho phép viết một mô hình dưới dạng một chương trình sinh dữ liệu và cung cấp phương pháp suy luận tổng quát, thường là Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC) với bộ lấy mẫu No-U-Turn và suy luận biến phân (variational inference, VI). Ví dụ là Stan (Carpenter et al., 2017), PyMC, Pyro (Bingham et al., 2019), NumPyro và TensorFlow Probability.
-- **Thư viện suy luận xấp xỉ cho mạng nơ-ron** bổ sung một phương pháp vào một mô hình sẵn có, chẳng hạn thư viện PyTorch cho xấp xỉ Laplace được Daxberger et al. (2021) mô tả.
+- **Ngôn ngữ lập trình xác suất** (probabilistic programming language) cho phép viết một mô hình dưới dạng một chương trình sinh dữ liệu và cung cấp phương pháp suy luận tổng quát, thường là Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC) với bộ lấy mẫu No-U-Turn và suy luận biến phân (variational inference, VI). Ví dụ là Stan (Carpenter và cộng sự, 2017), PyMC, Pyro (Bingham và cộng sự, 2019), NumPyro và TensorFlow Probability.
+- **Thư viện suy luận xấp xỉ cho mạng nơ-ron** bổ sung một phương pháp vào một mô hình sẵn có, chẳng hạn thư viện PyTorch cho xấp xỉ Laplace được Daxberger và cộng sự (2021) mô tả.
 - **Công cụ chẩn đoán và đánh giá**, như ArviZ cho chẩn đoán bộ lấy mẫu, tính các kiểm tra hội tụ, các thước đo hiệu chuẩn và điểm số thích đáng. Các chẩn đoán hội tụ chuẩn khó diễn giải đối với phân phối hậu nghiệm của mạng nơ-ron, vì các tính đối xứng của chúng ([bài thứ bảy](/vi/blog/priors-symmetries-and-identifiability)) tạo ra nhiều mode tương đương.
-- **Bộ công cụ phía sau** hành động dựa trên độ bất định, chẳng hạn BoTorch cho tối ưu Bayes (Balandat et al., 2020).
+- **Bộ công cụ phía sau** hành động dựa trên độ bất định, chẳng hạn BoTorch cho tối ưu hóa Bayes (Balandat và cộng sự, 2020).
 
 Bài này cố ý không nêu phiên bản nào. Các thư viện thay đổi nhanh, và tài liệu của chính chúng là nơi để kiểm tra phiên bản hiện hành; một báo cáo kết quả nên nêu thư viện và phiên bản đã dùng, như loạt bài này làm với Python và NumPy.
 
 ## 9. Bài tập
 
-**Bài tập 1.** Một bộ phân lớp nhị phân luôn trả về xác suất 0.3 cho lớp 1, và 30% số nhãn kiểm tra là lớp 1. ECE (với cách chia ngăn bất kỳ) và độ chính xác của nó là bao nhiêu? Điều này nói gì về việc dùng ECE để chọn giữa các mô hình?
+**Bài tập 1.** Một bộ phân loại nhị phân luôn trả về xác suất 0.3 cho lớp 1, và 30% số nhãn kiểm tra là lớp 1. ECE (với cách chia ngăn bất kỳ) và độ chính xác của nó là bao nhiêu? Điều này nói gì về việc dùng ECE để chọn giữa các mô hình?
 
 <details>
 <summary>Đáp án</summary>
 
-Mọi dự đoán đều rơi vào một ngăn với độ tin cậy 0.7 (cho lớp 0), và 70% số nhãn là lớp 0, nên độ chính xác là 0.7 và ECE là $\lvert 0.7 - 0.7 \rvert = 0$. Bộ phân lớp này bỏ qua đầu vào của nó. Một mô hình được chọn theo ECE nhỏ nhất có thể chính là mô hình này; ECE phải được báo cáo cùng một điểm số thích đáng, mà theo đó bộ phân lớp này kém hơn mọi mô hình có khả năng phân biệt.
+Mọi dự đoán đều rơi vào một ngăn với độ tự tin 0.7 (cho lớp 0), và 70% số nhãn là lớp 0, nên độ chính xác là 0.7 và ECE là $\lvert 0.7 - 0.7 \rvert = 0$. Bộ phân loại này bỏ qua đầu vào của nó. Một mô hình được chọn theo ECE nhỏ nhất có thể chính là mô hình này; ECE phải được báo cáo cùng một điểm số thích đáng, mà theo đó bộ phân loại này kém hơn mọi mô hình có khả năng phân biệt.
 
 </details>
 
-**Bài tập 2.** Dùng điểm Brier kỳ vọng của Mục 2.2, hãy chứng tỏ rằng với $p = (0.7, 0.3)$, các dự báo $(0.9, 0.1)$ và $(0.5, 0.5)$ có cùng điểm Brier kỳ vọng, và tính giá trị đó.
+**Bài tập 2.** Dùng điểm Brier kỳ vọng của mục 2.2, hãy chứng tỏ rằng với $p = (0.7, 0.3)$, các dự báo $(0.9, 0.1)$ và $(0.5, 0.5)$ có cùng điểm Brier kỳ vọng, và tính giá trị đó.
 
 <details>
 <summary>Đáp án</summary>
@@ -378,7 +378,7 @@ Số hạng không thể giảm là $0.7 \times 0.3 + 0.3 \times 0.7 = 0.42$. V�
 
 </details>
 
-**Bài tập 3.** Theo quy tắc Chow với các phân phối hậu nghiệm thật, một lần từ chối tốn $r = 0.2$. Bộ phân lớp dự đoán với những giá trị xác suất lớp lớn nhất nào, và vì sao quy tắc đòi hỏi $r < 1/2$ thì mới có ích với hai lớp?
+**Bài tập 3.** Theo quy tắc Chow với các phân phối hậu nghiệm thật, một lần từ chối tốn $r = 0.2$. Bộ phân loại dự đoán với những giá trị xác suất lớp lớn nhất nào, và vì sao quy tắc đòi hỏi $r < 1/2$ thì mới có ích với hai lớp?
 
 <details>
 <summary>Đáp án</summary>
@@ -387,18 +387,18 @@ Nó dự đoán khi xác suất lớn nhất ít nhất bằng $1 - r = 0.8$ và
 
 </details>
 
-**Bài tập 4.** (a) Tính lại điểm BALD của đầu vào C ở Mục 5.3 chỉ dùng hai mẫu hậu nghiệm đầu tiên của nó, $(0.95, 0.05)$ và $(0.05, 0.95)$. Vì sao nó khác giá trị 0.431 khi dùng bốn mẫu? (b) Chứng tỏ rằng BALD bằng không bất cứ khi nào mọi mẫu cho cùng các xác suất, dù entropy của chúng là bao nhiêu.
+**Bài tập 4.** (a) Tính lại điểm BALD của đầu vào C ở mục 5.3 chỉ dùng hai mẫu hậu nghiệm đầu tiên của nó, $(0.95, 0.05)$ và $(0.05, 0.95)$. Vì sao nó khác giá trị 0.431 khi dùng bốn mẫu? (b) Chứng tỏ rằng BALD bằng không bất cứ khi nào mọi mẫu cho cùng các xác suất, dù entropy của chúng là bao nhiêu.
 
 <details>
 <summary>Đáp án</summary>
 
-(a) Trung bình là $(0.5, 0.5)$, có entropy $\log 2 = 0.693$. Mỗi mẫu có entropy $-(0.95 \log 0.95 + 0.05 \log 0.05) = 0.199$, nên BALD là $0.693 - 0.199 = 0.495$ nat. Hai mẫu này tình cờ là cặp cực đoan nhất; hai mẫu còn lại kém tự tin hơn và làm tăng entropy kỳ vọng. Với ít mẫu, ước lượng phụ thuộc mạnh vào việc những mẫu nào được rút ra, và đó là một lý do khiến chất lượng của phép xấp xỉ hậu nghiệm trở nên quan trọng (Mục 5.4).
+(a) Trung bình là $(0.5, 0.5)$, có entropy $\log 2 = 0.693$. Mỗi mẫu có entropy $-(0.95 \log 0.95 + 0.05 \log 0.05) = 0.199$, nên BALD là $0.693 - 0.199 = 0.495$ nat. Hai mẫu này tình cờ là cặp cực đoan nhất; hai mẫu còn lại kém tự tin hơn và làm tăng entropy kỳ vọng. Với ít mẫu, ước lượng phụ thuộc mạnh vào việc những mẫu nào được rút ra, và đó là một lý do khiến chất lượng của phép xấp xỉ hậu nghiệm trở nên quan trọng (mục 5.4).
 
 (b) Nếu mọi $p_m$ đều bằng cùng một $p$, trung bình là $p$, nên entropy tổng là $\mathbb{H}[p]$ và entropy kỳ vọng cũng là $\mathbb{H}[p]$. Hiệu của chúng bằng không, như với các đầu vào A và B: không quan sát nào về $y$ có thể phân biệt những mẫu dự đoán giống hệt nhau.
 
 </details>
 
-**Bài tập 5.** Trong ví dụ phân lớp có chọn lọc, vì sao không điểm số độ tin cậy nào, dù được hiệu chuẩn tốt đến đâu, có thể đưa AURC xuống mức 0.097 của oracle?
+**Bài tập 5.** Trong ví dụ phân loại có chọn lọc, vì sao không điểm số độ tự tin nào, dù được hiệu chuẩn tốt đến đâu, có thể đưa AURC xuống mức 0.097 của oracle?
 
 <details>
 <summary>Đáp án</summary>
@@ -412,10 +412,10 @@ Các nhãn được rút ngẫu nhiên từ các xác suất lớp thật, nên 
 | Câu hỏi | Trả lời |
 |---|---|
 | Điều gì làm một phân phối dự đoán tốt? | Hiệu chuẩn, độ sắc nét và khả năng phân biệt; độ chính xác không đo được tính chất nào trong số đó. |
-| Nó được chấm điểm thế nào? | Bằng các quy tắc tính điểm thích đáng chặt, như điểm log (NLL) và điểm Brier, có kỳ vọng chỉ đạt cực tiểu tại phân phối thật. |
-| ECE đo gì? | Khoảng chênh theo ngăn giữa độ tin cậy và độ chính xác; nó bị chệch với mẫu hữu hạn, phụ thuộc cách chia ngăn và không thích đáng. |
-| Co giãn nhiệt độ là gì? | Chia các logit cho một $T$ được khớp trên dữ liệu thẩm định; nó cải thiện hiệu chuẩn mà không đổi độ chính xác và là mốc so sánh cho các phương pháp Bayes. |
-| Độ bất định được dùng để từ chối trả lời thế nào? | Một bộ phân lớp có chọn lọc chỉ trả lời khi điểm số vượt ngưỡng; đường cong rủi ro – độ phủ và diện tích dưới nó đo chất lượng xếp hạng. |
+| Nó được chấm điểm thế nào? | Bằng các quy tắc chấm điểm thích đáng chặt, như điểm log (NLL) và điểm Brier, có kỳ vọng chỉ đạt cực tiểu tại phân phối thật. |
+| ECE đo gì? | Khoảng chênh theo ngăn giữa độ tự tin và độ chính xác; nó bị chệch với mẫu hữu hạn, phụ thuộc cách chia ngăn và không thích đáng. |
+| Co giãn nhiệt độ là gì? | Chia các logit cho một $T$ được khớp trên dữ liệu kiểm định; nó cải thiện hiệu chuẩn mà không đổi độ chính xác và là mốc so sánh cho các phương pháp Bayes. |
+| Độ bất định được dùng để từ chối trả lời thế nào? | Một bộ phân loại có chọn lọc chỉ trả lời khi điểm số vượt ngưỡng; đường cong rủi ro – độ phủ và diện tích dưới nó đo chất lượng xếp hạng. |
 | BALD chọn gì? | Các đầu vào có thông tin tương hỗ cao giữa nhãn và tham số, nơi các mẫu hậu nghiệm bất đồng, thay vì các đầu vào chỉ đơn thuần nhiễu. |
 | LLM có gì đặc biệt? | Quy mô, đầu ra dạng chuỗi và nhiều câu trả lời tương đương; các bộ thích ứng Bayes, huấn luyện biến phân và entropy ngữ nghĩa giải quyết những vấn đề đó. |
 

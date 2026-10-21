@@ -337,3 +337,39 @@ name another entry of the series use that entry's Vietnamese title (the part bef
 | creativity, divergent / convergent thinking (production) | sáng tạo, tư duy (tạo sinh) phân kỳ / hội tụ |
 | incubation, fixation, functional fixedness | ấp ủ, sự cố định tư duy, sự cố định chức năng |
 | brainstorming, production blocking, evaluation apprehension, groupthink | động não, tắc nghẽn tạo sinh, lo ngại bị đánh giá, tư duy nhóm |
+
+### Bayesian deep learning
+
+Calibration keeps the existing rendering *hiệu chuẩn* (first table); "calibrated" is *được hiệu
+chuẩn*. "Mode" stays in English (not *mốt*). "Bias" of an estimator is *chệch* (*không chệch* for
+unbiased), the bias parameter of a unit is *độ chệch (bias)*, and data bias follows the rule of the
+Critical thinking section. "Precision" in the sense of inverse variance is *độ chính xác*, distinct
+from the measurement sense *độ chụm*. In prose, "et al." is written *và cộng sự*.
+
+| English | Tiếng Việt |
+|---|---|
+| Bayesian deep learning, Bayesian neural network, Bayesian model averaging | học sâu Bayes, mạng nơ-ron Bayes, lấy trung bình mô hình Bayes (Bayesian model averaging) |
+| posterior predictive, prior predictive, marginal likelihood, evidence | phân phối dự đoán hậu nghiệm (posterior predictive), phân phối dự đoán tiên nghiệm (prior predictive), hàm hợp lý biên (marginal likelihood), bằng chứng (evidence) |
+| MAP estimate, point estimate, weight decay, precision, prior precision | ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP), ước lượng điểm, suy giảm trọng số (weight decay), độ chính xác (precision), độ chính xác tiên nghiệm |
+| epistemic / aleatoric uncertainty, mutual information | độ bất định nhận thức / ngẫu nhiên (epistemic / aleatoric uncertainty), thông tin tương hỗ (mutual information) |
+| mode, multimodal, mode connectivity, basin of attraction | mode (kept in English), đa mode, tính liên thông giữa các mode (mode connectivity), miền hút (basin of attraction) |
+| approximate inference, ensemble, deep ensemble, member | suy luận xấp xỉ (approximate inference), tổ hợp mô hình (ensemble), tổ hợp sâu (deep ensemble), thành viên |
+| Markov chain Monte Carlo, Hamiltonian Monte Carlo, stochastic-gradient MCMC | Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC), Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC), MCMC gradient ngẫu nhiên (SG-MCMC) |
+| Markov chain, stationary distribution, burn-in, effective sample size, detailed balance | xích Markov, phân phối dừng, giai đoạn khởi động (burn-in), cỡ mẫu hiệu dụng (effective sample size, ESS), cân bằng chi tiết |
+| random walk, leapfrog integrator, (stochastic gradient) Langevin dynamics | bước ngẫu nhiên (random walk), bộ tích phân leapfrog, động lực học Langevin, động lực học Langevin gradient ngẫu nhiên (SGLD) |
+| cold posterior, tempered posterior, temperature | hậu nghiệm lạnh (cold posterior), phân phối hậu nghiệm điều chỉnh nhiệt độ (tempered posterior), nhiệt độ |
+| Laplace approximation, linearized predictive, generalized Gauss–Newton, K-FAC | xấp xỉ Laplace, phân phối dự đoán tuyến tính hóa, ma trận Gauss–Newton tổng quát (GGN), độ cong xấp xỉ phân tích Kronecker (K-FAC) |
+| Hessian, (empirical) Fisher information matrix, factorization | ma trận Hesse (Hessian), ma trận thông tin Fisher (thực nghiệm), phép phân tích (Cholesky, Kronecker); eigendecomposition: phân rã trị riêng |
+| variational inference, ELBO, mean-field, reparameterization trick, natural gradient | suy luận biến phân (VI), cận dưới của bằng chứng (ELBO), trường trung bình (mean-field), thủ thuật tái tham số hóa, gradient tự nhiên |
+| Gaussian process, kernel, lengthscale, squared-exponential kernel, inducing points | quá trình Gauss (GP), hàm nhân (kernel), thang độ dài (lengthscale), hàm nhân mũ bình phương, điểm cảm sinh (inducing points) |
+| NNGP, neural tangent kernel, deep kernel learning | quá trình Gauss của mạng nơ-ron (NNGP), hàm nhân tiếp tuyến nơ-ron (NTK), học hàm nhân sâu |
+| weight-space symmetry, identifiability, (un)identifiable, label switching | đối xứng không gian trọng số, tính khả định danh (identifiability), (không) khả định danh, hoán đổi nhãn (label switching) |
+| inductive bias | thiên hướng quy nạp (inductive bias) |
+| last-layer inference, single-forward-pass method, feature collapse, distance-aware | suy luận lớp cuối, phương pháp một lượt truyền xuôi, sụp đổ đặc trưng (feature collapse), nhận biết khoảng cách (distance-aware) |
+| proper / strictly proper scoring rule, log score, Brier score | quy tắc chấm điểm thích đáng (proper scoring rule) / thích đáng chặt, điểm log, điểm Brier |
+| confidence, reliability diagram, expected calibration error, temperature scaling | độ tự tin (confidence), biểu đồ độ tin cậy (reliability diagram), sai số hiệu chuẩn kỳ vọng (ECE), co giãn nhiệt độ (temperature scaling) |
+| selective classification / prediction, coverage, selective risk | phân loại / dự đoán có chọn lọc, độ phủ (coverage), rủi ro chọn lọc |
+| active learning, acquisition function, BALD | học chủ động (active learning), hàm thu nhận (acquisition function), học chủ động Bayes qua bất đồng (BALD) |
+| classifier, gradient descent, benchmark, validation set | bộ phân loại, hạ gradient, bộ dữ liệu chuẩn (benchmark), tập kiểm định |
+| random seed, mini-batch, forward pass | hạt giống ngẫu nhiên (random seed), lô nhỏ (mini-batch), lượt truyền xuôi |
+| prior-fitted network, singular learning theory | mạng khớp sẵn tiên nghiệm (prior-fitted network, PFN), lý thuyết học kỳ dị |
