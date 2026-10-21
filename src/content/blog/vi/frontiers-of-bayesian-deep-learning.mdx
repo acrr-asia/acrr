@@ -1,0 +1,332 @@
+---
+title: "Các hướng nghiên cứu tiên phong của học sâu Bayes"
+description: "Các hướng nghiên cứu hiện nay của học sâu Bayes, từ suy luận trong không gian con, mạng khớp sẵn tiên nghiệm đến lý thuyết học kỳ dị, kèm các câu hỏi còn mở."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - singular learning theory
+  - experimental design
+  - research directions
+series: bayesian-deep-learning
+seriesOrder: 10
+---
+
+import Figure from '../../../components/Figure.astro';
+import BdlSingularFreeEnergy from '../../../components/diagrams/BdlSingularFreeEnergy.astro';
+
+Chín bài đầu đã trình bày phần cốt lõi đã được xác lập của học sâu Bayes. Chúng bàn về phân phối hậu nghiệm (posterior) và phân phối dự đoán hậu nghiệm (posterior predictive) ([bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks)), bốn họ chính của suy luận xấp xỉ (các bài thứ hai đến thứ năm), cách nhìn trong không gian hàm qua quá trình Gauss ([bài thứ sáu](/vi/blog/gaussian-processes-and-kernels)), tiên nghiệm và tính đối xứng ([bài thứ bảy](/vi/blog/priors-symmetries-and-identifiability)), các phương pháp có khả năng mở rộng ([bài thứ tám](/vi/blog/scaling-bayesian-deep-learning)) và việc đánh giá, sử dụng độ bất định dự đoán ([bài thứ chín](/vi/blog/evaluating-and-using-uncertainty)). Bài cuối cùng này điểm qua những hướng mà lĩnh vực vẫn đang chuyển động.
+
+Mỗi hướng được trình bày theo cùng một cách: vấn đề nó giải quyết, ý tưởng trong vài đoạn văn, điều gì đã được xác lập và điều gì còn mở. Các phát biểu dưới mục *Đã xác lập* là định lý hoặc kết quả được báo cáo trong các công trình có bình duyệt được trích dẫn; các phát biểu dưới mục *Còn mở* là những câu hỏi chưa có câu trả lời được thống nhất, và được viết dưới dạng câu hỏi. Khi một kết quả chỉ được báo cáo trên một số bộ dữ liệu chuẩn cụ thể, nó được ghi rõ nguồn thay vì được khái quát hóa. Một bài tổng quan không thể đầy đủ, và lựa chọn ở đây theo những chủ đề mà các ý tưởng Bayes và học sâu hiện đang gặp nhau trực tiếp nhất.
+
+Hai phép tính làm cho các ý tưởng trở nên cụ thể: kiểm tra tính khả hoán cho hai quy tắc dự đoán đơn giản (mục 3) và sự tăng trưởng của hàm hợp lý biên trong một mô hình chính quy và một mô hình kỳ dị (mục 5). Mã dùng Python 3.13 và NumPy 2.5.3, cùng hàm `math.erf` của thư viện chuẩn.
+
+## 1. Các bài toán mở đến từ đâu
+
+Mọi phương pháp trong loạt bài đều xấp xỉ một tích phân, phân phối dự đoán hậu nghiệm
+
+$$
+p(y^* \mid x^*, \mathcal{D}) = \int p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, d\theta ,
+$$
+
+và mọi khó khăn gặp phải trên đường đi đều đến từ một trong ba nguồn. Không gian tham số khổng lồ, nên tích phân tốn kém. Phân phối hậu nghiệm khác xa phân phối Gauss, do các tính đối xứng và suy biến của mạng, nên các phép xấp xỉ cục bộ rẻ tiền có thể gây hiểu lầm. Và phân phối tiên nghiệm (prior) $p(\theta)$ trên các trọng số nói rất ít điều mà con người có thể kiểm tra, nên ngay cả phân phối hậu nghiệm chính xác cũng chỉ có ý nghĩa bằng một đối tượng mà không ai chủ ý lựa chọn.
+
+Các hướng dưới đây có thể được sắp xếp theo nguồn khó khăn mà chúng tấn công. Suy luận trong không gian con thu nhỏ không gian. Mạng khớp sẵn tiên nghiệm và các quy tắc dự đoán Bayes ngầm định bỏ qua phân phối hậu nghiệm trên trọng số và làm việc trực tiếp với các dự đoán. Lý thuyết học kỳ dị mô tả hình dạng thật của phân phối hậu nghiệm. Các phương pháp credal nới lỏng việc cam kết với một tiên nghiệm duy nhất. Học chủ động, mô hình hóa nhân quả và học tăng cường hỏi nên làm gì với độ bất định khi đã có nó, còn mô hình khuếch tán đưa một mô hình sinh mạnh mẽ vào bức tranh, với vai trò tiên nghiệm hoặc đối tượng của suy luận.
+
+## 2. Suy luận trong không gian con và mạng con
+
+### 2.1 Ý tưởng
+
+Nếu suy luận trên toàn bộ $P$ tham số quá tốn kém, ta có thể cố định phần lớn chúng tại một giá trị đã huấn luyện $\hat{\theta}$ và suy luận trên một tập tọa độ ít chiều. Viết $\theta = \hat{\theta} + U z$, trong đó $U$ là một ma trận cố định cỡ $P \times k$ với $k \ll P$ và $z \in \mathbb{R}^k$ mang độ bất định. Một tiên nghiệm trên $z$ và hàm hợp lý của dữ liệu xác định một phân phối hậu nghiệm trên $z$, và trong $k$ chiều, mọi phương pháp của loạt bài, kể cả Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC) của [bài thứ hai](/vi/blog/sampling-the-posterior-mcmc), đều trở nên khả thi.
+
+Có ba lựa chọn $U$ phổ biến. Izmailov và cộng sự (2019) lấy không gian sinh bởi các hướng biến thiên chính của các điểm lặp của hạ gradient ngẫu nhiên gần cuối quá trình huấn luyện. **Suy luận trên mạng con** (subnetwork inference) chọn một tập con các trọng số riêng lẻ, nên $U$ chọn ra các tọa độ. Daxberger và cộng sự (2021) chọn tập con sao cho giữ lại được nhiều nhất có thể độ bất định dự đoán của một phép xấp xỉ trên toàn mạng, rồi khớp một xấp xỉ Laplace với ma trận hiệp phương sai đầy đủ trên tập con đó. Các phương pháp lớp cuối của [bài thứ tám](/vi/blog/scaling-bayesian-deep-learning) là trường hợp đặc biệt khi tập con là lớp cuối cùng.
+
+Lựa chọn thứ ba khai thác **tính liên thông giữa các mode** (mode connectivity): các nghiệm được huấn luyện độc lập của cùng một mạng có thể được nối với nhau bằng những đường cong đơn giản, chẳng hạn một đường gấp khúc có một điểm gãy, mà dọc theo đó mất mát huấn luyện vẫn thấp (Garipov và cộng sự, 2018; Draxler và cộng sự, 2018). Một đường cong hay mặt cong đi qua một vài nghiệm như vậy cho một tập ít chiều trải qua nhiều mode thay vì chỉ lân cận của một mode.
+
+### 2.2 Điều gì đã được xác lập và điều gì còn mở
+
+*Đã xác lập.* Suy luận trong các không gian con từ vài chiều đến vài nghìn chiều là rẻ, và các bài báo được trích dẫn báo cáo hiệu chuẩn (calibration) tốt hơn so với ước lượng điểm mà chúng xuất phát, trên các bộ dữ liệu chuẩn về hồi quy và phân loại ảnh. Các đường nối có mất mát thấp giữa các nghiệm đã huấn luyện đã được tìm thấy một cách nhất quán cho các kiến trúc được nghiên cứu trong những bài báo đó.
+
+*Còn mở.* Một không gian con quanh một mode không thể biểu diễn sự đa dạng giữa các mode, điều làm cho các tổ hợp mô hình (ensemble) của [bài thứ năm](/vi/blog/deep-ensembles) hiệu quả. Vậy không gian con nào giữ lại những phần của phân phối hậu nghiệm quan trọng cho dự đoán, và một mạng và tập dữ liệu cho trước cần bao nhiêu chiều, hay những chiều nào?
+
+## 3. Dự đoán không cần phân phối hậu nghiệm tường minh
+
+### 3.1 Các quy tắc dự đoán Bayes ngầm định
+
+Phân phối hậu nghiệm trên trọng số là phương tiện; phân phối dự đoán mới là mục đích. Do đó một câu hỏi tự nhiên là liệu một quy trình có thể Bayes trong các dự đoán của nó mà không bao giờ biểu diễn một phân phối hậu nghiệm hay không. Một **quy tắc dự đoán** (prediction rule) ánh xạ mỗi dãy hữu hạn các quan sát $x_1, \dots, x_n$ thành một phân phối dự đoán cho $x_{n+1}$. Nhân các dự đoán một bước với nhau sẽ xác định một xác suất đồng thời cho mọi dãy, $p(x_1, \dots, x_n) = \prod_{i=1}^{n} p(x_i \mid x_1, \dots, x_{i-1})$.
+
+Với dữ liệu được coi là độc lập và cùng phân phối (i.i.d.) khi biết một phân phối chưa biết, định lý biểu diễn de Finetti, ở dạng tổng quát của Hewitt và Savage (1955), cho ta đặc trưng hóa. Một dãy vô hạn là **khả hoán** (exchangeable) nếu phân phối đồng thời của nó không đổi khi các quan sát được sắp xếp lại. Nó khả hoán khi và chỉ khi nó có thể được viết dưới dạng một hỗn hợp các mô hình i.i.d., tức là một tiên nghiệm trên phân phối chưa biết cùng với việc lấy mẫu i.i.d. Do đó, một quy tắc dự đoán có các phân phối đồng thời khả hoán với mọi $n$ là Bayes một cách ngầm định: có một tiên nghiệm và một hàm hợp lý tái tạo được mọi dự đoán của nó.
+
+Đoạn mã kiểm tra hai quy tắc cho các kết cục nhị phân. **Quy tắc kế tiếp của Laplace** (Laplace's rule of succession) dự đoán $\Pr(x_{n+1} = 1) = (1 + \sum_i x_i)/(n + 2)$, chính là phân phối dự đoán hậu nghiệm cho một đồng xu với tiên nghiệm đều trên độ lệch của nó. Quy tắc thứ hai là cùng công thức đó, nhưng các quan sát cũ hơn bị giảm trọng số theo hệ số 0.5 mỗi bước, một heuristic hợp lý cho dữ liệu trôi dạt.
+
+```python
+import numpy as np
+from itertools import permutations
+
+def laplace_rule(past):                  # P(next = 1 | past), uniform prior on the coin's bias
+    return (1 + sum(past)) / (len(past) + 2)
+
+def recency_rule(past, w=0.5):           # the same, but older outcomes count less
+    weights = w ** np.arange(len(past))[::-1]
+    return (1 + np.dot(weights, past)) / (2 + weights.sum())
+
+def joint(rule, seq):                    # P(x_1, ..., x_n) as a product of one-step predictions
+    prob = 1.0
+    for i, x in enumerate(seq):
+        p1 = rule(seq[:i])
+        prob *= p1 if x == 1 else 1 - p1
+    return prob
+
+for rule in (laplace_rule, recency_rule):
+    probs = {s: joint(rule, list(s)) for s in sorted(set(permutations((1, 1, 0))))}
+    print(f"{rule.__name__:13s}", "  ".join(f"{''.join(map(str, s))}: {p:.4f}" for s, p in probs.items()))
+```
+
+```text
+laplace_rule  011: 0.0833  101: 0.0833  110: 0.0833
+recency_rule  011: 0.0952  101: 0.0714  110: 0.0952
+```
+
+Quy tắc Laplace gán cho mọi cách sắp xếp hai số một và một số không cùng một xác suất, $1/12$, đúng như tính khả hoán đòi hỏi. Quy tắc ưu tiên gần đây gán cho dãy 101 xác suất nhỏ hơn 011 và 110, nên không có tiên nghiệm và hàm hợp lý i.i.d. nào tái tạo được nó: nó không phải là Bayes ngầm định đối với dữ liệu i.i.d. (Nó vẫn có thể là một quy tắc hợp lý cho dữ liệu không i.i.d.; tính khả hoán là phép kiểm tra đúng chỉ dưới giả định đó.)
+
+Về nguyên tắc, cùng phép kiểm tra này áp dụng được cho một mạng nơ-ron được huấn luyện bằng hạ gradient và dùng để dự đoán, dù việc kiểm tra đòi hỏi huấn luyện lại trên dữ liệu đã sắp xếp lại. Fong, Holmes và Walker (2023) biến cách nhìn theo dự đoán thành một phương pháp: **phân phối hậu nghiệm martingale** (martingale posterior) thu được độ bất định về một đại lượng quan tâm bằng cách lặp đi lặp lại việc điền các quan sát tương lai chưa thấy từ một quy tắc dự đoán được chọn rồi tính lại đại lượng đó, không cần tiên nghiệm nào trên tham số. Các mô hình ngôn ngữ lớn dự đoán từ những ví dụ trong lời nhắc (prompt) của chúng (học trong ngữ cảnh, in-context learning) đã được phân tích từ cùng góc nhìn này. Xie và cộng sự (2022) mô tả học trong ngữ cảnh như suy luận Bayes ngầm định trên các khái niệm ẩn; Falck, Wang và Holmes (2024) kiểm tra xem các dự đoán có hành xử như những phân phối dự đoán khả hoán nên có hay không, và nhận được những câu trả lời lẫn lộn.
+
+*Đã xác lập.* Định lý de Finetti và các hệ quả của nó đối với quy tắc dự đoán; cách dựng và các tính chất cơ bản của phân phối hậu nghiệm martingale.
+
+*Còn mở.* Nên đo như thế nào mức độ gần với Bayes ngầm định của một bộ dự đoán cho trước, và việc đưa nó đến gần hơn có cải thiện độ bất định của nó trong thực tế không? Với học trong ngữ cảnh ở các mô hình lớn, dưới những điều kiện nào, nếu có, các dự đoán hành xử giống một phân phối dự đoán hậu nghiệm?
+
+### 3.2 Mạng khớp sẵn tiên nghiệm
+
+Một **mạng khớp sẵn tiên nghiệm** (prior-fitted network, PFN) học trực tiếp phân phối dự đoán hậu nghiệm (Müller và cộng sự, 2022). Quá trình huấn luyện rút nhiều tập dữ liệu tổng hợp từ một tiên nghiệm trên các tập dữ liệu, giữ lại một điểm của mỗi tập, và huấn luyện một mạng $q_\psi$, thường là một transformer, để dự đoán nhãn bị giữ lại từ phần còn lại:
+
+$$
+\min_\psi \; \mathbb{E}_{\mathcal{D} \cup \{(x^*, y^*)\} \sim p(\text{data sets})} \left[ -\log q_\psi(y^* \mid x^*, \mathcal{D}) \right] .
+$$
+
+Đây là điểm log kỳ vọng của mục 2 trong [bài thứ chín](/vi/blog/evaluating-and-using-uncertainty), và vì điểm log là một quy tắc chấm điểm thích đáng chặt (strictly proper scoring rule), nghiệm cực tiểu trên mọi hàm số chính là phân phối dự đoán hậu nghiệm thật dưới tiên nghiệm đã chọn. Sau đó một PFN đã huấn luyện dự đoán cho một tập dữ liệu thật chỉ trong một lượt truyền xuôi, với tập dữ liệu được đưa vào làm đầu vào. Tiên nghiệm được định nghĩa bằng một bộ mô phỏng thay vì một hàm mật độ, nên nó có thể là bất cứ thứ gì lấy mẫu được: quá trình Gauss, mạng nơ-ron ngẫu nhiên, mô hình cấu trúc ngẫu nhiên.
+
+TabPFN áp dụng ý tưởng này cho các bài toán phân loại dữ liệu dạng bảng nhỏ (Hollmann và cộng sự, 2023). Một phiên bản sau mở rộng nó cho hồi quy và các bảng lớn hơn, và được báo cáo là vượt trội các mốc so sánh cây tăng cường gradient (gradient-boosted tree) đã điều chỉnh trên các bộ dữ liệu chuẩn có tới 10 000 mẫu (Hollmann và cộng sự, 2025). Quá trình nơ-ron có điều kiện (conditional neural process) là một thành viên sớm hơn của cùng họ này (Garnelo và cộng sự, 2018).
+
+*Đã xác lập.* Nghiệm cực tiểu của hàm mục tiêu PFN là phân phối dự đoán hậu nghiệm của tiên nghiệm, với điều kiện năng lực mô hình và tối ưu không giới hạn; các kết quả đã báo cáo trên bộ dữ liệu chuẩn cho dữ liệu dạng bảng trong các bài báo được trích dẫn.
+
+*Còn mở.* Một PFN hành xử thế nào khi dữ liệu thật không giống bất cứ thứ gì tiên nghiệm của nó sinh ra, và người dùng làm sao nhận biết điều đó? Cách tiếp cận này mở rộng thế nào cho các tập dữ liệu lớn, khi toàn bộ tập dữ liệu là đầu vào? Và vì tiên nghiệm chỉ được định nghĩa qua một bộ mô phỏng, độ bất định thu được có ý nghĩa gì, và những tiên nghiệm như vậy nên được thiết kế và kiểm tra ra sao?
+
+## 4. Mô hình khuếch tán
+
+### 4.1 Mô hình
+
+Một **mô hình khuếch tán** (diffusion model) sinh dữ liệu bằng cách đảo ngược một quá trình thêm nhiễu. Một quá trình thuận cố định thêm nhiễu Gauss vào một điểm dữ liệu $x_0$ qua $T$ bước cho đến khi $x_T$ gần như là nhiễu thuần túy; một mạng học các bước ngược $p_\psi(x_{t-1} \mid x_t)$, và việc lấy mẫu chạy các bước này từ nhiễu đến dữ liệu (Sohl-Dickstein và cộng sự, 2015; Ho, Jain và Abbeel, 2020). Hàm mục tiêu huấn luyện là một cận dưới của bằng chứng (evidence lower bound, ELBO) cho logarit hàm hợp lý của dữ liệu, cùng loại cận như ở [bài thứ tư](/vi/blog/variational-inference-for-neural-networks), với các phiên bản đã thêm nhiễu $x_1, \dots, x_T$ là các biến ẩn; trong thực tế nó quy về việc dự đoán nhiễu đã được thêm vào. Song và cộng sự (2021) mô tả giới hạn thời gian liên tục như một phương trình vi phân ngẫu nhiên mà việc đảo ngược nó đòi hỏi **hàm điểm** (score), tức gradient của logarit mật độ của dữ liệu đã thêm nhiễu, thứ mà mạng học được. Các biến thể cho dữ liệu rời rạc, như văn bản và đồ thị, thay nhiễu Gauss bằng sự làm hỏng các hạng mục (Austin và cộng sự, 2021).
+
+### 4.2 Quan hệ với học sâu Bayes
+
+Mô hình khuếch tán gặp loạt bài này theo hai cách. Thứ nhất, một mô hình khuếch tán đã huấn luyện là một tiên nghiệm linh hoạt trên các đối tượng phức tạp, chẳng hạn hình ảnh. Kết hợp nó với một hàm hợp lý cho một phép đo, như một ảnh bị nhòe hoặc không đầy đủ, sẽ xác định một phân phối hậu nghiệm trên đối tượng sạch, và đã có những bộ lấy mẫu xấp xỉ được đề xuất, lái quá trình ngược về phía phép đo (Chung và cộng sự, 2023). Thứ hai, bản thân một mô hình khuếch tán là một mạng nơ-ron được khớp với dữ liệu hữu hạn, nên các tham số của chính nó là bất định, và về nguyên tắc các phương pháp của loạt bài có thể được áp dụng cho nó.
+
+*Đã xác lập.* Cách suy dẫn ELBO cho hàm mục tiêu huấn luyện và mô tả thời gian liên tục dựa trên hàm điểm.
+
+*Còn mở.* Các bộ lấy mẫu hậu nghiệm xấp xỉ dùng tiên nghiệm khuếch tán chính xác đến đâu, khi các số hạng lái mà chúng thêm vào là những phép xấp xỉ có sai số khó định lượng? Độ bất định nhận thức (epistemic uncertainty) của một mô hình khuếch tán đối với những vùng có ít dữ liệu huấn luyện nên được ước lượng và thể hiện ra sao?
+
+## 5. Lý thuyết học kỳ dị
+
+### 5.1 Mô hình chính quy và mô hình kỳ dị
+
+Lý thuyết tiệm cận cổ điển của suy luận Bayes giả định một mô hình **chính quy** (regular): tham số sinh ra dữ liệu là duy nhất, và ma trận thông tin Fisher tại đó xác định dương. Dưới những điều kiện này, phân phối hậu nghiệm trở thành Gauss khi cỡ mẫu $n$ tăng, xấp xỉ Laplace của [bài thứ ba](/vi/blog/laplace-approximations) là có cơ sở, và logarit âm của hàm hợp lý biên hành xử như tiêu chuẩn thông tin Bayes (Bayesian information criterion), với số hạng phạt $(P/2) \log n$ cho $P$ tham số.
+
+Mạng nơ-ron là **kỳ dị** (singular). Các tính đối xứng rời rạc của [bài thứ bảy](/vi/blog/priors-symmetries-and-identifiability), hoán vị và đổi dấu, chỉ sao chép một điểm. Mạng còn có những suy biến liên tục: một đơn vị có trọng số đầu ra bằng không để các trọng số đầu vào của nó tự do, các đơn vị trùng lặp có thể chuyển trọng số qua lại cho nhau, và các đơn vị có hàm kích hoạt tuyến tính chỉnh lưu (ReLU) có thể được co giãn (bài thứ bảy, mục 4.2). Dọc theo những tập như vậy, nhiều giá trị tham số tạo ra cùng một hàm, nên tập các tham số tốt nhất không phải là một tập hữu hạn các điểm, và thông tin Fisher tại đó suy biến. Watanabe (2009) phát triển **lý thuyết học kỳ dị** (singular learning theory) cho trường hợp này. Ký hiệu $K(\theta)$ là độ phân kỳ Kullback–Leibler từ phân phối dữ liệu thật đến mô hình với tham số $\theta$, và $L_n$ là logarit âm thực nghiệm của hàm hợp lý tại một tham số $\theta_0$ thỏa $K(\theta_0) = 0$ (trong một mô hình được đặc tả đúng, đó là entropy thực nghiệm của dữ liệu). Dưới những điều kiện bao gồm mô hình và tiên nghiệm giải tích, và mô hình được đặc tả đúng (hoặc đủ gần đúng), **năng lượng tự do** (free energy) $F_n = -\log p(\mathcal{D})$ thỏa mãn
+
+$$
+F_n = n L_n + \lambda \log n - (m - 1) \log \log n + O_p(1),
+$$
+
+trong đó $\lambda$, **ngưỡng chính tắc logarit thực** (real log canonical threshold, còn gọi là hệ số học), và bội $m$ của nó được xác định bởi hình học của tập nơi $K = 0$, còn $O_p(1)$ là một số hạng ngẫu nhiên bị chặn theo xác suất. Với mô hình chính quy, $\lambda = P/2$ và $m = 1$; với mô hình kỳ dị, $\lambda \le P/2$, thường nhỏ hơn nhiều.
+
+### 5.2 Một ví dụ hai tham số
+
+Ví dụ nhỏ nhất có hai tham số $a, b \in [-1, 1]$ với tiên nghiệm đều. Trong mô hình chính quy, $K(a, b) = (a^2 + b^2)/2$, chỉ bằng không tại gốc tọa độ. Trong mô hình kỳ dị, $K(a, b) = (ab)^2/2$, bằng không trên toàn bộ hình chữ thập $a = 0$ hoặc $b = 0$; chẳng hạn, đó là độ phân kỳ của mô hình $y = abx + \varepsilon$ với $x$ và $\varepsilon$ chuẩn tắc khi hệ số góc thật bằng 0. Đoạn mã tính $F(n) = -\log \int e^{-nK(a,b)} \tfrac{1}{4}\, da\, db$, biểu thức thay độ phân kỳ thực nghiệm ngẫu nhiên bằng kỳ vọng của nó và do đó chỉ giữ lại các số hạng tất định của khai triển, rồi in ra hệ số góc của $F$ theo $\log n$ trên mỗi thập phân từ $10^2$ đến $10^8$.
+
+```python
+import numpy as np
+from math import erf
+
+def free_energy(n, singular):
+    """F(n) = -log of the integral of exp(-n K(a, b)) / 4 over the square [-1, 1]^2."""
+    a = np.concatenate([[0.0], np.logspace(-9, 0, 20001)])   # fine grid on [0, 1]
+    if singular:   # K = (a b)^2 / 2; the integral over b is done in closed form
+        s = a[1:] * np.sqrt(n / 2)
+        g = np.concatenate([[2.0], np.sqrt(np.pi) * np.array([erf(v) for v in s]) / s])
+    else:          # K = (a^2 + b^2) / 2
+        g = np.exp(-n * a**2 / 2) * np.sqrt(2 * np.pi / n) * erf(np.sqrt(n / 2))
+    return -np.log(2 * np.trapezoid(g, a) / 4)    # the integrand is even in a
+
+ns = 10.0 ** np.arange(2, 9)
+for name, singular in (("regular ", False), ("singular", True)):
+    F = np.array([free_energy(n, singular) for n in ns])
+    print(name, np.round(np.diff(F) / np.diff(np.log(ns)), 3))
+mid = np.sqrt(ns[:-1] * ns[1:])
+print("1/2 - 1/log n", np.round(0.5 - 1 / np.log(mid), 3))
+```
+
+```text
+regular  [1. 1. 1. 1. 1. 1.]
+singular [0.356 0.392 0.414 0.428 0.438 0.446]
+1/2 - 1/log n [0.326 0.376 0.403 0.421 0.433 0.442]
+```
+
+Năng lượng tự do của mô hình chính quy tăng đúng như $1 \cdot \log n$, như $P/2 = 1$ dự báo. Năng lượng tự do của mô hình kỳ dị tăng chậm hơn. Với $K = (ab)^2/2$, lý thuyết cho $\lambda = 1/2$ và $m = 2$, nên hệ số góc của $\tfrac{1}{2}\log n - \log\log n$ theo $\log n$ là $\tfrac{1}{2} - 1/\log n$; dòng cuối tính giá trị này tại điểm giữa của mỗi thập phân. Các hệ số góc tính được bám theo nó và tiến chậm đến $1/2$ từ phía dưới khi số hạng $\log \log n$ mờ dần. Mô hình có hai tham số, nhưng dữ liệu phạt nó như thể nó chỉ có một, và ngay cả tại $n = 10^8$ nó vẫn chưa đạt tới giới hạn đó.
+
+<Figure caption="Năng lượng tự do theo cỡ mẫu cho ví dụ hai tham số. Mô hình kỳ dị, có các tham số tốt nhất tạo thành một hình chữ thập thay vì một điểm, chịu số hạng phạt độ phức tạp nhỏ hơn nhiều so với mô hình chính quy có cùng số tham số.">
+  <BdlSingularFreeEnergy />
+</Figure>
+
+### 5.3 Hệ quả đối với loạt bài
+
+Ba hệ quả liên quan đến các bài trước.
+
+- **Xấp xỉ Laplace.** Tại một điểm kỳ dị, ma trận Hesse (Hessian) có trị riêng bằng không và phân phối hậu nghiệm không tiệm cận Gauss, nên tại đó xấp xỉ Laplace không có cơ sở như một lý thuyết tiệm cận, cả cho dự đoán lẫn cho hàm hợp lý biên. Điều này không ngăn nó hữu ích trong thực tế, nơi độ chính xác tiên nghiệm của [bài thứ ba](/vi/blog/laplace-approximations) lấp đầy các hướng phẳng, nhưng cơ sở của nó ở đó mang tính thực dụng.
+- **Số chiều hiệu dụng.** Số tham số, hay số trị riêng lớn của ma trận Hesse tại một mạng đã huấn luyện, không quyết định số hạng phạt độ phức tạp; $\lambda$ mới quyết định.
+- **So sánh mô hình.** Tiêu chuẩn thông tin áp dụng rộng rãi (widely applicable information criterion, WAIC) ước lượng mất mát tổng quát hóa của phân phối dự đoán hậu nghiệm cho các mô hình kỳ dị, nơi các tiêu chuẩn dựa trên số tham số thất bại (Watanabe, 2010).
+
+*Đã xác lập.* Khai triển tiệm cận ở trên và công thức WAIC, dưới các điều kiện của Watanabe; tính kỳ dị của mạng nơ-ron có đơn vị ẩn.
+
+*Còn mở.* Các phiên bản cục bộ của $\lambda$ đã được ước lượng bằng MCMC gradient ngẫu nhiên, nhưng liệu có thể ước lượng $\lambda$ một cách đáng tin cậy cho các mạng lớn? Các phát biểu tiệm cận có ý nghĩa đến đâu ở những cỡ mẫu trong thực tế, khi ngay cả ví dụ đồ chơi cũng hội tụ chậm như vậy? Và vì mạng với đơn vị tuyến tính chỉnh lưu không phải là mô hình giải tích, những phần nào của lý thuyết vẫn còn đúng cho chúng?
+
+## 6. Học chủ động và thiết kế thí nghiệm Bayes
+
+### 6.1 Từ chọn nhãn đến thiết kế thí nghiệm
+
+[Bài thứ chín](/vi/blog/evaluating-and-using-uncertainty) đã dùng thông tin tương hỗ (mutual information) giữa một nhãn và các tham số, tức học chủ động Bayes qua bất đồng (Bayesian active learning by disagreement, BALD), để chọn các đầu vào cần gán nhãn. Ý tưởng này lâu đời hơn và tổng quát hơn. Lindley (1956) đề xuất chọn một thí nghiệm, được mô tả bởi một **thiết kế** (design) $\xi$, sao cho cực đại hóa **lượng thông tin kỳ vọng thu được** (expected information gain, EIG)
+
+$$
+\mathrm{EIG}(\xi) = \mathbb{E}_{p(y \mid \xi)}\Big[\mathrm{KL}\big(p(\theta \mid y, \xi) \,\Vert\, p(\theta)\big)\Big],
+$$
+
+tức độ phân kỳ Kullback–Leibler (KL) kỳ vọng từ tiên nghiệm đến hậu nghiệm sau khi quan sát kết cục $y$ của thí nghiệm. Trong học chủ động (active learning), thiết kế là đầu vào cần gán nhãn. Trong khoa học, nó có thể là các thiết lập của một thiết bị đo hoặc các câu hỏi của một cuộc khảo sát (Rainforth và cộng sự, 2024).
+
+### 6.2 Thực tiễn đã xác lập và các bài toán mở
+
+*Đã xác lập.* Cơ sở lý thuyết quyết định cho thiết kế dựa trên thông tin, và sự bằng nhau giữa dạng trong không gian tham số và dạng trong không gian đầu ra của thông tin tương hỗ mà BALD sử dụng. Phần lớn các phương pháp thực tế là **thiển cận** (myopic): chúng chọn thiết kế có lượng thông tin kỳ vọng thu được lớn nhất chỉ cho bước kế tiếp và không lập kế hoạch cho các thí nghiệm sẽ theo sau. Các phương pháp khấu hao (amortized) học trước một mạng nhận lịch sử các thiết kế và kết cục làm đầu vào và trả về thiết kế tiếp theo, giúp thiết kế thích nghi đủ nhanh để chạy theo thời gian thực (Foster và cộng sự, 2021).
+
+*Còn mở.* Khi nào thì việc lập kế hoạch trước nhiều bước đáng với chi phí của nó? Các thiết kế dựa trên thông tin vững chắc đến đâu khi mô hình bị đặc tả sai, khi chúng chủ ý tìm những đầu vào mà mô hình kém chắc chắn nhất, cũng là nơi mô hình dễ sai nhất? Và với học chủ động trên các mạng lớn, chi phí huấn luyện lại và độ chệch của dữ liệu được chọn chủ động (bài thứ chín, mục 5) nên được cân đối thế nào với lượng thông tin thu được?
+
+## 7. Học sâu Bayes có nhận thức nhân quả
+
+Một mô hình của $p(y \mid x)$ mô tả sự liên kết: $y$ có xu hướng như thế nào khi quan sát thấy $x$. Nhiều quyết định cần hiệu ứng của một can thiệp: $y$ sẽ ra sao nếu $x$ được đặt bằng một giá trị. Một **mô hình nhân quả cấu trúc** (structural causal model) mô tả mỗi biến như một hàm của các nguyên nhân trực tiếp của nó và nhiễu độc lập, được tổ chức thành một đồ thị có hướng không chu trình (directed acyclic graph, DAG), và cho các can thiệp một ý nghĩa chính xác (Pearl, 2009). Từ đó có hai bài toán: **khám phá nhân quả** (causal discovery), học đồ thị từ dữ liệu, và **suy luận nhân quả** (causal inference), ước lượng các hiệu ứng khi đồ thị đã biết hoặc được giả định.
+
+Các phương pháp Bayes xuất hiện vì đồ thị hiếm khi khả định danh (identifiable) chỉ từ dữ liệu quan sát: nhiều đồ thị có thể giải thích cùng một phân phối. Một phân phối hậu nghiệm trên các đồ thị, và trên các hàm gắn với mỗi nút, mang sự mơ hồ này vào các hiệu ứng ước lượng được thay vì cam kết với một đồ thị duy nhất. Mạng nơ-ron biểu diễn các hàm của nút, còn suy luận biến phân hoặc MCMC xấp xỉ phân phối hậu nghiệm; chẳng hạn, DiBS làm cho phân phối hậu nghiệm trên đồ thị khả vi qua một biểu diễn ẩn liên tục (Lorch và cộng sự, 2021).
+
+*Đã xác lập.* Khung hình thức của mô hình nhân quả cấu trúc và các điều kiện để hiệu ứng khả định danh; sự tồn tại của các phân phối hậu nghiệm xấp xỉ tính được trên đồ thị cho số biến vừa phải.
+
+*Còn mở.* Số lượng DAG tăng nhanh hơn hàm mũ theo số biến. Các phân phối hậu nghiệm xấp xỉ trên đồ thị chính xác đến đâu, và có thể kiểm tra điều đó thế nào khi không biết đồ thị thật? Các kết quả nhạy đến đâu với những giả định thông thường, như không có biến gây nhiễu ẩn?
+
+## 8. Tập credal và xác suất không chính xác
+
+Một phân tích Bayes cam kết với một tiên nghiệm và một hàm hợp lý. **Xác suất không chính xác** (imprecise probability) thay một phân phối duy nhất bằng một **tập credal** (credal set), một tập lồi đóng các phân phối, và báo cáo các xác suất dưới và trên trên toàn tập (Walley, 1991). Áp dụng cho mạng nơ-ron Bayes, một tập credal các tiên nghiệm và hàm hợp lý cho ra một tập các phân phối dự đoán hậu nghiệm. Độ trải rộng của nó thể hiện mức độ các kết luận phụ thuộc vào những lựa chọn mà người lập mô hình không thể biện minh, và độ rộng của khoảng cho mỗi xác suất có thể được đọc như một đại lượng nhận thức.
+
+Động cơ này gắn với một phê phán đối với phép phân tách entropy của bài thứ chín. Hüllermeier và Waegeman (2021) tổng quan sự phân biệt giữa độ bất định ngẫu nhiên (aleatoric) và độ bất định nhận thức (epistemic) cùng các cách biểu diễn đã được đề xuất cho nó. Wimmer và cộng sự (2023) lập luận rằng phép phân tách theo thông tin tương hỗ vi phạm những tính chất mà người ta kỳ vọng ở một thước đo độ bất định nhận thức, điều thúc đẩy các phương án thay thế, trong đó có tập credal.
+
+*Đã xác lập.* Lý thuyết toán học về tập credal và kỳ vọng dưới (lower prevision); việc tính các tập credal của phân phối hậu nghiệm khi chúng được sinh bởi hữu hạn các tiên nghiệm và hàm hợp lý cực biên, vì các điểm cực biên có thể được lan truyền từng điểm một.
+
+*Còn mở.* Nên chọn tập credal thế nào cho một mạng nơ-ron, khi ngay cả một tiên nghiệm cũng khó đặc tả? Chi phí bổ sung, ít nhất một phân phối hậu nghiệm xấp xỉ cho mỗi điểm cực biên, có được biện minh bằng những quyết định tốt hơn không? Và một dự đoán có giá trị là tập hợp nên được đánh giá thế nào, khi các quy tắc chấm điểm thích đáng của bài thứ chín chấm điểm các phân phối đơn lẻ?
+
+## 9. Học tăng cường Bayes
+
+Một tác tử học tăng cường hành động trong một môi trường mà nó không biết động lực học và phần thưởng, và phải cân bằng giữa **khám phá** (exploration), hành động để học, và **khai thác** (exploitation), hành động dựa trên những gì nó đã tin. Một phân phối hậu nghiệm trên môi trường làm cho sự đánh đổi này trở nên tường minh. **Lấy mẫu Thompson** (Thompson sampling) rút một môi trường hợp lý từ phân phối hậu nghiệm và hành động tối ưu cho môi trường đó. Phương pháp này được đề xuất để chọn giữa hai phương pháp điều trị (Thompson, 1933). Mở rộng của nó cho quá trình quyết định Markov, **lấy mẫu hậu nghiệm cho học tăng cường** (posterior sampling for reinforcement learning, PSRL), có các cận regret trong trường hợp dạng bảng (Osband, Russo và Van Roy, 2013). Mạng Q sâu (deep Q-network, DQN) bootstrap xấp xỉ phân phối hậu nghiệm trên các hàm giá trị bằng một tổ hợp các đầu ra của mạng, tức ý tưởng tổ hợp sâu áp dụng cho khám phá (Osband và cộng sự, 2016). Ghavamzadeh và cộng sự (2015) tổng quan lĩnh vực này.
+
+*Đã xác lập.* Các bảo đảm về regret cho lấy mẫu hậu nghiệm trong trường hợp dạng bảng và một số bối cảnh có cấu trúc; các cải thiện thực nghiệm nhờ khám phá dựa trên tổ hợp mô hình trên các tác vụ được báo cáo trong các công trình được trích dẫn.
+
+*Còn mở.* Một tác tử khám phá quá ít khi phân phối hậu nghiệm xấp xỉ của nó quá hẹp, như các phương pháp biến phân trường trung bình thường cho ra, hoặc khi các thành viên trong tổ hợp mô hình của nó trở nên quá giống nhau. Làm sao kiểm tra chất lượng của phân phối hậu nghiệm xấp xỉ bên trong một tác tử đang học, và làm sao để độ bất định của nó hỗ trợ các bảo đảm an toàn trong những bài toán nhiều chiều, nơi các phương pháp quá trình Gauss quá tốn kém?
+
+## 10. Bài tập
+
+**Bài tập 1.** Với quy tắc Laplace, hãy tính xác suất của dãy 1, 1, 0, 0 và của dãy 0, 1, 0, 1. Chúng có bằng nhau không?
+
+<details>
+<summary>Đáp án</summary>
+
+Với 1, 1, 0, 0: $\tfrac{1}{2} \cdot \tfrac{2}{3} \cdot \tfrac{1}{4} \cdot \tfrac{2}{5} = \tfrac{1}{30}$. Với 0, 1, 0, 1: $\tfrac{1}{2} \cdot \tfrac{1}{3} \cdot \tfrac{2}{4} \cdot \tfrac{2}{5} = \tfrac{1}{30}$. Chúng bằng nhau, đúng như tính khả hoán đòi hỏi; cả hai đều bằng $\int_0^1 \mu^2 (1 - \mu)^2 d\mu = 1/30$, tích phân Beta cho tiên nghiệm đều trên độ lệch $\mu$.
+
+</details>
+
+**Bài tập 2.** Vì sao hàm mục tiêu PFN khôi phục được phân phối dự đoán hậu nghiệm, chứ không phải một phân phối nào khác, khi mạng có năng lực không giới hạn?
+
+<details>
+<summary>Đáp án</summary>
+
+Với mỗi tập dữ liệu và đầu vào kiểm tra, mất mát kỳ vọng là điểm log kỳ vọng của $q_\psi(\cdot \mid x^*, \mathcal{D})$ dưới phân phối có điều kiện thật của $y^*$ khi biết $x^*$ và $\mathcal{D}$ trong quá trình sinh dữ liệu, tức phân phối dự đoán hậu nghiệm của tiên nghiệm. Điểm log là thích đáng chặt, nên mất mát kỳ vọng chỉ đạt cực tiểu khi $q_\psi$ bằng phân phối đó với mọi đầu vào.
+
+</details>
+
+**Bài tập 3.** Một mô hình kỳ dị với $P = 10$ tham số có $\lambda = 2$ và $m = 1$. Năng lượng tự do của nó tăng bao nhiêu khi $n$ đi từ 1000 đến 100 000, bỏ qua $n L_n$ và số hạng ngẫu nhiên, và một mô hình chính quy với 10 tham số sẽ tăng bao nhiêu?
+
+<details>
+<summary>Đáp án</summary>
+
+$\lambda \log(100) = 2 \times 4.61 = 9.21$ nat cho mô hình kỳ dị, so với $(P/2)\log(100) = 5 \times 4.61 = 23.0$ nat cho mô hình chính quy.
+
+</details>
+
+**Bài tập 4.** Trong lượng thông tin kỳ vọng thu được, vì sao kỳ vọng được lấy theo $p(y \mid \xi)$ thay vì được tính tại kết cục quan sát được?
+
+<details>
+<summary>Đáp án</summary>
+
+Thiết kế được chọn trước khi chạy thí nghiệm, nên kết cục chưa được biết. Phân phối dự đoán tiên nghiệm $p(y \mid \xi) = \int p(y \mid \theta, \xi) p(\theta)\, d\theta$ là dự báo tốt nhất hiện có về kết cục đó, và EIG là lượng thông tin thu được lấy trung bình theo dự báo này.
+
+</details>
+
+## 11. Tóm tắt
+
+| Hướng | Vấn đề giải quyết | Đã xác lập | Còn mở |
+|---|---|---|---|
+| Suy luận trong không gian con và mạng con | Chi phí suy luận trên mọi trọng số | Suy luận rẻ trong ít chiều; tính liên thông giữa các mode | Không gian con nào giữ được phân phối dự đoán |
+| Quy tắc Bayes ngầm định, phân phối hậu nghiệm martingale | Nhu cầu cần một phân phối hậu nghiệm tường minh | Đặc trưng hóa de Finetti qua tính khả hoán | Đo và cải thiện tính Bayes của các bộ dự đoán đã huấn luyện |
+| Mạng khớp sẵn tiên nghiệm | Chi phí và độ khó của suy luận hậu nghiệm | Nghiệm tối ưu bằng phân phối dự đoán hậu nghiệm của tiên nghiệm | Hành vi khi tiên nghiệm không khớp; mở rộng theo kích thước dữ liệu |
+| Mô hình khuếch tán | Tiên nghiệm giàu biểu đạt và độ bất định của mô hình sinh | Các công thức ELBO và dựa trên hàm điểm | Độ chính xác của lấy mẫu hậu nghiệm với tiên nghiệm khuếch tán |
+| Lý thuyết học kỳ dị | Phân phối hậu nghiệm không Gauss, suy biến | Tiệm cận năng lượng tự do với $\lambda \le P/2$; WAIC | Ước lượng $\lambda$ ở quy mô lớn; ý nghĩa với mẫu hữu hạn |
+| Thiết kế thí nghiệm | Chọn dữ liệu nào cần thu thập | Tiêu chuẩn lượng thông tin thu được; thiết kế khấu hao | Thiết kế không thiển cận; độ vững khi đặc tả sai |
+| Phương pháp có nhận thức nhân quả | Hiệu ứng của can thiệp, không phải liên kết | Mô hình nhân quả cấu trúc; phân phối hậu nghiệm trên đồ thị | Độ chính xác và cách kiểm tra phân phối hậu nghiệm trên đồ thị |
+| Tập credal | Sự phụ thuộc vào một tiên nghiệm và một hàm hợp lý | Lý thuyết xác suất không chính xác | Chọn và đánh giá tập credal cho mạng nơ-ron |
+| Học tăng cường Bayes | Khám phá trong điều kiện bất định | Cận regret cho lấy mẫu hậu nghiệm | Chất lượng phân phối hậu nghiệm và an toàn ở quy mô lớn |
+
+Loạt bài đặt ra năm mục tiêu. Các bài đáp ứng chúng như sau.
+
+1. **Phân phối hậu nghiệm, phân phối dự đoán hậu nghiệm và hai loại độ bất định.** [Bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks) định nghĩa chúng và tách entropy dự đoán thành phần ngẫu nhiên và phần nhận thức; mục 5 của [bài thứ chín](/vi/blog/evaluating-and-using-uncertainty) dùng phép tách đó để chọn dữ liệu.
+2. **So sánh các họ suy luận xấp xỉ.** Các bài thứ hai đến thứ năm trình bày [lấy mẫu](/vi/blog/sampling-the-posterior-mcmc), [xấp xỉ Laplace](/vi/blog/laplace-approximations), [suy luận biến phân](/vi/blog/variational-inference-for-neural-networks) và [tổ hợp sâu](/vi/blog/deep-ensembles), mỗi phương pháp cùng với các giả định, chi phí và kiểu thất bại của nó.
+3. **Quá trình Gauss, hàm nhân, tiên nghiệm, tính đối xứng và tính khả định danh.** [Bài thứ sáu](/vi/blog/gaussian-processes-and-kernels) và [bài thứ bảy](/vi/blog/priors-symmetries-and-identifiability) trình bày các chủ đề này, và mục 5 của bài này cho thấy tính không khả định danh làm thay đổi hành vi tiệm cận của phân phối hậu nghiệm như thế nào.
+4. **Chọn một phương pháp có khả năng mở rộng và đánh giá độ bất định của nó.** [Bài thứ tám](/vi/blog/scaling-bayesian-deep-learning) bàn về quy mô; [bài thứ chín](/vi/blog/evaluating-and-using-uncertainty) bàn về hiệu chuẩn, quy tắc chấm điểm thích đáng và dự đoán có chọn lọc.
+5. **Các hướng nghiên cứu hiện nay và các bài toán mở của chúng.** Bài này và bảng của nó trình bày chúng.
+
+Điều gắn kết các hướng nghiên cứu là tích phân của mục 1. Mỗi hướng là một câu trả lời khác nhau cho câu hỏi tích phân đó tính được đến đâu, kết quả đáng tin đến mức nào và nó có giá trị gì khi đã có trong tay.
+
+### Tài liệu tham khảo
+
+- J. Austin, D. D. Johnson, J. Ho, D. Tarlow and R. van den Berg, "Structured denoising diffusion models in discrete state-spaces," in *Advances in Neural Information Processing Systems 34*, 2021.
+- H. Chung, J. Kim, M. T. McCann, M. L. Klasky and J. C. Ye, "Diffusion posterior sampling for general noisy inverse problems," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- E. Daxberger, E. Nalisnick, J. U. Allingham, J. Antorán and J. M. Hernández-Lobato, "Bayesian deep learning via subnetwork inference," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- F. Draxler, K. Veschgini, M. Salmhofer and F. A. Hamprecht, "Essentially no barriers in neural network energy landscape," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- F. Falck, Z. Wang and C. Holmes, "Is in-context learning in large language models Bayesian? A martingale perspective," in *Proceedings of the 41st International Conference on Machine Learning (ICML)*, 2024.
+- E. Fong, C. Holmes and S. G. Walker, "Martingale posterior distributions," *Journal of the Royal Statistical Society, Series B*, vol. 85, no. 5, 2023.
+- A. Foster, D. R. Ivanova, I. Malik and T. Rainforth, "Deep adaptive design: Amortizing sequential Bayesian experimental design," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- M. Garnelo et al., "Conditional neural processes," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- T. Garipov, P. Izmailov, D. Podoprikhin, D. Vetrov and A. G. Wilson, "Loss surfaces, mode connectivity, and fast ensembling of DNNs," in *Advances in Neural Information Processing Systems 31*, 2018.
+- M. Ghavamzadeh, S. Mannor, J. Pineau and A. Tamar, "Bayesian reinforcement learning: A survey," *Foundations and Trends in Machine Learning*, vol. 8, no. 5–6, 2015.
+- E. Hewitt and L. J. Savage, "Symmetric measures on Cartesian products," *Transactions of the American Mathematical Society*, vol. 80, no. 2, pp. 470–501, 1955.
+- J. Ho, A. Jain and P. Abbeel, "Denoising diffusion probabilistic models," in *Advances in Neural Information Processing Systems 33*, 2020.
+- N. Hollmann, S. Müller, K. Eggensperger and F. Hutter, "TabPFN: A transformer that solves small tabular classification problems in a second," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- N. Hollmann et al., "Accurate predictions on small data with a tabular foundation model," *Nature*, vol. 637, 2025.
+- E. Hüllermeier and W. Waegeman, "Aleatoric and epistemic uncertainty in machine learning: An introduction to concepts and methods," *Machine Learning*, vol. 110, 2021.
+- P. Izmailov, W. J. Maddox, P. Kirichenko, T. Garipov, D. Vetrov and A. G. Wilson, "Subspace inference for Bayesian deep learning," in *Proceedings of the 35th Conference on Uncertainty in Artificial Intelligence (UAI)*, 2019.
+- D. V. Lindley, "On a measure of the information provided by an experiment," *The Annals of Mathematical Statistics*, vol. 27, no. 4, pp. 986–1005, 1956.
+- L. Lorch, J. Rothfuss, B. Schölkopf and A. Krause, "DiBS: Differentiable Bayesian structure learning," in *Advances in Neural Information Processing Systems 34*, 2021.
+- S. Müller, N. Hollmann, S. Pineda Arango, J. Grabocka and F. Hutter, "Transformers can do Bayesian inference," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- I. Osband, C. Blundell, A. Pritzel and B. Van Roy, "Deep exploration via bootstrapped DQN," in *Advances in Neural Information Processing Systems 29*, 2016.
+- I. Osband, D. Russo and B. Van Roy, "(More) efficient reinforcement learning via posterior sampling," in *Advances in Neural Information Processing Systems 26*, 2013.
+- J. Pearl, *Causality: Models, Reasoning, and Inference*, 2nd ed., Cambridge University Press, 2009.
+- T. Rainforth, A. Foster, D. R. Ivanova and F. Bickford Smith, "Modern Bayesian experimental design," *Statistical Science*, vol. 39, no. 1, 2024.
+- J. Sohl-Dickstein, E. Weiss, N. Maheswaranathan and S. Ganguli, "Deep unsupervised learning using nonequilibrium thermodynamics," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
+- Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon and B. Poole, "Score-based generative modeling through stochastic differential equations," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2021.
+- W. R. Thompson, "On the likelihood that one unknown probability exceeds another in view of the evidence of two samples," *Biometrika*, vol. 25, no. 3–4, pp. 285–294, 1933.
+- P. Walley, *Statistical Reasoning with Imprecise Probabilities*, Chapman and Hall, 1991.
+- S. Watanabe, *Algebraic Geometry and Statistical Learning Theory*, Cambridge University Press, 2009.
+- S. Watanabe, "Asymptotic equivalence of Bayes cross validation and widely applicable information criterion in singular learning theory," *Journal of Machine Learning Research*, vol. 11, pp. 3571–3594, 2010.
+- L. Wimmer, Y. Sale, P. Hofman, B. Bischl and E. Hüllermeier, "Quantifying aleatoric and epistemic uncertainty in machine learning: Are conditional entropy and mutual information appropriate measures?," in *Proceedings of the 39th Conference on Uncertainty in Artificial Intelligence (UAI)*, 2023.
+- S. M. Xie, A. Raghunathan, P. Liang and T. Ma, "An explanation of in-context learning as implicit Bayesian inference," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.

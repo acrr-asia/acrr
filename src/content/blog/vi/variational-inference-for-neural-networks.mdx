@@ -1,0 +1,372 @@
+---
+title: "Suy luận biến phân cho mạng nơ-ron"
+description: "Suy luận biến phân khớp một phân phối dễ tính với hậu nghiệm bằng cách cực đại hóa một cận dưới; các dạng trường trung bình, dropout, gradient tự nhiên, hạt."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - uncertainty
+  - optimization
+series: bayesian-deep-learning
+seriesOrder: 4
+---
+
+import Figure from '../../../components/Figure.astro';
+import BdlMeanFieldVi from '../../../components/diagrams/BdlMeanFieldVi.astro';
+
+[Bài trước](/vi/blog/laplace-approximations) đã xấp xỉ phân phối hậu nghiệm (posterior) $p(\theta \mid \mathcal{D})$ bằng một phân phối Gauss được ấn định hoàn toàn bởi mode của phân phối hậu nghiệm và độ cong tại đó. **Suy luận biến phân** (variational inference, VI) giữ ý tưởng về một phân phối xấp xỉ dễ tính nhưng chọn nó theo cách khác: nó định nghĩa một họ các phân phối ứng viên và chọn phần tử gần phân phối hậu nghiệm nhất bằng cách giải một bài toán tối ưu. Suy luận trở thành huấn luyện với một hàm mục tiêu mới. Các công cụ của [bài về hạ gradient](/blog/gradient-descent-and-its-variants) (gradient ngẫu nhiên, lô nhỏ, bước thích nghi) áp dụng được cho nó.
+
+Bài này suy ra hàm mục tiêu, cận dưới của bằng chứng, rồi lần lượt đi qua các họ chính đã được áp dụng cho mạng nơ-ron. Đó là các phân phối Gauss phân tích thành tích được huấn luyện bằng gradient tái tham số hóa, dropout được hiểu như suy luận xấp xỉ, các phương pháp gradient tự nhiên có phép cập nhật giống Adam, và các phương pháp dựa trên hạt di chuyển đồng thời một tập các mạng. Hai biến thể nữa định nghĩa phép xấp xỉ trên các hàm thay vì trên trọng số, hoặc cập nhật nó khi dữ liệu đến theo thời gian. Một ví dụ minh họa trên một mô hình có phân phối hậu nghiệm được biết chính xác cho thấy họ phổ biến nhất làm đúng điều gì và sai một cách có hệ thống ở điều gì.
+
+Bài dùng ký hiệu của loạt bài trong [bài thứ nhất](/vi/blog/bayesian-inference-for-neural-networks): $\theta \in \mathbb{R}^P$ là các tham số, $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ là dữ liệu, $p(\theta)$ là tiên nghiệm, $p(\mathcal{D} \mid \theta)$ là hàm hợp lý và $x^*$ là một đầu vào kiểm tra. Phân phối xấp xỉ là $q(\theta)$, hoặc $q_\lambda(\theta)$ khi các tham số $\lambda$ của nó (các **tham số biến phân**, variational parameters) cần được nêu rõ. Các ví dụ chạy trên Python 3.13 với NumPy 2.5.3 và các hạt giống cố định.
+
+## 1. Suy luận như một bài toán tối ưu
+
+### 1.1 Đo độ gần với phân phối hậu nghiệm
+
+Để chọn phần tử của một họ $\mathcal{Q}$ gần phân phối hậu nghiệm nhất, VI cần một thước đo độ sai khác giữa các phân phối. Lựa chọn chuẩn là **độ phân kỳ Kullback–Leibler** (Kullback–Leibler divergence, KL)
+
+$$
+\mathrm{KL}\big(q \,\Vert\, p\big) = \int q(\theta) \log \frac{q(\theta)}{p(\theta \mid \mathcal{D})}\, d\theta ,
+$$
+
+bằng không khi hai phân phối bằng nhau và dương trong trường hợp ngược lại. Nó không đối xứng, và thứ tự là quan trọng. VI cực tiểu hóa $\mathrm{KL}(q \,\Vert\, p)$, **KL ngược** (reverse KL), với kỳ vọng lấy theo $q$. Ở bất cứ đâu $q$ đặt khối lượng mà phân phối hậu nghiệm thì không, logarit lớn, nên điểm tối ưu tránh các vùng có mật độ hậu nghiệm thấp. Ở bất cứ đâu phân phối hậu nghiệm có khối lượng mà $q$ thì không, không có gì bị tính phí. Vì vậy KL ngược có tính **tìm mode** (mode-seeking): khi họ phân phối không thể bao phủ toàn bộ phân phối hậu nghiệm, điểm tối ưu tập trung vào một phần của nó và đánh giá thấp độ phân tán của nó. Ví dụ minh họa ở mục 3 đo hiệu ứng này.
+
+Lý do cho thứ tự này là tính toán. KL ngược chỉ cần các kỳ vọng theo $q$ (một phân phối được chọn sao cho dễ lấy mẫu) và phân phối hậu nghiệm chưa chuẩn hóa. KL thuận (forward KL), $\mathrm{KL}(p \,\Vert\, q)$, sẽ cần các kỳ vọng theo phân phối hậu nghiệm, chính là đại lượng không tính được.
+
+### 1.2 Cận dưới của bằng chứng
+
+Độ phân kỳ KL ở trên vẫn chứa $p(\theta \mid \mathcal{D}) = p(\mathcal{D} \mid \theta)\,p(\theta)/p(\mathcal{D})$, và **hàm hợp lý biên** (marginal likelihood) $p(\mathcal{D})$ không tính được. Thay quy tắc Bayes vào và sắp xếp lại cho một đồng nhất thức đúng với mọi $q$:
+
+$$
+\log p(\mathcal{D}) = \underbrace{\mathbb{E}_{q}\big[\log p(\mathcal{D} \mid \theta)\big] - \mathrm{KL}\big(q(\theta) \,\Vert\, p(\theta)\big)}_{\mathrm{ELBO}(q)} + \mathrm{KL}\big(q(\theta) \,\Vert\, p(\theta \mid \mathcal{D})\big).
+$$
+
+Vế trái không phụ thuộc vào $q$. Do đó cực đại hóa số hạng thứ nhất ở vế phải, **cận dưới của bằng chứng** (evidence lower bound, ELBO), sẽ cực tiểu hóa độ phân kỳ KL đến phân phối hậu nghiệm, và ELBO tính được: nó chỉ cần hàm hợp lý, tiên nghiệm và các mẫu từ $q$. Vì số hạng KL cuối cùng không âm, ELBO là một cận dưới của logarit bằng chứng, và khoảng cách giữa chúng đúng bằng độ phân kỳ KL từ $q$ đến phân phối hậu nghiệm. Cách suy ra này là chuẩn; Jordan và cộng sự (1999) và Blei, Kucukelbir và McAuliffe (2017) trình bày đầy đủ.
+
+Hai số hạng của ELBO có một cách hiểu trực tiếp. Kỳ vọng của logarit hàm hợp lý thưởng cho các phân phối đặt khối lượng lên những tham số khớp với dữ liệu. Số hạng KL đến tiên nghiệm phạt các phân phối đi xa tiên nghiệm hoặc trở nên hẹp. Đối với một mạng, số hạng thứ nhất là hàm mất mát huấn luyện quen thuộc được lấy trung bình theo nhiễu của tham số, còn số hạng thứ hai là một số hạng chính quy hóa. Hinton và van Camp (1993) đã đi đến cùng hàm mục tiêu này từ nguyên lý độ dài mô tả tối thiểu (minimum description length): số hạng KL là chi phí truyền đạt các trọng số với một độ chính xác cho trước.
+
+### 1.3 Gradient của ELBO
+
+ELBO là một kỳ vọng theo chính phân phối đang được tối ưu, nên gradient của nó theo $\lambda$ không thể đưa trực tiếp vào trong kỳ vọng. **Thủ thuật tái tham số hóa** (reparameterization trick) (Kingma và Welling, 2014; Rezende, Mohamed và Wierstra, 2014) viết một mẫu từ $q_\lambda$ dưới dạng một hàm tất định của $\lambda$ và của một nhiễu có phân phối cố định. Với một phân phối Gauss có kỳ vọng $\mu$ và các độ lệch chuẩn $\tau$,
+
+$$
+\theta = \mu + \tau \odot \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, I),
+$$
+
+trong đó $\odot$ là phép nhân từng phần tử. Kỳ vọng bây giờ lấy theo $\varepsilon$, có phân phối không phụ thuộc vào $\lambda$, và gradient đi vào bên trong: $\nabla_\lambda \mathbb{E}_q[g(\theta)] = \mathbb{E}_\varepsilon[\nabla_\lambda g(\mu + \tau \odot \varepsilon)]$ với mọi $g$ khả vi. Lấy trung bình gradient trên một vài mẫu của $\varepsilon$ cho một ước lượng không chệch, và vi phân tự động tính được nó. Với các mô hình không thể tái tham số hóa, chẳng hạn khi có các biến ẩn rời rạc, bộ ước lượng hàm điểm (score-function estimator) (Ranganath, Gerrish và Blei, 2014) cũng không chệch nhưng có phương sai cao hơn nhiều.
+
+Với $N$ ví dụ và các lô nhỏ cỡ $B$, kỳ vọng của logarit hàm hợp lý được ước lượng bằng $N/B$ nhân với tổng của nó trên lô. Số hạng KL được tính một lần mỗi bước, dưới dạng đóng đối với các phân phối Gauss. Các ước lượng ELBO trên lô nhỏ làm cho VI mở rộng được đến các tập dữ liệu lớn, như trong suy luận biến phân ngẫu nhiên (stochastic variational inference) (Hoffman và cộng sự, 2013); kết hợp với tái tham số hóa, chúng cho phép thực hiện VI ở quy mô của việc huấn luyện thông thường.
+
+## 2. VI Gauss trường trung bình
+
+### 2.1 Họ phân phối và thuật toán
+
+Họ được dùng rộng rãi nhất cho các mạng là **phân phối Gauss trường trung bình** (mean-field Gaussian): mỗi tham số có một phân phối Gauss độc lập riêng, $q(\theta) = \prod_{i=1}^P \mathcal{N}(\theta_i; \mu_i, \tau_i^2)$. Các tham số biến phân gồm $2P$ con số, một kỳ vọng và một độ lệch chuẩn cho mỗi trọng số, nên bộ nhớ tăng gấp đôi và mỗi lượt truyền xuôi rút các trọng số mới. Graves (2011) đã áp dụng họ này cho các mạng, và Blundell và cộng sự (2015) phổ biến phiên bản tái tham số hóa dưới tên **Bayes by Backprop**. Mỗi bước huấn luyện gồm:
+
+1. Rút $\varepsilon$ và đặt $\theta = \mu + \tau \odot \varepsilon$, với $\tau = \exp(\rho)$ hoặc $\tau = \log(1 + e^\rho)$ để giữ nó dương.
+2. Chạy mạng với $\theta$ trên một lô nhỏ và tính $-\tfrac{N}{B}\sum \log p(y_n \mid x_n, \theta)$ cộng với số hạng KL.
+3. Lan truyền ngược đến $\mu$ và $\rho$ và thực hiện một bước của bộ tối ưu.
+
+Khi dự đoán, phân phối dự đoán là trung bình của $M$ lượt truyền xuôi với các mẫu $\theta$ rút độc lập. Dùng chung một mẫu trọng số cho cả lô nhỏ làm cho nhiễu gradient của các ví dụ khác nhau tương quan với nhau. **Thủ thuật tái tham số hóa cục bộ** (local reparameterization trick) (Kingma, Salimans và Welling, 2015) giảm phương sai đó bằng cách lấy mẫu các tiền kích hoạt (pre-activation) của từng ví dụ thay vào đó; với $q$ Gauss, chúng có phân phối Gauss với kỳ vọng và phương sai tính được.
+
+### 2.2 Cái giá của việc phân tích thành tích
+
+Giả định độc lập loại bỏ mọi tương quan giữa các tham số. Với một phân phối hậu nghiệm Gauss có ma trận độ chính xác (precision matrix) $\Lambda$ (nghịch đảo của hiệp phương sai), điểm tối ưu trường trung bình của KL ngược có dạng đóng (Bishop, 2006): các kỳ vọng của nó là các kỳ vọng hậu nghiệm, và các phương sai của nó là $1/\Lambda_{ii}$, nghịch đảo của các phần tử đường chéo của ma trận độ chính xác. Các phương sai này không bao giờ lớn hơn các phương sai hậu nghiệm $(\Lambda^{-1})_{ii}$, và chúng nhỏ hơn nhiều khi các tham số tương quan mạnh. VI trường trung bình đánh giá thấp độ bất định biên, và sai số tăng theo mức tương quan.
+
+Các mạng có các tham số tương quan mạnh: với hàm kích hoạt ReLU, phóng to một lớp và thu nhỏ lớp tiếp theo giữ nguyên hàm, và nhiều trọng số bù trừ cho nhau. Foong và cộng sự (2020) đã chỉ ra rằng với các mạng có một lớp ẩn, phương sai dự đoán của một xấp xỉ Gauss trường trung bình giữa hai cụm dữ liệu tách biệt bị chặn bởi các phương sai của nó tại các cụm, bất kể các tham số biến phân. Một phép xấp xỉ như vậy không thể biểu diễn độ bất định lớn hơn nhiều ở vùng giữa mà phân phối hậu nghiệm chính xác thể hiện. Số hạng KL thêm vào một vấn đề thứ hai. Một mạng có nhiều trọng số hơn hẳn mức dữ liệu có thể xác định, và với mỗi trọng số đó, cách rẻ nhất để tăng ELBO là đặt $q$ bằng tiên nghiệm. Khi đó nhiều trọng số trở thành nhiễu thuần túy, làm giảm năng lực hiệu dụng của mạng và có thể khiến mô hình khớp thiếu. Trong thực hành, số hạng KL thường được giảm trọng số, hoặc phân phối hậu nghiệm được điều chỉnh nhiệt độ (tempered), một lựa chọn được Wenzel và cộng sự (2020) xem xét và được bàn lại trong [Tiên nghiệm, tính đối xứng và tính khả định danh](/vi/blog/priors-symmetries-and-identifiability).
+
+## 3. Ví dụ minh họa: hồi quy tuyến tính
+
+### 3.1 Thiết lập
+
+Để đo các hiệu ứng này, xét một mô hình có phân phối hậu nghiệm được biết chính xác: hồi quy tuyến tính $y = b + w x + \varepsilon$ với tham số $\theta = (b, w)^\top$, nhiễu $\varepsilon \sim \mathcal{N}(0, \sigma^2)$ có độ lệch chuẩn đã biết $\sigma = 0.5$ và tiên nghiệm $\mathcal{N}(0, s_0^2 I)$ với độ lệch chuẩn tiên nghiệm $s_0 = 1$. Hai mươi đầu vào được rút đều trên $[0, 4]$ và các đầu ra từ đường thẳng thật $b = 1$, $w = 0.8$. Vì các đầu vào đều dương, hệ số chặn và hệ số góc tương quan mạnh trong phân phối hậu nghiệm: một đường dốc hơn khớp dữ liệu tốt như nhau nếu nó bắt đầu thấp hơn.
+
+Đoạn mã tính phân phối hậu nghiệm Gauss chính xác và logarit bằng chứng dưới dạng đóng, rồi chạy VI Gauss trường trung bình với gradient tái tham số hóa của mục 1.3. Gradient của logarit phân phối đồng thời $\log p(\mathcal{D} \mid \theta) + \log p(\theta)$ được tính tại 10 mẫu mỗi bước. Các độ lệch chuẩn được tham số hóa dưới dạng $\tau = e^{\rho}$, nên gradient của entropy Gauss $\sum_i \log \tau_i$ theo mỗi $\rho_i$ bằng 1. Bộ tối ưu là Adam với bước giảm dần từ 0.02 xuống khoảng 0.001 qua 6000 bước.
+
+```python
+import numpy as np
+
+# Toy data: y = 1 + 0.8 x + noise, noise sd 0.5 (known); prior theta ~ N(0, I)
+rng = np.random.default_rng(1)
+N, s2 = 20, 0.5**2
+x = rng.uniform(0, 4, N)
+y = 1.0 + 0.8 * x + rng.normal(0, 0.5, N)
+X = np.column_stack([np.ones(N), x])           # theta = (b, w)
+
+# Exact posterior and log evidence (conjugate model)
+Lam = X.T @ X / s2 + np.eye(2)                 # posterior precision
+Sig = np.linalg.inv(Lam)
+m = Sig @ X.T @ y / s2
+Ky = s2 * np.eye(N) + X @ X.T                  # marginal covariance of y
+logZ = -0.5 * (y @ np.linalg.solve(Ky, y) + np.linalg.slogdet(2 * np.pi * Ky)[1])
+
+def grad_log_joint(T):                         # rows of T are parameter vectors
+    return (y - T @ X.T) @ X / s2 - T
+
+def elbo(mu, sd, M=200000, seed=0):            # Monte Carlo estimate
+    T = mu + sd * np.random.default_rng(seed).standard_normal((M, 2))
+    ll = -0.5 * ((y - T @ X.T) ** 2).sum(1) / s2 - 0.5 * N * np.log(2 * np.pi * s2)
+    lp = -0.5 * (T**2).sum(1) - np.log(2 * np.pi)
+    return (ll + lp).mean() + np.sum(np.log(sd)) + np.log(2 * np.pi * np.e)
+
+# Mean-field Gaussian VI with reparameterization gradients and Adam
+mu, rho = np.zeros(2), np.zeros(2)             # q = N(mu, diag(exp(rho)^2))
+par = np.concatenate([mu, rho]); M = np.zeros(4); V = np.zeros(4)
+b1, b2 = 0.9, 0.999
+for k in range(1, 6001):
+    lr = 0.02 * 0.9995**k                      # decaying step size
+    mu, rho = par[:2], par[2:]
+    eps = rng.standard_normal((10, 2))         # 10 samples per step
+    g = grad_log_joint(mu + np.exp(rho) * eps)
+    grad = np.concatenate([g.mean(0), (g * eps).mean(0) * np.exp(rho) + 1.0])
+    M = b1 * M + (1 - b1) * grad; V = b2 * V + (1 - b2) * grad**2
+    par = par + lr * (M / (1 - b1**k)) / (np.sqrt(V / (1 - b2**k)) + 1e-8)
+mu, sd = par[:2], np.exp(par[2:])
+
+print("exact mean        :", m.round(3), "  exact sd     :", np.sqrt(np.diag(Sig)).round(3))
+print("VI mean           :", mu.round(3), "  VI sd        :", sd.round(3))
+print("optimal MF sd     :", (1 / np.sqrt(np.diag(Lam))).round(3),
+      "  correlation  :", round(Sig[0, 1] / np.sqrt(Sig[0, 0] * Sig[1, 1]), 3))
+L = elbo(mu, sd)
+Q = np.diag(sd**2)                             # closed-form KL(q || posterior)
+d = m - mu
+KL = 0.5 * (np.trace(Lam @ Q) + d @ Lam @ d - 2 + np.linalg.slogdet(Sig)[1] - np.log(np.prod(sd**2)))
+print(f"ELBO {L:.3f}   log p(D) {logZ:.3f}   gap {logZ - L:.3f}   KL(q||p) {KL:.3f}")
+for xs in [-2.0, 2.0, 6.0]:
+    phi = np.array([1.0, xs])
+    print(f"x* = {xs:4.1f}: sd of f, exact {np.sqrt(phi @ Sig @ phi):.3f}, mean-field {np.sqrt(phi**2 @ sd**2):.3f}")
+```
+
+```text
+exact mean        : [0.694 0.952]   exact sd     : [0.22  0.103]
+VI mean           : [0.696 0.949]   VI sd        : [0.112 0.053]
+optimal MF sd     : [0.111 0.052]   correlation  : -0.862
+ELBO -23.325   log p(D) -22.643   gap 0.682   KL(q||p) 0.682
+x* = -2.0: sd of f, exact 0.411, mean-field 0.154
+x* =  2.0: sd of f, exact 0.112, mean-field 0.154
+x* =  6.0: sd of f, exact 0.445, mean-field 0.335
+```
+
+### 3.2 Đọc kết quả
+
+Bộ tối ưu tìm ra đúng điều mà lý thuyết ở mục 2.2 dự báo. Các kỳ vọng biến phân khớp với các kỳ vọng hậu nghiệm chính xác trong phạm vi 0.003, và các độ lệch chuẩn biến phân (0.112 và 0.053) khớp với điểm tối ưu trường trung bình dạng đóng (0.111 và 0.052) trong phạm vi nhiễu của phép tối ưu ngẫu nhiên. Cả hai đều bằng khoảng một nửa các độ lệch chuẩn hậu nghiệm chính xác (0.220 và 0.103). Hệ số là $1/\sqrt{1 - r^2} = 1.98$ với hệ số tương quan hậu nghiệm $r = -0.862$, suy ra từ dạng đóng cho hai tham số.
+
+ELBO, ước lượng từ 200 000 mẫu, thấp hơn logarit bằng chứng chính xác 0.682, và độ phân kỳ KL dạng đóng từ $q$ đến phân phối hậu nghiệm cũng bằng 0.682. Đó là đồng nhất thức của mục 1.2 được kiểm tra bằng số. Với hai tham số, KL nhỏ nhất mà bất kỳ phân phối Gauss trường trung bình nào có thể đạt được là $-\tfrac{1}{2}\log(1 - r^2) = 0.681$, nên phép tối ưu cách giá trị tốt nhất mà họ này có thể đạt trong phạm vi 0.001. Huấn luyện thêm bao nhiêu cũng không thu hẹp được khoảng cách: đó là cái giá của việc phân tích thành tích.
+
+Các dòng dự đoán cho thấy cái giá đó ảnh hưởng đến dự đoán như thế nào. Viết $\phi = (1, x^*)^\top$. Dưới phân phối hậu nghiệm chính xác, phương sai của hàm hồi quy $f(x^*) = b + w x^*$ là $\phi^\top \Sigma \phi = \Sigma_{bb} + 2 x^* \Sigma_{bw} + (x^*)^2 \Sigma_{ww}$, với $\Sigma$ là hiệp phương sai hậu nghiệm. Hiệp phương sai âm $\Sigma_{bw}$ triệt tiêu phần lớn phương sai gần tâm dữ liệu, nơi sai số của hệ số chặn và hệ số góc bù trừ cho nhau. Xấp xỉ trường trung bình bỏ số hạng đó. Tại $x^* = 2$, bên trong dữ liệu, nó báo một độ lệch chuẩn lớn hơn giá trị chính xác (0.154 so với 0.112); tại $x^* = -2$ và $x^* = 6$, bên ngoài dữ liệu, nó báo các giá trị nhỏ hơn nhiều (0.154 so với 0.411 và 0.335 so với 0.445). Các sai số tệ nhất nằm đúng ở nơi độ bất định quan trọng nhất.
+
+<Figure caption="VI trường trung bình trên ví dụ hồi quy tuyến tính. Trái: các elip hai độ lệch chuẩn của phân phối hậu nghiệm chính xác (nét liền, nghiêng theo hệ số tương quan −0.86) và của điểm tối ưu trường trung bình (nét đứt, song song với các trục), có tâm đúng nhưng độ phân tán biên chỉ bằng khoảng một nửa. Phải: độ lệch chuẩn của hàm hồi quy theo đầu vào. Đường trường trung bình quá cao trên phần lớn vùng tô bóng của các đầu vào huấn luyện và quá thấp nhiều bên ngoài vùng đó.">
+  <BdlMeanFieldVi />
+</Figure>
+
+Ví dụ là tuyến tính và hai chiều, nên nó cho thấy cơ chế chứ không cho thấy độ lớn của sai số trong một mạng. Hướng của sai số, phương sai biên quá nhỏ và độ phân tán dự đoán tăng quá chậm khi đi xa dữ liệu, là hướng đã được báo cáo cho VI trường trung bình trong các mạng (Foong và cộng sự, 2020).
+
+## 4. Dropout như suy luận biến phân
+
+### 4.1 Dropout Monte Carlo
+
+Dropout nhân mỗi nơ-ron của một lớp với một biến Bernoulli độc lập trong khi huấn luyện, đặt nó bằng không với xác suất $p$. Gal và Ghahramani (2016) đã chỉ ra rằng huấn luyện một mạng với dropout và suy giảm trọng số có thể được hiểu là cực đại hóa xấp xỉ một ELBO, cho một họ biến phân trong đó mỗi hàng của một ma trận trọng số hoặc là một vector được học hoặc bằng không. Khi đó phân phối dự đoán có được bằng cách giữ dropout hoạt động khi kiểm tra và lấy trung bình $M$ lượt truyền xuôi ngẫu nhiên, một quy trình mà họ gọi là **dropout Monte Carlo** (Monte Carlo dropout, MC dropout):
+
+$$
+p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{M} \sum_{m=1}^M p(y^* \mid f(x^*, \theta_m)), \qquad \theta_m \text{ obtained by sampling a dropout mask}.
+$$
+
+Điểm hấp dẫn mang tính thực tế. Bất kỳ mạng nào đã được huấn luyện với dropout đều cho một ước lượng độ bất định mà không cần thay đổi việc huấn luyện, với chi phí $M$ lượt truyền xuôi.
+
+### 4.2 Giới hạn của cách hiểu này
+
+Cách hiểu này đã được xem xét kỹ, và ba điều cần lưu ý đã được xác lập. Thứ nhất, họ biến phân là suy biến: nó đặt khối lượng lên một tập hữu hạn các điểm, nên độ phân kỳ KL của nó đến một tiên nghiệm Gauss liên tục không được định nghĩa rõ. Sự tương ứng với suy giảm trọng số chỉ đúng sau một phép xấp xỉ mà Hron, Matthews và Ghahramani (2018) đã phân tích chi tiết. Thứ hai, tỉ lệ dropout $p$ được cố định bằng tay chứ không được khớp. Với $p$ cố định, độ phân tán của phân phối dự đoán không co lại khi tập huấn luyện tăng lên, như độ phân tán của một phân phối hậu nghiệm lẽ ra phải co lại. **Concrete dropout** (Gal, Hron và Kendall, 2017) biến $p$ thành một tham số biến phân bằng cách thay biến Bernoulli bằng một phép nới lỏng liên tục (continuous relaxation), để $p$ có thể được học bằng hạ gradient. Thứ ba, chất lượng của độ bất định phụ thuộc vào kiến trúc và vào vị trí đặt dropout. Dropout MC là một mốc so sánh rẻ thường cải thiện so với một mạng đơn lẻ; nó không phải là một phép xấp xỉ trung thực của phân phối hậu nghiệm.
+
+## 5. VI gradient tự nhiên
+
+### 5.1 Vì sao gradient thông thường là một hướng kém
+
+Các tham số biến phân của một phân phối Gauss không giống các trọng số thông thường. Thay đổi một kỳ vọng 0.1 là một thay đổi lớn nếu độ lệch chuẩn là 0.01 và là một thay đổi không đáng kể nếu độ lệch chuẩn là 10. Hạ gradient thông thường bỏ qua điều này, và đó là lý do ví dụ ở mục 3 cần hàng nghìn bước và một bộ tối ưu thích nghi. **Gradient tự nhiên** (natural gradient) (Amari, 1998) đo độ lớn của bước bằng mức thay đổi của phân phối, với ma trận thông tin Fisher của $q$ làm metric, thay vì bằng mức thay đổi của các tham số của nó.
+
+Với $q$ Gauss, gradient tự nhiên của ELBO có dạng đóng. Viết $q = \mathcal{N}(m_q, \Lambda_q^{-1})$ với kỳ vọng $m_q$ và ma trận độ chính xác $\Lambda_q$, và gọi $L(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta)$ là logarit âm của phân phối đồng thời. Một bước gradient tự nhiên với độ lớn $\beta \in (0, 1]$ là
+
+$$
+\Lambda_q \leftarrow (1 - \beta)\, \Lambda_q + \beta\, \mathbb{E}_q\big[\nabla^2 L(\theta)\big], \qquad m_q \leftarrow m_q - \beta\, \Lambda_q^{-1}\, \mathbb{E}_q\big[\nabla L(\theta)\big].
+$$
+
+Đây là một bước Newton với ma trận Hesse được lấy trung bình theo $q$ và với ma trận độ chính xác được cập nhật như một trung bình trượt hàm mũ (exponential moving average). Khan và Rue (2023) đã suy ra phép cập nhật này và nhiều phép khác như các trường hợp của cùng một nguyên lý, **quy tắc học Bayes** (Bayesian learning rule), khôi phục lại hạ gradient, phương pháp Newton và một số bộ tối ưu học sâu bằng cách chọn họ của $q$ và xấp xỉ các kỳ vọng của nó.
+
+### 5.2 Kiểm tra trên ví dụ
+
+Phần tiếp theo của đoạn mã chạy phép cập nhật này với một phân phối Gauss hiệp phương sai đầy đủ trên bài toán hồi quy của mục 3. Vì logarit phân phối đồng thời là bậc hai, $\mathbb{E}_q[\nabla L] = \nabla L(m_q)$ và $\mathbb{E}_q[\nabla^2 L]$ là ma trận độ chính xác hậu nghiệm không đổi, nên không cần lấy mẫu.
+
+```python
+def kl_to_post(mq, Lq):                        # KL(N(mq, Lq^-1) || N(m, Sig))
+    d = m - mq
+    Cq = np.linalg.inv(Lq)
+    return 0.5 * (np.trace(Lam @ Cq) + d @ Lam @ d - 2
+                  + np.linalg.slogdet(Sig)[1] - np.linalg.slogdet(Cq)[1])
+
+# Natural-gradient VI with a full-covariance Gaussian q = N(mq, Lq^-1).
+# The log joint is quadratic, so E_q[gradient] = gradient at mq and E_q[Hessian] is constant.
+hess = X.T @ X / s2 + np.eye(2)                # minus the Hessian of the log joint
+for beta in [1.0, 0.5, 0.1]:
+    mq, Lq = np.zeros(2), np.eye(2)            # start at the prior: mean 0, precision I
+    out = []
+    for k in range(1, 21):
+        Lq = (1 - beta) * Lq + beta * hess     # precision update
+        mq = mq + beta * np.linalg.solve(Lq, grad_log_joint(mq[None])[0])
+        if k in (1, 2, 5, 20):
+            out.append(f"{kl_to_post(mq, Lq):.1e}")
+    print(f"beta = {beta}: KL after 1, 2, 5, 20 steps:", ", ".join(out))
+```
+
+```text
+beta = 1.0: KL after 1, 2, 5, 20 steps: 0.0e+00, 0.0e+00, 0.0e+00, 0.0e+00
+beta = 0.5: KL after 1, 2, 5, 20 steps: 2.8e-01, 4.3e-02, 4.8e-04, 4.3e-13
+beta = 0.1: KL after 1, 2, 5, 20 steps: 5.3e+00, 2.2e+00, 5.0e-01, 8.3e-03
+```
+
+Với $\beta = 1$, chỉ một bước là đến được phân phối hậu nghiệm chính xác, giống như phương pháp Newton giải một bài toán bậc hai trong một bước; các bước nhỏ hơn hội tụ theo cấp số nhân. Phép so sánh với mục 3 không phải giữa hai bên ngang hàng, vì ở đây họ phân phối phong phú hơn và các kỳ vọng là chính xác. Nhưng nó cho thấy vì sao gradient tự nhiên hấp dẫn: chúng dùng độ cong, và với một họ Gauss, độ cong đó là kỳ vọng của độ cong của hàm mất mát.
+
+### 5.3 VI gradient tự nhiên cho các mạng
+
+Với một mạng, các kỳ vọng được ước lượng bằng một hoặc vài mẫu của $\theta$, và ma trận Hesse được thay bằng một thứ rẻ hơn. Dùng một ma trận độ chính xác đường chéo và một ước lượng ma trận Hesse bằng bình phương gradient cho một phép cập nhật giống Adam: ma trận độ chính xác đóng vai trò của ước lượng mô-men bậc hai trong Adam, và nhiễu bơm vào các trọng số do nó quyết định. Khan và cộng sự (2018) đã phát triển các phương pháp như vậy, và Osawa và cộng sự (2019) mở rộng chúng đến ImageNet. Shen và cộng sự (2024) báo cáo rằng một biến thể về sau, Newton trực tuyến biến phân cải tiến (improved variational online Newton, IVON), huấn luyện được các mạng lớn, kể cả các mô hình ngôn ngữ, với chi phí gần bằng Adam và với các dự đoán được hiệu chuẩn (calibrated) tốt hơn trong các thí nghiệm của họ. Đây là các kết quả được báo cáo trên các bộ dữ liệu chuẩn của các tác giả; chúng xác lập rằng VI gradient tự nhiên có thể chạy ở quy mô lớn, chứ không xác lập rằng nó vượt trội các phép xấp xỉ khác nói chung.
+
+## 6. VI dựa trên hạt
+
+### 6.1 Hạ gradient biến phân Stein
+
+Một họ tham số ấn định trước hình dạng của $q$. **VI dựa trên hạt** (particle-based VI) thay vào đó biểu diễn $q$ bằng một tập $n$ vector tham số, các hạt (particle) $\theta_1, \dots, \theta_n$, và di chuyển chúng để phân phối thực nghiệm của chúng tiến tới phân phối hậu nghiệm. Phương pháp nổi tiếng nhất, **hạ gradient biến phân Stein** (Stein variational gradient descent, SVGD) (Liu và Wang, 2016), di chuyển mỗi hạt theo hướng làm giảm độ phân kỳ KL nhanh nhất trong một không gian các hàm trơn được định nghĩa bởi một hàm nhân (kernel) $k(\theta, \theta')$:
+
+$$
+\theta_i \leftarrow \theta_i + \epsilon\, \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_j, \theta_i)\, \nabla_{\theta_j} \log p(\theta_j \mid \mathcal{D}) + \nabla_{\theta_j} k(\theta_j, \theta_i) \Big],
+$$
+
+với bước $\epsilon$. Gradient của logarit phân phối hậu nghiệm chỉ cần phân phối hậu nghiệm chưa chuẩn hóa, nên nó là một gradient huấn luyện. Số hạng thứ nhất đưa mỗi hạt lên dốc, lấy trung bình theo các hạt lân cận. Số hạng thứ hai, gradient của hàm nhân, đẩy các hạt ra xa nhau và ngăn chúng sụp vào cùng một mode. Với một hạt duy nhất, số hạng đẩy triệt tiêu đối với các hàm nhân thông dụng và SVGD trở thành phép tăng gradient đến ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP).
+
+### 6.2 Các hạt và tổ hợp mô hình
+
+Một tập các mạng được huấn luyện cùng nhau với một số hạng đẩy là một tổ hợp mô hình (ensemble) đã được sửa đổi, và bài thứ năm, [Tổ hợp sâu và cách diễn giải Bayes của chúng](/vi/blog/deep-ensembles), trình bày riêng về tổ hợp mô hình. Có hai khó khăn hạn chế SVGD đối với các mạng. Các hàm nhân trên các vector trọng số có hàng triệu phần tử mang ít thông tin về mức độ giống nhau của hai mạng, vì các mạng tính cùng một hàm có thể có các trọng số cách xa nhau. Vì lý do này, D'Angelo và Fortuin (2021) đề xuất tính lực đẩy trong không gian hàm. Trong không gian nhiều chiều, các hạt cũng có xu hướng đánh giá thấp phương sai hậu nghiệm, một hiệu ứng mà Ba và cộng sự (2022) đã phân tích. Chi phí mỗi bước tăng theo $n^2$ lần tính hàm nhân và $n$ lần tính gradient, nên trong thực tế $n$ được giữ nhỏ.
+
+## 7. VI trong không gian hàm
+
+### 7.1 Vì sao chuyển sang hàm
+
+Mọi họ ở trên đều được định nghĩa trên trọng số, nhưng các dự đoán chỉ phụ thuộc vào hàm mà mạng tính. Nhiều bộ trọng số tính cùng một hàm, và các tiên nghiệm đơn giản trên trọng số tương ứng với các tiên nghiệm trên hàm khó mô tả. **VI trong không gian hàm** (function-space VI) thay vào đó đặt phép xấp xỉ và tiên nghiệm trên các hàm. $q$ của nó là một phân phối trên các đầu ra $f(x)$ của mạng tại mọi đầu vào, và tiên nghiệm của nó có thể là một quá trình Gauss (Gaussian process, GP) được chọn để biểu đạt trực tiếp tính trơn hoặc tính tuần hoàn. Bài thứ sáu, [Quá trình Gauss, hàm nhân và mạng rộng vô hạn](/vi/blog/gaussian-processes-and-kernels), phát triển các tiên nghiệm như vậy.
+
+### 7.2 Điều gì làm nó khó
+
+ELBO trong không gian hàm chứa một độ phân kỳ KL giữa hai phân phối trên các hàm, tức là giữa hai quá trình ngẫu nhiên. Độ phân kỳ đó có thể vô hạn: Burt và cộng sự (2021) lập luận rằng nó vô hạn trong các thiết lập thông dụng, chẳng hạn với một phép xấp xỉ sinh ra từ mạng và một tiên nghiệm GP, điều này làm cho hàm mục tiêu chính xác không dùng được. Các phương pháp thực tế thay nó bằng một đại lượng hữu hạn.
+
+Sun và cộng sự (2019) chỉ tính độ phân kỳ KL trên một tập hữu hạn các đầu vào, một **tập đo** (measurement set) gồm các điểm huấn luyện và các điểm ngẫu nhiên, và ước lượng gradient của nó. Rudner và cộng sự (2022) tuyến tính hóa mạng, như trong [bài trước](/vi/blog/laplace-approximations), để $q$ trên các giá trị hàm là Gauss và độ phân kỳ trên một tập đo có dạng đóng. Một hướng khác thay độ phân kỳ KL bằng một khoảng cách khác giữa các phân phối, chẳng hạn khoảng cách Wasserstein giữa các độ đo Gauss (Wild, Hu và Sejdinovic, 2022). Hướng này xây dựng trên một khung tổng quát hóa trong đó ELBO là một lựa chọn trong số nhiều hàm mất mát và độ phân kỳ (Knoblauch, Jewson và Damoulas, 2022). Các phương pháp này làm cho tri thức tiên nghiệm về các hàm trở nên dùng được, với cái giá là các hàm mục tiêu chỉ là xấp xỉ của một lý tưởng đặt không chỉnh.
+
+## 8. VI tuần tự
+
+### 8.1 Phân phối hậu nghiệm trở thành tiên nghiệm
+
+Khi dữ liệu đến theo từng lô $\mathcal{D}_1, \mathcal{D}_2, \dots$, quy tắc Bayes có thể được áp dụng cho từng lô một: phân phối hậu nghiệm sau lô $t - 1$ là tiên nghiệm cho lô $t$,
+
+$$
+p(\theta \mid \mathcal{D}_{1:t}) \propto p(\mathcal{D}_t \mid \theta)\, p(\theta \mid \mathcal{D}_{1:t-1}).
+$$
+
+Với các mô hình tuyến tính – Gauss, phép đệ quy này là chính xác và chính là bộ lọc Kalman (Kalman filter) (Kalman, 1960) áp dụng cho các tham số không đổi, còn được gọi là bình phương tối thiểu đệ quy (recursive least squares). Với một mạng, phân phối hậu nghiệm phải được xấp xỉ ở mỗi bước. **Học liên tục biến phân** (variational continual learning) (Nguyen và cộng sự, 2018) chiếu mỗi phân phối hậu nghiệm mới trở lại họ biến phân: $q_t$ cực đại hóa ELBO của lô $t$ với $q_{t-1}$ ở vị trí của tiên nghiệm. Các phiên bản trực tuyến của các phép cập nhật gradient tự nhiên ở mục 5 làm điều tương tự với một hoặc vài bước mỗi lô, và bộ lọc Kalman mở rộng (extended Kalman filter), vốn tuyến tính hóa mạng tại kỳ vọng hiện tại, là phiên bản tuần tự tương ứng của xấp xỉ Laplace tuyến tính hóa (Murphy, 2023).
+
+### 8.2 Các sai số tích lũy
+
+Mỗi phép chiếu làm mất thông tin, và các mất mát cộng dồn lại: một phép xấp xỉ quá hẹp sau một lô trở thành một tiên nghiệm quá tự tin cho lô tiếp theo, nên dữ liệu về sau dịch chuyển các tham số quá ít. Đây là cách hiểu theo Bayes của hiện tượng quên thảm khốc (catastrophic forgetting) và của hiện tượng ngược lại, một mô hình ngừng học. Hàm phạt bậc hai của hợp nhất trọng số đàn hồi (elastic weight consolidation), được mô tả trong [bài trước](/vi/blog/laplace-approximations) như một xấp xỉ Laplace, là phiên bản đơn giản nhất của cùng phép đệ quy này. Một phép xấp xỉ tuần tự có giữ được độ chính xác qua nhiều lô hay không phụ thuộc vào họ phân phối và dữ liệu, và điều đó phải được kiểm tra bằng cách đối chiếu với một mô hình được huấn luyện lại trên toàn bộ dữ liệu.
+
+## 9. Bài tập
+
+**Bài tập 1.** Suy ra đồng nhất thức $\log p(\mathcal{D}) = \mathrm{ELBO}(q) + \mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D}))$ từ quy tắc Bayes.
+
+<details>
+<summary>Đáp án</summary>
+
+Viết $\mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D})) = \mathbb{E}_q[\log q(\theta) - \log p(\theta \mid \mathcal{D})]$ và thay $\log p(\theta \mid \mathcal{D}) = \log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log p(\mathcal{D})$. Hằng số $\log p(\mathcal{D})$ ra khỏi kỳ vọng, cho $\mathrm{KL} = \mathbb{E}_q[\log q(\theta) - \log p(\theta)] - \mathbb{E}_q[\log p(\mathcal{D} \mid \theta)] + \log p(\mathcal{D}) = -\mathrm{ELBO}(q) + \log p(\mathcal{D})$. Sắp xếp lại ta được đồng nhất thức.
+
+</details>
+
+**Bài tập 2.** Trong ví dụ, độ lệch chuẩn hậu nghiệm chính xác của hệ số chặn là 0.220 và của xấp xỉ trường trung bình là 0.111. Chứng minh rằng với hai tham số, tỉ số này chỉ phụ thuộc vào hệ số tương quan hậu nghiệm $r$, và kiểm tra nó với kết quả in ra.
+
+<details>
+<summary>Đáp án</summary>
+
+Với một hiệp phương sai $2 \times 2$ có các phương sai $s_1^2$, $s_2^2$ và hệ số tương quan $r$, ma trận độ chính xác có các phần tử đường chéo $\Lambda_{11} = 1/(s_1^2(1 - r^2))$ và $\Lambda_{22} = 1/(s_2^2(1 - r^2))$. Phương sai trường trung bình là $1/\Lambda_{11} = s_1^2(1 - r^2)$, nên tỉ số các độ lệch chuẩn là $1/\sqrt{1 - r^2}$ với cả hai tham số. Với $r = -0.862$, tỉ số là 1.98, và $0.220/0.111 = 1.98$ và $0.103/0.052 = 1.98$.
+
+</details>
+
+**Bài tập 3.** Một mạng được huấn luyện bằng VI trường trung bình trên $N = 50\,000$ ví dụ với các lô nhỏ $B = 100$. Logarit hàm hợp lý trên lô nhỏ được nhân với hệ số nào, và điều gì xảy ra với sự cân bằng giữa hai số hạng của ELBO nếu quên hệ số đó?
+
+<details>
+<summary>Đáp án</summary>
+
+Nhân với $N/B = 500$, để tổng trên lô nhỏ ước lượng không chệch kỳ vọng của logarit hàm hợp lý trên toàn bộ dữ liệu. Không có hệ số đó, số hạng hàm hợp lý nhỏ đi 500 lần so với số hạng KL, tương đương với việc đặt trọng số quá nặng 500 lần cho toàn bộ số hạng KL, kể cả entropy của $q$: hàm hợp lý bị điều chỉnh nhiệt độ theo hệ số 1/500. Khi đó phân phối biến phân ở gần tiên nghiệm và mạng bị khớp thiếu.
+
+</details>
+
+**Bài tập 4.** Chứng minh rằng SVGD với một hạt và hàm nhân $k(\theta, \theta') = \exp(-\lVert\theta - \theta'\rVert^2 / (2\ell^2))$ với thang độ dài (lengthscale) $\ell$ là phép tăng gradient trên logarit phân phối hậu nghiệm.
+
+<details>
+<summary>Đáp án</summary>
+
+Với $n = 1$, tổng chỉ có một số hạng $j = i$. Hàm nhân cho $k(\theta_i, \theta_i) = 1$, và gradient của nó $\nabla_{\theta_j} k(\theta_j, \theta_i) = -\tfrac{1}{\ell^2}(\theta_j - \theta_i)\,k(\theta_j, \theta_i)$ bằng không tại $\theta_j = \theta_i$. Phép cập nhật là $\theta_i \leftarrow \theta_i + \epsilon \nabla \log p(\theta_i \mid \mathcal{D})$, phép tăng gradient hướng tới ước lượng MAP. Số hạng đẩy, và cùng với nó là khả năng biểu diễn độ bất định, chỉ xuất hiện khi có từ hai hạt trở lên.
+
+</details>
+
+**Bài tập 5.** Trong ví dụ, độ lệch chuẩn trường trung bình của $f(2)$ lớn hơn giá trị chính xác, mặc dù mọi phương sai biên trường trung bình đều nhỏ hơn giá trị chính xác. Hãy giải thích mâu thuẫn bề ngoài này.
+
+<details>
+<summary>Đáp án</summary>
+
+Phương sai của $f(2) = b + 2w$ là $\Sigma_{bb} + 4\Sigma_{bw} + 4\Sigma_{ww}$. Dưới phân phối hậu nghiệm chính xác, hiệp phương sai $\Sigma_{bw}$ âm và triệt tiêu phần lớn hai số hạng phương sai: $0.0482 - 0.0783 + 0.0427 = 0.0126$, độ lệch chuẩn 0.112. Xấp xỉ trường trung bình có các phương sai nhỏ hơn nhưng không có hiệp phương sai: $0.0125 + 4 \times 0.0028 = 0.0237$, độ lệch chuẩn 0.154. Khi các tương quan bị loại bỏ, các phương sai biên nhỏ hơn không kéo theo phương sai của mọi tổ hợp tuyến tính đều nhỏ hơn.
+
+</details>
+
+## 10. Tóm tắt
+
+| Câu hỏi | Trả lời |
+|---|---|
+| VI tối ưu hóa điều gì? | ELBO $\mathbb{E}_q[\log p(\mathcal{D} \mid \theta)] - \mathrm{KL}(q \,\Vert\, p(\theta))$, bằng $\log p(\mathcal{D})$ trừ $\mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D}))$. |
+| Gradient của nó được tính thế nào? | Bằng thủ thuật tái tham số hóa, $\theta = \mu + \tau \odot \varepsilon$, các lô nhỏ nhân với $N/B$ và vi phân tự động. |
+| VI Gauss trường trung bình sai ở đâu? | Nó bỏ các tương quan, đánh giá thấp các phương sai biên (theo hệ số $1/\sqrt{1 - r^2}$ trong ví dụ) và có thể để nhiều trọng số sụp về tiên nghiệm. |
+| Dropout MC là gì? | Dropout được giữ hoạt động khi kiểm tra, được hiểu như VI với một họ suy biến; rẻ, nhưng tỉ lệ dropout ấn định độ bất định. |
+| Gradient tự nhiên bổ sung điều gì? | Các bước được đo bằng mức thay đổi của phân phối; với phân phối Gauss là một phép cập nhật kiểu Newton dẫn đến các bộ tối ưu giống Adam. |
+| Các phương pháp dựa trên hạt bổ sung điều gì? | Một $q$ phi tham số gồm các mạng tương tác với nhau, với một số hạng đẩy; gần với tổ hợp mô hình. |
+| Vì sao dùng không gian hàm? | Tiên nghiệm và phép xấp xỉ trên các hàm tránh được tính đối xứng của trọng số, nhưng KL chính xác có thể vô hạn và phải được thay thế. |
+| VI tuần tự là gì? | Dùng mỗi phân phối hậu nghiệm xấp xỉ làm tiên nghiệm tiếp theo; các sai số xấp xỉ tích lũy. |
+
+Suy luận biến phân biến suy luận Bayes thành một bài toán tối ưu chạy trên cùng bộ máy với việc huấn luyện, và các họ của nó trải từ rẻ và chệch (trường trung bình, dropout) đến linh hoạt và tốn kém (các hạt, không gian hàm). Ví dụ minh họa đã cho thấy lựa chọn phổ biến nhất khôi phục được kỳ vọng hậu nghiệm và đánh giá sai độ phân tán theo một cách dự đoán được. Bài tiếp theo, [Tổ hợp sâu và cách diễn giải Bayes của chúng](/vi/blog/deep-ensembles), đi theo hướng ngược lại: nó từ bỏ hoàn toàn một họ tham số và huấn luyện nhiều mạng một cách độc lập, một phương pháp thường là mốc so sánh mạnh nhất trong thực tế và có cách hiểu theo Bayes là chủ đề của bài đó.
+
+### Tài liệu tham khảo
+
+- S. Amari, "Natural gradient works efficiently in learning," *Neural Computation*, vol. 10, no. 2, pp. 251–276, 1998.
+- J. Ba et al., "Understanding the variance collapse of SVGD in high dimensions," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006.
+- D. M. Blei, A. Kucukelbir and J. D. McAuliffe, "Variational inference: A review for statisticians," *Journal of the American Statistical Association*, vol. 112, no. 518, pp. 859–877, 2017.
+- C. Blundell, J. Cornebise, K. Kavukcuoglu and D. Wierstra, "Weight uncertainty in neural networks," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
+- D. R. Burt, S. W. Ober, A. Garriga-Alonso and M. van der Wilk, "Understanding variational inference in function-space," in *Third Symposium on Advances in Approximate Bayesian Inference*, 2021.
+- F. D'Angelo and V. Fortuin, "Repulsive deep ensembles are Bayesian," in *Advances in Neural Information Processing Systems 34*, 2021.
+- A. Y. K. Foong, D. R. Burt, Y. Li and R. E. Turner, "On the expressiveness of approximate inference in Bayesian neural networks," in *Advances in Neural Information Processing Systems 33*, 2020.
+- Y. Gal and Z. Ghahramani, "Dropout as a Bayesian approximation: Representing model uncertainty in deep learning," in *Proceedings of the 33rd International Conference on Machine Learning (ICML)*, 2016.
+- Y. Gal, J. Hron and A. Kendall, "Concrete dropout," in *Advances in Neural Information Processing Systems 30*, 2017.
+- A. Graves, "Practical variational inference for neural networks," in *Advances in Neural Information Processing Systems 24*, 2011.
+- G. E. Hinton and D. van Camp, "Keeping the neural networks simple by minimizing the description length of the weights," in *Proceedings of the Sixth Annual Conference on Computational Learning Theory (COLT)*, 1993.
+- M. D. Hoffman, D. M. Blei, C. Wang and J. Paisley, "Stochastic variational inference," *Journal of Machine Learning Research*, vol. 14, pp. 1303–1347, 2013.
+- J. Hron, A. G. de G. Matthews and Z. Ghahramani, "Variational Bayesian dropout: Pitfalls and fixes," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- M. I. Jordan, Z. Ghahramani, T. S. Jaakkola and L. K. Saul, "An introduction to variational methods for graphical models," *Machine Learning*, vol. 37, no. 2, pp. 183–233, 1999.
+- R. E. Kalman, "A new approach to linear filtering and prediction problems," *Journal of Basic Engineering*, vol. 82, no. 1, pp. 35–45, 1960.
+- M. E. Khan, D. Nielsen, V. Tangkaratt, W. Lin, Y. Gal and A. Srivastava, "Fast and scalable Bayesian deep learning by weight-perturbation in Adam," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- M. E. Khan and H. Rue, "The Bayesian learning rule," *Journal of Machine Learning Research*, vol. 24, 2023.
+- D. P. Kingma, T. Salimans and M. Welling, "Variational dropout and the local reparameterization trick," in *Advances in Neural Information Processing Systems 28*, 2015.
+- D. P. Kingma and M. Welling, "Auto-encoding variational Bayes," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2014.
+- J. Knoblauch, J. Jewson and T. Damoulas, "An optimization-centric view on Bayes' rule: Reviewing and generalizing variational inference," *Journal of Machine Learning Research*, vol. 23, 2022.
+- Q. Liu and D. Wang, "Stein variational gradient descent: A general purpose Bayesian inference algorithm," in *Advances in Neural Information Processing Systems 29*, 2016.
+- K. P. Murphy, *Probabilistic Machine Learning: Advanced Topics*, MIT Press, 2023.
+- C. V. Nguyen, Y. Li, T. D. Bui and R. E. Turner, "Variational continual learning," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2018.
+- K. Osawa et al., "Practical deep learning with Bayesian principles," in *Advances in Neural Information Processing Systems 32*, 2019.
+- R. Ranganath, S. Gerrish and D. M. Blei, "Black box variational inference," in *Proceedings of the 17th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2014.
+- D. J. Rezende, S. Mohamed and D. Wierstra, "Stochastic backpropagation and approximate inference in deep generative models," in *Proceedings of the 31st International Conference on Machine Learning (ICML)*, 2014.
+- T. G. J. Rudner, Z. Chen, Y. W. Teh and Y. Gal, "Tractable function-space variational inference in Bayesian neural networks," in *Advances in Neural Information Processing Systems 35*, 2022.
+- Y. Shen et al., "Variational learning is effective for large deep networks," in *Proceedings of the 41st International Conference on Machine Learning (ICML)*, 2024.
+- S. Sun, G. Zhang, J. Shi and R. Grosse, "Functional variational Bayesian neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2019.
+- F. Wenzel et al., "How good is the Bayes posterior in deep neural networks really?," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
+- V. D. Wild, R. Hu and D. Sejdinovic, "Generalized variational inference in function spaces: Gaussian measures meet Bayesian deep learning," in *Advances in Neural Information Processing Systems 35*, 2022.

@@ -1,0 +1,395 @@
+---
+title: "Laplace Approximations and the Linearized Predictive"
+description: "A Laplace approximation fits a Gaussian at a trained network's mode from its curvature, giving post-hoc uncertainty and an estimate of the marginal likelihood."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - uncertainty
+  - model selection
+series: bayesian-deep-learning
+seriesOrder: 3
+---
+
+import Figure from '../../components/Figure.astro';
+import BdlLaplaceLogistic from '../../components/diagrams/BdlLaplaceLogistic.astro';
+
+The [first entry](/blog/bayesian-inference-for-neural-networks) defined the posterior $p(\theta \mid \mathcal{D})$ over the parameters of a network and the posterior predictive that averages the network's outputs over it. The [second entry](/blog/sampling-the-posterior-mcmc) approximated that average with samples. Sampling is accurate in the limit but expensive: every sample is a full copy of the parameters, and every prediction needs one forward pass per sample. This entry presents the oldest and cheapest alternative, the **Laplace approximation**, which replaces the posterior by a single Gaussian centered at a trained network's parameters and shaped by the curvature of the loss there.
+
+The approximation is attractive to anyone who already trains networks. It starts from the parameters that ordinary training returns, so the training run is unchanged, and it adds one step after training: compute a curvature matrix and invert it, or an approximation of it. In return it gives a predictive distribution with error bars and an estimate of the marginal likelihood $p(\mathcal{D})$, which can tune hyperparameters without a validation set. The price is that the approximation is local. It sees the posterior only through derivatives at one point, and it can be wrong in ways that the curvature cannot reveal.
+
+The entry builds on the regularized training objective of [Generalization, Overfitting and Regularization](/blog/generalization-overfitting-and-regularization) and the gradients of [Gradient Descent and Its Variants](/blog/gradient-descent-and-its-variants). It uses the series notation: $\theta \in \mathbb{R}^P$ are the $P$ parameters, $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ the training data, $p(\theta)$ the prior, $p(\mathcal{D} \mid \theta)$ the likelihood and $x^*$, $y^*$ a test input and its output. Vectors are columns. The example runs on Python 3.13 with NumPy 2.5.3 and fixed seeds.
+
+## 1. A Gaussian at the mode
+
+### 1.1 The idea
+
+The **maximum a posteriori (MAP) estimate** $\hat{\theta}$ is the parameter vector at which the posterior density is largest. Training a network with weight decay finds it, or at least a local version of it: minimizing the regularized loss
+
+$$
+L(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta) = \sum_{n=1}^N \ell(f(x_n, \theta), y_n) - \log p(\theta)
+$$
+
+is the same as maximizing $\log p(\theta \mid \mathcal{D}) = -L(\theta) - \log p(\mathcal{D})$, because $\log p(\mathcal{D})$ does not depend on $\theta$. Here $f(x, \theta) \in \mathbb{R}^C$ is the network's output (the $C$ logits of a classifier, or the mean of a regression) and $\ell$ is the per-example negative log-likelihood. With a Gaussian prior $p(\theta) = \mathcal{N}(0, s_0^2 I)$ of standard deviation $s_0$, written here through its **prior precision** $\alpha = 1/s_0^2$ because the curvature formulas are simpler in it, the term $-\log p(\theta)$ is the weight-decay penalty $\tfrac{\alpha}{2}\lVert\theta\rVert^2$ plus a constant.
+
+Near $\hat{\theta}$, expand $L$ to second order. The gradient vanishes at a minimum, so
+
+$$
+L(\theta) \approx L(\hat{\theta}) + \tfrac{1}{2}(\theta - \hat{\theta})^\top H (\theta - \hat{\theta}), \qquad H = \nabla^2_\theta L(\hat{\theta}).
+$$
+
+Exponentiating $-L$ gives a density proportional to a Gaussian. The Laplace approximation is that Gaussian:
+
+$$
+p(\theta \mid \mathcal{D}) \approx q(\theta) = \mathcal{N}(\theta;\ \hat{\theta},\ \Sigma), \qquad \Sigma = H^{-1}.
+$$
+
+The mean is the trained parameter vector and the covariance is the inverse curvature. Directions in which the loss rises steeply are directions the data pin down, and they get small variance; directions in which the loss is flat get large variance. The idea goes back to Laplace's work on integrals of the form $\int e^{-n g(\theta)}\,d\theta$ for large $n$. MacKay (1992) developed it for interpolation models and brought it to neural networks, for both predictions and model comparison, in regression and in classification. Tierney and Kadane (1986) analyzed its accuracy for posterior moments in statistics.
+
+### 1.2 The recipe and what it leaves out
+
+The approximation splits the work into two jobs of unequal cost. The expensive one, finding $\hat{\theta}$, is ordinary training and is not repeated. The new one is a pass over the training set that accumulates a curvature matrix at $\hat{\theta}$, followed by a factorization of that matrix: linear algebra, with no further optimization and no random sampling. Because the curvature is a sum over training examples, the second job needs the data, but it does not depend on how $\hat{\theta}$ was found. Daxberger et al. (2021) emphasize this separation from training as the main practical attraction of the method.
+
+The construction also fixes what the approximation can represent, and three of its consequences recur through the entry:
+
+- **One point of contact.** Everything comes from the value and the derivatives of $L$ at $\hat{\theta}$. A skewed posterior, a heavy tail or a second mode leaves no trace there and is invisible to the approximation.
+- **A closed form.** A mean and a covariance determine the whole approximation. The predictive variance in Section 3 and the evidence in Section 5 are formulas in them, not Monte Carlo averages.
+- **A minimum is assumed.** The expansion assumes $\nabla L(\hat{\theta}) = 0$ and $H$ positive definite. Networks are rarely trained to an exact stationary point, and Section 2 shows that the exact Hessian of a network is often indefinite.
+
+The approximation is exact when $L$ is quadratic, which is the case for linear regression with a Gaussian prior and Gaussian noise. For other models its accuracy improves as $N$ grows, because the posterior concentrates and becomes approximately Gaussian under regularity conditions (the Bernstein–von Mises theorem). A network with millions of parameters is far from that regime: many directions are barely constrained by the data, and the network's symmetries (the seventh entry, [Priors, Symmetries and Identifiability](/blog/priors-symmetries-and-identifiability), returns to them) create many equivalent modes.
+
+## 2. Curvature for a neural network
+
+### 2.1 The Hessian and its problems
+
+The obvious choice for $H$ is the exact Hessian of $L$. Writing $J_n = \partial f(x_n, \theta)/\partial\theta \in \mathbb{R}^{C \times P}$ for the Jacobian of the network output at the $n$-th input and $\Lambda_n = \nabla^2_f \ell(f, y_n) \in \mathbb{R}^{C \times C}$ for the Hessian of the loss with respect to the output, the chain rule gives
+
+$$
+\nabla^2_\theta L = \sum_{n=1}^N J_n^\top \Lambda_n J_n \;+\; \sum_{n=1}^N \sum_{c=1}^C \frac{\partial \ell}{\partial f_c}\, \nabla^2_\theta f_c(x_n, \theta) \;+\; \nabla^2_\theta\big(-\log p(\theta)\big).
+$$
+
+The second term involves the second derivatives of the network itself, weighted by the residuals $\partial \ell / \partial f_c$. It has two drawbacks. It can be negative in some directions, so the sum need not be positive definite and $H^{-1}$ need not be a covariance. And for a trained network it is expensive to compute and store: $H$ has $P^2$ entries.
+
+### 2.2 The generalized Gauss–Newton matrix
+
+The **generalized Gauss–Newton (GGN)** matrix keeps the first term and drops the second (Schraudolph, 2002):
+
+$$
+H_{\mathrm{GGN}} = \sum_{n=1}^N J_n^\top \Lambda_n J_n + \alpha I .
+$$
+
+For the usual losses $\Lambda_n$ is positive semidefinite: for squared error with noise variance $\sigma^2$ it is $I/\sigma^2$, and for a sigmoid or softmax output with cross-entropy it is the covariance of the predicted class distribution ($p(1-p)$ in the binary case). The prior term $\alpha I$ then makes $H_{\mathrm{GGN}}$ positive definite, whatever the state of training. The dropped term is small where the residuals are small or where the network is close to linear in $\theta$, and it vanishes for a model that is linear in its parameters.
+
+For likelihoods in the exponential family with their canonical link (Gaussian regression, logistic and softmax classification), the GGN equals the **Fisher information matrix**, the expected outer product of the gradient of the log-likelihood under the model's own predictive distribution (Martens, 2020). A different matrix, the **empirical Fisher**, uses the observed labels instead of labels drawn from the model, $\sum_n \nabla_\theta \ell_n \nabla_\theta \ell_n^\top$. It is cheaper but does not share the properties of the GGN; near a well-fitted mode, where gradients are small, it can badly underestimate the curvature (Kunstner, Balles and Hennig, 2019). This entry uses the GGN.
+
+### 2.3 Making the curvature affordable
+
+A network with $10^7$ parameters has a GGN with $10^{14}$ entries, far beyond any memory. Practical Laplace approximations restrict the structure of the curvature or the set of parameters it covers:
+
+- **Diagonal.** Keep only the diagonal of $H_{\mathrm{GGN}}$. Cost and storage are $O(P)$, but all correlations between parameters are lost, which tends to inflate the predictive variance.
+- **Kronecker-factored approximate curvature (K-FAC).** For each layer, approximate the block of the GGN by a Kronecker product $A \otimes G$, where $A$ is the covariance of the layer's input activations and $G$ the covariance of the gradients with respect to its outputs (Martens and Grosse, 2015). The **Kronecker product** $A \otimes G$ of an $m \times m$ matrix $A$ and an $n \times n$ matrix $G$ is the $mn \times mn$ block matrix whose $(i, j)$ block is $A_{ij} G$. A layer of size $d_{\mathrm{in}} \times d_{\mathrm{out}}$ then needs a $d_{\mathrm{in}} \times d_{\mathrm{in}}$ and a $d_{\mathrm{out}} \times d_{\mathrm{out}}$ matrix instead of a square matrix of side $d_{\mathrm{in}} d_{\mathrm{out}}$. Ritter, Botev and Barber used this structure for scalable Laplace approximations in 2018.
+- **Low rank.** Keep the leading eigenvectors of the data term and let the prior handle the rest, or never form the matrix and work with matrix-vector products $H v$, which automatic differentiation computes at the cost of a few gradient evaluations (Schraudolph, 2002).
+- **A subset of parameters.** Treat most of the network as fixed and apply a full Laplace approximation to a small part of it, most often the last layer. This **last-layer Laplace** approximation is cheap, exact in its curvature for that layer when the output is linear in it and often competitive in practice (Kristiadi, Hein and Hennig, 2020; Daxberger et al., 2021).
+
+The study of Daxberger et al. (2021) compares these options on standard benchmarks and recommends last-layer K-FAC or last-layer full curvature as a default. Their recommendation is an empirical finding about the benchmarks they ran; the eighth entry, [Scaling Bayesian Deep Learning](/blog/scaling-bayesian-deep-learning), returns to the trade-offs at scale.
+
+## 3. The predictive distribution
+
+### 3.1 Sampling weights and its pitfall
+
+Given $q(\theta)$, the posterior predictive is approximated by
+
+$$
+p(y^* \mid x^*, \mathcal{D}) \approx \int p(y^* \mid f(x^*, \theta))\, q(\theta)\, d\theta \approx \frac{1}{M} \sum_{m=1}^M p(y^* \mid f(x^*, \theta_m)), \qquad \theta_m \sim q,
+$$
+
+with $M$ draws from the Gaussian. This works for small models but often fails for a network with a GGN-based Laplace approximation: the predictions of sampled networks can be far worse than those of $\hat{\theta}$, so the Bayesian average underfits. The cause is a mismatch between the curvature and the model. The GGN describes the loss of a network that is linear in $\theta$ around $\hat{\theta}$; the sampled parameters are then pushed through the full nonlinear network, for which the same Gaussian may reach regions of high loss. Directions that the GGN considers unconstrained (only the prior bounds them) are where the mismatch is worst.
+
+### 3.2 The linearized predictive
+
+Immer, Korzepa and Bauer (2021) resolved the mismatch by making the predictive consistent with the curvature. Replace the network by its first-order Taylor expansion in the parameters:
+
+$$
+f_{\mathrm{lin}}(x, \theta) = f(x, \hat{\theta}) + J(x)\,(\theta - \hat{\theta}), \qquad J(x) = \left.\frac{\partial f(x, \theta)}{\partial \theta}\right|_{\theta = \hat{\theta}}.
+$$
+
+Two facts make this the natural partner of the GGN. First, the exact Hessian of the regularized loss of $f_{\mathrm{lin}}$ at $\hat{\theta}$ is $H_{\mathrm{GGN}}$, because the dropped second-derivative term is zero for a model linear in $\theta$. The GGN Laplace approximation is therefore the ordinary Laplace approximation of the linearized model. Second, a linear function of a Gaussian is Gaussian, so the output at a test input has a closed-form distribution:
+
+$$
+f_{\mathrm{lin}}(x^*, \theta) \sim \mathcal{N}\big(f(x^*, \hat{\theta}),\ J(x^*)\, \Sigma\, J(x^*)^\top\big), \qquad \theta \sim q .
+$$
+
+The predictive mean is the trained network's output, unchanged. The predictive covariance is large where the test input moves the output along directions that the data left uncertain. For regression with Gaussian noise of variance $\sigma^2$, the predictive of $y^*$ adds $\sigma^2$ to the diagonal of that covariance.
+
+The same formula defines a covariance between outputs at two inputs, $k(x, x') = J(x)\, \Sigma\, J(x')^\top$. The linearized Laplace approximation therefore turns a trained network into a Gaussian process (GP) whose mean function is the network and whose kernel is built from the network's Jacobians (Khan et al., 2019). The sixth entry, [Gaussian Processes, Kernels and Infinitely Wide Networks](/blog/gaussian-processes-and-kernels), develops the kernel $J(x)J(x')^\top$, known as the neural tangent kernel (NTK), in its own right.
+
+### 3.3 Classification and the probit approximation
+
+For a binary classifier with logit $f$, the predictive probability is $\int \mathrm{sig}(f)\, \mathcal{N}(f; \mu, s^2)\, df$, where $\mathrm{sig}(z) = 1/(1 + e^{-z})$ is the logistic sigmoid and $\mu$ and $s^2$ are the mean and variance of the linearized logit. The integral has no closed form, but replacing the sigmoid by a scaled Gaussian cumulative distribution function gives an accurate approximation (MacKay, *The evidence framework applied to classification networks*, 1992; Bishop, 2006):
+
+$$
+p(y^* = 1 \mid x^*, \mathcal{D}) \approx \mathrm{sig}\!\left(\frac{\mu}{\sqrt{1 + \pi s^2 / 8}}\right).
+$$
+
+The effect is to pull the logit toward zero in proportion to its uncertainty: a confident prediction made in an uncertain region is moderated toward 0.5. For $C$ classes a similar per-class scaling of the softmax logits is used, or a few Monte Carlo samples of the Gaussian logits.
+
+## 4. A worked example: logistic regression
+
+### 4.1 The problem
+
+A model with two parameters makes the approximation checkable, because the exact posterior can be computed on a grid. Take binary logistic regression with features $\phi(x) = (1, x)^\top$, parameters $\theta = (b, w)^\top$ (a bias and a slope), logit $f(x, \theta) = b + w x$ and prior $\mathcal{N}(0, \alpha^{-1} I)$ with $\alpha = 1$. The data are 20 points with $x$ uniform on $[-3, 3]$ and labels drawn from the true model with $b = 0.5$ and $w = 1.5$. The model is linear in $\theta$, so $J(x) = \phi(x)^\top$, the GGN equals the exact Hessian and the linearized predictive is exact for the Gaussian $q$. What remains to test is the Gaussian itself.
+
+The listing finds $\hat{\theta}$ by Newton's method, which uses the same matrix $H$ as its step, builds the Laplace approximation and compares it with the exact posterior on a $601 \times 601$ grid over $[-6, 8]^2$. It then compares four predictive probabilities: the plug-in $\mathrm{sig}(f(x^*, \hat{\theta}))$, the probit approximation of Section 3.3, a Monte Carlo average over 20 000 draws from $q$ and the exact posterior average from the grid.
+
+```python
+import numpy as np
+
+def sig(z):
+    return 1 / (1 + np.exp(-z))
+
+# Toy data: 20 points, true theta = (0.5, 1.5); features phi(x) = [1, x]
+rng = np.random.default_rng(8)
+N = 20
+x = rng.uniform(-3, 3, N)
+y = (rng.uniform(size=N) < sig(0.5 + 1.5 * x)).astype(float)
+X = np.column_stack([np.ones(N), x])
+
+def log_joint(T, alpha):                      # log p(D|theta) + log p(theta), rows of T
+    Z = T @ X.T
+    return ((Z * y - np.logaddexp(0, Z)).sum(-1)
+            - 0.5 * alpha * (T**2).sum(-1) - np.log(2 * np.pi / alpha))
+
+def laplace(alpha):
+    t = np.zeros(2)
+    for _ in range(50):                       # Newton's method for the MAP estimate
+        p = sig(X @ t)
+        g = X.T @ (y - p) - alpha * t
+        H = X.T @ (X * (p * (1 - p))[:, None]) + alpha * np.eye(2)  # GGN (= Hessian)
+        t = t + np.linalg.solve(H, g)
+    p = sig(X @ t)
+    H = X.T @ (X * (p * (1 - p))[:, None]) + alpha * np.eye(2)
+    logZ = log_joint(t, alpha) + np.log(2 * np.pi) - 0.5 * np.linalg.slogdet(H)[1]
+    return t, np.linalg.inv(H), logZ
+
+# Reference: the exact posterior on a 601 x 601 grid
+g1 = np.linspace(-6, 8, 601)
+B, W = np.meshgrid(g1, g1, indexing="ij")
+G = np.stack([B.ravel(), W.ravel()], 1)
+dA = (g1[1] - g1[0]) ** 2
+
+def exact(alpha):
+    lj = log_joint(G, alpha)
+    m = lj.max()
+    post = np.exp(lj - m)
+    return post / post.sum(), m + np.log(post.sum() * dA)
+
+alpha = 1.0
+t, S, logZ = laplace(alpha)
+post, logZ_ex = exact(alpha)
+mean = post @ G
+sd = np.sqrt(post @ (G - mean) ** 2)
+print("MAP theta*   :", t.round(3), " Laplace sd:", np.sqrt(np.diag(S)).round(3))
+print("exact mean   :", mean.round(3), " exact sd  :", sd.round(3))
+print(f"log p(D)     : Laplace {logZ:.3f}, exact {logZ_ex:.3f}")
+
+draws = np.random.default_rng(0).multivariate_normal(t, S, 20000)
+print("  x*   plug-in  probit  MC-Laplace  exact")
+for xs in [-8.0, -2.0, 0.0, 2.0, 8.0]:
+    phi = np.array([1.0, xs])
+    mu, s2 = phi @ t, phi @ S @ phi
+    print(f"{xs:5.0f}   {sig(mu):.3f}   {sig(mu / np.sqrt(1 + np.pi * s2 / 8)):.3f}"
+          f"     {sig(draws @ phi).mean():.3f}     {post @ sig(G @ phi):.3f}")
+```
+
+```text
+MAP theta*   : [0.363 1.326]  Laplace sd: [0.536 0.498]
+exact mean   : [0.407 1.479]  exact sd  : [0.55  0.514]
+log p(D)     : Laplace -9.466, exact -9.443
+  x*   plug-in  probit  MC-Laplace  exact
+   -8   0.000   0.019     0.008     0.002
+   -2   0.092   0.123     0.123     0.100
+    0   0.590   0.585     0.584     0.594
+    2   0.953   0.913     0.917     0.939
+    8   1.000   0.980     0.991     0.998
+```
+
+The `log_joint` function includes the normalizing constant of the prior, $-\log(2\pi/\alpha)$ for two parameters, so that `logZ` is a log marginal likelihood and can be compared across values of $\alpha$ in Section 5.
+
+### 4.2 Reading the output
+
+The standard deviations are close: 0.536 and 0.498 from the Laplace approximation against 0.550 and 0.514 from the grid. The means are not. The exact posterior mean of the slope is 1.479, the MAP value is 1.326, and the Laplace approximation has no way to know about the difference. The exact posterior of $w$ is skewed to the right, as the left panel of the figure shows: with 20 points, large slopes (a sharp boundary) remain plausible, whereas small slopes are ruled out quickly. A Gaussian is symmetric about its mode and puts too much mass on small slopes and too little on large ones.
+
+The predictive table shows the consequence. Near the data ($x^* = \pm 2$) the plug-in is too confident by a little and the Laplace predictive is not confident enough by a little more: at $x^* = 2$ the three values are 0.953, 0.917 and the exact 0.939. Far from the data the plug-in tends to 0 and 1, while the Laplace predictive levels off. As $x^* \to \infty$ the Monte Carlo average tends to the probability that the slope is positive under $q$, which is $\Phi(\hat{w}/s_w) = \Phi(1.326/0.498) \approx 0.996$, with $\Phi$ the standard normal cumulative distribution function and $s_w$ the Laplace standard deviation of the slope. The probit approximation tends to $\mathrm{sig}\big(\hat{w}/(s_w\sqrt{\pi/8})\big) \approx 0.986$. The exact posterior, whose mass on small slopes is smaller, is more confident than both.
+
+<Figure caption="Laplace approximation of the two-parameter logistic regression. Left: the exact marginal posterior of the slope w (solid) is skewed to the right of its mode; the Laplace Gaussian (dashed) is centered at the MAP value and misses the skew. Right: predictive probability of class 1 far from most of the data. The plug-in MAP curve approaches 1 fastest, the exact predictive lies just below it and the Laplace predictive levels off lowest.">
+  <BdlLaplaceLogistic />
+</Figure>
+
+Two lessons carry over to networks. Where the posterior is close to Gaussian, the Laplace approximation recovers its spread well from one matrix. Where it is skewed, the approximation errs in a predictable direction: it is centered at the mode, not at the mean, and its symmetric tails misplace probability. In this example the error made the predictions less confident than the exact posterior. That is the safer direction for many applications, but it is not guaranteed in general.
+
+The probit column also shows that the approximation is accurate where probabilities are moderate (0.123 against 0.123 at $x^* = -2$) and loses relative accuracy in the tails (0.019 against 0.008 at $x^* = -8$). Exercise 3 returns to this.
+
+## 5. The marginal likelihood and model selection
+
+### 5.1 The Laplace estimate of the evidence
+
+The same Gaussian integral that normalizes $q$ gives an estimate of the **marginal likelihood**, or **evidence**, $p(\mathcal{D}) = \int p(\mathcal{D} \mid \theta)\, p(\theta)\, d\theta$. Integrating the quadratic expansion of Section 1.1 gives
+
+$$
+\log p(\mathcal{D}) \approx \log p(\mathcal{D} \mid \hat{\theta}) + \log p(\hat{\theta}) + \frac{P}{2} \log 2\pi - \frac{1}{2} \log \det H .
+$$
+
+The first term rewards fit. The last three terms together form the logarithm of what MacKay called the **Occam factor**: the ratio of the posterior's volume to the prior's. A model whose prior spreads its mass over many parameter settings, of which only a small region fits the data, pays a large penalty. A model with a prior so tight that it cannot fit pays through the first term. The evidence is maximized between the two.
+
+In the example the Laplace estimate is $-9.466$ against the exact $-9.443$, an error of 0.023 nats. One reading is that the evidence depends on the volume of the posterior, which the Gaussian matches well, more than on its location, which it misses.
+
+### 5.2 Choosing the prior precision
+
+The evidence depends on hyperparameters such as $\alpha$, and maximizing it chooses them from the training data alone, with no held-out set. MacKay derived a fixed-point update for $\alpha$ by setting the derivative of the Laplace evidence to zero while treating the data term of $H$ as constant:
+
+$$
+\alpha \leftarrow \frac{\gamma}{\lVert \hat{\theta} \rVert^2}, \qquad \gamma = P - \alpha \operatorname{tr}(\Sigma).
+$$
+
+The quantity $\gamma$ is the **effective number of parameters**: each eigendirection of $H$ contributes close to 1 if the data determine it and close to 0 if the prior does. The listing continues the previous one: it evaluates both evidences over a range of $\alpha$, searches for the maximum of the Laplace estimate over a fine grid of $\log\alpha$ and runs the fixed-point update.
+
+```python
+print(" alpha   Laplace   exact")
+for alpha in [0.01, 0.1, 0.3, 1.0, 3.0, 10.0]:
+    print(f"{alpha:6.2f}  {laplace(alpha)[2]:8.3f}  {exact(alpha)[1]:7.3f}")
+
+alphas = np.exp(np.linspace(np.log(0.01), np.log(10), 301))
+best = max(alphas, key=lambda a: laplace(a)[2])
+print(f"search over alpha: alpha = {best:.3f}, log p(D) = {laplace(best)[2]:.3f}")
+
+alpha = 1.0                                   # MacKay's fixed-point update
+for _ in range(30):
+    t, S, logZ = laplace(alpha)
+    gamma = 2 - alpha * np.trace(S)           # effective number of parameters
+    alpha = gamma / (t @ t)
+print(f"fixed point:       alpha = {alpha:.3f}, log p(D) = {laplace(alpha)[2]:.3f}, gamma = {gamma:.3f}")
+```
+
+```text
+ alpha   Laplace   exact
+  0.01   -11.543  -11.417
+  0.10    -9.692   -9.612
+  0.30    -9.289   -9.241
+  1.00    -9.466   -9.443
+  3.00   -10.240  -10.228
+ 10.00   -11.552  -11.546
+search over alpha: alpha = 0.407, log p(D) = -9.267
+fixed point:       alpha = 0.650, log p(D) = -9.320, gamma = 1.562
+```
+
+Both curves have the shape the Occam argument predicts: a broad prior ($\alpha = 0.01$) and a tight one ($\alpha = 10$) are penalized, and the maximum lies in between. The Laplace and exact values differ by at most 0.126 nats and rank the six values of $\alpha$ in the same order. The search puts the Laplace optimum at $\alpha \approx 0.41$, which the table brackets between 0.3 and 1.
+
+The fixed-point update stops at $\alpha = 0.650$, not at the optimum. Its derivation treats $\sum_n J_n^\top \Lambda_n J_n$ as independent of $\alpha$, which is exact for linear-Gaussian regression, where $\Lambda_n = I/\sigma^2$ and, because the model is linear in $\theta$, $J_n$ do not depend on $\hat{\theta}$. For logistic regression the weights $p(1-p)$ change as $\hat{\theta}$ moves with $\alpha$, and the fixed point is an approximation of the stationary point. A gradient-based or grid search on the Laplace evidence itself avoids the issue, at the price of recomputing $H$.
+
+### 5.3 Marginal likelihoods for networks
+
+For networks the same objective can tune the prior precision of each layer, and the noise variance of a regression by gradient ascent on the Laplace evidence during training (Immer et al., 2021). The curvature must then be recomputed periodically, and the scalable structures of Section 2.3 make that affordable.
+
+Two cautions apply. First, the Laplace evidence inherits the errors of the curvature: a diagonal approximation, for example, misjudges $\log\det H$ and can favor the wrong model. Second, the marginal likelihood answers a specific question, how probable the training data were under the prior, which is not the same as how well the model will predict new data once trained. Lotfi et al. (2022) describe cases in which the two disagree and propose a conditional variant that scores a model on part of the data after training on the rest. The evidence is a useful tool for hyperparameters that control the prior; it is not a general replacement for validation.
+
+## 6. Geometry and the limits of a local approximation
+
+### 6.1 Curvature as a metric
+
+The GGN has a geometric reading. The term $J_n^\top \Lambda_n J_n$ measures how far a small step $\delta\theta$ moves the network's predictive distribution at $x_n$: $\delta\theta^\top J_n^\top \Lambda_n J_n\, \delta\theta$ is, to second order, twice the Kullback–Leibler (KL) divergence between the predictive distributions before and after the step for the likelihoods of Section 2.2. Summed over the data, the GGN is a metric on parameter space that measures distance by change in predictions, not by change in the numbers in $\theta$. The Laplace covariance is the inverse of that metric, regularized by the prior.
+
+Two consequences follow. Any direction $v$ with $J_n v = 0$ for every training input leaves the training predictions unchanged to first order. In such a direction the data contribute nothing to $H_{\mathrm{GGN}}$ and the posterior variance equals the prior variance $1/\alpha$. Networks have many such directions, so the prior precision has a strong effect on the Laplace predictive away from the data, which is one reason to tune it by the evidence. Second, the metric depends on the parameterization. Dinh et al. (2017) showed that rescaling the weights of a network with rectified linear units changes the Hessian at a minimum arbitrarily without changing the function. Statements about "flat" minima, and the Occam factor's preference for them, are therefore statements about a parameterization and a prior together.
+
+### 6.2 What a single Gaussian misses
+
+The failure modes of the approximation follow from its locality:
+
+- **Skew and heavy tails.** As in Section 4, the Gaussian is centered at the mode and is symmetric, so it misplaces mass when the posterior is not.
+- **Curved valleys.** Low-loss regions of networks are often curved. Moving along a straight line from $\hat{\theta}$ in a low-curvature direction can leave the valley and enter a region of high loss. Bergamin et al. (2023) replace the straight lines by paths that follow the curvature of the loss surface, a Riemannian Laplace approximation. The linearized predictive avoids the problem in a different way, by never evaluating the nonlinear network at the sampled parameters.
+- **Multiple modes.** One Gaussian describes one mode. Symmetric copies of a mode give identical predictions and do not matter for the predictive, but genuinely different modes do. Combining several Laplace approximations at the modes of independently trained networks is one remedy; the fifth entry, [Deep Ensembles and Their Bayesian Interpretation](/blog/deep-ensembles), treats ensembles.
+- **No stationary point.** Training with stochastic gradients stops near, not at, a minimum. The GGN is positive definite anyway, but the expansion is then centered at a point that is not the mode of anything in particular.
+- **Curvature approximations.** Diagonal, K-FAC and low-rank approximations each change the covariance, and their errors propagate into both the predictive and the evidence.
+
+### 6.3 What it is used for
+
+Despite these limits, the analytic form makes the Laplace approximation useful in several places:
+
+- **Moderating overconfidence.** Hein, Andriushchenko and Bitterwolf (2019) showed that networks with piecewise-linear activations become arbitrarily confident as an input is scaled away from the data. Kristiadi, Hein and Hennig (2020) proved that a Laplace approximation of the last layer alone keeps the confidence of such a network bounded away from 1 in that limit. The example of Section 4 shows the same mechanism on the logit: its standard deviation grows in proportion to $\lvert x^* \rvert$, as fast as its mean, so the moderated logit tends to a constant.
+- **Continual learning.** A Laplace approximation of the posterior after one task can serve as the prior for the next. Elastic weight consolidation (EWC) uses a diagonal Fisher matrix as the precision of that prior, which turns it into a quadratic penalty that protects the parameters important for earlier tasks (Kirkpatrick et al., 2017).
+- **Hyperparameter selection.** The evidence of Section 5, computed without a validation set.
+- **Decisions under uncertainty.** An analytic predictive variance can feed acquisition functions in active learning and Bayesian optimization, the subject of part of the ninth entry, [Evaluating and Using Predictive Uncertainty](/blog/evaluating-and-using-uncertainty).
+
+## 7. Exercises
+
+**Exercise 1.** A coin is tossed $n = 4$ times and lands heads $k = 3$ times. The prior on the probability of heads $\rho$ is uniform on $[0, 1]$. Compute the Laplace approximation of the posterior of $\rho$, compare its mean and standard deviation with the exact posterior and compute the probability that the approximation assigns to $\rho > 1$.
+
+<details>
+<summary>Answer</summary>
+
+The negative log posterior is $-3\log\rho - \log(1-\rho)$ plus a constant. Its minimum is at $\hat{\rho} = k/n = 0.75$, and its second derivative there is $3/\hat{\rho}^2 + 1/(1-\hat{\rho})^2 = 5.33 + 16 = 21.33$, so $q = \mathcal{N}(0.75, 0.2165^2)$. The exact posterior is $\mathrm{Beta}(4, 2)$, with mean $4/6 = 0.667$ and standard deviation $\sqrt{8/252} = 0.178$. The approximation is centered at the mode, overestimates the spread and puts $1 - \Phi(0.25/0.2165) = 1 - \Phi(1.155) \approx 0.124$ of its mass on impossible values above 1. A Laplace approximation in the log-odds $\log(\rho/(1-\rho))$, an unbounded parameter, avoids the last problem.
+
+</details>
+
+**Exercise 2.** Show that the Laplace approximation is exact for linear regression $y = \phi(x)^\top \theta + \varepsilon$ with $\varepsilon \sim \mathcal{N}(0, \sigma^2)$ and prior $\mathcal{N}(0, \alpha^{-1} I)$, and give its covariance.
+
+<details>
+<summary>Answer</summary>
+
+With $X$ the $N \times P$ matrix whose rows are $\phi(x_n)^\top$, the negative log joint is $\frac{1}{2\sigma^2}\lVert y - X\theta \rVert^2 + \frac{\alpha}{2}\lVert\theta\rVert^2$ plus a constant. It is exactly quadratic in $\theta$, so the second-order expansion has no remainder and $q$ equals the posterior. The Hessian is $H = X^\top X/\sigma^2 + \alpha I$ and the covariance is $H^{-1}$. Here the GGN, the Hessian and the Fisher matrix all coincide, because $J_n = \phi(x_n)^\top$ does not depend on $\theta$.
+
+</details>
+
+**Exercise 3.** In the output of Section 4.1, the probit approximation and the Monte Carlo average agree to three decimals at $x^* = -2$ but give 0.019 and 0.008 at $x^* = -8$. Is the probit approximation wrong there, and does it matter?
+
+<details>
+<summary>Answer</summary>
+
+The approximation replaces the logistic sigmoid by a rescaled Gaussian cumulative distribution function. The two functions agree closely near the center and differ in the tails, where the sigmoid decays like $e^{z}$ and the Gaussian function decays faster. At $x^* = -8$ the absolute error is 0.011, small, but the relative error is more than a factor of two. It matters when small probabilities are themselves the quantity of interest, for example when rare classes or log-probabilities of unlikely outcomes are scored. A few hundred Monte Carlo samples of the one-dimensional Gaussian logit, or Gauss–Hermite quadrature, remove the error at negligible cost.
+
+</details>
+
+**Exercise 4.** A classifier has $10^7$ parameters, and its last layer maps 512 features to 10 classes with a bias. In 32-bit floating point, how much memory does the full GGN need, how much does its diagonal need and how much does a full last-layer GGN need?
+
+<details>
+<summary>Answer</summary>
+
+The full GGN has $10^{14}$ entries, 400 terabytes (TB) at 4 bytes each, in decimal units ($1\ \mathrm{TB} = 10^{12}$ bytes). Its diagonal has $10^7$ entries, 40 megabytes (MB). The last layer has $512 \times 10 + 10 = 5130$ parameters, so its GGN has $5130^2 \approx 2.63 \times 10^7$ entries, about 105 MB. A K-FAC version of the same layer needs a $513 \times 513$ and a $10 \times 10$ matrix, about 1 MB.
+
+</details>
+
+## 8. Summary
+
+| Question | Answer |
+|---|---|
+| What is the Laplace approximation? | A Gaussian $\mathcal{N}(\hat{\theta}, H^{-1})$ at the MAP estimate, with the curvature of the negative log joint as precision. |
+| Which curvature is used for networks? | The GGN $\sum_n J_n^\top \Lambda_n J_n + \alpha I$, positive definite and equal to the Fisher matrix for canonical-link likelihoods. |
+| How is it made affordable? | Diagonal, K-FAC or low-rank structure, or a full curvature for a subset of parameters such as the last layer. |
+| How should predictions be made? | With the linearized network: Gaussian outputs with mean $f(x^*, \hat{\theta})$ and covariance $J(x^*)\Sigma J(x^*)^\top$; a probit approximation for classification. |
+| What does it give besides predictions? | An estimate of $\log p(\mathcal{D})$ that tunes hyperparameters such as $\alpha$ without validation data. |
+| Where does it fail? | Skewed, heavy-tailed, curved or multimodal posteriors; it is centered at the mode and sees only local curvature. |
+
+The Laplace approximation turns a trained network into an approximate posterior with one extra step and no change to training. Its Gaussian is fixed by a mode and a curvature, and the worked example showed both its strength (the spread was recovered within a few percent) and its blind spot (the skew of the posterior was invisible to it). The next entry, [Variational Inference for Neural Networks](/blog/variational-inference-for-neural-networks), keeps the idea of a tractable approximating family but chooses its member by optimization over the whole posterior rather than by derivatives at one point.
+
+### References
+
+- F. Bergamin, P. Moreno-Muñoz, S. Hauberg and G. Arvanitidis, "Riemannian Laplace approximations for Bayesian neural networks," in *Advances in Neural Information Processing Systems 36*, 2023.
+- C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006.
+- E. Daxberger, A. Kristiadi, A. Immer, R. Eschenhagen, M. Bauer and P. Hennig, "Laplace redux – effortless Bayesian deep learning," in *Advances in Neural Information Processing Systems 34*, 2021.
+- L. Dinh, R. Pascanu, S. Bengio and Y. Bengio, "Sharp minima can generalize for deep nets," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
+- M. Hein, M. Andriushchenko and J. Bitterwolf, "Why ReLU networks yield high-confidence predictions far away from the training data and how to mitigate the problem," in *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)*, 2019.
+- A. Immer, M. Bauer, V. Fortuin, G. Rätsch and M. E. Khan, "Scalable marginal likelihood estimation for model selection in deep learning," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- A. Immer, M. Korzepa and M. Bauer, "Improving predictions of Bayesian neural nets via local linearization," in *Proceedings of the 24th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2021.
+- M. E. Khan, A. Immer, E. Abedi and M. Korzepa, "Approximate inference turns deep networks into Gaussian processes," in *Advances in Neural Information Processing Systems 32*, 2019.
+- J. Kirkpatrick et al., "Overcoming catastrophic forgetting in neural networks," *Proceedings of the National Academy of Sciences*, vol. 114, no. 13, pp. 3521–3526, 2017.
+- A. Kristiadi, M. Hein and P. Hennig, "Being Bayesian, even just a bit, fixes overconfidence in ReLU networks," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
+- F. Kunstner, L. Balles and P. Hennig, "Limitations of the empirical Fisher approximation for natural gradient descent," in *Advances in Neural Information Processing Systems 32*, 2019.
+- S. Lotfi, P. Izmailov, G. Benton, M. Goldblum and A. G. Wilson, "Bayesian model selection, the marginal likelihood, and generalization," in *Proceedings of the 39th International Conference on Machine Learning (ICML)*, 2022.
+- D. J. C. MacKay, "Bayesian interpolation," *Neural Computation*, vol. 4, no. 3, pp. 415–447, 1992.
+- D. J. C. MacKay, "A practical Bayesian framework for backpropagation networks," *Neural Computation*, vol. 4, no. 3, pp. 448–472, 1992.
+- D. J. C. MacKay, "The evidence framework applied to classification networks," *Neural Computation*, vol. 4, no. 5, pp. 720–736, 1992.
+- J. Martens, "New insights and perspectives on the natural gradient method," *Journal of Machine Learning Research*, vol. 21, no. 146, pp. 1–76, 2020.
+- J. Martens and R. Grosse, "Optimizing neural networks with Kronecker-factored approximate curvature," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
+- H. Ritter, A. Botev and D. Barber, "A scalable Laplace approximation for neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2018.
+- N. N. Schraudolph, "Fast curvature matrix-vector products for second-order gradient descent," *Neural Computation*, vol. 14, no. 7, pp. 1723–1738, 2002.
+- L. Tierney and J. B. Kadane, "Accurate approximations for posterior moments and marginal densities," *Journal of the American Statistical Association*, vol. 81, no. 393, pp. 82–86, 1986.

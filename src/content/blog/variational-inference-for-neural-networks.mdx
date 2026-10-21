@@ -1,0 +1,372 @@
+---
+title: "Variational Inference for Neural Networks"
+description: "Variational inference fits a tractable distribution to the posterior by maximizing a lower bound; mean-field, dropout, natural-gradient and particle variants."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - uncertainty
+  - optimization
+series: bayesian-deep-learning
+seriesOrder: 4
+---
+
+import Figure from '../../components/Figure.astro';
+import BdlMeanFieldVi from '../../components/diagrams/BdlMeanFieldVi.astro';
+
+The [previous entry](/blog/laplace-approximations) approximated the posterior $p(\theta \mid \mathcal{D})$ by a Gaussian fixed entirely by the mode of the posterior and the curvature there. **Variational inference (VI)** keeps the idea of a tractable approximating distribution but chooses it differently: it defines a family of candidate distributions and picks the member closest to the posterior by solving an optimization problem. Inference becomes training with a new objective. The tools of the [gradient descent entry](/blog/gradient-descent-and-its-variants) (stochastic gradients, mini-batches, adaptive step sizes) carry over to it.
+
+This entry derives the objective, the evidence lower bound, and then works through the main families that have been applied to neural networks. They are factorized Gaussians trained with reparameterization gradients, dropout read as approximate inference, natural-gradient methods whose update resembles Adam and particle methods that move a set of networks together. Two further variants define the approximation over functions instead of weights, or update it as data arrive over time. A worked example on a model whose posterior is known exactly shows what the most common family gets right and what it systematically gets wrong.
+
+The entry uses the series notation of the [first entry](/blog/bayesian-inference-for-neural-networks): $\theta \in \mathbb{R}^P$ are the parameters, $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ the data, $p(\theta)$ the prior, $p(\mathcal{D} \mid \theta)$ the likelihood and $x^*$ a test input. The approximating distribution is $q(\theta)$, or $q_\lambda(\theta)$ when its parameters $\lambda$ (the **variational parameters**) matter. The examples run on Python 3.13 with NumPy 2.5.3 and fixed seeds.
+
+## 1. Inference as optimization
+
+### 1.1 Measuring closeness to the posterior
+
+To pick the member of a family $\mathcal{Q}$ closest to the posterior, VI needs a measure of discrepancy between distributions. The standard choice is the **Kullback–Leibler (KL) divergence**
+
+$$
+\mathrm{KL}\big(q \,\Vert\, p\big) = \int q(\theta) \log \frac{q(\theta)}{p(\theta \mid \mathcal{D})}\, d\theta ,
+$$
+
+which is zero when the two distributions are equal and positive otherwise. It is not symmetric, and the order matters. VI minimizes $\mathrm{KL}(q \,\Vert\, p)$, the **reverse KL**, with the expectation taken under $q$. Wherever $q$ puts mass and the posterior does not, the logarithm is large, so the optimum avoids regions of low posterior density. Wherever the posterior has mass and $q$ does not, nothing is charged. The reverse KL is therefore **mode-seeking**: when the family cannot cover the whole posterior, the optimum concentrates on part of it and underestimates its spread. The worked example in Section 3 measures this effect.
+
+The reason for this order is computational. The reverse KL needs only expectations under $q$ (a distribution chosen to be easy to sample) and the unnormalized posterior. The forward KL, $\mathrm{KL}(p \,\Vert\, q)$, would need expectations under the posterior, which is the quantity that cannot be computed.
+
+### 1.2 The evidence lower bound
+
+The KL divergence above still contains $p(\theta \mid \mathcal{D}) = p(\mathcal{D} \mid \theta)\,p(\theta)/p(\mathcal{D})$, and the **marginal likelihood** $p(\mathcal{D})$ is intractable. Substituting Bayes' rule and rearranging gives an identity that holds for every $q$:
+
+$$
+\log p(\mathcal{D}) = \underbrace{\mathbb{E}_{q}\big[\log p(\mathcal{D} \mid \theta)\big] - \mathrm{KL}\big(q(\theta) \,\Vert\, p(\theta)\big)}_{\mathrm{ELBO}(q)} + \mathrm{KL}\big(q(\theta) \,\Vert\, p(\theta \mid \mathcal{D})\big).
+$$
+
+The left side does not depend on $q$. Maximizing the first term on the right, the **evidence lower bound (ELBO)**, therefore minimizes the KL divergence to the posterior, and the ELBO can be computed: it needs only the likelihood, the prior and samples from $q$. Because the last KL term is nonnegative, the ELBO is a lower bound on the log evidence, and the gap between them is exactly the KL divergence from $q$ to the posterior. The derivation is standard; Jordan et al. (1999) and Blei, Kucukelbir and McAuliffe (2017) present it in full.
+
+The two terms of the ELBO have a direct reading. The expected log-likelihood rewards distributions that put their mass on parameters that fit the data. The KL term to the prior penalizes distributions that move far from the prior or become narrow. For a network, the first term is the familiar training loss averaged over parameter noise, and the second is a regularizer. Hinton and van Camp (1993) arrived at the same objective from the minimum description length principle: the KL term is the cost of communicating the weights to a given precision.
+
+### 1.3 Gradients of the ELBO
+
+The ELBO is an expectation under the distribution being optimized, so its gradient with respect to $\lambda$ cannot be moved inside the expectation directly. The **reparameterization trick** (Kingma and Welling, 2014; Rezende, Mohamed and Wierstra, 2014) writes a sample from $q_\lambda$ as a deterministic function of $\lambda$ and of noise with a fixed distribution. For a Gaussian with mean $\mu$ and standard deviations $\tau$,
+
+$$
+\theta = \mu + \tau \odot \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, I),
+$$
+
+where $\odot$ is elementwise multiplication. The expectation is now over $\varepsilon$, whose distribution does not depend on $\lambda$, and the gradient passes inside: $\nabla_\lambda \mathbb{E}_q[g(\theta)] = \mathbb{E}_\varepsilon[\nabla_\lambda g(\mu + \tau \odot \varepsilon)]$ for any differentiable $g$. Averaging the gradient over a few samples of $\varepsilon$ gives an unbiased estimate, and automatic differentiation computes it. For models where reparameterization is not possible, for example with discrete latent variables, the score-function estimator (Ranganath, Gerrish and Blei, 2014) is unbiased too but has a much higher variance.
+
+With $N$ examples and mini-batches of size $B$, the expected log-likelihood is estimated by $N/B$ times its sum over the batch. The KL term is computed once per step, in closed form for Gaussians. Mini-batch estimates of the ELBO make VI scale to large data sets, as in stochastic variational inference (Hoffman et al., 2013); combined with reparameterization they give VI at the scale of ordinary training.
+
+## 2. Mean-field Gaussian VI
+
+### 2.1 The family and the algorithm
+
+The most widely used family for networks is the **mean-field Gaussian**: each parameter has its own independent Gaussian, $q(\theta) = \prod_{i=1}^P \mathcal{N}(\theta_i; \mu_i, \tau_i^2)$. The variational parameters are $2P$ numbers, a mean and a standard deviation per weight, so memory doubles and every forward pass draws fresh weights. Graves (2011) applied this family to networks, and Blundell et al. (2015) popularized the reparameterized version under the name **Bayes by Backprop**. Each training step is:
+
+1. Draw $\varepsilon$ and set $\theta = \mu + \tau \odot \varepsilon$, with $\tau = \exp(\rho)$ or $\tau = \log(1 + e^\rho)$ to keep it positive.
+2. Run the network with $\theta$ on a mini-batch and compute $-\tfrac{N}{B}\sum \log p(y_n \mid x_n, \theta)$ plus the KL term.
+3. Backpropagate to $\mu$ and $\rho$ and take an optimizer step.
+
+At prediction time, the predictive distribution is the average of $M$ forward passes with independent draws of $\theta$. Sharing one weight sample across a mini-batch makes the gradient noise of different examples correlated. The **local reparameterization trick** (Kingma, Salimans and Welling, 2015) reduces that variance by sampling the pre-activations of each example instead; for a Gaussian $q$ they are Gaussian with a computable mean and variance.
+
+### 2.2 What the factorization costs
+
+The independence assumption removes every correlation between parameters. For a Gaussian posterior with precision matrix $\Lambda$ (the inverse covariance), the mean-field optimum of the reverse KL has a closed form (Bishop, 2006): its means are the posterior means, and its variances are $1/\Lambda_{ii}$, the inverses of the diagonal entries of the precision. These are never larger than the posterior variances $(\Lambda^{-1})_{ii}$, and they are much smaller when parameters are strongly correlated. Mean-field VI underestimates marginal uncertainty, and the error grows with correlation.
+
+Networks have strongly correlated parameters: with ReLU activations, scaling one layer up and the next down leaves the function unchanged, and many weights trade off against each other. Foong et al. (2020) showed that for networks with one hidden layer, the predictive variance of a mean-field Gaussian approximation between two separated clusters of data is bounded by its variances at the clusters, whatever the variational parameters. Such an approximation cannot express the much larger in-between uncertainty that the exact posterior shows. The KL term adds a second problem. A network has far more weights than the data can determine, and for each of them the cheapest way to raise the ELBO is to set $q$ equal to the prior. Many weights then become pure noise, which reduces the network's effective capacity and can make the model underfit. In practice the KL term is often downweighted, or the posterior tempered, a choice examined by Wenzel et al. (2020) and returned to in [Priors, Symmetries and Identifiability](/blog/priors-symmetries-and-identifiability).
+
+## 3. A worked example: linear regression
+
+### 3.1 The setup
+
+To measure these effects, take a model whose posterior is known exactly: linear regression $y = b + w x + \varepsilon$ with parameters $\theta = (b, w)^\top$, noise $\varepsilon \sim \mathcal{N}(0, \sigma^2)$ of known standard deviation $\sigma = 0.5$ and prior $\mathcal{N}(0, s_0^2 I)$ with prior standard deviation $s_0 = 1$. Twenty inputs are drawn uniformly on $[0, 4]$ and the outputs from the true line $b = 1$, $w = 0.8$. Because the inputs are all positive, the intercept and slope are strongly correlated in the posterior: a steeper line fits the data equally well if it starts lower.
+
+The listing computes the exact Gaussian posterior and log evidence in closed form, then runs mean-field Gaussian VI with the reparameterization gradients of Section 1.3. The gradient of the log joint $\log p(\mathcal{D} \mid \theta) + \log p(\theta)$ is evaluated at 10 samples per step. The standard deviations are parameterized as $\tau = e^{\rho}$, so the gradient of the Gaussian entropy $\sum_i \log \tau_i$ with respect to each $\rho_i$ is 1. The optimizer is Adam with a step size that decays from 0.02 to about 0.001 over 6000 steps.
+
+```python
+import numpy as np
+
+# Toy data: y = 1 + 0.8 x + noise, noise sd 0.5 (known); prior theta ~ N(0, I)
+rng = np.random.default_rng(1)
+N, s2 = 20, 0.5**2
+x = rng.uniform(0, 4, N)
+y = 1.0 + 0.8 * x + rng.normal(0, 0.5, N)
+X = np.column_stack([np.ones(N), x])           # theta = (b, w)
+
+# Exact posterior and log evidence (conjugate model)
+Lam = X.T @ X / s2 + np.eye(2)                 # posterior precision
+Sig = np.linalg.inv(Lam)
+m = Sig @ X.T @ y / s2
+Ky = s2 * np.eye(N) + X @ X.T                  # marginal covariance of y
+logZ = -0.5 * (y @ np.linalg.solve(Ky, y) + np.linalg.slogdet(2 * np.pi * Ky)[1])
+
+def grad_log_joint(T):                         # rows of T are parameter vectors
+    return (y - T @ X.T) @ X / s2 - T
+
+def elbo(mu, sd, M=200000, seed=0):            # Monte Carlo estimate
+    T = mu + sd * np.random.default_rng(seed).standard_normal((M, 2))
+    ll = -0.5 * ((y - T @ X.T) ** 2).sum(1) / s2 - 0.5 * N * np.log(2 * np.pi * s2)
+    lp = -0.5 * (T**2).sum(1) - np.log(2 * np.pi)
+    return (ll + lp).mean() + np.sum(np.log(sd)) + np.log(2 * np.pi * np.e)
+
+# Mean-field Gaussian VI with reparameterization gradients and Adam
+mu, rho = np.zeros(2), np.zeros(2)             # q = N(mu, diag(exp(rho)^2))
+par = np.concatenate([mu, rho]); M = np.zeros(4); V = np.zeros(4)
+b1, b2 = 0.9, 0.999
+for k in range(1, 6001):
+    lr = 0.02 * 0.9995**k                      # decaying step size
+    mu, rho = par[:2], par[2:]
+    eps = rng.standard_normal((10, 2))         # 10 samples per step
+    g = grad_log_joint(mu + np.exp(rho) * eps)
+    grad = np.concatenate([g.mean(0), (g * eps).mean(0) * np.exp(rho) + 1.0])
+    M = b1 * M + (1 - b1) * grad; V = b2 * V + (1 - b2) * grad**2
+    par = par + lr * (M / (1 - b1**k)) / (np.sqrt(V / (1 - b2**k)) + 1e-8)
+mu, sd = par[:2], np.exp(par[2:])
+
+print("exact mean        :", m.round(3), "  exact sd     :", np.sqrt(np.diag(Sig)).round(3))
+print("VI mean           :", mu.round(3), "  VI sd        :", sd.round(3))
+print("optimal MF sd     :", (1 / np.sqrt(np.diag(Lam))).round(3),
+      "  correlation  :", round(Sig[0, 1] / np.sqrt(Sig[0, 0] * Sig[1, 1]), 3))
+L = elbo(mu, sd)
+Q = np.diag(sd**2)                             # closed-form KL(q || posterior)
+d = m - mu
+KL = 0.5 * (np.trace(Lam @ Q) + d @ Lam @ d - 2 + np.linalg.slogdet(Sig)[1] - np.log(np.prod(sd**2)))
+print(f"ELBO {L:.3f}   log p(D) {logZ:.3f}   gap {logZ - L:.3f}   KL(q||p) {KL:.3f}")
+for xs in [-2.0, 2.0, 6.0]:
+    phi = np.array([1.0, xs])
+    print(f"x* = {xs:4.1f}: sd of f, exact {np.sqrt(phi @ Sig @ phi):.3f}, mean-field {np.sqrt(phi**2 @ sd**2):.3f}")
+```
+
+```text
+exact mean        : [0.694 0.952]   exact sd     : [0.22  0.103]
+VI mean           : [0.696 0.949]   VI sd        : [0.112 0.053]
+optimal MF sd     : [0.111 0.052]   correlation  : -0.862
+ELBO -23.325   log p(D) -22.643   gap 0.682   KL(q||p) 0.682
+x* = -2.0: sd of f, exact 0.411, mean-field 0.154
+x* =  2.0: sd of f, exact 0.112, mean-field 0.154
+x* =  6.0: sd of f, exact 0.445, mean-field 0.335
+```
+
+### 3.2 Reading the output
+
+The optimizer finds what the theory of Section 2.2 predicts. The variational means agree with the exact posterior means to within 0.003, and the variational standard deviations (0.112 and 0.053) agree with the closed-form mean-field optimum (0.111 and 0.052) to within the noise of the stochastic optimization. Both are about half the exact posterior standard deviations (0.220 and 0.103). The factor is $1/\sqrt{1 - r^2} = 1.98$ for a posterior correlation of $r = -0.862$, which follows from the closed form for two parameters.
+
+The ELBO, estimated from 200 000 samples, is 0.682 below the exact log evidence, and the closed-form KL divergence from $q$ to the posterior is also 0.682. That is the identity of Section 1.2 checked numerically. For two parameters the smallest KL that any mean-field Gaussian can reach is $-\tfrac{1}{2}\log(1 - r^2) = 0.681$, so the optimization is within 0.001 of the best this family can do. No amount of further training closes the gap: it is the cost of the factorization.
+
+The predictive lines show how that cost reaches predictions. Write $\phi = (1, x^*)^\top$. Under the exact posterior the variance of the regression function $f(x^*) = b + w x^*$ is $\phi^\top \Sigma \phi = \Sigma_{bb} + 2 x^* \Sigma_{bw} + (x^*)^2 \Sigma_{ww}$, with $\Sigma$ the posterior covariance. The negative covariance $\Sigma_{bw}$ cancels much of the variance near the center of the data, where errors in intercept and slope compensate each other. The mean-field approximation drops that term. At $x^* = 2$, inside the data, it reports a larger standard deviation than the exact one (0.154 against 0.112); at $x^* = -2$ and $x^* = 6$, outside the data, it reports much smaller ones (0.154 against 0.411 and 0.335 against 0.445). The worst errors are exactly where uncertainty matters most.
+
+<Figure caption="Mean-field VI on the linear regression example. Left: two-standard-deviation ellipses of the exact posterior (solid, tilted by the correlation of −0.86) and of the mean-field optimum (dashed, axis-aligned), which has the right center but roughly half the marginal spread. Right: standard deviation of the regression function against the input. The mean-field curve is too high over most of the shaded range of training inputs and far too low outside it.">
+  <BdlMeanFieldVi />
+</Figure>
+
+The example is linear and two-dimensional, so it shows the mechanism and not its size in a network. The direction of the error, too little marginal variance and a predictive spread that grows too slowly away from the data, is the one reported for mean-field VI in networks (Foong et al., 2020).
+
+## 4. Dropout as variational inference
+
+### 4.1 Monte Carlo dropout
+
+Dropout multiplies each unit of a layer by an independent Bernoulli variable during training, setting it to zero with probability $p$. Gal and Ghahramani (2016) showed that training a network with dropout and weight decay can be read as approximately maximizing an ELBO, for a variational family in which each row of a weight matrix is either a learned vector or zero. The predictive distribution then follows by keeping dropout active at test time and averaging $M$ stochastic forward passes, a procedure they called **Monte Carlo (MC) dropout**:
+
+$$
+p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{M} \sum_{m=1}^M p(y^* \mid f(x^*, \theta_m)), \qquad \theta_m \text{ obtained by sampling a dropout mask}.
+$$
+
+The appeal is practical. Any network already trained with dropout gives an uncertainty estimate with no change to training, at the cost of $M$ forward passes.
+
+### 4.2 Limits of the interpretation
+
+The interpretation has been examined closely, and three caveats are established. First, the variational family is degenerate: it puts its mass on a finite set of points, so its KL divergence to a continuous Gaussian prior is not well defined. The correspondence with weight decay holds only after an approximation that Hron, Matthews and Ghahramani (2018) analyzed in detail. Second, the dropout rate $p$ is fixed by hand rather than fitted. With a fixed $p$ the spread of the predictive does not shrink as the training set grows, as a posterior's would. **Concrete dropout** (Gal, Hron and Kendall, 2017) makes $p$ a variational parameter by replacing the Bernoulli variable by a continuous relaxation, so that $p$ can be learned by gradient descent. Third, the quality of the uncertainty depends on the architecture and on where dropout is placed. MC dropout is a cheap baseline that often improves on a single network; it is not a faithful approximation of the posterior.
+
+## 5. Natural-gradient VI
+
+### 5.1 Why the ordinary gradient is a poor direction
+
+The variational parameters of a Gaussian are not like ordinary weights. Changing a mean by 0.1 is a large change if the standard deviation is 0.01 and a negligible one if it is 10. Ordinary gradient descent ignores this, which is why the example of Section 3 needed thousands of steps and an adaptive optimizer. The **natural gradient** (Amari, 1998) measures step sizes by how much the distribution changes, with the Fisher information matrix of $q$ as the metric, instead of by how much its parameters change.
+
+For Gaussian $q$ the natural gradient of the ELBO has a closed form. Write $q = \mathcal{N}(m_q, \Lambda_q^{-1})$ with mean $m_q$ and precision matrix $\Lambda_q$, and let $L(\theta) = -\log p(\mathcal{D} \mid \theta) - \log p(\theta)$ be the negative log joint. A natural-gradient step of size $\beta \in (0, 1]$ is
+
+$$
+\Lambda_q \leftarrow (1 - \beta)\, \Lambda_q + \beta\, \mathbb{E}_q\big[\nabla^2 L(\theta)\big], \qquad m_q \leftarrow m_q - \beta\, \Lambda_q^{-1}\, \mathbb{E}_q\big[\nabla L(\theta)\big].
+$$
+
+This is a Newton step with the Hessian averaged over $q$ and with the precision updated as an exponential moving average. Khan and Rue (2023) derived this update and many others as instances of one principle, the **Bayesian learning rule**, which recovers gradient descent, Newton's method and several deep-learning optimizers by choosing the family of $q$ and approximating its expectations.
+
+### 5.2 A check on the example
+
+The continuation of the listing runs this update with a full-covariance Gaussian on the regression of Section 3. Because the log joint is quadratic, $\mathbb{E}_q[\nabla L] = \nabla L(m_q)$ and $\mathbb{E}_q[\nabla^2 L]$ is the constant posterior precision, so no sampling is needed.
+
+```python
+def kl_to_post(mq, Lq):                        # KL(N(mq, Lq^-1) || N(m, Sig))
+    d = m - mq
+    Cq = np.linalg.inv(Lq)
+    return 0.5 * (np.trace(Lam @ Cq) + d @ Lam @ d - 2
+                  + np.linalg.slogdet(Sig)[1] - np.linalg.slogdet(Cq)[1])
+
+# Natural-gradient VI with a full-covariance Gaussian q = N(mq, Lq^-1).
+# The log joint is quadratic, so E_q[gradient] = gradient at mq and E_q[Hessian] is constant.
+hess = X.T @ X / s2 + np.eye(2)                # minus the Hessian of the log joint
+for beta in [1.0, 0.5, 0.1]:
+    mq, Lq = np.zeros(2), np.eye(2)            # start at the prior: mean 0, precision I
+    out = []
+    for k in range(1, 21):
+        Lq = (1 - beta) * Lq + beta * hess     # precision update
+        mq = mq + beta * np.linalg.solve(Lq, grad_log_joint(mq[None])[0])
+        if k in (1, 2, 5, 20):
+            out.append(f"{kl_to_post(mq, Lq):.1e}")
+    print(f"beta = {beta}: KL after 1, 2, 5, 20 steps:", ", ".join(out))
+```
+
+```text
+beta = 1.0: KL after 1, 2, 5, 20 steps: 0.0e+00, 0.0e+00, 0.0e+00, 0.0e+00
+beta = 0.5: KL after 1, 2, 5, 20 steps: 2.8e-01, 4.3e-02, 4.8e-04, 4.3e-13
+beta = 0.1: KL after 1, 2, 5, 20 steps: 5.3e+00, 2.2e+00, 5.0e-01, 8.3e-03
+```
+
+With $\beta = 1$ a single step reaches the exact posterior, as Newton's method solves a quadratic problem in one step; smaller steps converge geometrically. The comparison with Section 3 is not between equals, since the family is richer here and the expectations are exact. It does show why natural gradients are attractive: they use curvature, and for a Gaussian family that curvature is the expected curvature of the loss.
+
+### 5.3 Natural-gradient VI for networks
+
+For a network, the expectations are estimated with one or a few samples of $\theta$, and the Hessian is replaced by something cheaper. Using a diagonal precision and a squared-gradient estimate of the Hessian gives an update that resembles Adam: the precision plays the role of Adam's second-moment estimate, and the noise injected into the weights is set by it. Khan et al. (2018) developed such methods, and Osawa et al. (2019) scaled them to ImageNet. Shen et al. (2024) reported that a later variant, improved variational online Newton (IVON), trains large networks, including language models, at a cost close to that of Adam and with better-calibrated predictions in their experiments. These are reported results on the authors' benchmarks; they establish that natural-gradient VI can run at scale, not that it beats other approximations in general.
+
+## 6. Particle-based VI
+
+### 6.1 Stein variational gradient descent
+
+A parametric family fixes the shape of $q$ in advance. **Particle-based VI** instead represents $q$ by a set of $n$ parameter vectors, the particles $\theta_1, \dots, \theta_n$, and moves them so that their empirical distribution approaches the posterior. The best-known method, **Stein variational gradient descent (SVGD)** (Liu and Wang, 2016), moves every particle in the direction that decreases the KL divergence fastest within a space of smooth functions defined by a kernel $k(\theta, \theta')$:
+
+$$
+\theta_i \leftarrow \theta_i + \epsilon\, \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_j, \theta_i)\, \nabla_{\theta_j} \log p(\theta_j \mid \mathcal{D}) + \nabla_{\theta_j} k(\theta_j, \theta_i) \Big],
+$$
+
+with step size $\epsilon$. The gradient of the log posterior needs only the unnormalized posterior, so it is a training gradient. The first term moves each particle uphill, averaged over its neighbors. The second term, the gradient of the kernel, pushes particles apart and keeps them from collapsing onto the same mode. With a single particle the repulsive term vanishes for the usual kernels and SVGD becomes gradient ascent to the maximum a posteriori (MAP) estimate.
+
+### 6.2 Particles and ensembles
+
+A set of networks trained together with a repulsive term is a modified ensemble, and the fifth entry, [Deep Ensembles and Their Bayesian Interpretation](/blog/deep-ensembles), treats ensembles in their own right. Two difficulties limit SVGD for networks. Kernels on weight vectors with millions of entries carry little information about how similar two networks are, since networks that compute the same function can have distant weights. D'Angelo and Fortuin (2021) proposed computing the repulsion in function space for this reason. In high dimensions the particles also tend to underestimate the posterior variance, an effect Ba et al. (2022) analyzed. The cost per step grows with $n^2$ kernel evaluations and $n$ gradient evaluations, so in practice $n$ is kept small.
+
+## 7. Function-space VI
+
+### 7.1 Why move to functions
+
+All of the families above are defined over weights, but predictions depend only on the function a network computes. Many weight settings compute the same function, and simple priors over weights correspond to priors over functions that are hard to describe. **Function-space VI** places the approximation and the prior over functions instead. Its $q$ is a distribution over the outputs $f(x)$ of the network at all inputs, and its prior can be a Gaussian process (GP) chosen to express smoothness or periodicity directly. The sixth entry, [Gaussian Processes, Kernels and Infinitely Wide Networks](/blog/gaussian-processes-and-kernels), develops such priors.
+
+### 7.2 What makes it hard
+
+The ELBO in function space contains a KL divergence between two distributions over functions, which are stochastic processes. That divergence can be infinite: Burt et al. (2021) argued that it is infinite in common settings, for example for a network-induced approximation and a GP prior, which makes the exact objective unusable. Practical methods replace it by something finite.
+
+Sun et al. (2019) evaluated the KL divergence only on a finite set of inputs, a **measurement set** of training points and random points, and estimated its gradient. Rudner et al. (2022) linearized the network, as in the [previous entry](/blog/laplace-approximations), so that $q$ over function values is Gaussian and the divergence on a measurement set has a closed form. Another line replaces the KL divergence by a different distance between distributions, such as a Wasserstein distance between Gaussian measures (Wild, Hu and Sejdinovic, 2022). It builds on a generalized framework in which the ELBO is one choice among several losses and divergences (Knoblauch, Jewson and Damoulas, 2022). These methods make prior knowledge about functions usable, at the cost of objectives that are approximations of an ill-posed ideal.
+
+## 8. Sequential VI
+
+### 8.1 Posteriors that become priors
+
+When data arrive in batches $\mathcal{D}_1, \mathcal{D}_2, \dots$, Bayes' rule can be applied one batch at a time: the posterior after batch $t - 1$ is the prior for batch $t$,
+
+$$
+p(\theta \mid \mathcal{D}_{1:t}) \propto p(\mathcal{D}_t \mid \theta)\, p(\theta \mid \mathcal{D}_{1:t-1}).
+$$
+
+For linear-Gaussian models this recursion is exact and is the Kalman filter (Kalman, 1960) applied to constant parameters, also known as recursive least squares. For a network the posterior must be approximated at every step. **Variational continual learning** (Nguyen et al., 2018) projects each new posterior back into the variational family: $q_t$ maximizes the ELBO of batch $t$ with $q_{t-1}$ in place of the prior. Online versions of the natural-gradient updates of Section 5 do the same with one or a few steps per batch, and the extended Kalman filter, which linearizes the network at the current mean, is the sequential counterpart of the linearized Laplace approximation (Murphy, 2023).
+
+### 8.2 Errors that accumulate
+
+Each projection loses information, and the losses compound: an approximation that is too narrow after one batch turns into a prior that is too confident for the next, so later data move the parameters too little. This is the Bayesian reading of catastrophic forgetting and of its opposite, a model that stops learning. The quadratic penalty of elastic weight consolidation, described in the [previous entry](/blog/laplace-approximations) as a Laplace approximation, is the simplest version of the same recursion. Whether a sequential approximation stays accurate over many batches depends on the family and the data, and it has to be checked against a model retrained on all data.
+
+## 9. Exercises
+
+**Exercise 1.** Derive the identity $\log p(\mathcal{D}) = \mathrm{ELBO}(q) + \mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D}))$ from Bayes' rule.
+
+<details>
+<summary>Answer</summary>
+
+Write $\mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D})) = \mathbb{E}_q[\log q(\theta) - \log p(\theta \mid \mathcal{D})]$ and substitute $\log p(\theta \mid \mathcal{D}) = \log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log p(\mathcal{D})$. The constant $\log p(\mathcal{D})$ leaves the expectation, giving $\mathrm{KL} = \mathbb{E}_q[\log q(\theta) - \log p(\theta)] - \mathbb{E}_q[\log p(\mathcal{D} \mid \theta)] + \log p(\mathcal{D}) = -\mathrm{ELBO}(q) + \log p(\mathcal{D})$. Rearranging gives the identity.
+
+</details>
+
+**Exercise 2.** In the example the exact posterior standard deviation of the intercept is 0.220 and the mean-field one is 0.111. Show that the ratio depends only on the posterior correlation $r$ for two parameters, and check it against the output.
+
+<details>
+<summary>Answer</summary>
+
+For a $2 \times 2$ covariance with variances $s_1^2$, $s_2^2$ and correlation $r$, the precision has diagonal entries $\Lambda_{11} = 1/(s_1^2(1 - r^2))$ and $\Lambda_{22} = 1/(s_2^2(1 - r^2))$. The mean-field variance $1/\Lambda_{11} = s_1^2(1 - r^2)$, so the ratio of standard deviations is $1/\sqrt{1 - r^2}$ for both parameters. With $r = -0.862$ it is 1.98, and $0.220/0.111 = 1.98$ and $0.103/0.052 = 1.98$.
+
+</details>
+
+**Exercise 3.** A network is trained by mean-field VI on $N = 50\,000$ examples with mini-batches of $B = 100$. By what factor is the mini-batch log-likelihood multiplied, and what happens to the balance between the two ELBO terms if the factor is forgotten?
+
+<details>
+<summary>Answer</summary>
+
+By $N/B = 500$, so that the mini-batch sum estimates the full-data expected log-likelihood without bias. Without the factor the likelihood term is 500 times too small relative to the KL term, which amounts to weighting the whole KL term, the entropy of $q$ included, 500 times too heavily: the likelihood is tempered by a factor of 1/500. The variational distribution then stays close to the prior and the network underfits.
+
+</details>
+
+**Exercise 4.** Show that SVGD with one particle and the kernel $k(\theta, \theta') = \exp(-\lVert\theta - \theta'\rVert^2 / (2\ell^2))$ with lengthscale $\ell$ is gradient ascent on the log posterior.
+
+<details>
+<summary>Answer</summary>
+
+With $n = 1$ the sum has the single term $j = i$. The kernel gives $k(\theta_i, \theta_i) = 1$, and its gradient $\nabla_{\theta_j} k(\theta_j, \theta_i) = -\tfrac{1}{\ell^2}(\theta_j - \theta_i)\,k(\theta_j, \theta_i)$ is zero at $\theta_j = \theta_i$. The update is $\theta_i \leftarrow \theta_i + \epsilon \nabla \log p(\theta_i \mid \mathcal{D})$, gradient ascent toward the MAP estimate. The repulsive term, and with it the representation of uncertainty, appears only with two or more particles.
+
+</details>
+
+**Exercise 5.** In the example the mean-field standard deviation of $f(2)$ is larger than the exact one, although every mean-field marginal variance is smaller than the exact one. Explain the apparent contradiction.
+
+<details>
+<summary>Answer</summary>
+
+The variance of $f(2) = b + 2w$ is $\Sigma_{bb} + 4\Sigma_{bw} + 4\Sigma_{ww}$. Under the exact posterior the covariance $\Sigma_{bw}$ is negative and cancels most of the two variance terms: $0.0482 - 0.0783 + 0.0427 = 0.0126$, a standard deviation of 0.112. The mean-field approximation has smaller variances but no covariance: $0.0125 + 4 \times 0.0028 = 0.0237$, a standard deviation of 0.154. Smaller marginal variances do not imply smaller variances of every linear combination once correlations are removed.
+
+</details>
+
+## 10. Summary
+
+| Question | Answer |
+|---|---|
+| What does VI optimize? | The ELBO $\mathbb{E}_q[\log p(\mathcal{D} \mid \theta)] - \mathrm{KL}(q \,\Vert\, p(\theta))$, which equals $\log p(\mathcal{D})$ minus $\mathrm{KL}(q \,\Vert\, p(\theta \mid \mathcal{D}))$. |
+| How are its gradients computed? | With the reparameterization trick, $\theta = \mu + \tau \odot \varepsilon$, mini-batches scaled by $N/B$ and automatic differentiation. |
+| What does mean-field Gaussian VI get wrong? | It drops correlations, underestimates marginal variances (by $1/\sqrt{1 - r^2}$ in the example) and can let many weights collapse to the prior. |
+| What is MC dropout? | Dropout kept on at test time, read as VI with a degenerate family; cheap, but the dropout rate fixes the uncertainty. |
+| What do natural gradients add? | Steps measured by change in distribution; for Gaussians a Newton-like update that leads to Adam-like optimizers. |
+| What do particle methods add? | A nonparametric $q$ made of interacting networks, with a repulsive term; close to ensembles. |
+| Why function space? | Priors and approximations over functions avoid weight symmetries, but the exact KL can be infinite and must be replaced. |
+| What is sequential VI? | Using each approximate posterior as the next prior; approximation errors accumulate. |
+
+Variational inference turns Bayesian inference into an optimization problem that runs on the same machinery as training, and its families range from cheap and biased (mean-field, dropout) to flexible and costly (particles, function space). The worked example showed that the most common choice recovers the posterior mean and misjudges the spread in a predictable way. The next entry, [Deep Ensembles and Their Bayesian Interpretation](/blog/deep-ensembles), takes the opposite approach: it gives up a parametric family altogether and trains several networks independently, a method that is often the strongest baseline in practice and whose Bayesian reading is the subject of the entry.
+
+### References
+
+- S. Amari, "Natural gradient works efficiently in learning," *Neural Computation*, vol. 10, no. 2, pp. 251–276, 1998.
+- J. Ba et al., "Understanding the variance collapse of SVGD in high dimensions," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006.
+- D. M. Blei, A. Kucukelbir and J. D. McAuliffe, "Variational inference: A review for statisticians," *Journal of the American Statistical Association*, vol. 112, no. 518, pp. 859–877, 2017.
+- C. Blundell, J. Cornebise, K. Kavukcuoglu and D. Wierstra, "Weight uncertainty in neural networks," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
+- D. R. Burt, S. W. Ober, A. Garriga-Alonso and M. van der Wilk, "Understanding variational inference in function-space," in *Third Symposium on Advances in Approximate Bayesian Inference*, 2021.
+- F. D'Angelo and V. Fortuin, "Repulsive deep ensembles are Bayesian," in *Advances in Neural Information Processing Systems 34*, 2021.
+- A. Y. K. Foong, D. R. Burt, Y. Li and R. E. Turner, "On the expressiveness of approximate inference in Bayesian neural networks," in *Advances in Neural Information Processing Systems 33*, 2020.
+- Y. Gal and Z. Ghahramani, "Dropout as a Bayesian approximation: Representing model uncertainty in deep learning," in *Proceedings of the 33rd International Conference on Machine Learning (ICML)*, 2016.
+- Y. Gal, J. Hron and A. Kendall, "Concrete dropout," in *Advances in Neural Information Processing Systems 30*, 2017.
+- A. Graves, "Practical variational inference for neural networks," in *Advances in Neural Information Processing Systems 24*, 2011.
+- G. E. Hinton and D. van Camp, "Keeping the neural networks simple by minimizing the description length of the weights," in *Proceedings of the Sixth Annual Conference on Computational Learning Theory (COLT)*, 1993.
+- M. D. Hoffman, D. M. Blei, C. Wang and J. Paisley, "Stochastic variational inference," *Journal of Machine Learning Research*, vol. 14, pp. 1303–1347, 2013.
+- J. Hron, A. G. de G. Matthews and Z. Ghahramani, "Variational Bayesian dropout: Pitfalls and fixes," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- M. I. Jordan, Z. Ghahramani, T. S. Jaakkola and L. K. Saul, "An introduction to variational methods for graphical models," *Machine Learning*, vol. 37, no. 2, pp. 183–233, 1999.
+- R. E. Kalman, "A new approach to linear filtering and prediction problems," *Journal of Basic Engineering*, vol. 82, no. 1, pp. 35–45, 1960.
+- M. E. Khan, D. Nielsen, V. Tangkaratt, W. Lin, Y. Gal and A. Srivastava, "Fast and scalable Bayesian deep learning by weight-perturbation in Adam," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- M. E. Khan and H. Rue, "The Bayesian learning rule," *Journal of Machine Learning Research*, vol. 24, 2023.
+- D. P. Kingma, T. Salimans and M. Welling, "Variational dropout and the local reparameterization trick," in *Advances in Neural Information Processing Systems 28*, 2015.
+- D. P. Kingma and M. Welling, "Auto-encoding variational Bayes," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2014.
+- J. Knoblauch, J. Jewson and T. Damoulas, "An optimization-centric view on Bayes' rule: Reviewing and generalizing variational inference," *Journal of Machine Learning Research*, vol. 23, 2022.
+- Q. Liu and D. Wang, "Stein variational gradient descent: A general purpose Bayesian inference algorithm," in *Advances in Neural Information Processing Systems 29*, 2016.
+- K. P. Murphy, *Probabilistic Machine Learning: Advanced Topics*, MIT Press, 2023.
+- C. V. Nguyen, Y. Li, T. D. Bui and R. E. Turner, "Variational continual learning," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2018.
+- K. Osawa et al., "Practical deep learning with Bayesian principles," in *Advances in Neural Information Processing Systems 32*, 2019.
+- R. Ranganath, S. Gerrish and D. M. Blei, "Black box variational inference," in *Proceedings of the 17th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2014.
+- D. J. Rezende, S. Mohamed and D. Wierstra, "Stochastic backpropagation and approximate inference in deep generative models," in *Proceedings of the 31st International Conference on Machine Learning (ICML)*, 2014.
+- T. G. J. Rudner, Z. Chen, Y. W. Teh and Y. Gal, "Tractable function-space variational inference in Bayesian neural networks," in *Advances in Neural Information Processing Systems 35*, 2022.
+- Y. Shen et al., "Variational learning is effective for large deep networks," in *Proceedings of the 41st International Conference on Machine Learning (ICML)*, 2024.
+- S. Sun, G. Zhang, J. Shi and R. Grosse, "Functional variational Bayesian neural networks," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2019.
+- F. Wenzel et al., "How good is the Bayes posterior in deep neural networks really?," in *Proceedings of the 37th International Conference on Machine Learning (ICML)*, 2020.
+- V. D. Wild, R. Hu and D. Sejdinovic, "Generalized variational inference in function spaces: Gaussian measures meet Bayesian deep learning," in *Advances in Neural Information Processing Systems 35*, 2022.

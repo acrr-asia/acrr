@@ -1,0 +1,332 @@
+---
+title: "Frontiers of Bayesian Deep Learning"
+description: "Current research directions in Bayesian deep learning, from subspace inference and prior-fitted networks to singular learning theory, with open questions marked."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - singular learning theory
+  - experimental design
+  - research directions
+series: bayesian-deep-learning
+seriesOrder: 10
+---
+
+import Figure from '../../components/Figure.astro';
+import BdlSingularFreeEnergy from '../../components/diagrams/BdlSingularFreeEnergy.astro';
+
+The first nine entries covered the established core of Bayesian deep learning. They treated the posterior and the posterior predictive ([first entry](/blog/bayesian-inference-for-neural-networks)), the four main families of approximate inference (entries two to five), the function-space view through Gaussian processes ([sixth](/blog/gaussian-processes-and-kernels)), priors and symmetries ([seventh](/blog/priors-symmetries-and-identifiability)), methods that scale ([eighth](/blog/scaling-bayesian-deep-learning)) and the evaluation and use of predictive uncertainty ([ninth](/blog/evaluating-and-using-uncertainty)). This last entry surveys directions in which the field is still moving.
+
+Each direction is presented in the same way: the problem it addresses, the idea in a few paragraphs, what is established and what is open. Statements under *Established* are theorems or results reported in the cited peer-reviewed work; statements under *Open* are questions without an agreed answer, phrased as questions. Where a result is reported only for particular benchmarks, it is attributed rather than generalized. A survey cannot be complete, and the selection here follows the topics where Bayesian ideas and deep learning currently meet most directly.
+
+Two computations make the ideas concrete: a check of exchangeability for two simple prediction rules (Section 3) and the growth of the marginal likelihood in a regular and a singular model (Section 5). Code uses Python 3.13 and NumPy 2.5.3, with the standard-library `math.erf`.
+
+## 1. Where the open problems come from
+
+Every method in the series approximates one integral, the posterior predictive
+
+$$
+p(y^* \mid x^*, \mathcal{D}) = \int p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, d\theta ,
+$$
+
+and every difficulty met along the way comes from one of three sources. The parameter space is enormous, so the integral is expensive. The posterior is far from Gaussian, because of the symmetries and degeneracies of networks, so cheap local approximations can mislead. And the prior $p(\theta)$ over weights says little that a person could check, so even the exact posterior is only as meaningful as an object nobody chose deliberately.
+
+The directions below can be sorted by which source they attack. Subspace inference reduces the space. Prior-fitted networks and implicitly Bayesian prediction rules bypass the posterior over weights and work with predictions directly. Singular learning theory describes the true shape of the posterior. Credal methods relax the commitment to a single prior. Active learning, causal modeling and reinforcement learning ask what to do with uncertainty once it is available, and diffusion models bring a powerful generative model into the picture as a prior or as a target of inference.
+
+## 2. Subspace and subnetwork inference
+
+### 2.1 The idea
+
+If inference over all $P$ parameters is too expensive, one can fix most of them at a trained value $\hat{\theta}$ and do inference over a low-dimensional set of coordinates. Write $\theta = \hat{\theta} + U z$, where $U$ is a fixed $P \times k$ matrix with $k \ll P$ and $z \in \mathbb{R}^k$ carries the uncertainty. A prior on $z$ and the likelihood of the data define a posterior over $z$, and in $k$ dimensions any method of the series, including the Markov chain Monte Carlo (MCMC) of the [second entry](/blog/sampling-the-posterior-mcmc), becomes affordable.
+
+Three choices of $U$ are common. Izmailov et al. (2019) took the span of the main directions of variation of the iterates of stochastic gradient descent near the end of training. **Subnetwork inference** picks a subset of individual weights, so that $U$ selects coordinates. Daxberger et al. (2021) chose the subset to preserve as much as possible of the predictive uncertainty of a full-network approximation, then fitted a full-covariance Laplace approximation on it. The last-layer methods of the [eighth entry](/blog/scaling-bayesian-deep-learning) are the special case in which the subset is the final layer.
+
+A third choice exploits **mode connectivity**: independently trained solutions of the same network can be joined by simple curves, such as a polygonal chain with one bend, along which the training loss stays low (Garipov et al., 2018; Draxler et al., 2018). A curve or surface through several such solutions gives a low-dimensional set that spans several modes rather than the neighborhood of one.
+
+### 2.2 What is established and what is open
+
+*Established.* Inference in subspaces of a few dimensions to a few thousand dimensions is cheap, and the cited papers report better calibration than the point estimate they start from on regression and image-classification benchmarks. Low-loss connecting paths between trained solutions have been found consistently for the architectures studied in those papers.
+
+*Open.* A subspace around one mode cannot represent the diversity between modes that makes the ensembles of the [fifth entry](/blog/deep-ensembles) effective. Which subspace, then, preserves the parts of the posterior that matter for prediction, and how many dimensions, or which ones, does a given network and data set need?
+
+## 3. Prediction without an explicit posterior
+
+### 3.1 Implicitly Bayesian prediction rules
+
+The posterior over weights is a means; the predictive distribution is the end. A natural question is therefore whether a procedure can be Bayesian in its predictions without ever representing a posterior. A **prediction rule** maps every finite sequence of observations $x_1, \dots, x_n$ to a predictive distribution for $x_{n+1}$. Multiplying the one-step predictions defines a joint probability for every sequence, $p(x_1, \dots, x_n) = \prod_{i=1}^{n} p(x_i \mid x_1, \dots, x_{i-1})$.
+
+For data treated as independent and identically distributed (i.i.d.) given an unknown distribution, de Finetti's representation theorem, in the general form of Hewitt and Savage (1955), gives the characterization. An infinite sequence is **exchangeable** if its joint distribution is unchanged when the observations are reordered. It is exchangeable exactly when it can be written as a mixture of i.i.d. models, that is, as a prior over the unknown distribution together with i.i.d. sampling. A prediction rule whose joint distributions are exchangeable for every $n$ is therefore implicitly Bayesian: some prior and likelihood reproduce all its predictions.
+
+The listing checks two rules for binary outcomes. **Laplace's rule of succession** predicts $\Pr(x_{n+1} = 1) = (1 + \sum_i x_i)/(n + 2)$, which is the posterior predictive for a coin with a uniform prior on its bias. The second rule is the same formula with older observations down-weighted by a factor 0.5 per step, a plausible heuristic for drifting data.
+
+```python
+import numpy as np
+from itertools import permutations
+
+def laplace_rule(past):                  # P(next = 1 | past), uniform prior on the coin's bias
+    return (1 + sum(past)) / (len(past) + 2)
+
+def recency_rule(past, w=0.5):           # the same, but older outcomes count less
+    weights = w ** np.arange(len(past))[::-1]
+    return (1 + np.dot(weights, past)) / (2 + weights.sum())
+
+def joint(rule, seq):                    # P(x_1, ..., x_n) as a product of one-step predictions
+    prob = 1.0
+    for i, x in enumerate(seq):
+        p1 = rule(seq[:i])
+        prob *= p1 if x == 1 else 1 - p1
+    return prob
+
+for rule in (laplace_rule, recency_rule):
+    probs = {s: joint(rule, list(s)) for s in sorted(set(permutations((1, 1, 0))))}
+    print(f"{rule.__name__:13s}", "  ".join(f"{''.join(map(str, s))}: {p:.4f}" for s, p in probs.items()))
+```
+
+```text
+laplace_rule  011: 0.0833  101: 0.0833  110: 0.0833
+recency_rule  011: 0.0952  101: 0.0714  110: 0.0952
+```
+
+Laplace's rule gives every ordering of two ones and a zero the same probability, $1/12$, as exchangeability requires. The recency rule gives the sequence 101 a smaller probability than 011 and 110, so no prior and i.i.d. likelihood reproduce it: it is not implicitly Bayesian for i.i.d. data. (It may still be a sensible rule for data that are not i.i.d.; exchangeability is the right test only under that assumption.)
+
+The same test applies, in principle, to a neural network trained by gradient descent and used to predict, although checking it requires retraining on reordered data. Fong, Holmes and Walker (2023) turned the predictive view into a method: the **martingale posterior** obtains uncertainty about a quantity of interest by repeatedly imputing the unseen future observations from a chosen predictive rule and recomputing the quantity, with no prior over parameters. Large language models that predict from examples in their prompt (in-context learning) have been analyzed from the same angle. Xie et al. (2022) described in-context learning as implicit Bayesian inference over latent concepts; Falck, Wang and Holmes (2024) tested whether the predictions behave as exchangeable predictive distributions should, with mixed answers.
+
+*Established.* De Finetti's theorem and its consequences for prediction rules; the construction and basic properties of martingale posteriors.
+
+*Open.* How should one measure how close a given predictor is to being implicitly Bayesian, and does moving it closer improve its uncertainty in practice? For in-context learning in large models, under which conditions, if any, do predictions behave like a posterior predictive?
+
+### 3.2 Prior-fitted networks
+
+A **prior-fitted network** (PFN) learns the posterior predictive directly (Müller et al., 2022). Training draws many synthetic data sets from a prior over data sets, holds out one point of each, and trains a network $q_\psi$, usually a transformer, to predict the held-out label from the rest:
+
+$$
+\min_\psi \; \mathbb{E}_{\mathcal{D} \cup \{(x^*, y^*)\} \sim p(\text{data sets})} \left[ -\log q_\psi(y^* \mid x^*, \mathcal{D}) \right] .
+$$
+
+This is the expected log score of Section 2 of the [ninth entry](/blog/evaluating-and-using-uncertainty), and because the log score is strictly proper the minimizer over all functions is the true posterior predictive under the chosen prior. A trained PFN then predicts for a real data set in one forward pass, with the data set given as input. The prior is defined by a simulator rather than a density, so it can be anything one can sample: Gaussian processes, random neural networks, random structural models.
+
+TabPFN applied the idea to small tabular classification problems (Hollmann et al., 2023). A later version extended it to regression and larger tables and was reported to outperform tuned gradient-boosted tree baselines on benchmark data sets of up to 10 000 samples (Hollmann et al., 2025). Conditional neural processes are an earlier member of the same family (Garnelo et al., 2018).
+
+*Established.* The minimizer of the PFN objective is the posterior predictive of the prior, given unlimited capacity and optimization; the reported benchmark results for tabular data in the cited papers.
+
+*Open.* How does a PFN behave when the real data are unlike anything its prior generates, and how can a user tell? How does the approach scale to large data sets, given that the whole data set is an input? And since the prior is defined only through a simulator, what does the resulting uncertainty mean, and how should such priors be designed and checked?
+
+## 4. Diffusion models
+
+### 4.1 The model
+
+A **diffusion model** generates data by reversing a noising process. A fixed forward process adds Gaussian noise to a data point $x_0$ over $T$ steps until $x_T$ is close to pure noise; a network learns the reverse steps $p_\psi(x_{t-1} \mid x_t)$, and sampling runs them from noise to data (Sohl-Dickstein et al., 2015; Ho, Jain and Abbeel, 2020). The training objective is an evidence lower bound (ELBO) on the log-likelihood of the data, the same bound as in the [fourth entry](/blog/variational-inference-for-neural-networks), with the noised versions $x_1, \dots, x_T$ as latent variables; in practice it reduces to predicting the added noise. Song et al. (2021) described the continuous-time limit as a stochastic differential equation whose reversal requires the **score**, the gradient of the log density of the noised data, which the network learns. Variants for discrete data, such as text and graphs, replace Gaussian noise with corruption of categories (Austin et al., 2021).
+
+### 4.2 Relation to Bayesian deep learning
+
+Diffusion models meet the series in two ways. First, a trained diffusion model is a flexible prior over complex objects, images for example. Combining it with a likelihood for a measurement, such as a blurred or incomplete image, defines a posterior over the clean object, and approximate samplers that steer the reverse process toward the measurement have been proposed (Chung et al., 2023). Second, a diffusion model is itself a neural network fitted to finite data, so its own parameters are uncertain, and the methods of the series could in principle be applied to it.
+
+*Established.* The ELBO derivation of the training objective and the score-based continuous-time description.
+
+*Open.* How accurate are the approximate posterior samplers that use a diffusion prior, given that the steering terms they add are approximations whose error is hard to quantify? How should the epistemic uncertainty of a diffusion model about regions with little training data be estimated and shown?
+
+## 5. Singular learning theory
+
+### 5.1 Regular and singular models
+
+The classical asymptotic theory of Bayesian inference assumes a **regular** model: the parameter that generates the data is unique, and the Fisher information matrix there is positive definite. Under these conditions the posterior becomes Gaussian as the sample size $n$ grows, the Laplace approximation of the [third entry](/blog/laplace-approximations) is justified, and the negative log marginal likelihood behaves like the Bayesian information criterion, with a penalty $(P/2) \log n$ for $P$ parameters.
+
+Neural networks are **singular**. The discrete symmetries of the [seventh entry](/blog/priors-symmetries-and-identifiability), permutations and sign flips, only copy a point. Networks also have continuous degeneracies: a unit with zero outgoing weight leaves its incoming weights free, duplicated units can trade weight between them, and units with rectified linear (ReLU) activations can be rescaled (seventh entry, Section 4.2). Along such sets many parameter values produce the same function, so the set of best parameters is not a finite set of points, and the Fisher information there is degenerate. Watanabe (2009) developed **singular learning theory** for this case. Write $K(\theta)$ for the Kullback–Leibler divergence from the true data distribution to the model with parameters $\theta$, and $L_n$ for the empirical negative log-likelihood at a parameter $\theta_0$ where $K(\theta_0) = 0$ (in a well-specified model, the empirical entropy of the data). Under conditions that include analytic model and prior and a well-specified (or suitably close) model, the **free energy** $F_n = -\log p(\mathcal{D})$ satisfies
+
+$$
+F_n = n L_n + \lambda \log n - (m - 1) \log \log n + O_p(1),
+$$
+
+where $\lambda$, the **real log canonical threshold** (also called the learning coefficient), and its multiplicity $m$ are determined by the geometry of the set where $K = 0$, and $O_p(1)$ is a random term bounded in probability. For a regular model $\lambda = P/2$ and $m = 1$; for a singular one $\lambda \le P/2$, often much less.
+
+### 5.2 A two-parameter example
+
+The smallest example has two parameters $a, b \in [-1, 1]$ with a uniform prior. In the regular model $K(a, b) = (a^2 + b^2)/2$, which is zero only at the origin. In the singular model $K(a, b) = (ab)^2/2$, which is zero on the whole cross $a = 0$ or $b = 0$; it is, for example, the divergence of the model $y = abx + \varepsilon$ with standard normal $x$ and $\varepsilon$ when the true slope is 0. The listing computes $F(n) = -\log \int e^{-nK(a,b)} \tfrac{1}{4}\, da\, db$, which replaces the random empirical divergence by its expectation and so keeps only the deterministic terms of the expansion, and reports the slope of $F$ against $\log n$ over each decade from $10^2$ to $10^8$.
+
+```python
+import numpy as np
+from math import erf
+
+def free_energy(n, singular):
+    """F(n) = -log of the integral of exp(-n K(a, b)) / 4 over the square [-1, 1]^2."""
+    a = np.concatenate([[0.0], np.logspace(-9, 0, 20001)])   # fine grid on [0, 1]
+    if singular:   # K = (a b)^2 / 2; the integral over b is done in closed form
+        s = a[1:] * np.sqrt(n / 2)
+        g = np.concatenate([[2.0], np.sqrt(np.pi) * np.array([erf(v) for v in s]) / s])
+    else:          # K = (a^2 + b^2) / 2
+        g = np.exp(-n * a**2 / 2) * np.sqrt(2 * np.pi / n) * erf(np.sqrt(n / 2))
+    return -np.log(2 * np.trapezoid(g, a) / 4)    # the integrand is even in a
+
+ns = 10.0 ** np.arange(2, 9)
+for name, singular in (("regular ", False), ("singular", True)):
+    F = np.array([free_energy(n, singular) for n in ns])
+    print(name, np.round(np.diff(F) / np.diff(np.log(ns)), 3))
+mid = np.sqrt(ns[:-1] * ns[1:])
+print("1/2 - 1/log n", np.round(0.5 - 1 / np.log(mid), 3))
+```
+
+```text
+regular  [1. 1. 1. 1. 1. 1.]
+singular [0.356 0.392 0.414 0.428 0.438 0.446]
+1/2 - 1/log n [0.326 0.376 0.403 0.421 0.433 0.442]
+```
+
+The regular model's free energy grows exactly like $1 \cdot \log n$, as $P/2 = 1$ predicts. The singular model's grows more slowly. For $K = (ab)^2/2$ the theory gives $\lambda = 1/2$ and $m = 2$, so the slope of $\tfrac{1}{2}\log n - \log\log n$ against $\log n$ is $\tfrac{1}{2} - 1/\log n$; the last line evaluates it at the middle of each decade. The computed slopes follow it and approach $1/2$ slowly from below, as the $\log \log n$ term fades. The model has two parameters, but the data penalize it as if it had one, and even at $n = 10^8$ it has not reached that limit.
+
+<Figure caption="Free energy against sample size for the two-parameter example. The singular model, whose best parameters form a cross rather than a point, pays a much smaller complexity penalty than the regular model with the same number of parameters.">
+  <BdlSingularFreeEnergy />
+</Figure>
+
+### 5.3 Consequences for the series
+
+Three consequences bear on earlier entries.
+
+- **Laplace approximations.** At a singular point the Hessian has zero eigenvalues and the posterior is not asymptotically Gaussian, so the Laplace approximation is not justified there as an asymptotic theory, either for prediction or for the marginal likelihood. This does not prevent it from being useful in practice, where the prior precision of the [third entry](/blog/laplace-approximations) fills the flat directions, but its justification there is pragmatic.
+- **Effective dimension.** The number of parameters, or the number of large Hessian eigenvalues at a trained network, does not determine the complexity penalty; $\lambda$ does.
+- **Model comparison.** The widely applicable information criterion (WAIC) estimates the generalization loss of the posterior predictive for singular models, where criteria based on parameter counts fail (Watanabe, 2010).
+
+*Established.* The asymptotic expansion above and the formula for WAIC, under Watanabe's conditions; the singularity of neural networks with hidden units.
+
+*Open.* Local versions of $\lambda$ have been estimated with stochastic-gradient MCMC, but can $\lambda$ be estimated reliably for large networks? How relevant are asymptotic statements at the sample sizes of practice, given how slowly even the toy example converges? And since networks with rectified linear units are not analytic models, which parts of the theory still hold for them?
+
+## 6. Active learning and Bayesian experimental design
+
+### 6.1 From label selection to experimental design
+
+The [ninth entry](/blog/evaluating-and-using-uncertainty) used the mutual information between a label and the parameters, Bayesian active learning by disagreement (BALD), to choose inputs for labeling. The idea is older and more general. Lindley (1956) proposed choosing an experiment, described by a **design** $\xi$, to maximize the **expected information gain** (EIG)
+
+$$
+\mathrm{EIG}(\xi) = \mathbb{E}_{p(y \mid \xi)}\Big[\mathrm{KL}\big(p(\theta \mid y, \xi) \,\Vert\, p(\theta)\big)\Big],
+$$
+
+the expected Kullback–Leibler (KL) divergence from prior to posterior after observing the outcome $y$ of the experiment. In active learning the design is the input to label. In science it may be the settings of an instrument or the questions of a survey (Rainforth et al., 2024).
+
+### 6.2 Established practice and open problems
+
+*Established.* The decision-theoretic justification of information-based design, and the equality of the parameter-space and output-space forms of the mutual information used by BALD. Most practical methods are **myopic**: they pick the design with the largest expected information gain for the next step alone and do not plan for the experiments that will follow it. Amortized methods learn, in advance, a network that takes the history of designs and outcomes as input and returns the next design, which makes adaptive design fast enough to run in real time (Foster et al., 2021).
+
+*Open.* When does planning several steps ahead pay for its cost? How robust are information-based designs when the model is misspecified, given that they deliberately seek the inputs where the model is least certain, which is also where it is most likely to be wrong? And for active learning with large networks, how should the cost of retraining and the bias of actively chosen data (ninth entry, Section 5) be traded against the information gained?
+
+## 7. Causal-aware Bayesian deep learning
+
+A model of $p(y \mid x)$ describes association: what $y$ tends to be when $x$ is observed. Many decisions need the effect of an intervention: what $y$ would be if $x$ were set. A **structural causal model** describes each variable as a function of its direct causes and independent noise, organized as a directed acyclic graph (DAG), and gives interventions a precise meaning (Pearl, 2009). Two tasks follow: **causal discovery**, learning the graph from data, and **causal inference**, estimating effects once the graph is known or assumed.
+
+Bayesian methods enter because the graph is rarely identifiable from observational data alone: several graphs can explain the same distribution. A posterior over graphs, and over the functions attached to each node, carries this ambiguity into the estimated effects instead of committing to one graph. Neural networks represent the node functions, and variational inference or MCMC approximates the posterior; DiBS, for example, makes the graph posterior differentiable through a continuous latent representation (Lorch et al., 2021).
+
+*Established.* The formal framework of structural causal models and the conditions under which effects are identifiable; the existence of tractable approximate posteriors over graphs for moderate numbers of variables.
+
+*Open.* The number of DAGs grows faster than exponentially with the number of variables. How accurate are approximate posteriors over graphs, and how can that be checked when the true graph is unknown? How sensitive are the results to the usual assumptions, such as no hidden confounders?
+
+## 8. Credal sets and imprecise probability
+
+A Bayesian analysis commits to one prior and one likelihood. **Imprecise probability** replaces a single distribution by a **credal set**, a closed convex set of distributions, and reports lower and upper probabilities over the set (Walley, 1991). Applied to Bayesian neural networks, a credal set of priors and likelihoods yields a set of posterior predictive distributions. Its spread expresses how much the conclusions depend on choices the modeler could not justify, and the width of the interval for each probability can be read as an epistemic quantity.
+
+The motivation connects to a critique of the entropy decomposition of the ninth entry. Hüllermeier and Waegeman (2021) survey the distinction between aleatoric and epistemic uncertainty and the representations proposed for it. Wimmer et al. (2023) argue that the mutual-information decomposition violates properties one would expect of a measure of epistemic uncertainty, which motivates alternatives, credal sets among them.
+
+*Established.* The mathematical theory of credal sets and lower previsions; the computation of credal sets of posteriors when they are generated by finitely many extreme priors and likelihoods, since the extreme points can be propagated one at a time.
+
+*Open.* How should the credal set be chosen for a neural network, where even one prior is hard to specify? Is the extra cost, at least one approximate posterior per extreme point, justified by better decisions? And how should a set-valued prediction be evaluated, given that the proper scoring rules of the ninth entry score single distributions?
+
+## 9. Bayesian reinforcement learning
+
+A reinforcement-learning agent acts in an environment whose dynamics and rewards it does not know, and must balance **exploration**, acting to learn, against **exploitation**, acting on what it already believes. A posterior over the environment makes the trade-off explicit. **Thompson sampling** draws one plausible environment from the posterior and acts optimally for it. It was proposed for choosing between two treatments (Thompson, 1933). Its extension to Markov decision processes, **posterior sampling for reinforcement learning** (PSRL), has regret bounds in the tabular case (Osband, Russo and Van Roy, 2013). Bootstrapped deep Q-networks (DQN) approximate the posterior over value functions with an ensemble of network heads, the deep-ensemble idea applied to exploration (Osband et al., 2016). Ghavamzadeh et al. (2015) survey the field.
+
+*Established.* Regret guarantees for posterior sampling in tabular and some structured settings; empirical gains from ensemble-based exploration on the tasks reported in the cited work.
+
+*Open.* An agent explores too little when its approximate posterior is too narrow, as mean-field variational methods tend to give, or when its ensemble members become too similar. How can the quality of the approximate posterior be checked inside a learning agent, and how can its uncertainty support safety guarantees in high-dimensional problems where Gaussian-process methods are too expensive?
+
+## 10. Exercises
+
+**Exercise 1.** For Laplace's rule, compute the probability of the sequence 1, 1, 0, 0 and of 0, 1, 0, 1. Are they equal?
+
+<details>
+<summary>Answer</summary>
+
+For 1, 1, 0, 0: $\tfrac{1}{2} \cdot \tfrac{2}{3} \cdot \tfrac{1}{4} \cdot \tfrac{2}{5} = \tfrac{1}{30}$. For 0, 1, 0, 1: $\tfrac{1}{2} \cdot \tfrac{1}{3} \cdot \tfrac{2}{4} \cdot \tfrac{2}{5} = \tfrac{1}{30}$. They are equal, as exchangeability requires; both equal $\int_0^1 \mu^2 (1 - \mu)^2 d\mu = 1/30$, the Beta integral for a uniform prior on the bias $\mu$.
+
+</details>
+
+**Exercise 2.** Why does the PFN objective recover the posterior predictive, rather than some other distribution, when the network has unlimited capacity?
+
+<details>
+<summary>Answer</summary>
+
+For each data set and test input, the expected loss is the expected log score of $q_\psi(\cdot \mid x^*, \mathcal{D})$ under the true conditional distribution of $y^*$ given $x^*$ and $\mathcal{D}$ in the generative process, which is the posterior predictive of the prior. The log score is strictly proper, so the expected loss is minimized only when $q_\psi$ equals that distribution for every input.
+
+</details>
+
+**Exercise 3.** A singular model with $P = 10$ parameters has $\lambda = 2$ and $m = 1$. By how much does its free energy grow when $n$ goes from 1000 to 100 000, ignoring $n L_n$ and the random term, and how much would a regular model with 10 parameters grow?
+
+<details>
+<summary>Answer</summary>
+
+$\lambda \log(100) = 2 \times 4.61 = 9.21$ nats for the singular model, against $(P/2)\log(100) = 5 \times 4.61 = 23.0$ nats for the regular one.
+
+</details>
+
+**Exercise 4.** In the expected information gain, why is the expectation taken over $p(y \mid \xi)$ rather than evaluated at the observed outcome?
+
+<details>
+<summary>Answer</summary>
+
+The design is chosen before the experiment is run, so the outcome is unknown. The prior predictive $p(y \mid \xi) = \int p(y \mid \theta, \xi) p(\theta)\, d\theta$ is the best available forecast of it, and the EIG is the information gain averaged over that forecast.
+
+</details>
+
+## 11. Summary
+
+| Direction | Problem addressed | Established | Open |
+|---|---|---|---|
+| Subspace and subnetwork inference | Cost of inference over all weights | Cheap inference in low dimensions; mode connectivity | Which subspace preserves the predictive |
+| Implicitly Bayesian rules, martingale posteriors | Need for an explicit posterior | De Finetti characterization by exchangeability | Measuring and improving Bayesianness of trained predictors |
+| Prior-fitted networks | Cost and difficulty of posterior inference | Optimum equals the posterior predictive of the prior | Behavior under prior mismatch; scaling in data size |
+| Diffusion models | Expressive priors and generative uncertainty | ELBO and score-based formulations | Accuracy of diffusion-prior posterior sampling |
+| Singular learning theory | Non-Gaussian, degenerate posteriors | Free-energy asymptotics with $\lambda \le P/2$; WAIC | Estimating $\lambda$ at scale; finite-sample relevance |
+| Experimental design | Choosing what data to gather | Information-gain criteria; amortized design | Nonmyopic design; robustness to misspecification |
+| Causal-aware methods | Effects of interventions, not associations | Structural causal models; graph posteriors | Accuracy and checking of graph posteriors |
+| Credal sets | Dependence on one prior and likelihood | Theory of imprecise probability | Choosing and evaluating credal sets for networks |
+| Bayesian reinforcement learning | Exploration under uncertainty | Regret bounds for posterior sampling | Posterior quality and safety at scale |
+
+The series set out five objectives. The entries meet them as follows.
+
+1. **The posterior, the posterior predictive and the two kinds of uncertainty.** The [first entry](/blog/bayesian-inference-for-neural-networks) defines them and splits the predictive entropy into aleatoric and epistemic parts; Section 5 of the [ninth](/blog/evaluating-and-using-uncertainty) uses that split to choose data.
+2. **Comparing the approximate-inference families.** The second to fifth entries treat [sampling](/blog/sampling-the-posterior-mcmc), [Laplace approximations](/blog/laplace-approximations), [variational inference](/blog/variational-inference-for-neural-networks) and [deep ensembles](/blog/deep-ensembles), each with its assumptions, cost and failure modes.
+3. **Gaussian processes, kernels, priors, symmetries and identifiability.** The [sixth](/blog/gaussian-processes-and-kernels) and [seventh](/blog/priors-symmetries-and-identifiability) entries cover them, and Section 5 of this entry shows how non-identifiability changes the asymptotics of the posterior.
+4. **Choosing a method that scales and evaluating its uncertainty.** The [eighth entry](/blog/scaling-bayesian-deep-learning) covers scale; the [ninth](/blog/evaluating-and-using-uncertainty) covers calibration, proper scoring rules and selective prediction.
+5. **Current research directions and their open problems.** This entry and its table cover them.
+
+What unites the directions is the integral of Section 1. Each is a different answer to how much of it can be computed, how far the result can be trusted and what it is worth once it is in hand.
+
+### References
+
+- J. Austin, D. D. Johnson, J. Ho, D. Tarlow and R. van den Berg, "Structured denoising diffusion models in discrete state-spaces," in *Advances in Neural Information Processing Systems 34*, 2021.
+- H. Chung, J. Kim, M. T. McCann, M. L. Klasky and J. C. Ye, "Diffusion posterior sampling for general noisy inverse problems," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- E. Daxberger, E. Nalisnick, J. U. Allingham, J. Antorán and J. M. Hernández-Lobato, "Bayesian deep learning via subnetwork inference," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- F. Draxler, K. Veschgini, M. Salmhofer and F. A. Hamprecht, "Essentially no barriers in neural network energy landscape," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- F. Falck, Z. Wang and C. Holmes, "Is in-context learning in large language models Bayesian? A martingale perspective," in *Proceedings of the 41st International Conference on Machine Learning (ICML)*, 2024.
+- E. Fong, C. Holmes and S. G. Walker, "Martingale posterior distributions," *Journal of the Royal Statistical Society, Series B*, vol. 85, no. 5, 2023.
+- A. Foster, D. R. Ivanova, I. Malik and T. Rainforth, "Deep adaptive design: Amortizing sequential Bayesian experimental design," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- M. Garnelo et al., "Conditional neural processes," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- T. Garipov, P. Izmailov, D. Podoprikhin, D. Vetrov and A. G. Wilson, "Loss surfaces, mode connectivity, and fast ensembling of DNNs," in *Advances in Neural Information Processing Systems 31*, 2018.
+- M. Ghavamzadeh, S. Mannor, J. Pineau and A. Tamar, "Bayesian reinforcement learning: A survey," *Foundations and Trends in Machine Learning*, vol. 8, no. 5–6, 2015.
+- E. Hewitt and L. J. Savage, "Symmetric measures on Cartesian products," *Transactions of the American Mathematical Society*, vol. 80, no. 2, pp. 470–501, 1955.
+- J. Ho, A. Jain and P. Abbeel, "Denoising diffusion probabilistic models," in *Advances in Neural Information Processing Systems 33*, 2020.
+- N. Hollmann, S. Müller, K. Eggensperger and F. Hutter, "TabPFN: A transformer that solves small tabular classification problems in a second," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- N. Hollmann et al., "Accurate predictions on small data with a tabular foundation model," *Nature*, vol. 637, 2025.
+- E. Hüllermeier and W. Waegeman, "Aleatoric and epistemic uncertainty in machine learning: An introduction to concepts and methods," *Machine Learning*, vol. 110, 2021.
+- P. Izmailov, W. J. Maddox, P. Kirichenko, T. Garipov, D. Vetrov and A. G. Wilson, "Subspace inference for Bayesian deep learning," in *Proceedings of the 35th Conference on Uncertainty in Artificial Intelligence (UAI)*, 2019.
+- D. V. Lindley, "On a measure of the information provided by an experiment," *The Annals of Mathematical Statistics*, vol. 27, no. 4, pp. 986–1005, 1956.
+- L. Lorch, J. Rothfuss, B. Schölkopf and A. Krause, "DiBS: Differentiable Bayesian structure learning," in *Advances in Neural Information Processing Systems 34*, 2021.
+- S. Müller, N. Hollmann, S. Pineda Arango, J. Grabocka and F. Hutter, "Transformers can do Bayesian inference," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- I. Osband, C. Blundell, A. Pritzel and B. Van Roy, "Deep exploration via bootstrapped DQN," in *Advances in Neural Information Processing Systems 29*, 2016.
+- I. Osband, D. Russo and B. Van Roy, "(More) efficient reinforcement learning via posterior sampling," in *Advances in Neural Information Processing Systems 26*, 2013.
+- J. Pearl, *Causality: Models, Reasoning, and Inference*, 2nd ed., Cambridge University Press, 2009.
+- T. Rainforth, A. Foster, D. R. Ivanova and F. Bickford Smith, "Modern Bayesian experimental design," *Statistical Science*, vol. 39, no. 1, 2024.
+- J. Sohl-Dickstein, E. Weiss, N. Maheswaranathan and S. Ganguli, "Deep unsupervised learning using nonequilibrium thermodynamics," in *Proceedings of the 32nd International Conference on Machine Learning (ICML)*, 2015.
+- Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon and B. Poole, "Score-based generative modeling through stochastic differential equations," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2021.
+- W. R. Thompson, "On the likelihood that one unknown probability exceeds another in view of the evidence of two samples," *Biometrika*, vol. 25, no. 3–4, pp. 285–294, 1933.
+- P. Walley, *Statistical Reasoning with Imprecise Probabilities*, Chapman and Hall, 1991.
+- S. Watanabe, *Algebraic Geometry and Statistical Learning Theory*, Cambridge University Press, 2009.
+- S. Watanabe, "Asymptotic equivalence of Bayes cross validation and widely applicable information criterion in singular learning theory," *Journal of Machine Learning Research*, vol. 11, pp. 3571–3594, 2010.
+- L. Wimmer, Y. Sale, P. Hofman, B. Bischl and E. Hüllermeier, "Quantifying aleatoric and epistemic uncertainty in machine learning: Are conditional entropy and mutual information appropriate measures?," in *Proceedings of the 39th Conference on Uncertainty in Artificial Intelligence (UAI)*, 2023.
+- S. M. Xie, A. Raghunathan, P. Liang and T. Ma, "An explanation of in-context learning as implicit Bayesian inference," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.

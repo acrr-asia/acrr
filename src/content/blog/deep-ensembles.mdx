@@ -1,0 +1,410 @@
+---
+title: "Deep Ensembles and Their Bayesian Interpretation"
+description: "Training one network several times from different seeds gives a strong uncertainty baseline; this entry asks what it approximates and when it fails."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - deep ensembles
+  - uncertainty
+  - pac-bayes
+series: bayesian-deep-learning
+seriesOrder: 5
+---
+import Figure from '../../components/Figure.astro';
+import BdlEnsembleDisagreement from '../../components/diagrams/BdlEnsembleDisagreement.astro';
+
+The [first entry](/blog/bayesian-inference-for-neural-networks) defined the posterior predictive distribution, an average of the network's predictions over the posterior $p(\theta \mid \mathcal{D})$. The next three entries approximated that average in different ways: [Markov chain Monte Carlo (MCMC)](/blog/sampling-the-posterior-mcmc) draws samples from the posterior, the [Laplace approximation](/blog/laplace-approximations) fits a Gaussian at one mode, and [variational inference (VI)](/blog/variational-inference-for-neural-networks) optimizes a member of a tractable family. Each of the last two describes the neighborhood of a single mode.
+
+This entry takes the opposite approach. Instead of describing one mode carefully, it describes several modes crudely, with one trained network for each. Lakshminarayanan, Pritzel and Blundell (2017) proposed this recipe, the **deep ensemble**, as a way to obtain predictive uncertainty without changing the network or its training code, and they motivated it by its results rather than by Bayes' rule. It has since become a standard baseline against which other uncertainty methods are compared, and it often compares well (Ovadia et al., 2019). The entry builds an ensemble on a toy problem and asks which parts of Bayesian inference it performs and which it skips. It then presents three extensions: anchoring the members so that they become exact posterior samples in the linear-Gaussian case, adding spread around each member, and choosing the members' weights with a frequentist guarantee.
+
+The examples use Python 3.13 and NumPy 2.5.3, with the seeds given in the code. The notation is the series notation: $\theta$ for parameters, $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ for the data, $x^*$ and $y^*$ for a test input and its output. The training of a single network relies on the [gradient descent](/blog/gradient-descent-and-its-variants) and [regularization](/blog/generalization-overfitting-and-regularization) material of the fundamentals series.
+
+## 1. Several trained networks, one prediction
+
+### 1.1 Why retraining gives a different network
+
+Fitting the linear models of the fundamentals series is a convex problem: there is one minimum, and every starting point leads to it. Training a network is not. Its loss has many minima, and which one gradient descent reaches depends on the random initialization and on the random order of the mini-batches. Two runs that reach the same training loss can still compute different functions, because the data constrain the function only near the training inputs. Between and beyond them, each run fills in the function according to where it started. A deep ensemble turns this variation, usually regarded as a nuisance of training, into a measure of uncertainty.
+
+### 1.2 The ensemble predictive
+
+A deep ensemble of $J$ **members** consists of $J$ copies of one architecture, trained independently on the full data set from independent random initializations to parameters $\hat\theta_1, \dots, \hat\theta_J$. It predicts with the equally weighted average of the members' predictive distributions,
+
+$$
+p_{\text{ens}}(y^* \mid x^*) = \frac{1}{J} \sum_{j=1}^{J} p(y^* \mid x^*, \hat\theta_j).
+$$
+
+When the training objective includes a weight penalty, each $\hat\theta_j$ is a local maximum a posteriori (MAP) estimate, as Section 2.1 makes explicit for the toy example. In the regression experiments of Lakshminarayanan et al. (2017), each network has two outputs, a mean and a variance, and is trained by minimizing the Gaussian negative log-likelihood. That loss is a **proper scoring rule**: its expected value is smallest when the predicted distribution equals the true one (Gneiting and Raftery, 2007), so it rewards honest variances as well as accurate means. The authors also tried adding adversarial examples to the training data as a smoothing device, and they used five members in most experiments.
+
+The idea of averaging separately trained networks is older. Hansen and Salamon (1990) used it to reduce classification error, and bagging (Breiman, 1996) gives each member a different bootstrap resample of the data. Lakshminarayanan et al. found resampling unnecessary for networks: different seeds and data orders produced enough diversity, and every member could use all the data.
+
+The price is paid in every phase. The five members of Section 2 need five times the training computation of one network, five times its memory and five forward passes per prediction. Training them on five devices at once shortens the wait but leaves the total computation unchanged.
+
+### 1.3 Splitting the predictive variance
+
+In regression with a Gaussian likelihood, member $j$ predicts $\mathcal{N}\big(\mu_j(x^*), \sigma_j^2(x^*)\big)$, where $\sigma_j^2$ is the noise variance the member assigns to the data, learned or fixed. Drawing from the ensemble predictive means picking a member uniformly at random and then drawing from its Gaussian. The mean of that draw is the average of the members' means, $\bar\mu(x^*) = \frac{1}{J}\sum_j \mu_j(x^*)$. Its second moment is the average of the members' second moments, $\frac{1}{J}\sum_j \big(\sigma_j^2 + \mu_j^2\big)$, and subtracting $\bar\mu^2$ gives the variance
+
+$$
+v(x^*) = \underbrace{\frac{1}{J}\sum_{j=1}^J \sigma_j^2(x^*)}_{\text{average noise}} \;+\; \underbrace{\frac{1}{J}\sum_{j=1}^J \big(\mu_j(x^*) - \bar\mu(x^*)\big)^2}_{\text{disagreement}}.
+$$
+
+The first term estimates the **aleatoric** part of the uncertainty, the noise the members see in the data. The second, the spread of the members' means, estimates the **epistemic** part, the uncertainty about the function that more data would remove; the [first entry](/blog/bayesian-inference-for-neural-networks) introduced both. The two numbers summarize a predictive that is itself a mixture of $J$ Gaussians and can be skewed or have several peaks.
+
+### 1.4 Classification: average probabilities
+
+In classification each member outputs a vector of class probabilities $p_j = p(y^* \mid x^*, \hat\theta_j)$, and the ensemble averages these vectors, $\bar p = \frac{1}{J}\sum_j p_j$. Averaging the members' logits (the inputs to the softmax) gives a different and generally more confident predictor, which is not the mixture above.
+
+The [first entry](/blog/bayesian-inference-for-neural-networks) (Section 2.2) split the entropy of a posterior predictive into an expected entropy (aleatoric) and the mutual information between the prediction and the parameters (epistemic; Depeweg et al., 2018). The same split applies to the ensemble with the posterior average replaced by the average over members:
+
+$$
+\mathbb{H}[\bar p] = \underbrace{\frac{1}{J}\sum_{j=1}^J \mathbb{H}[p_j]}_{\text{expected entropy}} + \underbrace{\Big(\mathbb{H}[\bar p] - \frac{1}{J}\sum_{j=1}^J \mathbb{H}[p_j]\Big)}_{\text{mutual information}} ,
+$$
+
+where $\mathbb{H}[p] = -\sum_c p_c \log p_c$ is the entropy of a probability vector. The second term is zero when all members agree and grows with their disagreement, so it plays the role of the disagreement term in regression. For three members predicting $(0.8, 0.2)$, $(0.6, 0.4)$ and $(0.1, 0.9)$, the average is $(0.5, 0.5)$ with entropy $\log 2 \approx 0.693$ nats; the members' entropies are 0.500, 0.673 and 0.325, with mean 0.499, so the mutual information is 0.194.
+
+## 2. A toy ensemble
+
+### 2.1 Setup
+
+The data follow the layout of the first entry's worked example, with more points and less noise: 40 noisy samples of $\sin x$, drawn in two clusters, $x \in [-3, -1]$ and $x \in [1, 3]$, with noise standard deviation $\sigma = 0.1$. Each member is a network with one hidden layer of 50 $\tanh$ units (151 parameters), trained by full-batch gradient descent on
+
+$$
+\frac{1}{2N}\sum_{n=1}^{N}\big(f_\theta(x_n) - y_n\big)^2 + \frac{\lambda}{2}\,\lVert\theta\rVert^2 , \qquad \lambda = 10^{-4},
+$$
+
+where $f_\theta$ is the network output. As the first entry showed (its Exercise 1), this is the negative log-posterior for Gaussian noise of variance $\sigma^2$ and a prior $\theta \sim \mathcal{N}(0, s_0^2 I)$, scaled by $\sigma^2/N$, with $\lambda = \sigma^2/(N s_0^2)$. So $\lambda = 10^{-4}$ corresponds to a prior standard deviation $s_0 = \sqrt{0.01/(40 \times 10^{-4})} \approx 1.58$. The members predict only a mean, and the noise variance is fixed at its true value, so the average-noise term of Section 1.3 is $\sigma^2 = 0.01$ everywhere.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+N, sigma = 40, 0.1
+x = np.concatenate([rng.uniform(-3, -1, N // 2), rng.uniform(1, 3, N // 2)])
+y = np.sin(x) + sigma * rng.normal(size=N)
+X = x[:, None]
+
+def init(seed, H=50):
+    r = np.random.default_rng(seed)
+    return [r.normal(0, 1, (1, H)), r.normal(0, 1, H),
+            r.normal(0, 1 / np.sqrt(H), (H, 1)), np.zeros(1)]
+
+def forward(p, X):
+    W1, b1, W2, b2 = p
+    h = np.tanh(X @ W1 + b1)
+    return h, (h @ W2 + b2).ravel()
+
+def train(seed, steps=20_000, lr=0.1, lam=1e-4):
+    p = init(seed)
+    for _ in range(steps):
+        h, f = forward(p, X)
+        r = (f - y)[:, None] / N                   # d/df of (1/2N) sum (f - y)^2
+        dh = (r @ p[2].T) * (1 - h ** 2)
+        g = [X.T @ dh, dh.sum(0), h.T @ r, r.sum(0)]
+        p = [w - lr * (gw + lam * w) for w, gw in zip(p, g)]  # weight decay = Gaussian prior
+    return p
+
+J = 5
+members = [train(seed) for seed in range(1, J + 1)]
+xs = np.array([-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0])
+F = np.array([forward(p, xs[:, None])[1] for p in members])   # J x len(xs)
+mean, spread = F.mean(0), F.std(0)
+total_sd = np.sqrt(sigma ** 2 + spread ** 2)
+print("train MSE per member:", np.round([np.mean((forward(p, X)[1] - y) ** 2) for p in members], 4))
+print("   x   sin(x)   mean   member sd   predictive sd")
+for i, x0 in enumerate(xs):
+    print(f"{x0:5.1f} {np.sin(x0):7.3f} {mean[i]:7.3f} {spread[i]:9.3f} {total_sd[i]:12.3f}")
+```
+
+It runs in about five seconds and prints:
+
+```text
+train MSE per member: [0.0109 0.0108 0.0108 0.0109 0.0109]
+   x   sin(x)   mean   member sd   predictive sd
+ -6.0   0.279   1.507     0.150        0.180
+ -4.0   0.757   0.682     0.032        0.105
+ -2.0  -0.909  -0.869     0.001        0.100
+  0.0   0.000  -0.080     0.087        0.132
+  2.0   0.909   0.922     0.002        0.100
+  4.0  -0.757  -0.305     0.057        0.115
+  6.0  -0.279  -0.928     0.174        0.201
+```
+
+### 2.2 Reading the output
+
+Every member reaches a training mean squared error (MSE) close to the noise variance of 0.01, so none of them overfits badly. Inside the data clusters, at $x = \pm 2$, the members agree to within 0.002, and the predictive standard deviation is the noise level 0.100. In the gap at $x = 0$ the member spread rises to 0.087, more than 40 times its value in the data, and at $x = \pm 6$ to about 0.15–0.17. This is the behavior that makes ensembles useful: disagreement appears where the data do not pin the function down.
+
+The output also shows the limit of that signal. At $x = 4$ the ensemble mean is $-0.305$ while the true value is $-0.757$, an error of 0.452, almost four predictive standard deviations. At $x = 6$ the error is $0.649$, about 3.2 standard deviations. Five networks with the same architecture, trained on the same data, share their inductive bias: all of them extrapolate with saturating $\tanh$ units, so they disagree less than the true uncertainty warrants. The figure shows the whole picture.
+
+<Figure caption="Five members (thin gray), their mean (accent) and a band of two predictive standard deviations, with the true function dashed. Look at the gap around x = 0, where the members fan out, and at x between about 3.2 and 5.0, below about −5.1 and above about 5.8, where the truth leaves the band.">
+  <BdlEnsembleDisagreement />
+</Figure>
+
+## 3. In what sense is an ensemble Bayesian?
+
+### 3.1 A two-mode experiment
+
+The posterior predictive of the first entry, $p(y^* \mid x^*, \mathcal{D}) = \int p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, d\theta$, is also called the **Bayesian model average (BMA)**. An average over $J$ independent posterior samples estimates it without bias, and the ensemble formula has exactly that form. The question is whether trained members behave like posterior samples. A one-dimensional stand-in for a posterior, small enough to compute exactly, answers it. Its density is a mixture of a narrow Gaussian at $-1$ (standard deviation 0.15, 70% of the mass) and a wide one at 2 (standard deviation 0.6, 30%). The listing starts 10 000 gradient-ascent runs on the log density from random points drawn from $\mathcal{N}(0, 1.5^2)$, as an ensemble would, and compares the result with the exact posterior.
+
+```python
+import numpy as np
+
+# A one-dimensional stand-in for a posterior with two modes:
+# 70% of the mass in a narrow mode at -1, 30% in a wide mode at 2.
+wt, mu, tau = np.array([0.7, 0.3]), np.array([-1.0, 2.0]), np.array([0.15, 0.6])
+
+def density(t):
+    return (wt / (np.sqrt(2 * np.pi) * tau) * np.exp(-0.5 * ((t[:, None] - mu) / tau) ** 2)).sum(1)
+
+def grad_log_density(t):
+    c = wt / tau * np.exp(-0.5 * ((t[:, None] - mu) / tau) ** 2)
+    return (c * (mu - t[:, None]) / tau ** 2).sum(1) / c.sum(1)
+
+rng = np.random.default_rng(7)
+t = rng.normal(0.0, 1.5, 10_000)                  # 10 000 random initializations
+for _ in range(2000):                             # gradient ascent to the nearest mode
+    t += 0.01 * grad_log_density(t)
+wide = t > 0.5
+print(f"posterior mass of the wide mode:       {wt[1]:.2f}")
+print(f"runs that end in the wide mode:        {wide.mean():.2f}")
+print("modes found:", np.round([t[~wide].mean(), t[wide].mean()], 3))
+
+grid = np.linspace(-4, 6, 20_001)
+p = density(grid); p /= p.sum()
+mean = (grid * p).sum(); sd = np.sqrt(((grid - mean) ** 2 * p).sum())
+print(f"posterior mean and sd:                 {mean:.3f} {sd:.3f}")
+print(f"all runs as one ensemble, mean and sd: {t.mean():.3f} {t.std():.3f}")
+```
+
+It prints:
+
+```text
+posterior mass of the wide mode:       0.30
+runs that end in the wide mode:        0.57
+modes found: [-1.  2.]
+posterior mean and sd:                 -0.100 1.419
+all runs as one ensemble, mean and sd: 0.718 1.484
+```
+
+### 3.2 What the experiment shows
+
+Each run finds a mode exactly, but the runs distribute themselves according to the wrong rule. A run ends in the mode whose basin of attraction contains its starting point, and the wide mode, which is lower but broader, attracts 57% of the starts while holding only 30% of the mass. An ensemble built from these runs therefore weights the modes by their basins under the chosen initialization, not by their posterior probability. It also puts every member at a peak, so the spread inside each mode, here 0.15 and 0.6, is missing. Together these errors move the ensemble's mean to 0.718, against a posterior mean of $-0.100$. Its standard deviation, 1.484, happens to be close to the posterior's 1.419, but only because the two errors partly offset each other.
+
+A network adds a difference that one dimension cannot show. In $P$ dimensions most of the probability mass of a distribution lies far from its peak: a standard Gaussian in $P$ dimensions has its density maximum at the origin, yet its samples lie at distance about $\sqrt{P}$ from it. A mode is then an atypical point, and predictions made at the mode can differ from those of typical posterior samples. Section 4 adds the extreme case: when the loss is convex, every member is the same point. A deep ensemble is thus a mixture of point predictions with fixed equal weights, and nothing in its construction makes those points posterior samples.
+
+### 3.3 Why ensembles still predict well
+
+Prediction depends on the function $f_\theta$, not on $\theta$ itself, and the functions in a network's posterior are organized differently from the toy example. Fort, Hu and Lakshminarayanan (2019) compared networks trained from different seeds with the checkpoints of a single training run. At equal accuracy, networks from different seeds disagreed on far more test predictions than checkpoints of one run did. If moving within a basin changes the predictions little and moving between basins changes them a lot, then a handful of members in different basins captures more of the variation in the BMA than many samples from one basin. Wilson and Izmailov (2020) built their case for deep ensembles as approximate Bayesian marginalization on this argument, and contrasted them with methods that describe a single basin.
+
+The most direct test used full-batch Hamiltonian Monte Carlo (HMC) with a large compute budget as a reference for the posterior predictive of image classifiers (Izmailov et al., 2021). The cheaper methods differed noticeably from that reference, and deep ensembles were reported to be closer to it than several single-mode methods, mean-field VI among them. This is evidence for particular networks and data sets, measured against a reference that is itself approximate. It makes ensembles a sound choice when only a few networks can be afforded. It does not settle how an ensemble compares with a sampler given enough time to mix, and the two-mode experiment shows that its weights can be badly wrong whenever basins of attraction and posterior masses disagree.
+
+### 3.4 Combining models is not averaging over them
+
+Part of an ensemble's accuracy may have nothing to do with marginalization. Suppose two members predict $\mathcal{N}(-1, 0.1^2)$ and $\mathcal{N}(1, 0.1^2)$ at some input. The ensemble predictive has two peaks and variance $0.01 + 1 = 1.01$, a shape that neither member, nor any single Gaussian, can produce. The ensemble has enlarged the family of predictive distributions. Bayesian averaging over a fixed set of hypotheses behaves differently: as data accumulate, the posterior odds of one hypothesis against another change by a factor that grows exponentially with $N$, so the BMA ends up predicting almost entirely with one of them. Minka (2000) used this contrast to argue that averaging over models and **combining** models answer different questions. When an ensemble beats its members, the gain can come from combination as well as from averaging over uncertainty.
+
+## 4. Turning an ensemble into a sampler
+
+### 4.1 Perturb, then optimize
+
+With a convex loss every member of a plain ensemble converges to the same minimum, and the ensemble reports zero spread; in a network, diversity comes only from the non-convexity of the loss. A small change to each member's objective gives every member its own target, and in the linear-Gaussian case it makes each member an exact posterior sample.
+
+Take the Bayesian linear regression of the [first entry](/blog/bayesian-inference-for-neural-networks) (Section 3): $f_\theta(x) = \phi(x)^\top \theta$ with $P$ features, design matrix $\Phi \in \mathbb{R}^{N \times P}$, targets $\mathbf{y}$, Gaussian noise of variance $\sigma^2$ and prior $\theta \sim \mathcal{N}(0, s_0^2 I)$. Its posterior is $\mathcal{N}(m_N, S_N)$ with
+
+$$
+S_N = \Big(\tfrac{1}{\sigma^2}\Phi^\top\Phi + \tfrac{1}{s_0^2} I\Big)^{-1}, \qquad m_N = \tfrac{1}{\sigma^2} S_N \Phi^\top \mathbf{y} .
+$$
+
+Now let member $j$ draw an **anchor** $\theta_{0,j} \sim \mathcal{N}(0, s_0^2 I)$ from the prior and a target perturbation $\varepsilon_j \sim \mathcal{N}(0, \sigma^2 I_N)$, and minimize
+
+$$
+L_j(\theta) = \frac{1}{2\sigma^2}\lVert \mathbf{y} + \varepsilon_j - \Phi\theta\rVert^2 + \frac{1}{2s_0^2}\lVert\theta - \theta_{0,j}\rVert^2 .
+$$
+
+Setting the gradient to zero gives $\hat\theta_j = S_N\big(\Phi^\top(\mathbf{y} + \varepsilon_j)/\sigma^2 + \theta_{0,j}/s_0^2\big)$. This is a linear function of independent Gaussian vectors, so it is Gaussian; its mean is $S_N\Phi^\top \mathbf{y}/\sigma^2 = m_N$, because $\varepsilon_j$ and $\theta_{0,j}$ have mean zero. Its covariance is
+
+$$
+S_N\Big(\frac{\Phi^\top (\sigma^2 I)\Phi}{\sigma^4} + \frac{s_0^2 I}{s_0^4}\Big)S_N = S_N\,S_N^{-1}S_N = S_N ,
+$$
+
+so each member is an exact posterior sample. This **perturb-then-optimize** construction is exact only in the linear-Gaussian case; Bardsley et al. (2014) developed a related randomize-then-optimize method for nonlinear inverse problems. For neural networks it becomes an approximation: Pearce et al. (2020) proposed anchored ensembles that regularize each member toward its own prior draw, and Osband, Aslanides and Cassirer (2018) add a fixed, randomly initialized "prior network" to each member's output, which has a similar effect.
+
+### 4.2 A numerical check
+
+The listing below fits a quadratic in $x$ (features $1, x, x^2$) to 12 noisy points and compares the exact posterior with 20 000 perturb-then-optimize members. Since each $L_j$ is quadratic, the members are found in closed form; for a network each would be trained by gradient descent.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+N, sigma, s = 12, 0.3, 1.0                       # data size, noise sd, prior sd
+x = rng.uniform(-1, 1, N)
+Phi = np.stack([np.ones(N), x, x ** 2], axis=1)   # features 1, x, x^2
+y = 0.5 - x + 0.8 * x ** 2 + sigma * rng.normal(size=N)
+
+# Exact Gaussian posterior (prior theta ~ N(0, s^2 I))
+A = Phi.T @ Phi / sigma ** 2 + np.eye(3) / s ** 2
+S_post = np.linalg.inv(A)
+m_post = S_post @ Phi.T @ y / sigma ** 2
+
+# Perturb-then-optimize: member j fits perturbed targets, anchored at a prior draw
+J = 20_000
+theta0 = rng.normal(0, s, (J, 3))                # anchors drawn from the prior
+eps = rng.normal(0, sigma, (J, N))               # perturbations of the targets
+members = (S_post @ (Phi.T @ (y + eps).T / sigma ** 2 + theta0.T / s ** 2)).T
+
+print("posterior mean     ", np.round(m_post, 3))
+print("ensemble mean      ", np.round(members.mean(0), 3))
+print("posterior sd       ", np.round(np.sqrt(np.diag(S_post)), 3))
+print("ensemble sd        ", np.round(members.std(0), 3))
+```
+
+It prints:
+
+```text
+posterior mean      [ 0.502 -1.203  0.633]
+ensemble mean       [ 0.502 -1.202  0.636]
+posterior sd        [0.124 0.223 0.396]
+ensemble sd         [0.124 0.223 0.396]
+```
+
+The means agree to Monte Carlo error (about $0.4/\sqrt{20\,000} \approx 0.003$ for the third coefficient) and the standard deviations to three decimals. Without the anchors and perturbations, every member would be the MAP estimate $m_N$ and the ensemble would report no uncertainty at all.
+
+## 5. Ensembles combined with local approximations
+
+The two-mode experiment of Section 3.1 left the width of each mode out of the prediction. One remedy keeps the ensemble for finding basins and replaces each member's single point by a distribution over its own basin.
+
+- **MultiSWAG.** After ordinary training, SWAG (Maddox et al., 2019) continues stochastic gradient descent with a high constant or cyclical learning rate, records the iterates and fits a Gaussian to them: its mean is the iterates' average, and its covariance is a diagonal part from their variances plus a low-rank part from the deviations of the most recent iterates. MultiSWAG (Wilson and Izmailov, 2020) does this for several independent training runs and predicts with the equally weighted mixture of the resulting Gaussians.
+- **Mixtures of Laplace or variational approximations.** A [Laplace approximation](/blog/laplace-approximations) or a Gaussian [variational posterior](/blog/variational-inference-for-neural-networks) fitted at each member gives the same kind of mixture with a different local covariance.
+- **Sampling started at the members.** An [MCMC](/blog/sampling-the-posterior-mcmc) chain started at a trained member skips most of the warm-up that a randomly started chain needs and then explores that member's basin. One chain per member covers several basins at once, which a single chain rarely does because it seldom crosses the low-density regions between them.
+
+All three keep the equal weighting of basins, the weighting error of Section 3.2. By drawing points around each member instead of using the member itself, they restore the spread inside each basin and move the evaluations away from the peaks.
+
+## 6. Cheaper ways to diverse members
+
+Several methods aim at most of an ensemble's diversity for a fraction of its cost.
+
+- **Snapshot ensembles** (Huang et al., 2017) use a cyclical learning-rate schedule and keep the network reached at the end of each cycle, so one training run yields several members.
+- **Fast geometric ensembling** (Garipov et al., 2018) starts from one trained network and collects members with short cycles of a cyclical learning rate, exploiting the low-loss paths between modes that the same paper found.
+- **BatchEnsemble** (Wen, Tran and Ba, 2020) shares one weight matrix among all members and gives each member its own rank-one multiplicative factor, so the extra parameters and memory are small.
+- **Monte Carlo dropout**, treated in the [fourth entry](/blog/variational-inference-for-neural-networks), averages several stochastic forward passes of one network.
+
+In the comparisons reported for these methods, the cheaper members are usually less diverse than independently trained ones. Under a fixed compute budget, a single larger network may match an ensemble's accuracy, but it gives no disagreement signal; the [sixth entry](/blog/gaussian-processes-and-kernels) and the [eighth entry](/blog/scaling-bayesian-deep-learning) describe other mechanisms that do and compare them by cost.
+
+## 7. Where ensembles are used
+
+Ensembles are the most common uncertainty method in applied deep learning, largely because they need no change to the model or the training code. A few uses illustrate what the disagreement signal is good for.
+
+- **Detecting data set shift.** Ovadia et al. (2019) compared several uncertainty methods on image and text classifiers under corrupted and shifted inputs. Ensembles generally came out best in both calibration and accuracy, while every method lost quality as the shift grew.
+- **Exploration in reinforcement learning.** Bootstrapped deep Q-networks (Osband et al., 2016) keep several value-function heads and act greedily with respect to one head chosen at random per episode, so the agent explores where the heads disagree.
+- **Model-based control.** Chua et al. (2018) learned an ensemble of probabilistic dynamics models and planned through it, which separated the noise in the system from the uncertainty of the learned model and reduced the amount of interaction needed on their benchmarks.
+- **Weather and climate.** Numerical weather prediction has long issued ensemble forecasts from perturbed initial conditions and model variants (Leutbecher and Palmer, 2008). Learned forecasting models are evaluated in the same ensemble framework, which makes the disagreement-based view of uncertainty a natural fit there.
+
+The [ninth entry](/blog/evaluating-and-using-uncertainty) returns to how such uncertainty is evaluated and used, including in active learning.
+
+## 8. Weighting members with generalization bounds
+
+### 8.1 Frequentist bounds with a prior
+
+Equal weights are a default, not a result. **Probably approximately correct (PAC)-Bayesian** analysis, introduced by McAllester (1999), gives a principled way to choose weights with a guarantee that holds without assuming the prior is correct. It studies a randomized predictor that, for each new input, draws parameters from a distribution $\rho$ and predicts with them. With a loss bounded in $[0, 1]$, write $L(\theta)$ for the expected loss on new data and $\hat L(\theta)$ for the average loss on $N$ examples. For any distribution $\pi$ chosen before seeing those $N$ examples, Seeger (2002) and Maurer (2004) showed that with probability at least $1 - \delta$ over the examples, simultaneously for all $\rho$,
+
+$$
+\mathbb{E}_{\rho}[L(\theta)] \le \mathbb{E}_{\rho}[\hat L(\theta)] + \sqrt{\frac{\mathrm{KL}(\rho \,\Vert\, \pi) + \log(2\sqrt{N}/\delta)}{2N}} ,
+$$
+
+where $\mathrm{KL}$ is the Kullback–Leibler divergence. (The bound in the cited papers is tighter; this form follows from it by Pinsker's inequality.) Despite the vocabulary, $\pi$ does not have to be anyone's belief; it only has to be fixed before the $N$ examples are drawn. The only random quantity in the statement is that sample, and because the inequality holds for every $\rho$ simultaneously, $\rho$ may be chosen after looking at the data, for example by minimizing the right-hand side.
+
+For an ensemble, take $\pi$ and $\rho$ as distributions over the $J$ members and evaluate $\hat L$ on held-out data not used to train them. With $J = 5$, $N = 2000$ held-out examples and $\delta = 0.05$, the logarithmic term is $\log(2\sqrt{2000}/0.05) \approx 7.49$. For uniform $\rho = \pi$ the divergence is zero and the bound adds $\sqrt{7.49/4000} \approx 0.043$ to the average held-out error. Putting all the weight on one member costs $\mathrm{KL} = \log 5 \approx 1.61$ and raises the term only to about 0.048, so with a few members the price of choosing weights is small.
+
+### 8.2 The majority vote needs second-order information
+
+The quantity above bounds the error of the randomized predictor, not of the ensemble's vote. For the weighted majority vote $\mathrm{MV}_\rho$ in classification with the zero-one loss, the vote errs only if members carrying at least half the weight err, which gives $L(\mathrm{MV}_\rho) \le 2\,\mathbb{E}_\rho[L(\theta)]$. Take members that each err 10% of the time. If they all err on the same examples, the vote errs 10% of the time too; if they err on different examples, the vote can be far more accurate. The bound gives 0.20 in both cases. The tandem bound below tells the two cases apart.
+
+Masegosa et al. (2020) used the **tandem loss** $L(\theta, \theta')$, the probability that two members both err on the same example, to prove $L(\mathrm{MV}_\rho) \le 4\,\mathbb{E}_{\rho \times \rho}[L(\theta, \theta')]$, and turned it into an empirical PAC-Bayesian bound that can be minimized over $\rho$. Suppose each member errs on 10% of examples and a pair drawn from $\rho \times \rho$ (a member paired with itself included) errs together on 4% of examples on average. The first-order bound gives $2 \times 0.10 = 0.20$, the tandem bound $4 \times 0.04 = 0.16$. If the members' errors were perfectly correlated, the tandem loss would equal 0.10 and the tandem bound 0.40, worse than the first-order one: the second-order bound pays off exactly when the members are diverse. These oracle bounds still need the complexity term of Section 8.1 before they become guarantees.
+
+## 9. Limits and failure modes
+
+- **Cost.** Training, memory and inference all scale with $J$. For large models this cost is often prohibitive; the [eighth entry](/blog/scaling-bayesian-deep-learning) covers cheaper alternatives.
+- **Shared inductive bias.** Members with the same architecture extrapolate alike, as Section 2.2 showed, so disagreement underestimates uncertainty far from the data. For classifiers with ReLU activations, Hein, Andriushchenko and Bitterwolf (2019) proved that a single network becomes arbitrarily confident along almost every ray far from the data. Averaging helps there only if the members happen to favor different classes, and nothing guarantees that they do.
+- **Low diversity.** When members start from the same pretrained weights and are fine-tuned briefly, they can remain in one basin and agree too much. Diversity has to be checked, for example by measuring disagreement on held-out data, not assumed.
+- **Equal weights and no within-basin spread.** Section 3.2 listed what the plain ensemble does not represent; Sections 4, 5 and 8 address each in turn at some extra cost.
+- **Calibration is not guaranteed.** Ensembles are often better calibrated than single networks, but under strong shift their calibration degrades too (Ovadia et al., 2019). Calibration has to be measured on data like those the model will meet.
+
+## 10. Exercises
+
+**Exercise 1.** Three regression members predict means 1.0, 1.4 and 0.6 at some input, each with noise variance 0.04. Compute the ensemble's mean, its predictive variance and the share of that variance due to disagreement.
+
+<details>
+<summary>Answer</summary>
+
+The mean is $(1.0 + 1.4 + 0.6)/3 = 1.0$. The disagreement term is $(0^2 + 0.4^2 + 0.4^2)/3 = 0.32/3 \approx 0.107$. The predictive variance is $0.04 + 0.107 = 0.147$, of which about 73% is disagreement.
+
+</details>
+
+**Exercise 2.** In the toy ensemble, $\lambda = 10^{-4}$ corresponded to a prior standard deviation of about 1.58. What prior standard deviation does $\lambda = 10^{-3}$ correspond to, with the same $N$ and $\sigma$? Would you expect more or less disagreement in the gap?
+
+<details>
+<summary>Answer</summary>
+
+$s_0 = \sqrt{\sigma^2/(N\lambda)} = \sqrt{0.01/(40 \times 10^{-3})} = 0.5$. The stronger penalty pulls every member toward small weights and smoother functions, so the members become more alike and disagree less in the gap. (Rerunning the listing with $\lambda = 10^{-3}$ gives a member spread of 0.005 at $x = 0$, against 0.087.)
+
+</details>
+
+**Exercise 3.** Show that if the anchors in Section 4.1 were all set to zero ($\theta_{0,j} = 0$) but the targets were still perturbed, the members would have the right mean and too small a covariance.
+
+<details>
+<summary>Answer</summary>
+
+Then $\hat\theta_j = S_N\Phi^\top(\mathbf{y} + \varepsilon_j)/\sigma^2$, with mean $m_N$ and covariance $S_N(\Phi^\top\Phi/\sigma^2)S_N$. Since $S_N^{-1} = \Phi^\top\Phi/\sigma^2 + I/s_0^2$, this equals $S_N(S_N^{-1} - I/s_0^2)S_N = S_N - S_N^2/s_0^2$, which is smaller than $S_N$ by the positive semi-definite matrix $S_N^2/s_0^2$.
+
+</details>
+
+**Exercise 4.** Two classifiers each err on 20% of examples. Give the tandem loss if their errors never coincide and if they always coincide, and the corresponding tandem bounds on the majority vote of the two.
+
+<details>
+<summary>Answer</summary>
+
+With uniform weights, $\mathbb{E}_{\rho\times\rho}[L(\theta,\theta')]$ averages the four ordered pairs: two pairs of a member with itself (tandem loss 0.20 each) and two mixed pairs. If the errors never coincide the mixed pairs have tandem loss 0, the average is 0.10 and the bound is 0.40. If they always coincide every pair has 0.20 and the bound is 0.80. The first-order bound is 0.40 in both cases, so the tandem bound helps only with larger ensembles of diverse members, where self-pairs carry a smaller share of the weight.
+
+</details>
+
+## 11. Summary
+
+| Question | Answer |
+|---|---|
+| What is a deep ensemble? | $J$ copies of a network trained from different random initializations, whose predictive distributions are averaged with equal weights. |
+| How is its uncertainty split? | Regression: average noise plus the variance of the members' means. Classification: expected entropy plus mutual information. |
+| Is it a posterior sampler? | No: members sit at modes, are weighted by basins of attraction rather than posterior mass, and carry no within-basin spread. |
+| Why does it approximate the BMA well? | Predictions vary more between basins than within one, so a few modes cover much of the predictive variation; comparisons with an HMC reference support this for the networks tested. |
+| How can it be made exact? | In the linear-Gaussian case, by perturbing targets and anchoring each member to a prior draw (perturb then optimize). |
+| How is it combined with local methods? | MultiSWAG, mixtures of Laplace or variational approximations, and MCMC chains started at members. |
+| Can the weights be chosen with a guarantee? | Yes: PAC-Bayesian bounds on held-out data; for majority votes, second-order (tandem) bounds reward diverse members. |
+| Main failure modes? | $J$-fold cost, shared inductive bias far from data, low diversity, calibration loss under shift. |
+
+Ensembles describe uncertainty through a handful of trained functions. The [next entry](/blog/gaussian-processes-and-kernels) takes that view to its end: it places the prior directly on functions with a Gaussian process, derives the exact posterior for regression, and shows that a randomly initialized network becomes a Gaussian process as its width grows without bound.
+
+### References
+
+- J. M. Bardsley, A. Solonen, H. Haario and M. Laine, "Randomize-then-optimize: A method for sampling from posterior distributions in nonlinear inverse problems," *SIAM Journal on Scientific Computing*, vol. 36, no. 4, pp. A1895–A1910, 2014.
+- L. Breiman, "Bagging predictors," *Machine Learning*, vol. 24, no. 2, pp. 123–140, 1996.
+- K. Chua, R. Calandra, R. McAllister and S. Levine, "Deep reinforcement learning in a handful of trials using probabilistic dynamics models," in *Advances in Neural Information Processing Systems 31*, 2018.
+- S. Depeweg, J. M. Hernández-Lobato, F. Doshi-Velez and S. Udluft, "Decomposition of uncertainty in Bayesian deep learning for efficient and risk-sensitive learning," in *Proceedings of the 35th International Conference on Machine Learning (ICML)*, 2018.
+- S. Fort, H. Hu and B. Lakshminarayanan, "Deep ensembles: A loss landscape perspective," arXiv preprint, 2019.
+- T. Garipov, P. Izmailov, D. Podoprikhin, D. Vetrov and A. G. Wilson, "Loss surfaces, mode connectivity, and fast ensembling of DNNs," in *Advances in Neural Information Processing Systems 31*, 2018.
+- T. Gneiting and A. E. Raftery, "Strictly proper scoring rules, prediction, and estimation," *Journal of the American Statistical Association*, vol. 102, no. 477, pp. 359–378, 2007.
+- L. K. Hansen and P. Salamon, "Neural network ensembles," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, vol. 12, no. 10, pp. 993–1001, 1990.
+- M. Hein, M. Andriushchenko and J. Bitterwolf, "Why ReLU networks yield high-confidence predictions far away from the training data and how to mitigate the problem," in *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)*, 2019.
+- G. Huang, Y. Li, G. Pleiss, Z. Liu, J. E. Hopcroft and K. Q. Weinberger, "Snapshot ensembles: Train 1, get M for free," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2017.
+- P. Izmailov, S. Vikram, M. D. Hoffman and A. G. Wilson, "What are Bayesian neural network posteriors really like?," in *Proceedings of the 38th International Conference on Machine Learning (ICML)*, 2021.
+- B. Lakshminarayanan, A. Pritzel and C. Blundell, "Simple and scalable predictive uncertainty estimation using deep ensembles," in *Advances in Neural Information Processing Systems 30*, 2017.
+- M. Leutbecher and T. N. Palmer, "Ensemble forecasting," *Journal of Computational Physics*, vol. 227, no. 7, pp. 3515–3539, 2008.
+- W. J. Maddox, T. Garipov, P. Izmailov, D. Vetrov and A. G. Wilson, "A simple baseline for Bayesian uncertainty in deep learning," in *Advances in Neural Information Processing Systems 32*, 2019.
+- A. Masegosa, S. Lorenzen, C. Igel and Y. Seldin, "Second order PAC-Bayesian bounds for the weighted majority vote," in *Advances in Neural Information Processing Systems 33*, 2020.
+- A. Maurer, "A note on the PAC Bayesian theorem," arXiv preprint, 2004.
+- D. A. McAllester, "PAC-Bayesian model averaging," in *Proceedings of the 12th Annual Conference on Computational Learning Theory (COLT)*, 1999.
+- T. P. Minka, "Bayesian model averaging is not model combination," technical note, MIT Media Lab, 2000.
+- I. Osband, J. Aslanides and A. Cassirer, "Randomized prior functions for deep reinforcement learning," in *Advances in Neural Information Processing Systems 31*, 2018.
+- I. Osband, C. Blundell, A. Pritzel and B. Van Roy, "Deep exploration via bootstrapped DQN," in *Advances in Neural Information Processing Systems 29*, 2016.
+- Y. Ovadia et al., "Can you trust your model's uncertainty? Evaluating predictive uncertainty under dataset shift," in *Advances in Neural Information Processing Systems 32*, 2019.
+- T. Pearce, F. Leibfried, A. Brintrup, M. Zaki and A. Neely, "Uncertainty in neural networks: Approximately Bayesian ensembling," in *Proceedings of the 23rd International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2020.
+- M. Seeger, "PAC-Bayesian generalisation error bounds for Gaussian process classification," *Journal of Machine Learning Research*, vol. 3, pp. 233–269, 2002.
+- Y. Wen, D. Tran and J. Ba, "BatchEnsemble: An alternative approach to efficient ensemble and lifelong learning," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2020.
+- A. G. Wilson and P. Izmailov, "Bayesian deep learning and a probabilistic perspective of generalization," in *Advances in Neural Information Processing Systems 33*, 2020.

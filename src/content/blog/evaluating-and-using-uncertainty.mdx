@@ -1,0 +1,457 @@
+---
+title: "Evaluating and Using Predictive Uncertainty"
+description: "How to score predictive uncertainty with proper scoring rules and calibration error, and how to use it to abstain, choose data to label and tune language models."
+publishedAt: "2026-10-21"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - calibration
+  - uncertainty quantification
+  - active learning
+series: bayesian-deep-learning
+seriesOrder: 9
+---
+
+import Figure from '../../components/Figure.astro';
+import BdlReliabilityDiagram from '../../components/diagrams/BdlReliabilityDiagram.astro';
+import BdlRiskCoverage from '../../components/diagrams/BdlRiskCoverage.astro';
+
+The previous entries built approximations to the posterior predictive $p(y^* \mid x^*, \mathcal{D})$. They used samples from the posterior in the [second entry](/blog/sampling-the-posterior-mcmc), a Gaussian at a mode in the [third](/blog/laplace-approximations), an optimized family in the [fourth](/blog/variational-inference-for-neural-networks), independently trained networks in the [fifth](/blog/deep-ensembles), and cheaper variants of all of them in the [eighth](/blog/scaling-bayesian-deep-learning). Each produces a probability distribution over outputs rather than a single answer. This entry asks two practical questions about such distributions. How does one tell whether they are good? And what can be done with them once they are?
+
+The first half answers the evaluation question with proper scoring rules, calibration and the expected calibration error, and shows that these measure different things. The second half treats three uses of predictive uncertainty: abstaining on inputs the model is unsure about (selective classification), choosing which data to label next (active learning) and attaching uncertainty to large language models. A short section lists the kinds of software that implement the methods of the series.
+
+The entry assumes the [Machine Learning Fundamentals](/series/machine-learning-fundamentals) series, in particular the separation of training, validation and test data in [Evaluating Models Honestly](/blog/evaluating-models-honestly), and the notation of the series. Logarithms are natural, so entropies are in nats. Code uses Python 3.13 and NumPy 2.5.3 with the seeds given beside it. All predictions in the examples are synthetic, generated so that the true class probabilities are known.
+
+## 1. What a good predictive distribution does
+
+### 1.1 Calibration, sharpness and discrimination
+
+A predictive distribution can be wrong in several distinct ways, and a single number rarely captures all of them. Three properties are worth separating.
+
+- **Calibration** is agreement between stated probabilities and observed frequencies: among all inputs for which a classifier says "class 3 with probability 0.8", class 3 should occur about 80% of the time. It is a joint property of the predictions and the data, never of one prediction alone.
+- **Sharpness** is how concentrated the predictions are. A classifier that always outputs the class frequencies of the training set is perfectly calibrated and useless; sharp predictions commit to answers.
+- **Discrimination** (or ranking quality) is whether higher confidence goes with a higher chance of being right, so that confident predictions can be trusted more than hesitant ones.
+
+Gneiting, Balabdaoui and Raftery (2007) state the goal for probabilistic forecasts as maximizing sharpness subject to calibration. Accuracy measures none of the three: it only asks whether the most probable class is the correct one.
+
+### 1.2 Evaluation data
+
+Every quantity in this entry is an estimate computed from held-out examples, so the rules of [Evaluating Models Honestly](/blog/evaluating-models-honestly) apply unchanged. Anything fitted to improve the uncertainty (a temperature, a rejection threshold, a combination of scores) is fitted on validation data, and the test set is used once. A calibration measured on the data used to tune it is optimistic for the same reason as a test error measured on the training set.
+
+## 2. Proper scoring rules
+
+### 2.1 Definition
+
+A **scoring rule** $\mathcal{S}(q, y)$ assigns a number to a predictive distribution $q$ over outputs and the output $y$ that occurred. This entry uses the loss orientation, in which lower is better. If outputs are drawn from a distribution $p$, the expected score of a forecast $q$ is $\mathcal{S}(q, p) = \mathbb{E}_{y \sim p}[\mathcal{S}(q, y)]$. The rule is **proper** if $\mathcal{S}(p, p) \le \mathcal{S}(q, p)$ for every $q$, so that reporting the true distribution is never worse than reporting anything else, and **strictly proper** if equality holds only for $q = p$ (Gneiting and Raftery, 2007).
+
+Propriety is what makes a score safe to optimize and to compare models with: a model cannot improve a strictly proper score by distorting its probabilities away from what it believes. Fitting a model by minimizing a strictly proper score, or comparing two Bayesian approximations by their average score on test data, rewards the honest predictive distribution.
+
+### 2.2 The log score and the Brier score
+
+For a classifier over $C$ classes that outputs probabilities $q = (q_1, \dots, q_C)$, the two scores in common use are
+
+$$
+\mathcal{S}_{\log}(q, y) = -\log q_y,
+\qquad
+\mathcal{S}_{\text{Brier}}(q, y) = \sum_{k=1}^{C} \big(q_k - \mathbb{1}[y = k]\big)^2,
+$$
+
+where $\mathbb{1}[\cdot]$ is 1 when its argument is true and 0 otherwise. The **log score** is the negative log-likelihood (NLL) of the observed label; averaged over a test set it is the test cross-entropy. The **Brier score** is the squared distance between $q$ and the one-hot vector of the label (Brier, 1950); it lies between 0 and 2.
+
+Both are strictly proper, and the expected scores show why. Taking the expectation over $y \sim p$,
+
+$$
+\mathcal{S}_{\log}(q, p) = \mathbb{H}(p) + \mathrm{KL}(p \,\Vert\, q),
+\qquad
+\mathcal{S}_{\text{Brier}}(q, p) = \sum_{k=1}^{C} p_k (1 - p_k) + \sum_{k=1}^{C} (q_k - p_k)^2,
+$$
+
+where $\mathbb{H}(p) = -\sum_k p_k \log p_k$ is the entropy of $p$ and $\mathrm{KL}(p \,\Vert\, q) = \sum_k p_k \log(p_k / q_k)$ is the Kullback–Leibler (KL) divergence. In each case the first term does not depend on $q$ and the second is zero exactly when $q = p$. The first term is the irreducible part: even the true distribution pays it, because the label is random.
+
+### 2.3 A worked example
+
+Suppose that for some input the true probabilities of two classes are $p = (0.7, 0.3)$. Three forecasts score as follows.
+
+| Forecast $q$ | Expected log score | Expected Brier score | Predicted class |
+|---|---|---|---|
+| $(0.7, 0.3)$, the truth | 0.611 | 0.420 | 1 |
+| $(0.9, 0.1)$, overconfident | 0.765 | 0.500 | 1 |
+| $(0.5, 0.5)$, underconfident | 0.693 | 0.500 | tie |
+
+Both scores rank the true forecast first. Accuracy does not separate the first two rows at all, because both predict class 1; a model could become arbitrarily overconfident without losing accuracy. The two scores also disagree on what to punish. The log score charges more for overconfidence than for an equal error toward 0.5, while the Brier score, being quadratic in $q - p$, charges both equally here.
+
+The difference is starker for a confident mistake. If a forecast gives the observed label probability 0.01, its log score is $-\log 0.01 = 4.61$, whereas its Brier score cannot exceed 2. The log score is therefore sensitive to rare confident errors, which is a virtue when such errors are costly and a nuisance when a few mislabeled test examples dominate the average. Reporting both is common practice.
+
+## 3. Calibration and the expected calibration error
+
+### 3.1 Confidence and top-label calibration
+
+For a classifier, write $\hat{y} = \arg\max_k q_k$ for the predicted class and $c = \max_k q_k$ for its **confidence**. The classifier is **top-label calibrated** if, for every value $c_0$, the probability that the prediction is correct given that the confidence equals $c_0$ is $c_0$:
+
+$$
+\Pr\big(\hat{y} = y \mid c = c_0\big) = c_0 .
+$$
+
+This is weaker than full calibration of the probability vector, which would require every component $q_k$ to match a frequency, but it is the property that matters when the prediction and its confidence are what a user sees.
+
+### 3.2 The estimator
+
+Because $c$ is continuous, the conditional probability cannot be read off a finite test set directly. The **expected calibration error** (ECE) groups the $n$ test predictions into $B$ bins by confidence, usually of equal width on $[0, 1]$, and compares average accuracy with average confidence in each bin (Naeini, Cooper and Hauskrecht, 2015; Guo et al., 2017):
+
+$$
+\mathrm{ECE} = \sum_{b=1}^{B} \frac{\lvert \mathcal{B}_b \rvert}{n} \,\big\lvert \mathrm{acc}(\mathcal{B}_b) - \mathrm{conf}(\mathcal{B}_b) \big\rvert ,
+$$
+
+where $\mathcal{B}_b$ is the set of predictions in bin $b$, $\lvert \mathcal{B}_b \rvert$ its size, $\mathrm{acc}(\mathcal{B}_b)$ the fraction of them that are correct and $\mathrm{conf}(\mathcal{B}_b)$ their mean confidence. A **reliability diagram** plots $\mathrm{acc}(\mathcal{B}_b)$ against $\mathrm{conf}(\mathcal{B}_b)$; a calibrated classifier lies on the diagonal, and an overconfident one lies below it.
+
+### 3.3 Temperature scaling
+
+Guo et al. (2017) found modern image classifiers to be overconfident and proposed a one-parameter fix. **Temperature scaling** divides the logits $\ell$ (the inputs to the softmax) by a scalar $T > 0$ before the softmax, $q = \mathrm{softmax}(\ell / T)$, and chooses $T$ to minimize the log score on validation data. A temperature above 1 softens the probabilities; below 1 sharpens them. Dividing by a positive constant does not change which logit is largest, so the predicted class and the accuracy are unchanged. Temperature scaling is not Bayesian, but it is the baseline every Bayesian method in this series should be compared with: if a posterior approximation is not better calibrated than a temperature-scaled point estimate, its extra cost buys little calibration.
+
+### 3.4 Worked example: an overconfident classifier
+
+The listing builds 6000 synthetic inputs with four classes. Each input has true logits $z$ with independent standard normal entries scaled by 1.5, true probabilities $\mathrm{softmax}(z)$, and a label drawn from them. The "trained model" sees $z$ through noise of standard deviation 0.5 and then multiplies by 2.5, which makes it overconfident by construction. The first 3000 inputs are the validation set, used only to choose $T$ on a grid; the remaining 3000 are the test set.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=7)
+n, k = 6000, 4
+
+# Ground truth: each input has true class probabilities softmax(z).
+z = rng.normal(0.0, 1.5, size=(n, k))
+p_true = np.exp(z) / np.exp(z).sum(axis=1, keepdims=True)
+y = np.array([rng.choice(k, p=p) for p in p_true])
+
+# An overconfident model: a noisy estimate of z, scaled up by 2.5.
+logits = 2.5 * (z + rng.normal(0.0, 0.5, size=(n, k)))
+
+def softmax(a):
+    e = np.exp(a - a.max(axis=1, keepdims=True))
+    return e / e.sum(axis=1, keepdims=True)
+
+def scores(p, y):
+    idx = np.arange(len(y))
+    nll = -np.mean(np.log(p[idx, y]))
+    onehot = np.eye(p.shape[1])[y]
+    brier = np.mean(np.sum((p - onehot) ** 2, axis=1))
+    return nll, brier
+
+def ece(p, y, bins=10):
+    conf, pred = p.max(axis=1), p.argmax(axis=1)
+    correct = (pred == y).astype(float)
+    edges = np.linspace(0.0, 1.0, bins + 1)
+    b = np.clip(np.digitize(conf, edges[1:-1]), 0, bins - 1)
+    total = 0.0
+    for j in range(bins):
+        m = b == j
+        if m.any():
+            total += m.mean() * abs(correct[m].mean() - conf[m].mean())
+    return total
+
+val, test = slice(0, 3000), slice(3000, n)
+temps = np.linspace(0.5, 5.0, 451)
+nll_val = [scores(softmax(logits[val] / t), y[val])[0] for t in temps]
+T = temps[int(np.argmin(nll_val))]
+
+for name, p in [("model", softmax(logits[test])),
+                (f"T = {T:.2f}", softmax(logits[test] / T)),
+                ("truth", p_true[test])]:
+    acc = np.mean(p.argmax(axis=1) == y[test])
+    nll, brier = scores(p, y[test])
+    print(f"{name:9s} acc {acc:.3f}  NLL {nll:.3f}  Brier {brier:.3f}  ECE {ece(p, y[test]):.3f}")
+```
+
+```text
+model     acc 0.594  NLL 1.455  Brier 0.634  ECE 0.236
+T = 2.86  acc 0.594  NLL 0.991  Brier 0.543  ECE 0.021
+truth     acc 0.616  NLL 0.932  Brier 0.510  ECE 0.014
+```
+
+The model's confidence exceeds its accuracy by about 24 percentage points on average. Temperature scaling with $T = 2.86$ leaves the accuracy at 0.594, lowers the test NLL from 1.455 to 0.991 and the ECE from 0.236 to 0.021. The chosen temperature is a little larger than the factor 2.5 used to build the model, because the noise added to $z$ also spreads the logits. The last row scores the true probabilities, which no model can beat in expectation: their NLL of 0.932 and Brier score of 0.510 are the irreducible terms of Section 2.2, estimated on 3000 labels.
+
+<Figure caption="Reliability diagrams of the worked example, from 10 equal-width bins with at least 20 test predictions each. Before scaling, every bin above 0.5 confidence sits below the diagonal; after dividing the logits by 2.86 the bins follow it.">
+  <BdlReliabilityDiagram />
+</Figure>
+
+### 3.5 What the ECE does not tell
+
+The last row of the output shows the first limitation: the true probabilities, which are calibrated by construction, have an ECE of 0.014, not 0. The binned estimator is biased upward on a finite sample, because the absolute value turns sampling noise in each bin into a positive contribution, and its value depends on the number and placement of bins (Nixon et al., 2019). Differences in ECE of the size of this bias should not be read as differences in calibration.
+
+The second limitation is more serious: the ECE is not a proper scoring rule. A classifier that ignores its input and outputs the class frequencies of the training set has an ECE near zero and no discrimination at all. The ECE measures one property, calibration, and must be reported together with the accuracy and with a proper score. A proper score also rewards sharpness. Proper scores contain calibration as a component. Murphy (1973) split the Brier score into three terms. A reliability term is zero for calibrated forecasts; a resolution term, which is subtracted, rewards separating cases with different outcome frequencies; the last term is the irreducible uncertainty of the labels.
+
+Third, calibration on the test distribution says nothing about calibration under distribution shift. Ovadia et al. (2019) compared several of the methods of this series on image and text benchmarks under increasing amounts of shift and reported that calibration degraded for all of them as the shift grew, with deep ensembles performing best overall in their experiments. An evaluation of predictive uncertainty that matters for deployment includes data from the kinds of shift that deployment will bring.
+
+## 4. Selective classification
+
+### 4.1 The reject option
+
+A classifier with a **reject option** may abstain on an input instead of predicting, for instance by passing it to a person. Chow (1970) analyzed the trade-off between errors and rejections. Suppose the true posterior class probabilities are known, a mistake costs 1 and a rejection costs $r$ with $0 < r < 1$ (for two classes, rejecting is useful only if $r < 1/2$; see Exercise 3). The rule that minimizes expected cost then predicts the most probable class when its probability is at least $1 - r$ and rejects otherwise. In practice the true posterior is replaced by the model's predictive distribution, and what matters is whether its confidence separates the inputs it gets right from those it gets wrong.
+
+### 4.2 Coverage and selective risk
+
+A **selective classifier** pairs a classifier with a score $s(x)$ and a threshold $\tau$, and answers only when $s(x) \ge \tau$. Two quantities describe it (Geifman and El-Yaniv, 2017):
+
+- the **coverage**, the fraction of inputs it answers;
+- the **selective risk**, its error rate on the answered inputs.
+
+Lowering $\tau$ raises the coverage and, with a good score, the risk. Sorting the test inputs by decreasing score and computing the risk of the top fraction for every fraction gives the **risk–coverage curve**. Its average height, the area under the risk–coverage curve (AURC), summarizes the ranking quality in one number, lower being better (Geifman, Uziel and El-Yaniv, 2019). Two reference curves bound it: an **oracle** that rejects exactly the wrong predictions first, and a random order, whose risk equals the overall error rate at every coverage.
+
+### 4.3 Worked example: rejecting the least confident inputs
+
+The listing continues the previous one and uses the temperature-scaled confidence as the score.
+
+```python
+p = softmax(logits[test] / T)
+correct = p.argmax(axis=1) == y[test]
+
+def risk_coverage(score, correct):
+    order = np.argsort(-score, kind="stable")         # most confident first
+    errors = np.cumsum(~correct[order])
+    kept = np.arange(1, len(order) + 1)
+    return kept / len(order), errors / kept           # coverage, selective risk
+
+cov, risk = risk_coverage(p.max(axis=1), correct)
+_, risk_oracle = risk_coverage(correct.astype(float), correct)
+for c in (1.0, 0.8, 0.5, 0.2):
+    i = int(round(c * len(cov))) - 1
+    print(f"coverage {c:.1f}: risk {risk[i]:.3f}  oracle {risk_oracle[i]:.3f}")
+
+_, risk_raw = risk_coverage(softmax(logits[test]).max(axis=1), correct)
+correct_true = p_true[test].argmax(axis=1) == y[test]
+_, risk_true = risk_coverage(p_true[test].max(axis=1), correct_true)
+print(f"AURC scaled {risk.mean():.3f}  unscaled {risk_raw.mean():.3f}  "
+      f"true probabilities {risk_true.mean():.3f}  oracle {risk_oracle.mean():.3f}")
+```
+
+```text
+coverage 1.0: risk 0.406  oracle 0.406
+coverage 0.8: risk 0.365  oracle 0.258
+coverage 0.5: risk 0.294  oracle 0.000
+coverage 0.2: risk 0.180  oracle 0.000
+AURC scaled 0.275  unscaled 0.277  true probabilities 0.238  oracle 0.097
+```
+
+Answering only the most confident half of the inputs lowers the error rate from 0.406 to 0.294; answering the most confident fifth lowers it to 0.180. Two further observations are worth more than the numbers themselves.
+
+First, temperature scaling barely changes the AURC (0.277 before, 0.275 after), although it improved the ECE tenfold. Calibration and ranking are different properties: a monotone rescaling of confidence repairs the first and leaves the second almost untouched. (For two classes it leaves the ranking exactly unchanged; with more classes, dividing the logits by $T$ can reorder a few inputs.)
+
+Second, even the true probabilities reach only an AURC of 0.238, far from the oracle's 0.097. The labels in this example are drawn at random from the true probabilities, so many errors are **aleatoric**: no model can foresee them, and no score can reject them selectively. The gap between the scaled model and the true probabilities, 0.275 against 0.238, is the part that better modeling could still recover.
+
+<Figure caption="Risk–coverage curves of the worked example. The scaled model's risk falls steadily as coverage is reduced, a little above the curve obtained from the true probabilities. The oracle shows what a perfect ranking would achieve; random rejection does not help at all.">
+  <BdlRiskCoverage />
+</Figure>
+
+### 4.4 Choosing the score and the threshold
+
+The threshold is chosen on validation data to meet a target, either a maximum selective risk or a minimum coverage, and then checked once on the test set. Geifman and El-Yaniv (2017) gave a procedure that chooses it with a high-probability guarantee on the selective risk. Conformal prediction, which outputs sets of labels rather than abstaining, offers a different distribution-free guarantee on coverage of the true label (Vovk, Gammerman and Shafer, 2005).
+
+For the score, the maximum probability of the posterior predictive is the natural default and its entropy a common alternative; which separates errors best is an empirical question for each model and data set. When the inputs to be rejected include ones unlike the training data, a score that isolates the epistemic part of the uncertainty (Section 5) is better motivated, although not guaranteed to work better.
+
+## 5. Active learning and mutual information
+
+### 5.1 The problem
+
+In **pool-based active learning** a model is trained on a small labeled set, a large pool of unlabeled inputs is available and labels are expensive. At each round an **acquisition function** scores the pool inputs, the highest-scoring ones are sent for labeling, and the model is retrained. The aim is to reach a given accuracy with fewer labels than random selection would need (Settles, 2012).
+
+An input is worth labeling if its label would teach the model something. Predictive entropy is a tempting score, but it is high for two different reasons: the model may not know the answer, or the answer may be inherently random. Labeling an input of the second kind teaches nothing, because a coin flip stays a coin flip however many times it is observed.
+
+### 5.2 The entropy decomposition
+
+A posterior over $\theta$ separates the two reasons. Section 2.2 of the [first entry](/blog/bayesian-inference-for-neural-networks) split the entropy of the posterior predictive into two parts:
+
+$$
+\underbrace{\mathbb{H}\!\left[\,\mathbb{E}_{p(\theta \mid \mathcal{D})}\, p(y \mid x, \theta)\,\right]}_{\text{total}}
+=
+\underbrace{\mathbb{E}_{p(\theta \mid \mathcal{D})}\, \mathbb{H}\!\left[\,p(y \mid x, \theta)\,\right]}_{\text{expected entropy (aleatoric)}}
++
+\underbrace{I\big(y; \theta \mid x, \mathcal{D}\big)}_{\text{mutual information (epistemic)}} ,
+$$
+
+where $\mathbb{H}[\cdot]$ is the entropy of a distribution over $y$ and $I(y; \theta \mid x, \mathcal{D})$ the mutual information between the label of $x$ and the parameters. For active learning the second term has a further reading: it is the expected reduction in the entropy of the posterior over $\theta$ from observing $y$, the information gain that Lindley (1956) proposed for choosing experiments. Houlsby et al. (2011) showed that computing it in the output space, as written above, is far cheaper than in parameter space, and named the acquisition function **Bayesian active learning by disagreement** (BALD). Gal, Islam and Ghahramani (2017) applied it to image classifiers with Monte Carlo dropout.
+
+With $M$ samples $\theta_1, \dots, \theta_M$ from an approximate posterior, or the $J$ members of an ensemble (then $M = J$), each giving class probabilities $p_m = p(y \mid x, \theta_m)$, the estimate is
+
+$$
+\widehat{\mathrm{BALD}}(x) = \mathbb{H}\!\left[\frac{1}{M}\sum_{m=1}^{M} p_m\right] - \frac{1}{M}\sum_{m=1}^{M} \mathbb{H}[p_m] .
+$$
+
+### 5.3 Worked example: three pool inputs
+
+The listing scores three pool inputs from the probabilities that four posterior samples assign to two classes.
+
+```python
+import numpy as np
+
+def entropy(p):
+    return -np.sum(p * np.log(np.clip(p, 1e-12, 1.0)), axis=-1)
+
+# Class probabilities from M = 4 posterior samples (rows) for three pool inputs.
+pool = {
+    "A, members agree, confident": [[0.95, 0.05]] * 4,
+    "B, members agree, 50/50":     [[0.50, 0.50]] * 4,
+    "C, members disagree":         [[0.95, 0.05], [0.05, 0.95], [0.90, 0.10], [0.10, 0.90]],
+}
+for name, probs in pool.items():
+    probs = np.array(probs)
+    total = entropy(probs.mean(axis=0))          # entropy of the posterior predictive
+    aleatoric = entropy(probs).mean()            # expected entropy under the posterior
+    print(f"{name:28s} total {total:.3f}  expected {aleatoric:.3f}  BALD {total - aleatoric:.3f}")
+```
+
+```text
+A, members agree, confident  total 0.199  expected 0.199  BALD 0.000
+B, members agree, 50/50      total 0.693  expected 0.693  BALD 0.000
+C, members disagree          total 0.693  expected 0.262  BALD 0.431
+```
+
+Inputs B and C have the same predictive distribution, $(0.5, 0.5)$, and therefore the same total entropy of $\log 2 = 0.693$ nats. Predictive entropy cannot tell them apart. BALD can: for B all samples agree that the label is a coin flip, so its label carries no information about $\theta$, while for C each sample is confident but they disagree, and the label would rule half of them out. BALD ranks C first and B with A at the bottom.
+
+### 5.4 Practical problems
+
+Several difficulties separate this clean picture from working active learning.
+
+- **Batches.** Labeling usually happens in batches, and the top $b$ inputs by BALD are often near-duplicates that carry the same information. BatchBALD scores the mutual information of the whole batch jointly to avoid this (Kirsch, van Amersfoort and Gal, 2019).
+- **The target.** BALD rewards information about $\theta$, including about parameters that do not affect predictions on the inputs that matter. The expected predictive information gain instead measures information about predictions on a target distribution of inputs (Bickford Smith, Kirsch, Farquhar, Gal, Foster and Rainforth, 2023).
+- **Quality of the posterior.** The mutual information is only as good as the samples behind it. With few samples, or an approximation that underestimates the spread of the posterior (as mean-field VI tends to, see the [fourth entry](/blog/variational-inference-for-neural-networks)), the epistemic term is underestimated.
+- **Biased data.** Actively chosen labels are not an i.i.d. sample, so the average training loss on them is a biased estimate of the risk. Farquhar, Gal and Rainforth (2021) analyze when this bias matters and give corrective weights.
+- **Cost and cold start.** Retraining after every batch is expensive for large networks, and with only a handful of initial labels the posterior, and therefore the acquisition function, is unreliable. Random selection is the baseline any reported gain must beat.
+
+## 6. Large language models
+
+### 6.1 Why the setting is different
+
+Large language models (LLMs) bring three complications. The parameter count, in the billions, makes inference over all weights impractical with the methods of this series. The output is a sequence of tokens, so the predictive distribution lives on an enormous discrete space. And many different sequences can be equally correct answers, which makes "the probability of the correct output" ill defined.
+
+Pre-trained language models have been reported to be fairly well calibrated on multiple-choice questions when their answer probabilities are read directly (Kadavath et al., 2022). Fine-tuning a large model on a small task data set, on the other hand, can leave it overconfident, which is where much of the Bayesian work has concentrated.
+
+### 6.2 Bayesian fine-tuning and variational training
+
+**Low-rank adaptation** (LoRA) fine-tunes a frozen pre-trained weight matrix $W$ by learning a low-rank update $\Delta W = BA$, where $B$ and $A$ have a small inner dimension $r$ (Hu et al., 2022). The adapters have few parameters, so the methods of earlier entries apply to them. Yang et al. (2024) fitted a Laplace approximation over the LoRA parameters after fine-tuning, the post-hoc approach of the [third entry](/blog/laplace-approximations), and reported markedly better calibration on small multiple-choice reasoning tasks at little cost in accuracy. Ensembles of independently fine-tuned adapters are the corresponding application of the [fifth entry](/blog/deep-ensembles), and are cheap to store because only the adapters differ.
+
+Variational learning has also been run at full scale. Shen et al. (2024) trained language models as large as the generative pre-trained transformer (GPT) model GPT-2 with a natural-gradient variational method called improved variational online Newton (IVON). The cost was close to that of the Adam optimizer, and they reported predictive performance and calibration comparable to or better than Adam's. Whether such methods give large benefits at the largest scales remains an open empirical question.
+
+### 6.3 Uncertainty of generated text
+
+For a sequence output, a model can average the per-token distributions of several posterior samples while generating (token-level averaging) or average the probabilities of complete sequences (sequence-level averaging). The two define different predictive distributions; Malinin and Gales (2021) analyze both, with their entropy and mutual-information estimates.
+
+A further problem is that many sequences mean the same thing. Suppose a model answers "Paris", "It is Paris." and "The capital is Paris" with probability one third each. The entropy over sequences is then high, although the model is certain of the answer. **Semantic entropy** groups sampled answers into clusters of equivalent meaning, using a separate model to judge equivalence, and computes the entropy over clusters (Kuhn, Gal and Farquhar, 2023). Its authors report that it predicts the correctness of answers to free-form questions better than sequence-level entropy. Like the decomposition of Section 5.2, it can be combined with posterior samples to separate the epistemic part, although most uses so far apply it to a single point-estimated model.
+
+## 7. Uncertainty passed to downstream models
+
+Predictive uncertainty is often an input to a further computation rather than a number shown to a person. Three settings recur.
+
+- **Missing data.** Drawing several completions of a record's missing values from a predictive distribution, and analyzing each completed data set, carries the uncertainty about them into the result; a single filled-in value hides it. Whether this is valid depends on why the data are missing (Rubin, 1976). Deep generative models such as variational autoencoders (Kingma and Welling, 2014) can learn the predictive distribution for high-dimensional records, for example biomedical ones.
+- **Spatio-temporal forecasting.** Decisions about extremes need the probability of an extreme value at a place and time, which a point forecast cannot give. Gaussian processes (the [sixth entry](/blog/gaussian-processes-and-kernels)) or Bayesian neural networks supply it; proper scores evaluate it.
+- **Bayesian optimization.** A probabilistic surrogate predicts an expensive function and its uncertainty at untried points, and an acquisition function such as expected improvement trades one against the other to choose the next evaluation (Jones, Schonlau and Welch, 1998).
+
+In each case the downstream result is only as reliable as the calibration of the uncertainty fed into it, which is why the evaluation of Sections 2 and 3 comes first.
+
+## 8. Software
+
+The examples in this series use NumPy only, so that every computation is visible. Larger models are better served by libraries of four kinds.
+
+- **Probabilistic programming languages** let a model be written as a generative program and provide general inference, usually Hamiltonian Monte Carlo (HMC) with the No-U-Turn sampler and variational inference (VI). Examples are Stan (Carpenter et al., 2017), PyMC, Pyro (Bingham et al., 2019), NumPyro and TensorFlow Probability.
+- **Approximate-inference libraries for neural networks** add one method to an existing model, for example the PyTorch library for Laplace approximations described by Daxberger et al. (2021).
+- **Diagnostics and evaluation tools**, such as ArviZ for sampler diagnostics, compute convergence checks, calibration measures and proper scores. Standard convergence diagnostics are hard to interpret for neural-network posteriors, whose symmetries ([seventh entry](/blog/priors-symmetries-and-identifiability)) create many equivalent modes.
+- **Downstream toolkits** act on uncertainty, such as BoTorch for Bayesian optimization (Balandat et al., 2020).
+
+This entry deliberately names no versions. The libraries change quickly, and their own documentation is the place to check what is current; a report of results should state the library and version it used, as the series does for Python and NumPy.
+
+## 9. Exercises
+
+**Exercise 1.** A binary classifier always outputs probability 0.3 for class 1, and 30% of the test labels are class 1. What are its ECE (with any binning) and its accuracy? What does this say about using the ECE to choose between models?
+
+<details>
+<summary>Answer</summary>
+
+All predictions fall in one bin with confidence 0.7 (for class 0), and 70% of the labels are class 0, so the accuracy is 0.7 and the ECE is $\lvert 0.7 - 0.7 \rvert = 0$. The classifier ignores its input. A model chosen by smallest ECE could be this one; the ECE must be reported with a proper score, which this classifier does poorly on compared with any model that discriminates.
+
+</details>
+
+**Exercise 2.** Using the expected Brier score of Section 2.2, show that for $p = (0.7, 0.3)$ the forecasts $(0.9, 0.1)$ and $(0.5, 0.5)$ have the same expected Brier score, and compute it.
+
+<details>
+<summary>Answer</summary>
+
+The irreducible term is $0.7 \times 0.3 + 0.3 \times 0.7 = 0.42$. For $(0.9, 0.1)$ the second term is $0.2^2 + 0.2^2 = 0.08$; for $(0.5, 0.5)$ it is $0.2^2 + 0.2^2 = 0.08$ as well. Both give $0.50$.
+
+</details>
+
+**Exercise 3.** Under Chow's rule with true posteriors, a rejection costs $r = 0.2$. For which maximum class probabilities does the classifier predict, and why does the rule require $r < 1/2$ to be useful for two classes?
+
+<details>
+<summary>Answer</summary>
+
+It predicts when the maximum probability is at least $1 - r = 0.8$ and rejects otherwise, because predicting costs the error probability $1 - \max_k p_k$ on average and rejecting costs $r$. With two classes the maximum probability is never below 0.5, so the error probability is at most 0.5; if $r \ge 1/2$ rejecting is never cheaper than predicting. (With $C$ classes the error probability can reach $1 - 1/C$, so rejection can be useful up to $r < 1 - 1/C$.)
+
+</details>
+
+**Exercise 4.** (a) Recompute the BALD score of input C in Section 5.3 using only its first two posterior samples, $(0.95, 0.05)$ and $(0.05, 0.95)$. Why does it differ from the four-sample value 0.431? (b) Show that BALD is zero whenever all samples give the same probabilities, whatever their entropy.
+
+<details>
+<summary>Answer</summary>
+
+(a) The average is $(0.5, 0.5)$, with entropy $\log 2 = 0.693$. Each sample has entropy $-(0.95 \log 0.95 + 0.05 \log 0.05) = 0.199$, so BALD is $0.693 - 0.199 = 0.495$ nats. The two samples happen to be the most extreme pair; the other two are less confident and raise the expected entropy. With few samples the estimate depends strongly on which samples were drawn, which is one reason the quality of the posterior approximation matters (Section 5.4).
+
+(b) If every $p_m$ equals the same $p$, the average is $p$, so the total entropy is $\mathbb{H}[p]$ and the expected entropy is also $\mathbb{H}[p]$. Their difference is zero, as for inputs A and B: no observation of $y$ can distinguish samples that predict identically.
+
+</details>
+
+**Exercise 5.** In the selective-classification example, why could no confidence score, however well calibrated, bring the AURC down to the oracle's 0.097?
+
+<details>
+<summary>Answer</summary>
+
+The labels were drawn at random from the true class probabilities, so some predictions of the most probable class are wrong by chance. A score computed from the input cannot know which of two identical-looking inputs received the unlikely label. The true probabilities, the best possible score here, reach 0.238; the oracle uses the labels themselves.
+
+</details>
+
+## 10. Summary
+
+| Question | Answer |
+|---|---|
+| What makes a predictive distribution good? | Calibration, sharpness and discrimination; accuracy measures none of them. |
+| How is it scored? | With strictly proper scoring rules, such as the log score (NLL) and the Brier score, whose expectation is minimized only by the true distribution. |
+| What does the ECE measure? | The binned gap between confidence and accuracy; it is biased on finite samples, depends on the binning and is not proper. |
+| What is temperature scaling? | Dividing the logits by a validation-fitted $T$; it improves calibration without changing accuracy and is the baseline for Bayesian methods. |
+| How is uncertainty used to abstain? | A selective classifier answers only above a score threshold; the risk–coverage curve and its area measure the ranking. |
+| What does BALD select? | Inputs with high mutual information between label and parameters, where posterior samples disagree, rather than inputs that are merely noisy. |
+| What is special about LLMs? | Scale, sequence outputs and many equivalent answers; Bayesian adapters, variational training and semantic entropy address them. |
+
+The worked examples separated three properties that are easy to conflate. Temperature scaling repaired calibration without touching accuracy or ranking, the risk–coverage curve exposed the ranking, and the BALD example showed that two inputs with the same predictive distribution can be worth entirely different amounts of new data. The [final entry](/blog/frontiers-of-bayesian-deep-learning) surveys the research directions that build on these ideas, from low-dimensional subspaces and prior-fitted networks to singular learning theory, imprecise probabilities and Bayesian reinforcement learning, and returns to the objectives of the series.
+
+### References
+
+- M. Balandat et al., "BoTorch: A framework for efficient Monte-Carlo Bayesian optimization," in *Advances in Neural Information Processing Systems 33*, 2020.
+- F. Bickford Smith, A. Kirsch, S. Farquhar, Y. Gal, A. Foster and T. Rainforth, "Prediction-oriented Bayesian active learning," in *Proceedings of the 26th International Conference on Artificial Intelligence and Statistics (AISTATS)*, 2023.
+- E. Bingham et al., "Pyro: Deep universal probabilistic programming," *Journal of Machine Learning Research*, vol. 20, 2019.
+- G. W. Brier, "Verification of forecasts expressed in terms of probability," *Monthly Weather Review*, vol. 78, no. 1, pp. 1–3, 1950.
+- B. Carpenter et al., "Stan: A probabilistic programming language," *Journal of Statistical Software*, vol. 76, no. 1, 2017.
+- C. K. Chow, "On optimum recognition error and reject tradeoff," *IEEE Transactions on Information Theory*, vol. 16, no. 1, pp. 41–46, 1970.
+- E. Daxberger, A. Kristiadi, A. Immer, R. Eschenhagen, M. Bauer and P. Hennig, "Laplace redux – effortless Bayesian deep learning," in *Advances in Neural Information Processing Systems 34*, 2021.
+- S. Farquhar, Y. Gal and T. Rainforth, "On statistical bias in active learning: How and when to fix it," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2021.
+- Y. Gal, R. Islam and Z. Ghahramani, "Deep Bayesian active learning with image data," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
+- Y. Geifman and R. El-Yaniv, "Selective classification for deep neural networks," in *Advances in Neural Information Processing Systems 30*, 2017.
+- Y. Geifman, G. Uziel and R. El-Yaniv, "Bias-reduced uncertainty estimation for deep neural classifiers," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2019.
+- T. Gneiting, F. Balabdaoui and A. E. Raftery, "Probabilistic forecasts, calibration and sharpness," *Journal of the Royal Statistical Society, Series B*, vol. 69, no. 2, pp. 243–268, 2007.
+- T. Gneiting and A. E. Raftery, "Strictly proper scoring rules, prediction, and estimation," *Journal of the American Statistical Association*, vol. 102, no. 477, pp. 359–378, 2007.
+- C. Guo, G. Pleiss, Y. Sun and K. Q. Weinberger, "On calibration of modern neural networks," in *Proceedings of the 34th International Conference on Machine Learning (ICML)*, 2017.
+- N. Houlsby, F. Huszár, Z. Ghahramani and M. Lengyel, "Bayesian active learning for classification and preference learning," arXiv preprint arXiv:1112.5745, 2011.
+- E. J. Hu et al., "LoRA: Low-rank adaptation of large language models," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2022.
+- D. R. Jones, M. Schonlau and W. J. Welch, "Efficient global optimization of expensive black-box functions," *Journal of Global Optimization*, vol. 13, no. 4, pp. 455–492, 1998.
+- S. Kadavath et al., "Language models (mostly) know what they know," arXiv preprint arXiv:2207.05221, 2022.
+- D. P. Kingma and M. Welling, "Auto-encoding variational Bayes," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2014.
+- A. Kirsch, J. van Amersfoort and Y. Gal, "BatchBALD: Efficient and diverse batch acquisition for deep Bayesian active learning," in *Advances in Neural Information Processing Systems 32*, 2019.
+- L. Kuhn, Y. Gal and S. Farquhar, "Semantic uncertainty: Linguistic invariances for uncertainty estimation in natural language generation," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2023.
+- D. V. Lindley, "On a measure of the information provided by an experiment," *The Annals of Mathematical Statistics*, vol. 27, no. 4, pp. 986–1005, 1956.
+- A. Malinin and M. Gales, "Uncertainty estimation in autoregressive structured prediction," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2021.
+- A. H. Murphy, "A new vector partition of the probability score," *Journal of Applied Meteorology*, vol. 12, no. 4, pp. 595–600, 1973.
+- M. P. Naeini, G. F. Cooper and M. Hauskrecht, "Obtaining well calibrated probabilities using Bayesian binning," in *Proceedings of the 29th AAAI (Association for the Advancement of Artificial Intelligence) Conference on Artificial Intelligence*, 2015.
+- J. Nixon, M. W. Dusenberry, L. Zhang, G. Jerfel and D. Tran, "Measuring calibration in deep learning," in *Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) Workshops*, 2019.
+- Y. Ovadia et al., "Can you trust your model's uncertainty? Evaluating predictive uncertainty under dataset shift," in *Advances in Neural Information Processing Systems 32*, 2019.
+- D. B. Rubin, "Inference and missing data," *Biometrika*, vol. 63, no. 3, pp. 581–592, 1976.
+- B. Settles, *Active Learning*, Synthesis Lectures on Artificial Intelligence and Machine Learning, Morgan & Claypool, 2012.
+- Y. Shen et al., "Variational learning is effective for large deep networks," in *Proceedings of the 41st International Conference on Machine Learning (ICML)*, 2024.
+- V. Vovk, A. Gammerman and G. Shafer, *Algorithmic Learning in a Random World*, Springer, 2005.
+- A. X. Yang, M. Robeyns, X. Wang and L. Aitchison, "Bayesian low-rank adaptation for large language models," in *Proceedings of the International Conference on Learning Representations (ICLR)*, 2024.
