@@ -1,0 +1,558 @@
+---
+title: "Linearized Laplace Approximations"
+description: "How linearizing a network turns its Laplace posterior into a Gaussian process: the NTK prior, GGN and Fisher curvature, scalable approximations and the predictive."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - gaussian processes
+  - neural tangent kernel
+  - fisher information
+series: bayesian-deep-learning
+seriesOrder: 11
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl08Pipeline from '../../components/diagrams/Bdl08Pipeline.astro';
+import Bdl08LinVsNonlin from '../../components/diagrams/Bdl08LinVsNonlin.astro';
+import Bdl08LastLayerRegression from '../../components/diagrams/Bdl08LastLayerRegression.astro';
+import Bdl08IrisLaplace from '../../components/diagrams/Bdl08IrisLaplace.astro';
+
+The previous chapter showed a computationally lightweight Gaussian approximation $\mathcal{N}(\theta; \theta_*, \Psi(\theta_*)^{-1})$ to the true posterior $p(\theta \mid \mathcal{D})$ on the parameter space $\mathbb{R}^P$. Our final goal is to use this Gaussian measure to *make decisions* based on the model's output: its predictions feed into the risks and utilities that downstream tasks optimize (Chapter 10). To this end, we first quantify the **predictive uncertainty** of our network on the output space $\mathbb{R}^C$ by turning it into a Gaussian process (GP). Figure 8.1 previews the pipeline, from the maximum a posteriori (MAP) estimate $\theta_*$ to the predictive distribution.
+
+## 1. Linearization
+
+To turn an arbitrary (differentiable) neural network parameterized by $\theta \in \mathbb{R}^P$ into a Gaussian process, we use two ingredients: linearization in the parameter space and the previously introduced Laplace approximation.
+
+We first introduce the concept of the **linearized network** $f^{\theta_0} \colon \mathbb{R}^D \times \mathbb{R}^P \to \mathbb{R}^C$ as the first-order Taylor approximation of network $f$ around parameters $\theta_0 \in \mathbb{R}^P$:
+
+$$
+f^{\theta_0}(x, \theta) := f(x, \theta_0) + J_\theta f(x, \theta_0)(\theta - \theta_0), \tag{8.1}
+$$
+
+where $J_\theta f(x, \theta_0) \in \mathbb{R}^{C \times P}$ is the **network Jacobian** evaluated at $(x, \theta_0)$.[^1] Analogously to Equation 7.1, we define the regularized empirical risk of the linearized network $f^{\theta_0}$ with parameters $\theta$ as
+
+$$
+\mathcal{L}_\Omega^{\theta_0}(\theta) := \sum_{n=1}^{N} \ell\left(f^{\theta_0}(x_n, \theta), y_n\right) + \Omega(\theta). \tag{8.2}
+$$
+
+Unless explicitly stated otherwise (e.g., in the prior-only discussion in Section 2), we fix the linearization point at a minimizer of the *original* regularized empirical risk $\mathcal{L}_\Omega(\theta)$:
+
+$$
+\theta_* :\in \mathop{\mathrm{arg\,min}}\limits_{\theta \in \mathbb{R}^P} \mathcal{L}_\Omega(\theta), \tag{8.3}
+$$
+
+that is, we set $\theta_0 \equiv \theta_*$. Linearization itself only requires differentiability of $f$ at $\theta_0$. The Laplace approximation needs more: $\theta_*$ must be a local minimizer of $\mathcal{L}_\Omega$ with zero gradient, and the resulting precision must be positive definite after adding the prior curvature. We note that $f^{\theta_*}$ shares its value and its parameter Jacobian with $f$ at $\theta_*$, so $\nabla_\theta \mathcal{L}_\Omega^{\theta_*}(\theta_*) = \nabla_\theta \mathcal{L}_\Omega(\theta_*) = 0$ and $\theta_*$ is a stationary point of $\mathcal{L}_\Omega^{\theta_*}$, too. Because $f^{\theta_*}$ is affine in $\theta$, convexity of $\ell(\cdot, y)$ in $z$ makes each loss term convex in $\theta$; with a strictly convex $\Omega$, the risk $\mathcal{L}_\Omega^{\theta_*}$ is then strictly convex in $\theta$, hence $\theta_*$ is its unique minimizer.
+
+Following Chapter 7, Section 1, the Laplace approximation using the regularized empirical risk of the linearized network yields the parameter-space Gaussian measure $\mathcal{N}(\theta; \theta_*, \Psi(\theta_*)^{-1})$ with
+
+$$
+[\Psi(\theta)]_{ij} = \left[\nabla_\theta \nabla_\theta^\top \mathcal{L}_\Omega^{\theta_*}(\theta)\right]_{ij} = \frac{\partial^2 \mathcal{L}_\Omega^{\theta_*}(\theta)}{\partial \theta_i \partial \theta_j}. \tag{8.4}
+$$
+
+The curvature $\Psi$ of the linearized network's regularized empirical risk differs from the Hessian in Equation 7.5 for networks that are not piecewise affine in their parameters (except at the non-generic parameter values where all training residuals vanish). The difference is that $\Psi(\theta_*)$, as defined in Equation 8.4, discards the network's parameter curvature (and higher-order derivatives) and only retains the curvature of the *loss function* over the model outputs. The advantages of this modeling choice are summarized in Section 1.1.
+
+<Figure caption="Figure 8.1: The linearized Laplace pipeline. The linearized network f^θ* and parameter covariance Σ = Ψ(θ*)⁻¹ jointly determine the logit Gaussian process, which induces a predictive distribution. (Redrawn.)">
+  <Bdl08Pipeline />
+</Figure>
+
+An important property of Gaussian measures is their closure under affine transformations, stated formally below.
+
+**Proposition 8.1** (Affine closure of Gaussians). *Let* $X \sim \mathcal{N}(\mu, \Sigma)$ *with* $\mu \in \mathbb{R}^N$ *and* $\Sigma \succ 0$. *For any* $A \in \mathbb{R}^{M \times N}$ *with full row rank and* $b \in \mathbb{R}^M$,
+
+$$
+Y := AX + b \;\sim\; \mathcal{N}\left(A\mu + b,\ A\Sigma A^\top\right). \tag{8.5}
+$$
+
+*If* $\operatorname{rank}(A) < M$, *then* $A\Sigma A^\top \succeq 0$ *and* $Y$ *has no Lebesgue density on* $\mathbb{R}^M$.
+
+*Proof.* We first treat an invertible $A \in \mathbb{R}^{N \times N}$. For any Borel set $E \subseteq \mathbb{R}^N$, the event $\{Y \in E\}$ equals $\{X \in A^{-1}(E - b)\}$, so substituting $x = A^{-1}(y - b)$, whose Jacobian has absolute determinant $|\det A^{-1}|$, gives
+
+$$
+p_Y(y) = p_X\left(A^{-1}(y - b)\right) |\det A^{-1}|. \tag{8.6}
+$$
+
+Writing $d := y - (A\mu + b)$, we have $A^{-1}(y - b) - \mu = A^{-1} d$, so
+
+$$
+\left(A^{-1}(y - b) - \mu\right)^\top \Sigma^{-1} \left(A^{-1}(y - b) - \mu\right) = d^\top (A\Sigma A^\top)^{-1} d, \tag{8.7}
+$$
+
+and $|\Sigma|^{-1/2} |\det A^{-1}| = |A\Sigma A^\top|^{-1/2}$ by $|A\Sigma A^\top| = |A|^2 |\Sigma|$. Substituting the Gaussian density of $X$ yields
+
+$$
+p_Y(y) = (2\pi)^{-N/2} |A\Sigma A^\top|^{-1/2} \exp\left(-\frac{1}{2} d^\top (A\Sigma A^\top)^{-1} d\right), \tag{8.8}
+$$
+
+so $Y \sim \mathcal{N}(A\mu + b, A\Sigma A^\top)$.
+
+For the full row rank case $A \in \mathbb{R}^{M \times N}$ with $M \le N$, choose $K \in \mathbb{R}^{(N-M) \times N}$ so that $T := \begin{bmatrix} A \\ K \end{bmatrix} \in \mathbb{R}^{N \times N}$ is invertible, and set $Y := AX + b$, $Z := KX$, and $U := \begin{bmatrix} Y \\ Z \end{bmatrix} = TX + \begin{bmatrix} b \\ 0 \end{bmatrix}$. By the invertible case, $U$ is Gaussian with mean $\begin{bmatrix} A\mu + b \\ K\mu \end{bmatrix}$ and covariance
+
+$$
+S := T\Sigma T^\top = \begin{bmatrix} S_{11} & S_{12} \\ S_{21} & S_{22} \end{bmatrix} = \begin{bmatrix} A\Sigma A^\top & A\Sigma K^\top \\ K\Sigma A^\top & K\Sigma K^\top \end{bmatrix}, \qquad S_{11} = A\Sigma A^\top \succ 0. \tag{8.9}
+$$
+
+Let $C := S_{22} - S_{21} S_{11}^{-1} S_{12}$ be the (positive definite) Schur complement and $B := S_{21} S_{11}^{-1}$. With $\Delta y := y - (A\mu + b)$ and $\Delta z := z - K\mu$, the block-inverse identity splits the quadratic form as
+
+$$
+\begin{bmatrix} \Delta y \\ \Delta z \end{bmatrix}^\top S^{-1} \begin{bmatrix} \Delta y \\ \Delta z \end{bmatrix} = \Delta y^\top S_{11}^{-1} \Delta y + (\Delta z - B\Delta y)^\top C^{-1} (\Delta z - B\Delta y), \tag{8.10}
+$$
+
+and $|S| = |S_{11}||C|$. Marginalizing $U$ over $z$ with
+
+$$
+\int_{\mathbb{R}^{N-M}} \exp\left(-\frac{1}{2} (\Delta z - B\Delta y)^\top C^{-1} (\Delta z - B\Delta y)\right) \mathrm{d}z = (2\pi)^{(N-M)/2} |C|^{1/2} \tag{8.11}
+$$
+
+leaves
+
+$$
+p_Y(y) = (2\pi)^{-M/2} |S_{11}|^{-1/2} \exp\left(-\frac{1}{2} \Delta y^\top S_{11}^{-1} \Delta y\right), \tag{8.12}
+$$
+
+that is, $Y \sim \mathcal{N}(A\mu + b, A\Sigma A^\top)$. Only $S_{11} = A\Sigma A^\top$ survives, so the result is independent of the choice of $K$.
+
+Finally, if $\operatorname{rank}(A) < M$, then $\operatorname{rank}(A\Sigma A^\top) = \operatorname{rank}(A) < M$ because $\Sigma \succ 0$, so $A\Sigma A^\top$ is singular and $Y$ is supported on the proper affine subspace $A\mathbb{R}^N + b$, hence has no Lebesgue density on $\mathbb{R}^M$. $\square$
+
+As such, the linearized network $f^{\theta_*}$ pushes the parameter posterior forward, via the affine map of Equation 8.1, to a Gaussian in the output space (the logit space in classification). In the network-output variable $z \in \mathbb{R}^C$ (the logits, which the loss $\ell(z, y)$ takes as its first argument), this measure is
+
+$$
+\mathcal{N}\left(z; f(x_*, \theta_*), J_\theta f(x_*, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x_*, \theta_*)^\top\right). \tag{8.13}
+$$
+
+This result already equips the network $f$ with a probability measure in its output space (or logit space in classification) for every input $x_*$. A **Gaussian process** is an even more powerful construction, capable of modeling a Gaussian measure over any *finite set of inputs*, not just a single one. The linearized network $f^{\theta_*}$ equipped with its parameter-space Laplace approximation defines a Gaussian process $\mathcal{GP}(f(\cdot, \theta_*), k)$ with the following (Mercer) kernel:
+
+$$
+k(x, x') = \operatorname{cov}\left(f^{\theta_*}(x, \theta), f^{\theta_*}(x', \theta)\right) \tag{8.14}
+$$
+
+$$
+\phantom{k(x, x')} = \operatorname{cov}\left(J_\theta f(x, \theta_*)(\theta - \theta_*), J_\theta f(x', \theta_*)(\theta - \theta_*)\right) \tag{8.15}
+$$
+
+$$
+\phantom{k(x, x')} = J_\theta f(x, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x', \theta_*)^\top. \tag{8.16}
+$$
+
+### 1.1 Advantages of using the linearized network
+
+We perform the Laplace approximation w.r.t. $\mathcal{L}_\Omega^{\theta_*}$ (with $\theta_* = \arg\min_{\theta \in \mathbb{R}^P} \mathcal{L}_\Omega(\theta)$) instead of the regularized empirical risk of $f$ for multiple reasons.
+
+First, the Hessian of the regularized empirical risk of $f$ (Equation 7.5) is not guaranteed to be positive definite, preventing us from interpreting it as the inverse covariance matrix of our approximate Gaussian posterior over the parameters $\theta$.[^2] In second-order optimization, the lack of positive definiteness also prohibits using the inverse Hessian as a preconditioner. However, the Hessian of the regularized empirical risk of $f^{\theta_*}$, with a strongly convex regularizer, is *guaranteed* to be positive definite.
+
+Second, the Hessian of the regularized empirical risk of $f^{\theta_*}$ is considerably cheaper to use than that of $f$, allowing Laplace approximations to scale to deep learning architectures (see Section 3).
+
+There are thus two uses of the linearized model. First, it defines the curvature $\Psi$ and hence the parameter-space Gaussian posterior approximation. Second, it defines the predictive pushforward in Equation 8.13. Earlier work on Laplace approximations for neural networks *sampled* $M$ parameter configurations $\{\theta_s\}_{s=1}^M$ from the parameter-space Gaussian and calculated *predictive* quantities from the nonlinear predictions $\{f(x, \theta_s)\}_{s=1}^M$. This loses the exact output-space Gaussian distribution available from linearization and yields no posterior GP. Lawrence shows empirically that this approach is prone to underfitting: the predictive becomes *too uncertain* even on in-distribution data points. Immer et al. identify the core reason for performance loss as a mismatch between the model in which we perform approximate Bayesian inference (the linearized network $f^{\theta_*}$) and the model we use for prediction (the nonlinear network $f$). Figure 8.2 visualizes this underfitting and the low-density samples drawn under the true posterior. See also Immer et al. (Fig. 3). By using the linearized network to make predictions and not only to calculate the curvature, the approximation remains internally consistent.
+
+> **Takeaways**
+>
+> The linearized Laplace approximation turns any differentiable neural network into a *Gaussian process* by (i) linearizing the network in parameter space at $\theta_*$ and (ii) placing a Gaussian posterior $\mathcal{N}(\theta_*, \Psi(\theta_*)^{-1})$ on parameters. The induced Mercer kernel has the form
+>
+> $$
+> k(x, x') = J_\theta f(x, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x', \theta_*)^\top,
+> $$
+>
+> whereby $\Psi$ captures the effect of the data set on the *parameter-space curvature*, which the Jacobian $J_\theta f(\cdot, \theta_*)$ pushes forward into *function-space uncertainty*.
+
+<Figure caption="Figure 8.2: The same full Laplace posterior under two predictive rules on a one-dimensional regression example from the code accompanying Immer et al. Both panels use the same parameter-space approximate posterior and the same ten parameter draws. They differ only in how each parameter draw becomes a function-space sample called a sample path in the GP literature. Panel (a) sends each draw through the linearized network f^θ*, the model consistent with the parameter-space Laplace approximation. Panel (b) sends the draws through the original nonlinear network f. Solid curves are predictive means; dashed curves show pointwise 95% credible intervals. The linearized Laplace approximation in Panel (a) yields a GP; therefore, the output-space quantities are available in closed form. The (nonlinear) Laplace approximation in Panel (b) yields an intractable output mean and covariance, which we approximate with two million Monte Carlo samples. The nonlinear scheme is far more uncertain over the training inputs and its mean severely underfits. The linearized Laplace approximation yields consistent function-space uncertainty. (Schematic reproduction: computed anew for this page with a one-hidden-layer tanh network of 50 units fitted to synthetic data in the same layout, a full GGN Laplace posterior with prior precision 1 and 20,000 Monte Carlo samples for panel (b); individual curves differ from the book's.)">
+  <Bdl08LinVsNonlin />
+</Figure>
+
+## 2. The prior
+
+The Gaussian process determined by the *posterior* parameter-space covariance matrix $\Psi^{-1}$ is tied to the data set $\mathcal{D}$, as $\Psi$ is the Hessian of the linearized model's regularized empirical risk over $\mathcal{D}$. It is worth spending some time on the case when the neural network $f \colon \mathbb{R}^D \times \mathbb{R}^P \to \mathbb{R}^C$ has not been exposed to any data set $\mathcal{D}$ yet. In this case, the model's behavior is determined by its architecture and by the prior $p(\theta)$ over the parameters.
+
+For a non-Gaussian parameter prior $p(\theta)$, a Laplace approximation to the prior is centered at a local maximum $\theta_0$ of $p(\theta)$, analogously to Equation 7.4c. Its precision is the negative log-prior Hessian,
+
+$$
+\Psi = -\nabla_\theta \nabla_\theta \log p(\theta_0). \tag{8.17}
+$$
+
+For the construction that follows, we specialize to a Gaussian prior centered at the linearization point,
+
+$$
+p(\theta) = \mathcal{N}(\theta; \theta_0, I), \tag{8.18}
+$$
+
+where $\theta_0$ can be any chosen initialization. The prior's mode is $\theta_0$, so the linearization and the Laplace approximation of the prior share the same center, and the precision above evaluates to $\Psi = I$. Pushing this prior through the linearized network gives the kernel $k \colon \mathbb{R}^D \times \mathbb{R}^D \to \mathbb{R}^{C \times C}$,
+
+$$
+k(x, x') = J_\theta f(x, \theta_0) \left(J_\theta f(x', \theta_0)\right)^\top. \tag{8.19}
+$$
+
+The kernel comes from the same pushforward as the posterior GP kernel in Equation 8.16. Compared with it, the data-dependent pair $(\theta_*, \Psi(\theta_*))$ is replaced by the data-set-independent pair $(\theta_0, I)$. This kernel is known as the **Neural Tangent Kernel (NTK)**.[^3] It differs from the neural network Gaussian process (NNGP) kernel: the NNGP kernel is the covariance of random network outputs $f(x, \theta)$ and $f(x', \theta)$ under a random initialization distribution, while the NTK is the covariance of the linearized network outputs $f^{\theta_0}(x, \theta)$ and $f^{\theta_0}(x', \theta)$ under the prior $\mathcal{N}(\theta; \theta_0, I)$. As the network width is taken to infinity in a specific way, both kernels are convergent. Where these limits exist, they are different deterministic kernels.
+
+The NTK determines the function-space trajectory of $f$ during full-batch gradient flow training on the average empirical loss via the Ordinary Differential Equation (ODE)
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} f_t(x) = -\frac{1}{N} \sum_{n=1}^{N} k_t(x, x_n)\, \nabla_z \ell(z, y_n)\big|_{z = f_t(x_n)}, \tag{8.20}
+$$
+
+where $t$ is the time variable of the gradient flow and $k_t$ is the NTK of $f_t$. Jacot et al. show that in the infinite-width limit of fully-connected neural networks with the so-called NTK initialization, the NTK stays constant during training, and the convergence of optimization is related to the positive definiteness of the NTK. However, the NTK of regular, finite-width neural networks is not constant and must be recomputed at every evaluation point.
+
+From a modeling perspective, putting an isotropic Gaussian prior over the parameters is seldom well-motivated. However, the framework of Laplace approximations is compatible with interpretable function-space priors. Cinquin et al. define Laplace priors using a prior Gaussian process. In particular, the negative log-prior is, up to an additive constant, equal to the squared Reproducing Kernel Hilbert Space (RKHS) norm of the difference between the linearized network $f^{\theta_0}$ and the mean of the prior Gaussian process $\mu$. This negative log-prior is also used as a regularizer during training. As specifying the Gaussian prior in the function space only requires knowledge about the function's behavior and *not* about the parameter space's structure, the framework of Cinquin et al. allows domain experts to directly encode functional behavior in the Bayesian inference problem.
+
+> **Takeaways**
+>
+> Without any data and with a Gaussian prior $\mathcal{N}(\theta; \theta_0, I)$ centered at $\theta_0$, the parameter-space curvature is the identity, $\Psi = I$, and the GP kernel derived from neural networks reduces to the Neural Tangent Kernel (NTK):
+>
+> $$
+> k(x, x') = J_\theta f(x, \theta_0) J_\theta f(x', \theta_0)^\top.
+> $$
+
+## 3. The Fisher
+
+In Section 1, we glossed over the curvature matrix defined in Equation 8.4. This matrix and its components give an information-geometric interpretation to Laplace approximations, warranting its own chapter (Chapter 9).
+
+Consider the regularized empirical risk of the linearized network $f^{\theta_0}$ (Equations 8.1 and 8.2). Under the assumption of Equation 7.2 applied to the linearized network, the term
+
+$$
+\mathcal{L}^{\theta_0}(\theta) = \sum_{n=1}^{N} \ell\left(f^{\theta_0}(x_n, \theta), y_n\right) \tag{8.21}
+$$
+
+is equal, up to an additive constant, to the negative log-likelihood of the data set under the model, $-\log p(Y \mid X, \theta)$, whereas the term $\Omega(\theta)$ equals the negative log-prior, $-\log p(\theta)$, again up to an additive constant.
+
+Writing out the Hessian of $\mathcal{L}^{\theta_0}$ evaluated at $\theta_0$, we obtain
+
+$$
+G(\theta_0) = \nabla_\theta \nabla_\theta^\top \mathcal{L}^{\theta_0}(\theta_0) = \sum_{n=1}^{N} \left(J_\theta f(x_n, \theta_0)\right)^\top \left(\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f^{\theta_0}(x_n, \theta_0)}\right) J_\theta f(x_n, \theta_0), \tag{8.22}
+$$
+
+called the **Generalized Gauss-Newton matrix (GGN)**. In this section, we show that this matrix is equivalent to the Fisher Information Matrix for a family of loss functions, which is a natural (usually degenerate) Riemannian metric for statistical manifolds parameterized by the model (Chapter 9, Section 2).
+
+Consider the statistical manifold
+
+$$
+\mathcal{M} = \left\{p(x, y \mid \theta) : \theta \in \mathbb{R}^P\right\} \tag{8.23}
+$$
+
+with conditional independence structure $p(x, y \mid \theta) = p(y \mid x, \theta) \cdot p(x)$, whose in-depth study we defer to Chapter 9. The $p(y \mid x, \theta)$ distribution represents the likelihood parameterized by a neural network and $p(x)$ is the ground-truth input distribution. A natural notion of separation between probability distributions on this manifold is the **Kullback-Leibler (KL) divergence**:
+
+$$
+D_{\mathrm{KL}}\left(p(x, y \mid \theta_1) \,\|\, p(x, y \mid \theta_2)\right) := \mathbb{E}_{p(x, y \mid \theta_1)}\left[\log \frac{p(x, y \mid \theta_1)}{p(x, y \mid \theta_2)}\right]. \tag{8.24}
+$$
+
+The KL divergence is not a valid metric, as it is non-symmetric. However, for parameters $\theta_1$ and $\theta_2$ and $\Delta\theta = \theta_1 - \theta_2$, the KL divergence's second-order Taylor approximation around $\theta_1$ is given by
+
+$$
+D_{\mathrm{KL}}\left(p(x, y \mid \theta_1) \,\|\, p(x, y \mid \theta_2)\right) = \frac{1}{2} \Delta\theta^\top F(\theta_1) \Delta\theta + \mathcal{O}\left(\|\Delta\theta\|^3\right). \tag{8.25}
+$$
+
+Both the zeroth- and first-order terms vanish (the former because $D_{\mathrm{KL}}(p \,\|\, p) = 0$, the latter because the expected score is zero, Equation 8.27), leaving the quadratic Fisher term as the leading contribution. At each parameter $\theta$, the bilinear form $g_\theta(u, v) := u^\top F(\theta) v$ on tangent vectors $u, v$ is a valid Riemannian metric over manifold $\mathcal{M}$ (up to the identifiability of parameters; see Chapter 9). The matrix
+
+$$
+F(\theta) = \mathbb{E}_{p(x, y \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(x, y \mid \theta)\right] \tag{8.26}
+$$
+
+is called the **Fisher Information Matrix (FIM)** of the random variable $(\mathrm{X}, \mathrm{Y})$ distributed according to $p(x, y \mid \theta)$.
+
+Differentiating the normalization $\int p(x, y \mid \theta) \, \mathrm{d}x \, \mathrm{d}y = 1$ under the integral sign and using $\nabla_\theta p = p \nabla_\theta \log p$ gives the zero-mean score,
+
+$$
+\mathbb{E}_{p(x, y \mid \theta)}\left[\nabla_\theta \log p(x, y \mid \theta)\right] = 0. \tag{8.27}
+$$
+
+Differentiating once more yields the two equivalent forms of the Fisher information,
+
+$$
+F(\theta) = \mathbb{E}_{p(x, y \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(x, y \mid \theta)\right] = \mathbb{E}_{p(x, y \mid \theta)}\left[\nabla_\theta \log p(x, y \mid \theta) \left(\nabla_\theta \log p(x, y \mid \theta)\right)^\top\right]. \tag{8.28}
+$$
+
+The FIM of independent random variables is additive. In particular, for $N$ i.i.d. random variables $\{(\mathrm{X}_n, \mathrm{Y}_n)\}_{n=1}^N$, the FIM is $N$ times that of a single random variable $(\mathrm{X}, \mathrm{Y})$:
+
+$$
+\mathbb{E}_{p(\{(x_n, y_n)\}_{n=1}^N \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p\left(\{(x_n, y_n)\}_{n=1}^N \mid \theta\right)\right] \tag{8.29}
+$$
+
+$$
+= \sum_{n=1}^{N} \mathbb{E}_{p(x_n, y_n \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(x_n, y_n \mid \theta)\right] \tag{8.30}
+$$
+
+$$
+= N F(\theta). \tag{8.31}
+$$
+
+In the following, we use the notation $F(\theta)$ for the FIM of a single random variable $(\mathrm{X}, \mathrm{Y})$ distributed according to $p(x, y \mid \theta)$.
+
+Using Equation 8.25, the utility of the FIM becomes clear in second-order optimization. In particular, consider the objective
+
+$$
+\mathop{\mathrm{arg\,min}}\limits_{\Delta\theta \in \mathbb{R}^P} \mathcal{L}(\theta + \Delta\theta) \qquad \text{s.t.} \qquad D_{\mathrm{KL}}\left(p(x, y \mid \theta) \,\|\, p(x, y \mid \theta + \Delta\theta)\right) \le c \tag{8.32}
+$$
+
+for some constant $c \in \mathbb{R}_{>0}$. The intuition behind this objective is that we want to minimize our model's non-regularized empirical risk while limiting how much the likelihood induced by the model changes, irrespective of the curvature of the loss surface. To find an approximate minimizer of the objective in Equation 8.32, we consider the quadratic approximation to our constraint in Equation 8.25 and linearize the empirical risk around the current parameter $\theta$:
+
+$$
+\mathcal{L}(\theta + \Delta\theta) = \mathcal{L}(\theta) + \Delta\theta^\top \nabla_\theta \mathcal{L}(\theta) + \mathcal{O}\left(\|\Delta\theta\|^2\right). \tag{8.33}
+$$
+
+Substituting in the linearized empirical risk and quadratic constraint, our objective becomes
+
+$$
+\mathop{\mathrm{arg\,min}}\limits_{\Delta\theta \in \mathbb{R}^P} \Delta\theta^\top \nabla_\theta \mathcal{L}(\theta) \qquad \text{s.t.} \qquad \frac{1}{2} \Delta\theta^\top F(\theta) \Delta\theta \le c. \tag{8.34}
+$$
+
+The above is a convex quadratically constrained linear program. When $F(\theta)$ is positive definite and $\nabla_\theta \mathcal{L}(\theta) \neq 0$, the optimum lies on the boundary of the constraint ellipsoid and can be found in closed form with Lagrange's method, yielding
+
+$$
+\Delta\theta^* = -\frac{1}{\lambda^*} F(\theta)^{-1} \nabla_\theta \mathcal{L}(\theta), \qquad \lambda^* = \sqrt{\frac{\left(\nabla_\theta \mathcal{L}(\theta)\right)^\top F(\theta)^{-1} \nabla_\theta \mathcal{L}(\theta)}{2c}}. \tag{8.35}
+$$
+
+In particular, the optimal update direction $\Delta\theta^*$ is given by the so-called **natural gradient** $F(\theta)^{-1} \nabla_\theta \mathcal{L}(\theta)$ with a magnitude that is a function of the constant $c$. Natural-gradient methods are developed in detail in Chapter 15.
+
+In practice, we replace the unknown distribution of inputs $p(x)$ with the empirical distribution w.r.t. training set $\mathcal{D}$:
+
+$$
+p(x) \approx p_{\mathcal{D}}(x) = \frac{1}{N} \sum_{n=1}^{N} \delta(x - x_n). \tag{8.36}
+$$
+
+The corresponding FIM approximation becomes
+
+$$
+\tilde{F}(\theta) = \frac{1}{N} \sum_{n=1}^{N} \mathbb{E}_{p(y \mid x_n, \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(y \mid x_n, \theta)\right]. \tag{8.37}
+$$
+
+Using the chain rule w.r.t. the model's output $z = f(x_n, \theta)$, we obtain
+
+$$
+\tilde{F}(\theta_0) = \frac{1}{N} \sum_{n=1}^{N} \left(J_\theta f(x_n, \theta_0)\right)^\top \mathbb{E}_{p(y \mid x_n, \theta_0)}\left[-\nabla_z \nabla_z^\top \log p(y \mid z)\big|_{z = f(x_n, \theta_0)}\right] J_\theta f(x_n, \theta_0). \tag{8.38}
+$$
+
+Here the network's own second-order term vanishes under the expectation by the zero-mean score in $z$ (Equation 8.27 applied to $p(y \mid z)$), which is why the linearized and nonlinear networks share the same $\tilde{F}(\theta_0)$. The expectation over model outputs for each input can be expensive to compute. One approach to mitigate the cost is the Monte Carlo approximation:
+
+$$
+\mathbb{E}_{p(y \mid x_n, \theta)}\left[-\nabla_z \nabla_z^\top \log p(y \mid z)\big|_{z = f(x_n, \theta)}\right] \approx -\frac{1}{M} \sum_{s=1}^{M} \nabla_z \nabla_z^\top \log p(y_s \mid z)\big|_{z = f(x_n, \theta)}, \tag{8.39}
+$$
+
+with $y_s \sim p(y \mid x_n, \theta)$. For small $M$, we obtain a rather crude but cheap approximation. An alternative approach is to first rewrite $\tilde{F}(\theta)$ as
+
+$$
+\tilde{F}(\theta) = \frac{1}{N} \sum_{n=1}^{N} \mathbb{E}_{p(y \mid x_n, \theta)}\left[\nabla_\theta \log p(y \mid x_n, \theta) \left(\nabla_\theta \log p(y \mid x_n, \theta)\right)^\top\right] \tag{8.40}
+$$
+
+(Equation 8.28, applied to $p(y \mid x_n, \theta)$), then substitute the ground-truth labels instead of approximating the expectation:
+
+$$
+\hat{F}(\theta) = \frac{1}{N} \sum_{n=1}^{N} \nabla_\theta \log p(y_n \mid x_n, \theta) \left(\nabla_\theta \log p(y_n \mid x_n, \theta)\right)^\top, \tag{8.41}
+$$
+
+called the **Empirical Fisher Information Matrix (EFIM)**. While this substitution may seem natural, Kunstner et al. show that it has a detrimental effect for optimization, where the predicted and ground-truth labels can be significantly different, especially at the beginning of training. However, for the Laplace approximation, we use a MAP estimate, which, if it generalizes well, approximates the ground-truth label distribution well.
+
+For a wide family of likelihoods, one does *not* have to approximate the Fisher $\tilde{F}(\theta)$ by Monte Carlo. This allows us to connect the FIM to the GGN under some assumptions. Identifying $\ell(z, y_n) = -\log p(y_n \mid z)$ and $f(x_n, \theta_0) = f^{\theta_0}(x_n, \theta_0)$ using Equation 8.1, in the case when the Hessian of the negative log-likelihood loss $\ell$ does not depend on the target $y$, the GGN is equal to the FIM (up to a constant scaling factor):
+
+$$
+G(\theta_0) = N \tilde{F}(\theta_0). \tag{8.42}
+$$
+
+In fact, the difference in the scaling factor has a natural interpretation. Previously, we saw that $F(\theta)$ is the FIM of the random variable $(\mathrm{X}, \mathrm{Y})$ distributed according to $p(x, y \mid \theta)$ and that the FIM is additive for independent random variables. Therefore, under this assumption, the GGN is equal to the FIM w.r.t. $N$ i.i.d. observations $\{(x_n, y_n)\}_{n=1}^N$ distributed as $p(x, y \mid \theta)$ (and *not* as $p(x, y)$).
+
+The requirement of the loss Hessian not depending on the target might seem arbitrary. However, this property is satisfied by a wide family of likelihoods, called **exponential families**.
+
+**Definition 8.1.** *A probability distribution with probability density function (PDF) of the form*
+
+$$
+p(y \mid w) = h(y) \exp\left(\phi(y)^\top w - \log Z(w)\right) \tag{8.43}
+$$
+
+*is called an* **exponential family** *of probability measures. The function* $\phi \colon \mathcal{Y} \to \mathbb{R}^d$ *is the vector of* **sufficient statistics**. *The parameters* $w \in \mathbb{R}^d$ *are the* **natural parameters** *of* $p(y \mid w)$. *The normalization constant* $Z(w) \colon \mathbb{R}^d \to \mathbb{R}$ *is the* **partition function**. *The function* $h(y) \colon \mathcal{Y} \to \mathbb{R}_{>0}$ *is the* **base measure**.
+
+First, we state some facts about simple parameterizations.
+
+**Proposition 8.2.** *For a probability distribution* $p(y \mid w)$, $-\nabla_w \nabla_w^\top \log p(y \mid w)$ *is independent of* $y$ *if and only if* $p(y \mid w)$ *is an exponential family with natural parameter* $w$.
+
+Parameterizations via neural networks are more delicate. The following proposition gives a necessary and sufficient condition for Equation 8.42.
+
+**Proposition 8.3.** *For an exponential family* $p(y \mid x, \theta)$ *with natural parameters* $w$ *given as a function of* $x$ *and* $\theta$, $w(x, \theta) = (g \circ f)(x, \theta)$ *for some function* $g \colon \mathbb{R}^C \to \mathbb{R}^d$, *the Hessian of* $-\log p(y \mid x, \theta)$ *w.r.t.* $f(x, \theta)$ *does not depend on* $y$ *if and only if* $\nabla_z \nabla_z^\top g(z)\big|_{z = f(x, \theta)} \cdot \phi(y)$ *is constant in* $y$ *where* $\nabla_z \nabla_z^\top g(z)\big|_{z = f(x, \theta)} \in \mathbb{R}^{C \times C \times d}$ *is a 3-tensor, and the product* $\cdot$ *contracts its third* ($d$-dimensional) *index against* $\phi(y)$, *giving a* $C \times C$ *matrix. A special case of the statement is when* $g$ *is affine.*
+
+The above statement on neural network parameterizations covers the most popular loss functions in classification and regression. In classification, the cross-entropy loss is the negative log-likelihood of a categorical distribution parameterized by our neural network. The logits are the categorical's natural parameters, so with the identity link $g = \mathrm{Id}$ the cross-entropy loss satisfies Proposition 8.3 in its affine special case. Similarly, the $L_2$ loss for regression satisfies Proposition 8.3 with $g = \mathrm{Id}$.
+
+A word of caution is in order: the GGN/FIM alone is usually degenerate; thus, it does not serve as a valid precision matrix for the Laplace approximation. Considering a single input-label pair $(x_n, y_n)$, the term
+
+$$
+\left(J_\theta f(x_n, \theta_0)\right)^\top \left(\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f^{\theta_0}(x_n, \theta_0)}\right) J_\theta f(x_n, \theta_0) \tag{8.44}
+$$
+
+is a positive *semidefinite* (PSD) matrix, as the loss Hessian $\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f^{\theta_0}(x_n, \theta_0)}$ is positive semidefinite. For softmax cross-entropy, this Hessian is $\operatorname{diag}(p) - pp^\top$, which is rank deficient as the softmax is shift-invariant. Usually, the GGN, that is, the sum of these matrices over the training data set, is still rank deficient. However, adding the Hessian of the strongly convex regularizer term $\Omega(\theta_0)$ to the GGN results in the *positive definite* matrix
+
+$$
+\Psi(\theta_0) = \nabla_\theta \nabla_\theta^\top \mathcal{L}_\Omega^{\theta_0}(\theta_0) = \nabla_\theta \nabla_\theta^\top \mathcal{L}^{\theta_0}(\theta_0) + \nabla_\theta \nabla_\theta^\top \Omega(\theta_0), \tag{8.45}
+$$
+
+which is the Hessian of the regularized empirical risk of the linearized model, $\mathcal{L}_\Omega^{\theta_0}(\theta_0)$. This justifies using this matrix as a parameter-space precision in the Laplace approximation (Equation 7.4c).
+
+With the curvature $\Psi$ in hand, we can place the NTK of Section 2 and the posterior GP kernel of Equation 8.16 in a single frame. Both are Jacobian Gram matrices $J_\theta f M^{-1} J_\theta f^\top$ in a parameter-space metric $M$; they differ in the expansion point ($\theta_0$ for the NTK, $\theta_*$ for the posterior kernel) and in the metric $M$. Preconditioning the gradient flow of Equation 8.20 by $M$ multiplies the parameter velocity by $M^{-1}$, inserting $M^{-1}$ between the Jacobians and replacing its kernel $k_t$ with $J_\theta f(x, \theta_t) M^{-1} J_\theta f(x_n, \theta_t)^\top$, holding the expansion point fixed and changing only the metric. Vanilla gradient descent uses the Euclidean metric $M = I$ and recovers the NTK, the isotropic-prior pushforward. Regularized natural-gradient descent uses $M = \Psi(\theta_t)$, the GGN/Fisher curvature plus the prior precision (Equation 8.45) at the current parameters. We call the resulting kernel $J_\theta f(\cdot, \theta_t) \Psi(\theta_t)^{-1} J_\theta f(\cdot, \theta_t)^\top$ the **natural-gradient NTK**. Because $\Psi(\theta_t)$ is positive definite at every $\theta_t$, the natural-gradient NTK governs the dynamics all along training, even where the gradient is nonzero and no Laplace posterior exists. It coincides with the posterior GP kernel $J_\theta f \Psi^{-1} J_\theta f^\top$ only at a posterior mode $\theta_*$, as the Laplace approximation requires. The parameter-space metric thus determines both the predictive uncertainty, through the Gaussian we push forward, and the optimization geometry, through the descent the function follows.
+
+> **Takeaways**
+>
+> For common losses (exponential-family with an *affine* link; e.g., squared loss, cross-entropy), the curvature of the linearized model satisfies
+>
+> $$
+> G(\theta_0) = N \tilde{F}(\theta_0),
+> $$
+>
+> identifying the GGN with the Fisher Information Matrix (FIM) over $N$ i.i.d. samples, and tying the Riemannian and information-geometric views.
+>
+> The Fisher Information Matrix is the Riemannian metric describing the local behavior of the KL divergence:
+>
+> $$
+> D_{\mathrm{KL}}\left(p(x, y \mid \theta_1) \,\|\, p(x, y \mid \theta_2)\right) = \frac{1}{2} \Delta\theta^\top F(\theta_1) \Delta\theta + \mathcal{O}\left(\|\Delta\theta\|^3\right).
+> $$
+>
+> In practice, one uses the empirical input distribution to form the FIM. The matrix $G$ is PSD and typically singular; adding a strongly convex regularizer makes
+>
+> $$
+> \Psi(\theta_0) = G(\theta_0) + \nabla_\theta \nabla_\theta^\top \Omega(\theta_0) \succ 0,
+> $$
+>
+> which is the invertible precision used by the Laplace approximation.
+>
+> The metric $M$ in the form $J_\theta f M^{-1} J_\theta f^\top$ sets which kernel we obtain: $M = I$ gives the NTK (vanilla gradient descent) and $M = \Psi$ gives the natural-gradient NTK (natural-gradient descent), which becomes the posterior GP kernel at a mode.
+
+## 4. Scalable curvature approximations
+
+The GGN of the linearized network (cf. Equation 8.22)
+
+$$
+G(\theta) = \sum_{n=1}^{N} \left(J_\theta f(x_n, \theta)\right)^\top \underbrace{\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f(x_n, \theta)}}_{=: H_n \succeq 0} J_\theta f(x_n, \theta) \in \mathbb{R}^{P \times P} \tag{8.46}
+$$
+
+is dense in general and *far* too large to form for modern neural networks. We therefore seek structured surrogates that (i) are cheap to store and invert, yet (ii) retain meaningful parameter correlations. Table 8.1 compares the three curvature proxies we develop: the diagonal, low-rank, and Kronecker-Factored Approximate Curvature (KFAC) approximations. Scalable variants of these curvature approximations are developed further in Chapter 40, and last-layer inference is treated in Chapter 39.
+
+| Approx. | Storage | Cov.-vec. | Inversion | Correlations | Blind spot |
+| --- | --- | --- | --- | --- | --- |
+| Diag. | $\mathcal{O}(P)$ | Elementwise division | Elementwise | None across parameters | Misses coupled directions |
+| Low-rank | $\mathcal{O}(kP)$ | Products with $Q_{1:k}$ | Woodbury | Top eigenspace of $G$ | Misses broad low-curvature directions |
+| KFAC | $\sum_i \mathcal{O}(d_{i-1}^2 + d_i^2)$ | Kronecker identities | Factor eigensystems | Within-layer Kronecker | Drops cross-layer couplings |
+
+*Table 8.1: Common scalable curvature approximations for linearized Laplace. Here $d_{i-1}$ and $d_i$ are the input and pre-activation dimensions of layer $i$.*
+
+A simple baseline is the diagonal $\operatorname{diag} G(\theta)$, which is trivial to store and invert, though calculating it efficiently requires care. However, it encodes an independence assumption between *all parameters*, destroying the often-crucial within-layer correlations carried by $G(\theta)$. This tends to hurt the utility of the downstream uncertainty estimates.
+
+### 4.1 Low-rank GGN approximations
+
+A scalable yet expressive alternative is a *low-rank* approximation of $G(\theta)$. As $G(\theta)$ is symmetric for any $\theta \in \mathbb{R}^P$, it possesses an eigendecomposition with real eigenvalues of the form
+
+$$
+G(\theta) = Q(\theta) \Lambda(\theta) Q(\theta)^\top, \tag{8.47}
+$$
+
+where $Q(\theta) \in \mathbb{R}^{P \times P}$ is an orthogonal matrix (i.e., a matrix with ortho*normal* columns/rows) and $\Lambda(\theta) \in \mathbb{R}^{P \times P}$ is a diagonal matrix.
+
+For $q_{:,i}$, the $i$th column of $Q(\theta)$, and $\lambda_i$, the $i$th diagonal entry of $\Lambda(\theta)$, it holds that $G(\theta) q_{:,i} = \lambda_i q_{:,i}$. We follow the convention $\lambda_1 \ge \lambda_2 \ge \dots \ge \lambda_P$. In the following, we drop the dependence of $Q$ and its factors on $\theta$ for brevity.
+
+We now seek a *good* low-rank approximation $\tilde{G}_k$ to $G$, as this reduces the sizes of the objects we need to handle. Since $G \succeq 0$, its eigenvalues are nonnegative, so the $k$ algebraically largest coincide with the $k$ largest in magnitude. The Eckart–Young–Mirsky theorem states that the objective
+
+$$
+\mathop{\mathrm{arg\,min}}\limits_{G' \in \mathbb{R}^{P \times P} : \operatorname{rank}(G') \le k} \|G - G'\| \tag{8.48}
+$$
+
+is minimized by $\tilde{G}_k := Q_{1:k} \Lambda_{1:k} Q_{1:k}^\top$ where $Q_{1:k} \in \mathbb{R}^{P \times k}$ is the first $k$ columns of $Q$ and $\Lambda_{1:k} \in \mathbb{R}^{k \times k}$ holds the first $k$ eigenvalues of $G$. This result holds for both the spectral norm $\|\cdot\|_2$ and the Frobenius norm $\|\cdot\|_F$. Therefore, one obtains an *optimal* low-rank approximation $\tilde{G}_k$ to $G$ in the above sense by computing the first $k$ eigenvalues and eigenvectors of $G$. Storing this low-rank approximation requires storing $(P + 1)k$ values instead of $P^2$.
+
+The most naive way to compute $\tilde{G}_k$ is first calculating the eigendecomposition $G = Q\Lambda Q^\top$ and then truncating it to the first $k$ eigenpairs. However, this strategy does not resolve the infeasibility of storing the full eigendecomposition with $P(P + 1)$ values. Instead, one uses efficient *matrix-free* schemes such as the Locally Optimal Block Preconditioned Conjugate Gradient (LOBPCG) method or Lanczos iterations to obtain the low-rank decomposition. Notably, these algorithms only require *matrix-vector products* $v \mapsto Gv$ with the GGN to obtain the top eigenpairs, which does not require representing the entire $G$ matrix in memory.
+
+The low-rank representation is particularly handy, as for simple priors, such as isotropic Gaussians, calculating the approximate covariance matrix is just as efficient as working with the low-rank GGN. Let $\Gamma \succ 0$ be the Hessian of the negative log-prior $\Omega$, that is, the prior-curvature term $\nabla_\theta \nabla_\theta^\top \Omega$ of the precision $\Psi = G + \nabla_\theta \nabla_\theta^\top \Omega$ (Equation 8.45). Then the Woodbury matrix identity yields
+
+$$
+\left(\Gamma + \tilde{G}_k\right)^{-1} = \Gamma^{-1} - \Gamma^{-1} Q_{1:k} \left(\Lambda_{1:k}^{-1} + Q_{1:k}^\top \Gamma^{-1} Q_{1:k}\right)^{-1} Q_{1:k}^\top \Gamma^{-1}. \tag{8.49}
+$$
+
+In particular, for isotropic Gaussians, $\Gamma = \tau I$,
+
+$$
+\left(\tau I + Q_{1:k} \Lambda_{1:k} Q_{1:k}^\top\right)^{-1} = \tau^{-1} I + Q_{1:k} \operatorname{diag}\left(-\frac{\lambda_1}{\tau(\lambda_1 + \tau)}, \dots, -\frac{\lambda_k}{\tau(\lambda_k + \tau)}\right) Q_{1:k}^\top. \tag{8.50}
+$$
+
+In words: a diagonal-plus-low-rank matrix has a diagonal-plus-low-rank inverse. Multiplying by such a matrix is efficient and does not require forming a $P \times P$ matrix. For a vector $v \in \mathbb{R}^P$, we first calculate $u = Q_{1:k}^\top v \in \mathbb{R}^k$, then elementwise multiply $u$ by the diagonal entries in $\operatorname{diag}\left(-\frac{\lambda_1}{\tau(\lambda_1 + \tau)}, \dots, -\frac{\lambda_k}{\tau(\lambda_k + \tau)}\right)$, then map the result back to $\mathbb{R}^P$ with $Q_{1:k}$ and add the diagonal term $\tau^{-1} v$.
+
+### 4.2 Kronecker-factored approximate curvature
+
+A complementary path towards scalable approximate curvature representations assumes independence *between layers* only, while retaining rich *within-layer* parameter correlations via a Kronecker factorization. This idea underlies KFAC, which has recently seen wide use as a scalable curvature proxy. In this section, we give an introduction to KFAC for dense linear layers and refer to Dangel et al. for a more detailed and general exposition of KFAC.
+
+Consider layer $i$ with weights $W^{(i)} \in \mathbb{R}^{d_i \times d_{i-1}}$, input activation $a_n^{(i-1)} \in \mathbb{R}^{d_{i-1}}$, and pre-activation $s_n^{(i)} = W^{(i)} a_n^{(i-1)} \in \mathbb{R}^{d_i}$.[^4] Let $z_n = f(x_n, \theta) \in \mathbb{R}^C$ denote the network output. Let $J_{W^{(i)}} s_n^{(i)} \in \mathbb{R}^{d_i \times (d_i d_{i-1})}$ denote the Jacobian of $s_n^{(i)}$ w.r.t. $\operatorname{vec}(W^{(i)})$, where $\operatorname{vec}$ flattens its input by stacking its columns. For datum $n$, define the *output-space* curvature $H_n := \nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = z_n} \succeq 0$, so $H_n \in \mathbb{R}^{C \times C}$. Writing $H_n = S_n S_n^\top$ with $S_n \in \mathbb{R}^{C \times C}$, the corresponding layer block of the GGN can be expressed as
+
+$$
+\begin{aligned}
+G^{(i)} &= \sum_{n=1}^{N} \left(J_{W^{(i)}} s_n^{(i)}\right)^\top \underbrace{\left(J_{s_n^{(i)}} z_n\right)^\top H_n \left(J_{s_n^{(i)}} z_n\right)}_{=:\, \hat{H}_n^{(i)} \succeq 0} J_{W^{(i)}} s_n^{(i)} \\
+&= \sum_{n=1}^{N} \sum_{c=1}^{C} \left(J_{W^{(i)}} s_n^{(i)}\right)^\top g_{n,c}^{(i)} \left(g_{n,c}^{(i)}\right)^\top J_{W^{(i)}} s_n^{(i)}.
+\end{aligned} \tag{8.51}
+$$
+
+with $g_{n,c}^{(i)} := (J_{s_n^{(i)}} z_n)^\top [S_n]_{:,c} \in \mathbb{R}^{d_i}$, where $J_{s_n^{(i)}} z_n$ is the Jacobian of the network output $z_n$ w.r.t. this layer's pre-activation $s_n^{(i)}$.[^5] Thus, the sum over $c$ is over the network output curvature factor, while $g_{n,c}^{(i)}$ lives in the layer pre-activation space.
+
+For a linear layer, the output-parameter Jacobian has the form $J_{W^{(i)}} s_n^{(i)} = (a_n^{(i-1)})^\top \otimes I_{d_i}$ where $\otimes$ denotes the Kronecker product. Noting the Kronecker properties $(A \otimes B)^\top = A^\top \otimes B^\top$ and $(A \otimes B)(C \otimes D) = (AC) \otimes (BD)$ for compatible matrices $A, B, C, D$, we get
+
+$$
+G^{(i)} = \sum_{n=1}^{N} \sum_{c=1}^{C} \underbrace{\left(a_n^{(i-1)} (a_n^{(i-1)})^\top\right)}_{\text{input factor}} \otimes \underbrace{\left(g_{n,c}^{(i)} (g_{n,c}^{(i)})^\top\right)}_{\text{backpropagated factor}} \in \mathbb{R}^{(d_{i-1} d_i) \times (d_{i-1} d_i)}. \tag{8.52}
+$$
+
+The KFAC approximation then pulls the Kronecker product outside the sum:
+
+$$
+\begin{aligned}
+&\sum_{n=1}^{N} \sum_{c=1}^{C} \left(a_n^{(i-1)} (a_n^{(i-1)})^\top\right) \otimes \left(g_{n,c}^{(i)} (g_{n,c}^{(i)})^\top\right) \\
+&\approx \underbrace{\left(\sum_{n=1}^{N} a_n^{(i-1)} (a_n^{(i-1)})^\top\right)}_{=:\, A^{(i)}} \otimes \underbrace{\left(\frac{1}{N} \sum_{n=1}^{N} \sum_{c=1}^{C} g_{n,c}^{(i)} (g_{n,c}^{(i)})^\top\right)}_{=:\, B^{(i)}}.
+\end{aligned} \tag{8.53}
+$$
+
+Thus, the layer block is approximated by
+
+$$
+G^{(i)} \approx A^{(i)} \otimes B^{(i)} =: \tilde{G}^{(i)}, \qquad A^{(i)} \in \mathbb{R}^{d_{i-1} \times d_{i-1}}, \quad B^{(i)} \in \mathbb{R}^{d_i \times d_i}. \tag{8.54}
+$$
+
+Stacking layers and *neglecting inter-layer couplings* yields a block-diagonal curvature with Kronecker blocks $A^{(i)} \otimes B^{(i)}$.
+
+The Kronecker form is efficient to store. While the dense GGN $G^{(i)}$ for a single linear layer has $(d_{i-1} d_i)^2$ entries, the Kronecker factorization only requires storing $A^{(i)}$ and $B^{(i)}$, that is, a total of $d_{i-1}^2 + d_i^2$ values. The block-diagonal layer approximation then avoids storing cross-layer blocks. One can also calculate efficient covariance-vector products without forming a dense $P \times P$ matrix by leveraging the cached eigendecompositions of the Kronecker factors and standard Kronecker identities. This property is more involved to show than in the case of low-rank approximations; refer to Dangel et al. for more details.
+
+> **Takeaways**
+>
+> KFAC assumes independence *across* layers but preserves rich *within-layer* correlations through a Kronecker factorization of each layer's curvature block: $G^{(i)} \approx A^{(i)} \otimes B^{(i)}$. It is far more expressive than diagonal curvature structures and complementary to low-rank approximations (usually at lower cost). Storing the Kronecker factors is cheap. With an isotropic prior precision, covariance-vector products can be implemented remarkably efficiently. See Dangel et al. for implementation details and extensions.
+
+## 5. The predictive
+
+Equation 8.13 gives a Gaussian distribution in the output space for input $x_*$. For regression, this distribution is called the **predictive distribution**: its mean encodes the average prediction under the parameter-space posterior and the linearized model, and its covariance structure quantifies the uncertainty in the prediction, including correlations of the outputs. Figure 8.3 shows a one-dimensional regression example of the linearized Laplace approximation.
+
+<Figure caption="Figure 8.3: A one-dimensional regression example with irregular inputs and input-dependent observation noise. The model is a neural network with a Bayesian last layer, so the linearization is exact and the linearized GP yields the exact posterior predictive. The shaded region shows the pointwise 95% latent GP interval, while the dashed curves add the input-dependent observation variance. (Schematic reproduction: computed anew for this page with fixed radial-basis features, a known input-dependent noise level and synthetic data in the same layout; error bars show one noise standard deviation.)">
+  <Bdl08LastLayerRegression />
+</Figure>
+
+In classification, however, we are interested in obtaining a second-order distribution (a distribution over distributions) over the *categorical* distributions of a discrete set of labels. To this end, one has to map the logit-space Gaussian measure in Equation 8.13 through an activation function onto the $(C - 1)$-dimensional probability simplex:
+
+$$
+\mathrm{h} \colon \mathbb{R}^D \xrightarrow{\ \mathrm{f}\ } \mathcal{G}\left(\mathbb{R}^C\right) \xrightarrow{\ \varphi_*\ } \mathcal{P}\left(\Delta^{C-1}\right) \tag{8.55}
+$$
+
+where $\mathrm{f}$ is the mapping from an input $x_*$ to the logit-space Gaussian distribution given by the Laplace-approximated network, $\mathcal{G}(\mathbb{R}^C)$ is the set of Gaussian measures on the logit space $\mathbb{R}^C$, $\mathcal{P}(\Delta^{C-1})$ is the set of probability measures on the simplex, and $\varphi_*$ pushes forward the Gaussian probability measures through the activation function. The roman $\mathrm{f}$ is the network with its parameter posterior pushed through it: the affine pushforward of the Laplace posterior $\mathcal{N}(\theta; \theta_*, \Psi(\theta_*)^{-1})$ along the linearized network, giving $\mathrm{f}(x_*) = \mathcal{N}(f(x_*, \theta_*), J_\theta f(x_*, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x_*, \theta_*)^\top) \in \mathcal{G}(\mathbb{R}^C)$ as in Equation 8.13. The italic $f(x_*, \theta_*) \in \mathbb{R}^C$ plugs in the point estimate $\theta_*$ and returns a single logit vector; the roman $\mathrm{f}(x_*)$ returns the full logit-space Gaussian, whose mean is exactly that italic vector. All parameters in the support of the Laplace posterior are taken into account rather than a single one being held fixed, so $\mathrm{f}$ takes only the input. In words, $\mathrm{h}$ is the composition of the Laplace-approximated neural network outputting logit-space Gaussian distributions, $\mathrm{f}$, and the pushforward map through the activation function that gives us a distribution over probability vectors.
+
+In most cases, this activation function is the softmax, defined as $\operatorname{softmax} \colon \mathbb{R}^C \to \Delta^{C-1}$,
+
+$$
+\operatorname{softmax}_c(z) = \frac{\exp(z_c)}{\sum_{c'=1}^{C} \exp(z_{c'})}. \tag{8.56}
+$$
+
+In this case, there exists no closed-form expression for $\mathrm{h}(x_*) \in \mathcal{P}(\Delta^{C-1})$ given input $x_*$. Further, $\mathbb{E}_{P \sim \mathrm{h}(x_*)}[P]$, called the posterior predictive, is also intractable. However, sampling from $\mathrm{h}(x_*)$ is efficient, as it only requires sampling from the logit-space Gaussian $\mathrm{f}(x_*)$ and pushing these logit samples forward through the activation function. Thus, in practice, one resorts to Monte Carlo integration, that is, drawing $M$ samples from $\mathrm{h}(x_*)$ and calculating their empirical average. Similarly, one can approximate other derived quantities, such as the expected entropy $\mathbb{E}_{P \sim \mathrm{h}(x_*)}[\mathrm{H}(P)]$, through Monte Carlo sampling. Such derived quantities are often used in the field of uncertainty disentanglement, where different quantities capture different sources of uncertainty. These uncertainty estimates are applied to selective classification in Chapter 44.
+
+The main issue with the above schemes is the requirement of sampling: the error of Monte Carlo integration decreases as the inverse square root of the number of samples $M$, meaning that to reduce the error by three orders of magnitude, one needs a million samples. Standard softmax-cross-entropy integration cannot avoid this sampling cost without incurring significant approximation error. However, some output activation functions admit a *closed-form* posterior predictive. For a single output, integrating a normCDF (probit) link against a Gaussian is exact, and the logistic sigmoid admits a classical probit approximation. Mucsányi et al. show that the normalized elementwise sigmoid and normCDF functions yield closed-form predictives that have strong approximation guarantees and are naturally compatible with more performant training objectives than the standard softmax-cross-entropy objective. Further, derived quantities such as the expected entropy can also be obtained in closed form by matching the moments of the Gaussian pushforward distributions with Dirichlets. The change in the training objective comes at no cost: models trained this way become better calibrated while providing sample-free posterior predictives and other derived quantities. Therefore, Laplace approximations in classification can be formulated in a purely sample-free fashion, with theoretical guarantees. Figure 8.4 compares the MAP, Monte Carlo softmax, and sample-free probit predictives on a two-dimensional example, together with the predictive entropy.
+
+<Figure caption="Figure 8.4: Two-dimensional binary classification with a Laplace approximation to the last layer of a fixed-feature network on the Iris data set. The inputs are the measured sepal width and petal width. White denotes Iris versicolor and black denotes Iris virginica. Circles are training points, triangles are validation points, and squares are test points. The prior precision is selected on the validation set by log score. Panels (a)–(c) show the probability of the black class for the MAP predictor, the softmax posterior predictive estimated by Monte Carlo sampling, and the sample-free probit approximation. Panel (d) shows the predictive entropy computed from the Monte Carlo predictive. On the held-out test points, the MAP log score and Brier score are 0.433 and 0.122, while the Monte Carlo GP predictive gives 0.345 and 0.107, and the probit predictive gives 0.347 and 0.108, close to indistinguishable. (Schematic reproduction: recomputed for this page on the real Iris measurements with 60 fixed random tanh features, a random 30/10/10 per-class split and a prior precision chosen from a grid by validation log score; open markers are versicolor, filled markers virginica, and darker accent shading means a higher probability of virginica in (a)–(c) and a higher entropy in (d). The scores quoted above are the book's and are not reproduced by this redraw.)">
+  <Bdl08IrisLaplace />
+</Figure>
+
+> **Takeaways**
+>
+> For regression, the linearized Laplace output at input $x_*$ is *Gaussian* (Equation 8.13); its mean is $f(x_*, \theta_*)$ with covariance $J_\theta f(x_*, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x_*, \theta_*)^\top$.
+>
+> In classification with softmax, pushing this logit-space Gaussian through the activation yields a distribution on the simplex with *no closed form* for the posterior predictive $\mathbb{E}_{P \sim \mathrm{h}(x_*)}[P]$, so one typically uses Monte Carlo with $\mathcal{O}(M^{-1/2})$ error.
+>
+> Replacing softmax by a normalized elementwise sigmoid or normCDF output activation makes the posterior predictive (and derived quantities such as expected entropy via Dirichlet moment matching) *closed-form* with approximation guarantees, usually improving calibration and rendering Laplace classification *sample-free*.
+
+[^1]: Note that this network is only linear in its parameters $\theta$ but is still nonlinear in its inputs $x$.
+
+[^2]: In particular, the transition from Equation 7.4b to Equation 7.4c is not justified when $\Psi(\theta_*)$ is not positive definite.
+
+[^3]: For a finite-width network, this is sometimes called the *empirical* NTK at $\theta_0$, and the NTK is reserved for networks in the infinite-width limit.
+
+[^4]: Bias terms are omitted for brevity.
+
+[^5]: For the squared loss, $H_n = I$; for cross-entropy, $H_n = \operatorname{diag}(\operatorname{softmax}(z)) - \operatorname{softmax}(z) \operatorname{softmax}(z)^\top$ is the softmax Hessian.
