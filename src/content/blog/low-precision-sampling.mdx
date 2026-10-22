@@ -1,0 +1,487 @@
+---
+title: "Low-Precision Sampling"
+description: "How SG-MCMC samplers run in low-precision arithmetic: quantized SGLD and SGHMC, variance-corrected quantization and post-training low-precision sampling."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - quantization
+  - stochastic gradient mcmc
+  - low-precision arithmetic
+series: bayesian-deep-learning
+seriesOrder: 7
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl05LowPrecisionSgld from '../../components/diagrams/Bdl05LowPrecisionSgld.astro';
+
+When running simulations for a dynamic system on a computer, the impact of round-off errors on number representations (e.g., floating-point representations) can not be naïvely presumed to be negligible. It has been observed that a large deviation can occur between numerical behavior and the theoretical behavior. In Bayesian literature, the same question arises: how does the rounding error from computer simulation affect the convergence property of a Markov chain? Roberts et al. shows a rather alarming example that a well-behaved Markov chain (with Feller continuity and geometrical ergodicity) becomes transient (i.e., will not converge to any target distribution) after adding an arbitrarily small roundoff error. Hoffman also warned that roundoff errors can severely degrade the performance of the Metropolis-Hastings sampling algorithm. To sum up, a common wisdom for conventional MCMC practice is to use high-precision numerical representations to limit the negative impact of roundoff errors. However, in this chapter, we will embrace the low-precision representations in the era of SG-MCMC samplers.
+
+## 1. Low-precision deep neural network
+
+The rise of large-scale deep neural networks (DNNs) and large language models (LLMs) has led to significant computational and memory costs of model training and inference. To improve efficiency, low-precision deep learning (which uses fewer bits to represent numbers in model parameters, activations, and gradients, and thus can drastically lower resource demands) has emerged as a promising direction. Precision formats such as 16-bit (FP16), 8-bit (INT8), 4-bit, and even binary (1-bit) offer memory reduction, energy savings, and speedup in inference, enabling deployment on edge devices and platforms, and specialized accelerators. On the other hand, well-designed low-precision optimization algorithms can maintain the model utility, such that the performance degradation from full-precision models to low-precision models is tolerable.
+
+Modern foundations of low-precision deep learning include Gupta et al., which uses 16-bit wide fixed-point arithmetic and stochastic rounding to accelerate the training speed of DNNs, and Vanhoucke et al., which discusses the possibility of running DNN inference on x86 CPUs rather than GPUs using 8-bit fixed-point arithmetic. In general, there are two directions for achieving lower precision representations of DNN models: quantization-aware training (QAT) and post-training quantization (PTQ). The former simulates quantization during the training process, allowing the model to learn a robust solution that accounts for quantization errors induced by rounding; the latter, on the other hand, applies quantization to off-the-shelf pre-trained models. It is arguably true that QAT outperforms PTQ in terms of better accuracy, but incurs greater computational costs of model training. Other worth mentioning techniques of low-precision models are, but not limited to, non-uniform quantization and mixed precision training. Opposite to conventional quantization methods that map floating-point values to an evenly spaced quantized target space, non-uniform quantization chooses an unevenly spaced quantized target space that can allocate more quantization levels where the values are dense. This unevenly spaced quantized target space can be of logarithmic scale, or adaptively learned from the training process. Mixed-precision methods assign different bit-widths to different layers of the neural networks or different computation steps of the training, exploiting the fact that different components of DNNs have varying sensitivities to quantization error. Theoretical investigations related to low-precision training are available in Li et al., Markov et al., Sa et al., Sakr et al.
+
+Inevitably, low-precision optimization achieves better efficiency at the expense of performance sacrifice. One natural way to mitigate performance degradation caused by quantization error is low-precision Bayesian sampling. We argue that posterior sampling is particularly suited for low-precision arithmetic because of its intrinsic robustness to system noise. In particular: (1) Bayesian posterior explores weight space instead of converging to a single point, thus it should not require precise weights and be tolerant to non-full-precision models; and (2) it allows us to perform Bayesian model averaging during testing using an ensemble of models, which allows coarse representations of individual models to be compensated by the overall model average.
+
+## 2. Low-precision SG-MCMC
+
+### 2.1 Preliminary
+
+The Bayesian counterpart of QAT directly samples low-precision models (i.e., low-precision weights of the neural network) from a target distribution (typically, a Bayesian posterior distribution). A straightforward idea is to adapt existing Monte Carlo sampling algorithms for low-precision sampling tasks. In the regime of deep learning, where the training data sets are usually massive, the SG-MCMC sampling algorithm (see [Chapter 2](/blog/stochastic-gradient-mcmc)) is the most suitable choice since it can avoid a full scan of the data set when calculating the likelihood terms.
+
+Now we briefly recall two seminal SG-MCMC algorithms, the SGLD and SGHMC. Given some data set $\mathcal{D}$, a model with parameters $\theta \in \mathbb{R}^P$, and a prior $p(\theta)$, we are interested in sampling from the posterior $p(\theta \mid \mathcal{D}) \propto \exp(-U(\theta))$, where the energy function is
+
+$$
+U(\theta) = -\sum_{(x,y)\in\mathcal{D}} \log p(x, y \mid \theta) - \log p(\theta).
+$$
+
+Stochastic Gradient Langevin Dynamics (SGLD) reduces the computational cost by using a stochastic gradient estimation $\nabla\tilde{U}$, which is an unbiased estimator of $\nabla U$ based on a subset of the data set $\mathcal{D}$. Specifically, SGLD updates the parameter in the $(k+1)$-th step following the rule
+
+$$
+\theta_{k+1} = \theta_k - \alpha\nabla\tilde{U}(\theta_k) + \sqrt{2\alpha}\,\xi_{k+1}, \tag{5.1}
+$$
+
+where $\alpha$ is the stepsize and $\xi_{k+1}$ is a standard Gaussian noise. Compared to the Stochastic Gradient Descent (SGD) update, the only difference is that SGLD adds an additional Gaussian noise in each step, which essentially enables SGLD to characterize the full distribution instead of converging to a single point. The close connection between SGLD and SGD makes it convenient to implement and run on existing deep learning tasks for which SGD is the typical learning algorithm.
+
+Stochastic Gradient HMC (SGHMC) is derived by replacing $\nabla U$ with a noisy gradient $\nabla\tilde{U} + \xi$ in the Hamiltonian Monte Carlo, and boils down to the unadjusted underdamped Langevin algorithm with stochastic gradient, where the underdamped Langevin dynamics can be defined as
+
+$$
+\begin{aligned}
+\mathrm{d}v_t &= -\gamma v_t\,\mathrm{d}t - u\nabla U(\theta_t)\,\mathrm{d}t + \sqrt{2\gamma u}\,\mathrm{d}\mathbf{B}_t \\
+\mathrm{d}\theta_t &= v_t\,\mathrm{d}t,
+\end{aligned} \tag{5.2}
+$$
+
+where $u, \gamma$ denote the hyperparameters of the inverse mass and friction, respectively. Furthermore, Cheng et al. proposed the following discretization of underdamped Langevin dynamics (5.2) with stochastic gradient:
+
+$$
+\begin{aligned}
+v_{k+1} &= v_k e^{-\gamma\eta} - u\gamma^{-1}(1 - e^{-\gamma\eta})\nabla\tilde{U}(\theta_k) + \xi_k^v \\
+\theta_{k+1} &= \theta_k + \gamma^{-1}(1 - e^{-\gamma\eta})v_k + u\gamma^{-2}(\gamma\eta + e^{-\gamma\eta} - 1)\nabla\tilde{U}(\theta_k) + \xi_k^\theta,
+\end{aligned} \tag{5.3}
+$$
+
+where $\xi_k^v, \xi_k^\theta$ are normal distributed in $\mathbb{R}^P$ satisfying that:
+
+$$
+\begin{aligned}
+&\mathbb{E}\xi_k^v(\xi_k^v)^\top = u(1 - e^{-2\gamma\eta}) \cdot \mathbf{I}, \\
+&\mathbb{E}\xi_k^\theta(\xi_k^\theta)^\top = u\gamma^{-2}(2\gamma\eta + 4e^{-\gamma\eta} - e^{-2\gamma\eta} - 3) \cdot \mathbf{I}, \\
+&\mathbb{E}\xi_k^\theta(\xi_k^v)^\top = u\gamma^{-1}(1 - 2e^{-\gamma\eta} + e^{-2\gamma\eta}) \cdot \mathbf{I}.
+\end{aligned} \tag{5.4}
+$$
+
+Before formally introducing the low-precision SG-MCMC algorithms, we review the basic concepts of low-precision training. To represent numbers, e.g., the weights of a DNN, in low-precision, one simple way is to use *fixed point*, which has been used in both theory and practice. Specifically, suppose that we use $W$ bits to represent numbers with $F$ of those $W$ bits to represent the fractional part. Then there is a distance between consecutive representable numbers, $\Delta = 2^{-F}$, which is called *quantization gap*. The representable numbers also have a lower bound $l$ and an upper bound $u$, where
+
+$$
+L = -2^{W-F-1}, \quad U = 2^{W-F-1} - 2^{-F}.
+$$
+
+As shown above, when the number of bits decreases, the accuracy of number representation decreases. We use this type of number representation in our theoretical analysis and empirical demonstration following previous work.
+
+Another common type of number representation is *floating point*, where each number has its own exponent part. Between fixed point and floating point, there is *block floating point* which allows all numbers within a block to share the same exponent. We use block floating point for deep learning experiments since it has been shown to be more favorable for deep models.
+
+Having low-precision number representation in hand, we also need a quantization function $Q$ to convert a real-valued number into a low-precision number. Such functions include *deterministic rounding* and *stochastic rounding*. Particularly, the deterministic rounding function $Q^d$ quantizes a number to its nearest representable neighbor as follows:
+
+$$
+Q^d(\theta) = \operatorname{sign}(\theta) \cdot \operatorname{clip}\left(\Delta\left\lfloor \frac{|\theta|}{\Delta} + \frac{1}{2} \right\rfloor, L, U\right),
+$$
+
+where $\operatorname{clip}(x, L, U) = \max(\min(x, U), L)$ and the above action is applied to the whole vector elementwisely. Instead, stochastic rounding $Q^s$ quantizes a number with a probability based on the distance to its representable neighbor:
+
+$$
+Q^s(\theta) = \begin{cases}
+\operatorname{clip}\left(\Delta\left\lfloor \frac{\theta}{\Delta} \right\rfloor, L, U\right), & \text{w.p. } \left\lceil \frac{\theta}{\Delta} \right\rceil - \frac{\theta}{\Delta} \\[4pt]
+\operatorname{clip}\left(\Delta\left\lceil \frac{\theta}{\Delta} \right\rceil, L, U\right), & \text{w.p. } 1 - \left(\left\lceil \frac{\theta}{\Delta} \right\rceil - \frac{\theta}{\Delta}\right).
+\end{cases}
+$$
+
+An important property of $Q^s$ is that $\mathbb{E}[Q^s(\theta)] = \theta$, which means the quantized number is unbiased. $Q^s$ is generally preferred over $Q^d$ in practice since it can preserve gradient information, especially when the gradient update is smaller than the quantization gap. In what follows, when necessary, we use $Q_W$ and $\Delta_W$ to denote the weights' quantizer and quantization gap, $Q_G$ and $\Delta_G$ to denote gradients' quantizer and quantization gap.
+
+To do the gradient update in low-precision training optimization, there are two common choices depending on whether we store an additional copy of full-precision weights. *Full-precision gradient accumulators* use a full-precision weight buffer to accumulate gradient updates and only quantize weights before computing gradients. SGD with full-precision gradient accumulators (SGDLP-F) updates the weights as follows,
+
+$$
+\theta_{k+1} = \theta_k - \alpha Q_G\left(\nabla\tilde{U}(Q_W(\theta_k))\right),
+$$
+
+where we use full-precision $\theta_{k+1}$ and $\theta_k$ in the update, and only quantize the weight for forward and backward propagation.
+
+However, gradient accumulators have to be frequently updated during training. It would be ideal to also represent it in low-precision to further reduce the costs. To achieve it, we could instead do the update as follows,
+
+$$
+\theta_{k+1} = Q_W\left(\theta_k - \alpha Q_G\left(\nabla\tilde{U}(\theta_k)\right)\right), \tag{5.5}
+$$
+
+where $\theta$ is always represented in low-precision. This update of SGD is called using *low-precision gradient accumulators* (SGDLP-L). Both full- and low-precision gradient accumulators have been widely used: low-precision gradient accumulators are cheaper and faster because of having all numbers in low-precision, whereas full-precision gradient accumulators generally have better performance because of more precisely reflecting small gradient updates.
+
+### 2.2 Low-precision stochastic gradient Langevin dynamics
+
+In this section, we combine the low-precision rounding and the SGLD update (5.1). As shown in Equation (5.1), the update of SGLD is simply an SGD update plus a Gaussian noise. Therefore, the low-precision formulation for SGD in the previous section can be naturally extended to SGLD training. Similar to SGDLP-F, we can do low-precision SGLD with full-precision gradient accumulators (SGLDLP-F) as follows:
+
+$$
+\theta_{k+1} = \theta_k - \alpha Q_G\left(\nabla\tilde{U}(Q_W(\theta_k))\right) + \sqrt{2\alpha}\,\xi_{k+1}, \tag{5.6}
+$$
+
+which can also be viewed as SGDLP-F plus a Gaussian noise in each step. However, the Gaussian noise turns out to help counteract the noise introduced by quantization, making SGLDLP-F more robust to inaccurate number representation and converging better than SGDLP-F as shown in Theorem 5.1.
+
+To facilitate the theoretical analysis, we assume that the target distribution is smooth and strongly log-concave, and the energy function has Lipschitz Hessian, i.e., $\forall\, \theta, \theta' \in \mathbb{R}^P$,
+
+$$
+\begin{aligned}
+&U(\theta) - U(\theta') - \nabla U(\theta')^\top(\theta - \theta') \ge (m/2)\|\theta - \theta'\|_2^2, \\
+&\|\nabla U(\theta) - \nabla U(\theta')\|_2 \le M\|\theta - \theta'\|_2, \\
+&\|\nabla^2 U(\theta) - \nabla^2 U(\theta')\|_2 \le \Psi\|\theta - \theta'\|_2, \\
+&\mathbb{E}\left[\|\nabla\tilde{U}(\theta) - \nabla U(\theta)\|_2^2\right] \le \kappa^2.
+\end{aligned} \tag{5.7}
+$$
+
+These assumptions are commonly used in the literature.
+
+**Theorem 5.1.** *We run SGLDLP-F under the above assumptions and with a constant stepsize* $\alpha \le 2/(m+M)$. *Let* $\pi$ *be the target distribution,* $\mu_0$ *be the initial distribution and* $\mu_K$ *be the distribution obtained by SGLDLP-F after* $K$ *iterations, then the 2-Wasserstein distance is*
+
+$$
+\begin{aligned}
+W_2(\mu_K, \pi) \le{}& (1 - \alpha m)^K W_2(\mu_0, \pi) + 1.65(M/m)(\alpha P)^{1/2} \\
+&+ \min\left(\frac{\Psi\Delta_W^2 P}{4m}, \frac{M\Delta_W\sqrt{P}}{2m}\right) + \sqrt{\frac{(\Delta_G^2 + M^2\Delta_W^2)\alpha P + 4\alpha\kappa^2}{4m}}.
+\end{aligned}
+$$
+
+This theorem shows that SGLDLP-F converges to the accuracy floor at
+
+$$
+\min\left(\frac{\Psi\Delta_W^2 P}{4m}, \frac{M\Delta_W\sqrt{P}}{2m}\right) \tag{5.8}
+$$
+
+given a large iteration number $K$ and small stepsize $\alpha$. Besides, if we further assume that the energy function is quadratic (i.e., $\Psi = 0$), then SGLDLP-F converges to the target distribution asymptotically. This matches the result of SGDLP-F on a quadratic function which converges to the optimum asymptotically. Our theorem also recovers the bound of full-precision SGLD (i.e., $\Delta_W = 0$) in Dalalyan and Karagulyan. However, when the energy function is not quadratic, the convergence of SGLDLP-F to the target distribution has a $\mathcal{O}(\Delta_W^2)$ rate whereas SGDLP-F to the optimum has a $\mathcal{O}(\Delta_W)$ rate. Recall that $\Delta_W = 2^{-F}$ where $F$ is the number of fractional bits. Our result suggests that asymptotically, SGLD only needs half the number of bits as SGD needs to achieve the same convergence accuracy. This comparison between SGLD and SGD also fits into the literature in comparing sampling and optimization convergence bounds.
+
+To further reduce the costs using low-precision gradient accumulators beyond SGLDLP-F, we mimic the update of SGDLP-L in Equation (5.5) and naturally get the following update rule for SGLD with low-precision gradient accumulators (SGLDLP-L),
+
+$$
+\theta_{k+1} = Q_W\left(\theta_k - \alpha Q_G\left(\nabla\tilde{U}(\theta_k)\right) + \sqrt{2\alpha}\,\xi_{k+1}\right). \tag{5.9}
+$$
+
+Surprisingly, despite the convergence of SGLDLP-L, the next theorem shows that it may diverge arbitrarily far away from the target distribution with small stepsizes.
+
+**Theorem 5.2.** *We run SGLDLP-L under the same assumptions as in Theorem 5.1. Let* $\mu_0$ *be the initial distribution and* $\mu_K$ *be the distribution obtained by SGLDLP-L after* $K$ *iterations, then*
+
+$$
+\begin{aligned}
+W_2(\mu_K, \pi) \le{}& (1 - \alpha m)^K W_2(\mu_0, \pi) + 1.65(M/m)(\alpha P)^{1/2} + \min\left(\frac{\Psi\Delta_W^2 P}{4m}, \frac{M\Delta_W\sqrt{P}}{2m}\right) \\
+&+ \sqrt{\frac{(\alpha\Delta_G^2 + \alpha^{-1}\Delta_W^2)P + 4\alpha\kappa^2}{4m}} + \left((1 - \alpha m)^K + 1\right)\frac{\Delta_W\sqrt{P}}{2}.
+\end{aligned}
+$$
+
+Note that one term on the right-hand side contains $\alpha^{-1}$, this theorem implies that as the stepsize $\alpha$ decreases, $W_2$ distance between the stationary distribution of SGLDLP-L and the target distribution may increase. To see if this is the case, we empirically run SGLDLP-L on a standard Gaussian distribution in Figure 5.1. We use 8-bit fixed-point and assign 3 of them to represent the fractional part. The simulations verify that SGLDLP-L indeed diverges from the target distribution with small stepsizes. At the same time, SGLDLP-F always converges to the target distribution with different stepsizes, aligning with the result in Theorem 5.1.
+
+One may choose a stepsize that minimizes the above $W_2$ distance to avoid divergence, however, getting that optimal stepsize is, in general, difficult since the constants are unknown in practice. Moreover, enabling a small stepsize in SGLD is often desirable, since it is needed to reduce the asymptotic bias of the posterior approximation.
+
+<Figure caption="Figure 5.1: Low-precision SGLD with varying stepsizes on a Gaussian distribution. Variance-corrected SGLD with low-precision gradient accumulators (VC SGLDLP-L) and SGLD with full-precision gradient accumulators (SGLDLP-F) converge to the true distribution, whereas naïve SGLDLP-L diverges and the divergence increases as the stepsize decreases. (a) Low-precision SGLD with α = 0.001; (b) low-precision SGLD with α = 0.0001. Reproduction computed for this page from the setup described in the text: standard Gaussian target, 8-bit fixed point with 3 fractional bits, stochastic rounding, 4,000 parallel chains, histograms with bin width 0.25.">
+  <Bdl05LowPrecisionSgld />
+</Figure>
+
+One key reason causing the divergence of SGLDLP-L is that the *variance* of each dimension of $\theta_{k+1}$ becomes larger due to using low-precision gradient accumulators. Specifically, given the stochastic gradient $\nabla\tilde{U}$, the update of full-precision SGLD can be viewed as sampling from a Gaussian distribution for each dimension $i$
+
+$$
+\theta_{k+1,i} \sim \mathcal{N}\left(\theta_{k,i} - \alpha\nabla\tilde{U}(\theta_k)_i, 2\alpha\right), \text{ for } i = 1, \cdots, P.
+$$
+
+Since stochastic rounding is unbiased, using it as the weight quantizer $Q_W$ and the gradient quantizer $Q_G$ in SGLDLP-L gives us
+
+$$
+\mathbb{E}\theta_{k+1,i} = \mathbb{E}Q_W\left(\theta_{k,i} - \alpha Q_G\left(\nabla\tilde{U}(\theta_k)\right)_i + \sqrt{2\alpha}\,\xi_{k+1,i}\right) = \theta_{k,i} - \alpha\nabla\tilde{U}(\theta_k)_i,
+$$
+
+which has the same mean as $\theta_{k+1}$ in full-precision. However, the variance of $\theta_{k+1,i}$ is now essentially larger than needed. If we ignore the variance from $Q_G$ and the stochastic gradient, since they are present and have been shown to work well in SGLDLP-F, the variance of $\theta_{k+1,i}$ is
+
+$$
+\begin{aligned}
+&\operatorname{Var}(\theta_{k+1,i}) \\
+&= \mathbb{E}\left[\operatorname{Var}\left[Q_W\left(\theta_{k,i} - \alpha\nabla U(\theta_k)_i + \sqrt{2\alpha}\,\xi_{k+1,i}\right) \,\middle|\, \xi_{k+1,i}\right]\right] \\
+&+ \operatorname{Var}\left[\mathbb{E}\left[Q_W\left(\theta_{k,i} - \alpha\nabla U(\theta_k)_i + \sqrt{2\alpha}\,\xi_{k+1,i}\right) \,\middle|\, \xi_{k+1,i}\right]\right] \\
+&= \frac{\Delta_W^2}{4}\chi_{k+1,i} + 2\alpha,
+\end{aligned}
+$$
+
+where $\chi_{k+1,i} \in [0, 1]$ depends on the distance of $\theta_{k+1,i}$ to its discrete neighbor. The above equation shows that the variance in SGLDLP-L update is larger than the right variance value $2\alpha$. This can be validated from Figure 5.1 where the naïve SGLDLP-L estimates the mean correctly but the variance wrongly.
+
+To enable SGLD with low-precision gradient accumulators, we introduce a new quantization function $Q^{\mathrm{vc}}$, denoting variance-corrected quantization, to fix the issue. The main idea of $Q^{\mathrm{vc}}$ is to directly sample from the discrete weight space instead of quantizing a real-valued Gaussian sample. First, we note that if we want a sample with mean $\mu \ge 0$ and variance $v \le \Delta_W^2/4$, we could sample from the following categorical distribution over $\{\Delta_W, -\Delta_W, 0\}$ to get it,
+
+$$
+\operatorname{Cat}(\mu, v) = \begin{cases}
+\Delta_W, & \text{w.p. } \frac{v + \mu^2 + \mu\Delta_W}{2\Delta_W^2} \\[4pt]
+-\Delta_W, & \text{w.p. } \frac{v + \mu^2 - \mu\Delta_W}{2\Delta_W^2} \\[4pt]
+0, & \text{otherwise}
+\end{cases} \tag{5.10}
+$$
+
+providing that the probability values are valid (i.e., non-negative and smaller than 1). Now we show how to use this categorical distribution to preserve the correct mean and variance for quantized $\theta_{k+1}$. We do so considering two cases: when the Gaussian variance $2\alpha$ is larger than the largest possible stochastic rounding variance $\Delta_W^2/4$, $Q^{\mathrm{vc}}$ first adds a small Gaussian noise and uses a sample from Equation (5.10) to make up the remaining variance; in the other situation, $Q^{\mathrm{vc}}$ directly samples from Equation (5.10) to achieve the target variance. The full description of $Q^{\mathrm{vc}}$ is outlined in Algorithm 13 (where the use of $\operatorname{Cat}(\cdot, \cdot)$ sampler is valid). SGLDLP-L using $Q^{\mathrm{vc}}$, denoting VC SGLDLP-L, follows the update rule:
+
+$$
+\theta_{k+1} = Q^{\mathrm{vc}}\left(\theta_k - \alpha Q_G\left(\nabla\tilde{U}(\theta_k)\right), 2\alpha, \Delta_W\right). \tag{5.11}
+$$
+
+**Algorithm 13** Variance-corrected quantization function $Q^{\mathrm{vc}}$.
+
+```text
+Input : (μ, v, Δ)
+Output: θ ∈ ℝ^P with mean vector μ ∈ ℝ^P and coordinate variance v ∈ ℝ
+v₀ ← Δ²/4                         // Δ²/4 is the largest variance due to stochastic rounding
+if v > v₀ then
+    x ← μ + √(v − v₀) ξ, where ξ ∼ N(0, I_P)
+    r ← x − Q^d(x)
+    foreach i do
+        sample cᵢ from Cat(|rᵢ|, v₀) as in (5.10)
+                  // cᵢ, rᵢ and θᵢ are ith coordinates of c, r and θ, respectively
+    θ ← Q^d(x) + sign(r) ⊙ c
+else
+    r ← μ − Q^s(μ)
+    foreach i do
+        v_s ← (1 − |rᵢ|/Δ) rᵢ² + (|rᵢ|/Δ) (−rᵢ + sign(rᵢ)Δ)²
+        if v > v_s then
+            sample cᵢ from Cat(0, v − v_s) as in (5.10)
+            θᵢ ← Q^s(μ)ᵢ + cᵢ
+        else
+            θᵢ ← Q^s(μ)ᵢ
+clip θ if outside representable range
+return θ
+```
+
+Our variance-corrected quantization function $Q^{\mathrm{vc}}$ always guarantees the correct mean, $\mathbb{E}(\theta_{k+1,i}) = \theta_{k,i} - \alpha\nabla\tilde{U}(\theta_k)_i$, and further guarantees the correct variance $\operatorname{Var}(\theta_{k+1,i}) = 2\alpha$ most of the time except when $v = 2\alpha < v_s$, where $v_s$ is defined in Algorithm 13. However, that case rarely happens in practice, because the stepsize has to be extremely small. Besides, our quantization is simple to implement, and its computation cost is negligible compared to gradient computation. Although $Q^{\mathrm{vc}}$ only preserves the correctness of the first two moments (i.e., mean and variance), this does not affect the performance much in both theory and practice, as shown by Theorem 5.3 and later numerical evidence.
+
+**Theorem 5.3.** *We run VC SGLDLP-L as in (5.11). Besides the same assumptions in Theorem 5.1, we further assume the gradient is bounded* $\mathbb{E}\left[\left\|Q_G(\nabla\tilde{U}(\theta_k))\right\|_1\right] \le G$. *Let* $v_0 = \Delta_W^2/4$. *Then*
+
+$$
+\begin{aligned}
+W_2(\mu_K, \pi) \le{}& (1 - \alpha m)^K W_2(\mu_0, \pi) + 1.65(M/m)(\alpha P)^{1/2} \\
+&+ \min\left(\frac{\Psi A}{m}, \frac{M\sqrt{A}}{m}\right) + \sqrt{\frac{\alpha\Delta_G^2 P + 4\alpha\kappa^2}{4m} + \frac{A}{\alpha m}} + \left((1 - \alpha m)^K + 1\right)\sqrt{A},
+\end{aligned}
+$$
+
+*where*
+
+$$
+A = \begin{cases}
+5v_0 P, & \text{if } 2\alpha > v_0 \\
+\max\left(2\Delta_W\alpha G, 4\alpha P\right), & \text{otherwise}
+\end{cases}
+$$
+
+| Method | Test error (%), CIFAR-10 | Test error (%), CIFAR-100 | ECE ↓ (%), CIFAR-10 | ECE ↓ (%), CIFAR-100 |
+|---|---|---|---|---|
+| **32-bit floating point** | | | | |
+| SGLDFP | 4.65 ± 0.06 | 22.58 ± 0.18 | 1.11 | 3.92 |
+| SGDFP | 4.71 ± 0.02 | 22.64 ± 0.13 | 2.53 | 4.97 |
+| **8-bit fixed point** | | | | |
+| VC SGLDLP-L | 7.13 ± 0.01 | 26.62 ± 0.16 | 0.60 | 3.19 |
+| SGDLP-L | 8.53 ± 0.08 | 28.86 ± 0.10 | 3.40 | 10.38 |
+| SGLDLP-F | 5.12 ± 0.06 | 23.30 ± 0.09 | 1.12 | 4.42 |
+| SGDLP-F | 5.20 ± 0.14 | 23.84 ± 0.12 | 3.05 | 6.80 |
+| **8-bit floating point** | | | | |
+| VC SGLDLP-L | 5.51 ± 0.01 | 25.22 ± 0.18 | 0.60 | 5.82 |
+| SGDLP-L | 5.86 ± 0.18 | 26.19 ± 0.11 | 4.23 | 12.97 |
+| SGLDLP-F | 4.58 ± 0.07 | 22.59 ± 0.18 | 1.19 | 3.78 |
+| SGDLP-F | 4.75 ± 0.05 | 22.90 ± 0.13 | 2.76 | 5.20 |
+
+*Table 5.1: Test error and ECE on CIFAR data set with the ResNet-18 model.*
+
+This theorem shows that when the stepsize $\alpha \to 0$, VC SGLDLP-L converges to the target distribution up to an error instead of diverging. Moreover, VC SGLDLP-L converges to the target distribution in $\mathcal{O}(\sqrt{\Delta_W})$, which is equivalent to the convergence rate of SGD with low-precision gradient accumulators to the optimum.
+
+**Numerical experiments.** We demonstrate the generalization accuracy and uncertainty estimation of low-precision SGLD with full-precision gradient accumulators (SGLDLP-F) and with variance-corrected low-precision gradient accumulators (VC SGLDLP-L) on the ResNet-18 model on the CIFAR data sets. We use the same quantization for weights, gradients, activations, and backpropagation errors unless otherwise stated. For all experiments, SGLD collects samples from the posterior of the model's weight and obtains the prediction on test data by Bayesian model averaging. We mainly compare low-precision SGLD with low-precision SGD, which is commonly used for frequentist low-precision deep learning. We use SGDFP, SGDLP-F, and SGDLP-L to denote full-precision SGD, low-precision SGD with full-precision gradient accumulators, and low-precision SGD with low-precision gradient accumulators, respectively. The numerical results are provided in Table 5.1, which reports average performance over 3 runs with the standard error.
+
+1. Fixed Point: We use 8-bit fixed point for weights and gradients but full-precision for activations since we find low-precision activations significantly harm the performance. We find that, SGLDLP-F is better than SGDLP-F and VC SGLDLP-L significantly outperforms SGDLP-L across data sets and architectures. Notably, the improvement of SGLD over SGD becomes larger when using more low-precision arithmetic. For example, on CIFAR-100, VC SGLDLP-L outperforms SGDLP-L by 2.24%, SGLDLP-F outperforms SGDLP-F by 0.54% and SGLDFP outperforms SGDFP by 0.06%. This demonstrates that SGLD is particularly compatible with low-precision deep learning because of its natural ability to handle system noise.
+2. Block Floating Point: We also consider block floating point (BFP) which is another common number type and is often preferred over fixed point on deep models due to less quantization error caused by overflow and underflow. Following the block design in Yang et al., we use *small-block* for ResNet. The $Q^{\mathrm{vc}}$ function naturally generalizes to BFP and only needs a small modification (see Zhang et al. for the detailed algorithm of $Q^{\mathrm{vc}}$ with BFP). By using BFP, the results of all low-precision methods improve over fixed point. SGLDLP-F can match the performance of SGLDFP with all numbers quantized to 8-bit except gradient accumulators. Again, SGLDFP-F and VC SGLDLP-L outperform their SGD counterparts on all tasks, suggesting the general applicability of low-precision SGLD with different number types.
+3. Expected Calibration Error: Besides generalization performance, we further report the results of expected calibration error (ECE) to demonstrate the uncertainty estimation of low-precision SGLD. In Table 5.1, we observe that SGLDLP-F and VC SGLDLP-L achieve almost the same or even lower ECE than full-precision SGLD, showing the ability of SGLD to give well-calibrated predictions does not degenerate due to using low-precision. VC SGLDLP-L sometimes gives lower ECE than SGLDLP-F which may be due to the regularization effect of low-precision arithmetic. In contrast, the ECE of low-precision SGD increases significantly compared to full-precision SGD, implying that the quantization error makes the standard DNNs even more overconfident, which might lead to wrong decisions in real-world applications.
+
+### 2.3 Low-precision stochastic gradient Hamiltonian Monte Carlo
+
+In this section, we combine low-precision arithmetic with SGHMC algorithm (5.3). Recall that SGHMC is equivalent to a discretized underdamped Langevin algorithm with stochastic gradient. The stationary distribution of underdamped Langevin dynamics is defined on the augmented probability space: $\pi(\theta, v) \propto \exp(-U(\theta) - \|v\|_2^2/2u)$. Therefore, our theoretical investigation will investigate the 2-Wasserstein distance¹ between the distribution of $(\theta_K, v_K)$ and $\pi(\theta, v)$.
+
+Adopting the update rule in equations (5.3), we introduce low-precision SGHMC with full gradient accumulators (SGHMCLP-F) as follows:
+
+$$
+\begin{aligned}
+v_{k+1} &= v_k e^{-\gamma\eta} - u\gamma^{-1}(1 - e^{-\gamma\eta})Q_G(\nabla\tilde{U}(Q_W(\theta_k))) + \xi_k^v \\
+\theta_{k+1} &= \theta_k + \gamma^{-1}(1 - e^{-\gamma\eta})v_k + u\gamma^{-2}(\gamma\eta + e^{-\gamma\eta} - 1)Q_G(\nabla\tilde{U}(Q_W(\theta_k))) + \xi_k^\theta,
+\end{aligned} \tag{5.12}
+$$
+
+where the distributions of $\xi^v$ and $\xi^\theta$ follow (5.4). SGHMCLP-F keeps full-precision parameters $v_k, \theta_k$ at each iteration and quantizes them to low-precision representations before taking the gradient. Following the previous section, we still assume strong convexity of $U(\theta)$. In addition, we denote $\theta^* = \arg\min_\theta U(\theta)$ and $\rho = M/m$, and assume $\Delta_G = \Delta_W = \Delta$ for the simplicity of analysis presented in the following sections.
+
+**Theorem 5.4.** *Under assumptions of Theorem 5.1, we assume that the minimum of* $U(\theta)$ *satisfies* $\|\theta^*\|^2 < \mathcal{D}^2$. *Given any sufficiently small* $\epsilon > 0$, *if we set the step size to be*
+
+$$
+\eta = \min\left\{\frac{\epsilon\rho^{-1}}{\sqrt{479232/5(P/m + \mathcal{D}^2)}}, \frac{\epsilon^2}{1440\rho u^2\left[(M^2 + 1)\frac{\Delta^2 P}{4} + \kappa^2\right]}\right\},
+$$
+
+*then after* $K$ *steps starting with initial points* $\theta_0 = v_0 = 0$, *the distribution* $(\theta_K, v_K)$ *of the SGHMCLP-F (5.12), denoted by* $\mu_K$, *satisfies*
+
+$$
+W_2(\mu_K, \pi) \le \tilde{\mathcal{O}}(\epsilon + \Delta),
+$$
+
+*for some* $K$ *satisfying*
+
+$$
+K \le \frac{\rho}{\eta}\log\left(\frac{36\left(\frac{P}{m} + \mathcal{D}^2\right)}{\epsilon}\right) = \tilde{\mathcal{O}}\left(\epsilon^{-2}\log(\epsilon^{-1})(\Delta^2 + 1)\right),
+$$
+
+*where the big-O notation* $\tilde{\mathcal{O}}$ *gives explicit dependence on the quantization error* $\Delta$ *but hides multiplicative terms that polynomially depend on the other parameters (e.g., dimension* $P$, *friction* $\gamma$, *inverse mass* $u$, *and gradient variance* $\kappa^2$*).*
+
+Theorem 5.1 implies that for a strongly log-concave target distribution, the low-precision SGLDLP-F also achieves $\epsilon$ accuracy within $\tilde{\mathcal{O}}\left(\epsilon^{-2}\log(\epsilon^{-1})(\Delta^2 + 1)\right)$ iterations with learning rate of order $\epsilon^2/(\Delta^2 + 1)$. Thus, under strong convexity, SGHMCLP-F achieves no better convergence speed than SGLDLP-F. This is not surprising, since the quantization applied to the gradients in the full-precision gradient accumulator algorithm is equivalent to adding extra noise to the stochastic gradients. As theoretically shown by Cheng et al. for a strongly-log-concave target distribution, SGHMC does not exhibit any advantage over the overdamped Langevin algorithm when stochastic gradients are used.
+
+To reduce the computation cost, the SGHMC with low-precision gradient accumulators (SGHMCLP-L) can be trivially implemented as
+
+$$
+\begin{aligned}
+v_{k+1} &= Q_W\left(v_k e^{-\gamma\eta} - u\gamma^{-1}(1 - e^{-\gamma\eta})Q_G(\nabla\tilde{U}(\theta_k)) + \xi_k^v\right), \\
+\theta_{k+1} &= Q_W\left(\theta_k + \gamma^{-1}(1 - e^{-\gamma\eta})v_k + u\gamma^{-2}(\gamma\eta + e^{-\gamma\eta} - 1)Q_G(\nabla\tilde{U}(\theta_k)) + \xi_k^\theta\right).
+\end{aligned} \tag{5.13}
+$$
+
+¹ The 2-Wasserstein distance between two probability measures $\mu$ and $\nu$ is defined as $W_2(\mu, \nu) = \left(\int_{\gamma\Gamma(\mu,\nu)} \|x - y\|^2\, d\gamma(x, y)\right)^{1/2}$, where $\Gamma(\mu, \nu)$ denotes the set of joint distributions whose marginals are exactly $\mu$ and $\nu$.
+
+Similar to SGLDLP-L, SGHMCLP-L has intrinsic flaws. It directly quantizes the weights after each update, hence a small stepsize update is often quantized to zero update of $\theta$ and $v$, resulting in the sample distribution converging to a Dirac distribution at the initial point. In such cases, ensuring convergence becomes challenging. Wang et al. investigated the convergence of SGHMCLP-L under 2-Wasserstein distance, exhibiting that the naïve SGHMCLP-L has a much worse convergence upper bound than SGHMCLP-F. To remedy this, we adapt the variance correction quantizer (Algorithm 13) to SGHMCLP-L. Let $\mathbb{V}_v^{hmc} = u(1 - e^{-2\gamma\eta})$ and $\mathbb{V}_\theta^{hmc} = u\gamma^{-2}(2\gamma\eta + 4e^{-\gamma\eta} - e^{-2\gamma\eta} - 3)$, which are the desired variances induced from the underdamped Langevin dynamics (5.3). The VC SGHMCLP-L can be done as follows:
+
+$$
+\begin{aligned}
+v_{k+1} &= Q^{\mathrm{vc}}\left(v_k e^{-\gamma\eta} - u\gamma^{-1}(1 - e^{-\gamma\eta})Q_G(\nabla\tilde{U}(\theta_k)), \mathbb{V}_v^{hmc}, \Delta\right), \\
+\theta_{k+1} &= Q^{\mathrm{vc}}\left(\theta_k + \gamma^{-1}(1 - e^{-\gamma\eta})v_k + u\gamma^{-2}(\gamma\eta + e^{-\gamma\eta} - 1)Q_G(\nabla\tilde{U}(\theta_k)), \mathbb{V}_\theta^{hmc}, \Delta\right).
+\end{aligned} \tag{5.14}
+$$
+
+Next, we present the convergence result for VC SGHMCLP-L under a strongly log-concave target distribution.
+
+**Theorem 5.5.** *Under assumptions of Theorem 5.1, we assume that the minimum of* $U(\theta)$ *satisfies* $\|\theta^*\|^2 < \mathcal{D}^2$. *Given any sufficiently small* $\epsilon > 0$, *if we set the stepsize to be*
+
+$$
+\eta = \min\left\{\frac{\epsilon}{479232/5\left(\frac{P}{m} + \mathcal{D}^2\right)\rho}, \frac{\epsilon^2}{90u^2\Delta^2 P\rho + 360u^2\kappa^2\rho}\right\}
+$$
+
+*after* $K$ *steps starting from the initial point* $\theta_0 = v_0 = 0$, *the distribution* $(\theta_K, v_K)$ *of the VC SGHMCLP-L (5.14) satisfies*
+
+$$
+W_2(\mu_K, \pi) = \tilde{\mathcal{O}}\left(\epsilon + \sqrt{\Delta}\right), \tag{5.15}
+$$
+
+*for some* $K$ *satisfied*
+
+$$
+K \le \frac{\rho}{\eta}\log\left\{\frac{36\left(\frac{P}{m} + \mathcal{D}^2\right)}{\epsilon}\right\} = \tilde{\mathcal{O}}\left(\epsilon^{-2}\log(\epsilon^{-1})(\Delta^2 + 1)\right).
+$$
+
+Theorem 5.5 shows that the variance corrected quantization function resolves the overdispersion problem for the naïve SGHMCLP-L algorithm. The $W_2$ distance between the sample distribution and target distribution can be arbitrarily close to $\tilde{\mathcal{O}}(\sqrt{\Delta})$. This convergence rate of VC SGHMCLP-L is the same as VC SGLDLP-L (see the discussion after Theorem 5.3).
+
+### 2.4 Advantage of LP stochastic gradient HMC under non-convexity
+
+So far, we have introduced the low-precision SGLD and SGHMC algorithms and explored their theoretical convergence behavior. The theorems in previous sections do not showcase any advantage of low-precision SGHMC over low-precision SGLDLP for strongly log-concave distributions. This does not align with the common understanding of SGHMC performance. Cheng et al., Gao et al. showed that SGHMC converges to its target distribution faster than the best-known convergence rate of SGLD in the 2-Wasserstein distance under both strongly log-concave and non-log-concave assumptions. Beyond this, SGHMC is analogous to stochastic gradient methods augmented with momentum, which is shown to have more robust updates w.r.t. gradient estimation noise. Since the quantization-induced stochastic error in low-precision updates acts as extra gradient noise, we expect that low-precision SGHMC can perform better than low-precision SGLD under certain scenarios beyond strongly convexity of $U(\theta)$.
+
+Wang et al. explored the convergence of low-precision SGHMC and SGLD under non-log-concave distributions. Instead of assuming $U(\theta) - U(\theta') - \nabla U(\theta')^\top(\theta - \theta') \ge (m/2)\|\theta - \theta'\|_2^2$, the *dissipative* condition is considered:
+
+$$
+\langle\nabla U(\theta), \theta\rangle \ge m\|\theta\|^2 - b, \quad \text{for any } \theta \in \mathbb{R}^P.
+$$
+
+Such an assumption is commonly used in the analysis of sampling from non-log-concave distributions. The theorem below summarizes the theoretical findings of Wang et al., which emphasize how the convergence rate depends on the quantization gap $\Delta$.
+
+| Method | Test error (%), CIFAR-10 | Test error (%), CIFAR-100 | ECE ↓ (%), CIFAR-10 | ECE ↓ (%), CIFAR-100 |
+|---|---|---|---|---|
+| **32-bit floating point** | | | | |
+| SGHMCFP | 4.78 ± 0.08 | 22.37 ± 0.04 | 0.72 | 1.52 |
+| **8-bit fixed point** | | | | |
+| VC SGHMCLP-L | 6.60 ± 0.06 | 26.43 ± 0.19 | 0.70 | 2.44 |
+| SGHMCLP-F | 5.08 ± 0.08 | 23.54 ± 0.10 | 1.11 | 1.92 |
+| **8-bit floating point** | | | | |
+| VC SGHMCLP-L | 5.15 ± 0.08 | 24.45 ± 0.16 | 0.67 | 5.02 |
+| SGHMCLP-F | 4.93 ± 0.09 | 22.39 ± 0.11 | 1.12 | 3.65 |
+
+*Table 5.2: Test error and ECE on CIFAR data set with the ResNet-18 model.*
+
+**Theorem 5.6.** *Under assumptions (5.7) except for the strongly convexity and dissipative assumption, there exist respective choices of tuning parameter (e.g., stepsize) and the number of iterations* $K$, *such that one can achieve*
+
+$$
+\begin{aligned}
+W_2(\mu_K, \pi) &= \tilde{\mathcal{O}}\left(\Delta^{e/(1+2e)}\right), \text{ for SGHMCLP-F}, \\
+W_2(\mu_K, \pi) &= \tilde{\mathcal{O}}\left(\Delta^{e/(2+2e)}\right), \text{ for SGLDLP-F}, \\
+W_2(\mu_K, \pi) &= \tilde{\mathcal{O}}\left(\Delta^{e/(2+4e)}\right), \text{ for VC SGHMCLP-L}, \\
+W_2(\mu_K, \pi) &= \tilde{\mathcal{O}}\left(\Delta^{e/(6+6e)}\right), \text{ for VC SGLDLP-L}.
+\end{aligned} \tag{5.16}
+$$
+
+*where* $e$ *is Euler's number.*
+
+Note that $\Delta < 1$ in general, thus Theorem 5.6 suggests that HMC-based low-precision sampling algorithms have better dependence on the quantization error than SGLD-based algorithms for non-log-concave distributions.
+
+**Numerical experiments.** Similarly to the experiment settings for low-precision SGLD, we consider image tasks CIFAR-10 and CIFAR-100 on the ResNet-18. The simulation results are summarized in Table 5.2. Together with Table 5.1, it shows that across all evaluation metrics, the low-precision SGHMC has either a better or comparable performance with its SGLD counterpart.
+
+## 3. Post-training low-precision sampling
+
+The previous section focuses on training low-precision Bayesian DNN models directly by SG-MCMC from scratch. In contrast, it is feasible first to train a full-precision (Bayesian) DNN and then obtain a low-precision Bayesian DNN model via additional processing, such as fine-tuning, over the pre-trained model. More relevant content about model compression with quantization can be found in Chapter 41.
+
+### 3.1 Quantized pre-trained Bayesian models
+
+To convert a pre-trained Bayesian DNN to its low-precision counterpart, one common approach is to quantize the sampled weights yielded by the full-precision posterior sampling (e.g., from SG-MCMC algorithms). In simple words, let $\theta^{(1)}, \dots, \theta^{(T)}, \dots$ be the posterior samples in $\mathbb{R}^P$, then a post-training quantization technique is applied to each sample.
+
+This process seems trivial, but there are multiple factors that need to be considered.
+
+**Sampling thinning.** Sample thinning refers to the selection of a subset from the original posterior samples. That is, only a proportion of samples will be quantized and used for low-precision Bayesian model average-based inferences, for the sake of computational efficiency. One would also avoid samplers from the burn-in period of posterior sampling to reduce the sampling bias. One common way to include one sample every other $f$ samples (where $f$ denotes the thinning frequency), skipping the first $b$ samples (where $b$ denotes the burn-in period length).
+
+To determine the best thinned sample set, one needs to assess the quality of the samples, say how well the empirical distribution determined by this sample set resembles the true posterior distribution. To this end, we employ the Kernel Stein Discrepancy (KSD). KSD is a distance measure between two distributions, where the target distribution is continuously differentiable with an intractable normalization constant. Given a kernel function $k(\cdot, \cdot)$, we define the *Stein Kernel* as
+
+$$
+\begin{aligned}
+k_p(\theta, \vartheta) ={}& \langle\nabla_\theta, \nabla_\vartheta k(\theta, \vartheta)\rangle - \langle\nabla_\theta U(\theta), \nabla_\vartheta k(\theta, \vartheta)\rangle \\
+&- \langle\nabla_\vartheta U(\vartheta), \nabla_\theta k(\theta, \vartheta)\rangle + \langle\nabla_\theta U(\theta), \nabla_\vartheta U(\vartheta)\rangle k(\theta, \vartheta).
+\end{aligned}
+$$
+
+Then, the KSD between (the empirical distribution of) a sample $\theta^{(1)}, \dots, \theta^{(T)}$ and the target distribution is
+
+$$
+\mathbb{S}(\theta^{(1)}, \dots, \theta^{(T)}) = \frac{1}{T^2}\sum_{i,j=1}^{T} k_p(\theta^{(i)}, \theta^{(j)}).
+$$
+
+KSD can be used to search for the optimal choices of $b$ and $f$ or the whole subset. However, it is worth mentioning that the computation of the Stein Kernel scales up quickly with the dimension $d$, thus it could be very expensive for huge models.
+
+**Calibration of quantization range and gap.** If training low-precision (Bayesian) DNNs from scratch (e.g., Section 2), one usually needs to determine the quantization scheme (e.g., the quantization gap $\Delta$ in the quantization functions $Q^d$ or $Q^s$) beforehand. In contrast, when a pre-trained model is available (e.g., a full-precision posterior sample $\theta^{(t)}$), we have direct access to the distribution of its weight values; we can use a representative data set to approximate the distribution of activations along the forward propagation. This information can help us choose an appropriate quantization scheme to quantize this $\theta^{(t)}$ that fits the computational / memory budgets and has a small impact on its predictive performance. Note that in Section 2, we only consider a rounding mechanism that maps a high-precision (e.g., full floating-point value) to its near low-bit fixed-point values. But in general, any mapping from real values to a discrete space can be used. For example, an uniform quantization with $W$-bit quantization is defined as
+
+$$
+Q^u(\theta) = \left\lfloor \frac{\operatorname{clip}(\theta, a, b) - a}{s} \right\rceil s + a, \text{ with } s = (b - a)/(2^W - 1),
+$$
+
+where $\lfloor\cdot\rceil$ denotes rounding to the nearest integer. Then $a$ and $b$, which denote the quantization range, can be set as the minimum and maximum values among entries of the pre-trained model $\theta^{(t)}$.
+
+**Parameter fine-tuning.** Although a quantized network $Q(\theta^{(t)})$ for some quantization function $Q$ is ready for inference, it may suffer significant performance drops. In such a case, one can first fine-tune the model $\theta^{(t)}$ for a small number of gradient descent steps to compensate for the performance drops caused by quantization, then apply quantization to the fine-tuned model.
+
+Let $f(x; \theta)$ be the neural network model parameterized by the weight vector $\theta$, then the empirical loss is defined as
+
+$$
+\mathcal{L}(\theta) = -\sum_{(x,y)\in\mathcal{D}} \log p(x, y \mid \theta) := \sum_{(x,y)\in\mathcal{D}} l(y, f(x; \theta)),
+$$
+
+for some loss function $l(\cdot, \cdot)$. Instead of running fine-tuning gradient descent on $\mathcal{L}(\theta)$, we design a new neural network model $f^q(\cdot; \theta)$ which approximates $f(\cdot; \theta)$ with quantization applied on weights and activations. For example, Ferianc et al., Jacob et al. insert simulated quantization modules after weights input and every tensor product operation. Therefore, running gradient descent on $\mathcal{L}^q = \sum l(y, f^q(x; \theta))$ initialized from $\theta^{(t)}$, leads to a nearby model whose after-quantization performance is acceptable.
+
+**Quantize pre-trained variational Bayesian DNNs.** If a pre-trained variational Bayesian neural network model (refer to Book Part III for details) is given, one may additionally quantize the variational parameters. Suppose that the variational posterior distribution of one weight entry $\theta_{(i)}$ is $\mathrm{N}(\mu, \sigma^2)$, then given a quantization function $Q$, the quantized posterior sample of $\theta_{(i)}$ is generated by $Q(Q(\mu) + Q(\sigma)\xi)$ where $\xi$ is a standard Gaussian variable. To accommodate performance degradation induced by quantization, one can also incorporate additional fine-tuning for the variational parameters, similarly to the procedure discussed in the above paragraph.
+
+### 3.2 Low-bit sub-distribution
+
+As discussed earlier, a pre-trained full-precision model can provide valuable insights into the distribution of weight values and inform the design of a quantization scheme. The SG-MCMC algorithms in Section 2 yield posterior samples whose entries belong to an equally spaced discrete space $\mathcal{S} = \{0, \pm\Delta, \pm 2\Delta, \dots\}$. When a pre-trained model is available, one can train a flexible discrete space $\mathcal{S}$ from which the posterior samples are drawn. The elements in $\mathcal{S}$ can be full floating-point values; thus, model weights of a neural network achieve low-bit representation by sharing the same full precision values in $\mathcal{S}$. This can be viewed as a generalization of sparse DNN, which encourages network weights to share a common value of 0.
+
+Given a pre-trained DNN model $\theta$, a straightforward method is to implement a clustering algorithm over the entries of $\theta$ and obtain the cluster centers $\mathcal{S} = \{q_1, \dots, q_M\}$. Then we would like to restrict the posterior samples to $\mathcal{S}$. To accomplish this, we can adapt the mean-field variational Bayes (refer to Chapter 12 for details) and define the discrete variational distribution as
+
+$$
+q(\theta) = \prod_{i=1}^{P}\sum_{m=1}^{M} p_{im}\mathbf{1}(\theta_{(i)} = q_m), \quad \theta = (\theta_{(1)}, \dots, \theta_{(P)}) \tag{5.17}
+$$
+
+where variational parameters satisfy $\sum_m p_{im} = 1$. To facilitate the training of variational inference, we can introduce parametric modeling for $p_{im}$ (e.g., $p_{im}$ relates to $|\theta_{(i)} - q_m|$, where $\theta_{(i)}$ is the pre-trained weight). To enhance the model performance, we can also allow $q_1, \dots, q_M$ to update in the variational training procedure.
+
+It is worth mentioning that no actual low-precision sampling happens in the variational training process since variational inference boils down to an optimization problem for the variational parameters. Once these parameters are learned, the (approximate) posterior samples are easily drawn from (5.17).
+
+## 4. Conclusions and discussions
+
+This chapter introduced low-precision sampling algorithms that are useful for modern Bayesian deep learning applications, including SG-MCMC-based direct low-precision samplers and post-training low-precision sampling techniques. These low-precision methods are crucial for deploying large models on resource-constrained hardware and improving Bayesian inference speed.
+
+As discussed in the introduction section, one main reason for pursuing low-precision arithmetics is to reduce the memory and computation costs for DNN training or DNN inference. Beyond this, the low-precision representation is also helpful to reduce communication cost for scenarios where frequent information transfer among several parties is required, but only with limited bandwidth. One such emerging research field is federated learning (FL). Federated learning is a learning paradigm where multiple parties (e.g., hospitals or edge devices) collaboratively train a global model while keeping the local training data private and decentralized. In a federated SGLD algorithm, each party computes the gradient based on its local data, and all local gradients are shared and aggregated via communication. The aggregated gradient is then used in the SGLD update (5.1) of the global model. Low-precision representations can be used to compress the gradient communications. Vono et al. used a stochastic rounding mechanism and studied how quantization error impacts the convergence of the global Bayesian model.
+
+The theorems and algorithms in this chapter are mostly depicted regarding the theme that quantization of the weight parameter $\theta$ suffices. However, neural networks have a multilayer structure, and quantization can be employed on each layer along the forward propagation process (i.e., online conversion of activation values to low-precision representations). In addition, normalization layers, such as Batch Normalization and Layer Normalization, are often sensitive to quantization error and may require different techniques (e.g., BatchNorm folding) to mitigate the impact of quantization. These issues are less explored and discussed in the field of Bayesian low-precision DNNs. Interested readers may refer to Gholami et al., Kim et al.

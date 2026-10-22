@@ -1,0 +1,383 @@
+---
+title: "Discrete Sampling"
+description: "Sampling high-dimensional discrete spaces: locally balanced proposals, Gibbs-With-Gradient, the Discrete Langevin Proposal and any-scale and cyclical samplers."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - markov chain monte carlo
+  - discrete sampling
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 8
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl06GradientInformed from '../../components/diagrams/Bdl06GradientInformed.astro';
+import Bdl06GwgVsDlp from '../../components/diagrams/Bdl06GwgVsDlp.astro';
+import Bdl06ScaleSchedules from '../../components/diagrams/Bdl06ScaleSchedules.astro';
+
+Many tasks within deep learning involve sampling over discrete spaces. Such sampling tasks are distinct from sampling over continuous spaces: while the primary frameworks of sampling (Markov chain Monte Carlo (MCMC), rejection sampling, and importance sampling) introduced in [Chapter 1](/blog/introduction-to-sampling) can be applied to discrete spaces by adjusting the proposal distribution, this adjustment is often highly non-trivial. In this chapter, we focus on high-dimensional targets whose unnormalised log density can be evaluated but whose state spaces are too large to enumerate. Such targets arise in binary energy-based models, categorical latent-variable models, and neural models over combinatorial structures.
+
+## 1. Introduction
+
+Discrete sampling is notably difficult due to the sparse, discontinuous, and combinatorial nature of discrete spaces. If a state consists of $d$ categorical variables with $K$ possible values each, its state space may contain $K^d$ configurations. In principle, one could evaluate the unnormalised density at every configuration, normalize the resulting weights, and sample from the corresponding categorical distribution. This enumeration-based approach becomes infeasible as the dimension grows. Standard local MCMC methods avoid full enumeration, but target-independent proposals can mix slowly because they do not distinguish promising moves from moves into low-density regions.
+
+As a running example, consider a binary energy-based model with $x \in \{0, 1\}^d$ and unnormalised log density $U(x)$. The model assigns a score to each of its $2^d$ possible configurations, making enumeration infeasible for large $d$. Nevertheless, $U(x)$, and often the gradient of a differentiable extension of $U$, can be evaluated at any given configuration. We use this binary model to illustrate the methods below, although the framework also applies to the broader categorical and combinatorial settings described above.
+
+Gradients are a staple of sampling within deep learning, as illustrated by the continuous-space Langevin methods in [Section 1.5.1](/blog/introduction-to-sampling#51-metropolishastings). Although a function defined only on a discrete space has no intrinsic gradient, many deep-learning targets are represented through a differentiable function on a continuous ambient space and evaluated at binary, categorical, or other discrete states. The gradient of this extension can provide a cheap source of local information about promising discrete moves.
+
+We begin with an uninformed local MCMC proposal and show how pointwise-informed and locally balanced proposals incorporate target-specific information. We then use this framework to develop gradient-based discrete samplers, first for single-coordinate moves and then for parallel multi-coordinate moves. Finally, we discuss methods designed for larger-scale exploration.
+
+## 2. Notation
+
+We assume a discrete state space $\mathcal{X}$. We denote a state by $x = (x_1, \dots, x_d) \in \mathcal{X}$, where each coordinate can take one of $K$ possible values. Throughout the chapter, $\pi$ denotes the normalized target distribution and $U$ its unnormalised log density. Thus our target is
+
+$$
+\pi(x) = \frac{1}{Z} \exp(U(x)), \quad Z = \sum_{x' \in \mathcal{X}} \exp U(x') \tag{6.1}
+$$
+
+The normalizing constant or partition function $Z$ in Equation (6.1) generally requires a sum over as many as $K^d$ states. This makes enumeration-based direct sampling computationally infeasible in high dimensions. MCMC can nevertheless operate on differences such as $U(x') - U(x)$, in which $Z$ cancels.
+
+## 3. Locally balanced proposals
+
+A simple Metropolis–Hastings approach proposes a nearby state using a target-independent kernel $K_\sigma(x' \mid x)$. For example, the kernel might choose a coordinate uniformly and replace its value. Such a proposal is inexpensive, but it assigns the same proposal probability to moves towards high- and low-density states. Large moves may explore quickly but often reach low-density states and are rejected; small moves are more likely to be accepted but can produce highly correlated samples and traverse the state space slowly.
+
+For the running binary example, the simplest local kernel selects one of the $d$ bits uniformly and flips it, without using the values of $U$ to prioritize the available moves.
+
+Zanella introduces a framework that addresses this trade-off by weighting the candidate moves from $K_\sigma$ using target-density information. The resulting pointwise-informed proposal is
+
+$$
+P_{g,\sigma}(x' \mid x) = \frac{g\!\left(\frac{\pi(x')}{\pi(x)}\right) K_\sigma(x' \mid x)}{Z_{g,\sigma}(x)}. \tag{6.2}
+$$
+
+The pointwise-informed proposal in Equation (6.2) consists of the target-density ratio, a symmetric base kernel or weight $K_\sigma$ whose scale controls the size of candidate moves, a balancing function $g$ that weights moves using the density ratio, and the state-dependent normalizer $Z_{g,\sigma}(x)$. The base kernel may be specified only up to a state-independent multiplicative constant, because that constant cancels through $Z_{g,\sigma}(x)$. We assume $K_\sigma(x' \mid x) = K_\sigma(x \mid x')$. The limit $\sigma \to 0$ represents a family of kernels that becomes increasingly concentrated at the current state.
+
+The roles of invariance and ergodicity in MCMC are reviewed in [Section 1.5](/blog/introduction-to-sampling#5-markov-chain-monte-carlo), while detailed balance and the Metropolis–Hastings construction are discussed in [Section 1.5.1](/blog/introduction-to-sampling#51-metropolishastings). In the present setting, $P_{g,\sigma}$ is reversible with respect to $\pi_{g,\sigma}$ if it satisfies detailed balance,
+
+$$
+\pi_{g,\sigma}(x) P_{g,\sigma}(x' \mid x) = \pi_{g,\sigma}(x') P_{g,\sigma}(x \mid x').
+$$
+
+Detailed balance is sufficient for $\pi_{g,\sigma}$ to be invariant under the transition. Invariance alone does not ensure convergence from an arbitrary initial state. For a discrete chain, irreducibility means that every state with positive target probability can eventually be reached from every admissible initial state, while aperiodicity means that the chain is not constrained to return according to a fixed cycle. Together with invariance and the relevant regularity conditions, these properties yield an ergodic chain. The general role of ergodicity in MCMC is reviewed in [Section 1.5](/blog/introduction-to-sampling#5-markov-chain-monte-carlo).
+
+A pointwise-informed proposal is called *locally balanced* if the transition kernel $P_{g,\sigma}$ is reversible with respect to some distribution $\pi_{g,\sigma}$ such that $\pi_{g,\sigma}$ converges weakly to $\pi$ as $\sigma \to 0$. In plain terms, as the proposal becomes increasingly local, the invariant distribution of the uncorrected informed proposal approaches the desired target. Zanella demonstrates that a pointwise-informed proposal is locally balanced if and only if the balancing function satisfies $g(t) = t g(1/t)$.
+
+If this property holds for the function $g$, then the locally balanced proposal will be reversible with respect to the following distribution without any correction:
+
+$$
+\pi_{g,\sigma}(x) = \frac{\pi(x) Z_{g,\sigma}(x)}{\sum_{x' \in \mathcal{X}} \pi(x') Z_{g,\sigma}(x')}.
+$$
+
+Here, $Z_{g,\sigma}$ is defined as follows:
+
+$$
+Z_{g,\sigma}(x) = \sum_{x' \in \mathcal{X}} g\!\left(\frac{\pi(x')}{\pi(x)}\right) K_\sigma(x' \mid x).
+$$
+
+For a local kernel satisfying $K_\sigma(x' \mid x) \to \mathbf{1}\{x' = x\}$ and the conventional normalization $g(1) = 1$, we have $Z_{g,\sigma}(x) \to 1$. Consequently, $\pi_{g,\sigma}$ converges to $\pi$ as $\sigma \to 0$.
+
+At a non-zero scale, $\pi_{g,\sigma}$ need not equal $\pi$, so a Metropolis–Hastings correction is still required for exact sampling. Local balance makes the uncorrected proposal close to the target in the small-scale regime, which can improve the acceptance rate, while a non-zero $\sigma$ is required to produce non-degenerate movement across the state space.
+
+Zanella shows that locally balanced proposals can improve efficiency over uninformed local proposals in the asymptotic regimes considered there. Constructing an exact informed proposal nevertheless requires evaluating the density ratio for every candidate. Full enumeration can involve $K^d$ states; even a Hamming-one neighborhood contains $d(K - 1)$ candidates. The gradient-based methods below replace these repeated neighbouring-state evaluations with one gradient evaluation at the current state.
+
+## 4. Gradient-based discrete sampling
+
+A function specified only on a discrete state space does not have an intrinsic gradient. Gradient-based discrete samplers therefore assume that the unnormalised log density $U$ is supplied with, or represented through, a differentiable extension to a continuous ambient space. For example, a neural network may accept a continuous vector representation even though the sampler evaluates it only at binary or one-hot encoded states. This extension need not be unique, and its gradient is useful only insofar as it predicts changes between the discrete states of interest.
+
+Given such an extension, the log-density difference for a nearby state can be approximated by
+
+$$
+U(x') - U(x) \approx \nabla U(x)^\top (x' - x).
+$$
+
+This approximation is most reliable when the extension is sufficiently smooth and $x'$ is close to $x$; differentiability alone does not guarantee accuracy if the function changes sharply between neighboring states. Since $\log \pi(x) = U(x) - \log Z$, their gradients are identical and the unknown normalizing constant is not required. One forward and backward pass at $x$ then supplies approximate scores for all local candidate moves, at the expense of Taylor-approximation error.
+
+### 4.1 Gibbs with gradient
+
+Grathwohl et al. first introduces this notion of gradient-based discrete sampling through the Gibbs-With-Gradient algorithm. This algorithm can be seen as a version of the standard Gibbs algorithm where the updated coordinate is selected based on the gradient.
+
+Returning to the general locally balanced sampler, we can derive the Gibbs-With-Gradient update by choosing an uninformed kernel that uniformly selects a state differing from the current state in exactly one coordinate. Define the Hamming-one neighborhood by
+
+$$
+H(x) = \left\{ x' \in \mathcal{X} : \sum_{i=1}^{d} \mathbf{1}\{x'_i \neq x_i\} = 1 \right\}.
+$$
+
+In the running binary example, $H(x)$ contains exactly the $d$ states obtained by flipping one bit of $x$.
+
+For this fixed-scale update, the uniform kernel is
+
+$$
+K_\sigma(x' \mid x) = \frac{\mathbf{1}\{x' \in H(x)\}}{|H(x)|}.
+$$
+
+When every coordinate has $K$ possible categories, $|H(x)| = d(K - 1)$. This factor is constant across candidate moves and is therefore absorbed into the proportionality below.
+
+Next, we choose the balancing function $g(t) = \sqrt{t}$. Before approximation, this yields the exact informed proposal
+
+$$
+q_{\text{exact}}(x' \mid x) \propto \mathbf{1}\{x' \in H(x)\} \sqrt{\frac{\pi(x')}{\pi(x)}}
+$$
+
+Using the unnormalised log density $U$ from Equation (6.1), this proposal can be expressed without evaluating $Z$:
+
+$$
+q_{\text{exact}}(x' \mid x) \propto \mathbf{1}\{x' \in H(x)\} \exp\left( \frac{1}{2} (U(x') - U(x)) \right).
+$$
+
+Replacing the exact log-density difference by its first-order Taylor approximation defines the Gibbs-With-Gradient proposal:
+
+$$
+q_{\text{GWG}}(x' \mid x) \propto \mathbf{1}\{x' \in H(x)\} \exp\left( \frac{1}{2} \nabla U(x)^\top (x' - x) \right).
+$$
+
+<Figure caption="Figure 6.1: Gradient-informed sampling on a discrete state space. The gradient ∇U(x) of a differentiable extension provides local geometric information at the current state x, which induces different proposal weights over its Hamming-one neighbourhood H(x). The starred state x′ represents a draw from this proposal. Adapted from Grathwohl et al. Redrawn as a schematic reproduction on an illustrative landscape.">
+  <Bdl06GradientInformed />
+</Figure>
+
+Figure 6.1 illustrates this Gibbs-With-Gradient construction. The gradient at $x$ assigns different approximate weights to the states in $H(x)$, and $x'$ is then sampled from the resulting proposal over those discrete neighbors.
+
+This can be computed quickly by viewing the update as the selection of a coordinate to modify. In the binary case, this update is always a bit flip. Here, Softmax normalizes a vector of real-valued scores into probabilities, and Cat denotes the categorical distribution with those probabilities. The resulting proposal is
+
+$$
+q_{\text{GWG}}(\cdot \mid x) = \operatorname{Cat}\left( \operatorname{Softmax}\left( -\frac{1}{2} (2x - 1) \odot \nabla U(x) \right) \right).
+$$
+
+The categorical case requires selecting both a coordinate and its proposed category. Let $c_i$ denote the current category of coordinate $i$. We represent each categorical coordinate by a one-hot vector when evaluating the gradient. For every alternative category $j \neq c_i$, define the approximate log-probability difference
+
+$$
+\widetilde{d}(x)_{i,j} = \nabla_{x_{i,j}} U(x) - \nabla_{x_{i,c_i}} U(x).
+$$
+
+The first term measures the local effect of assigning category $j$ to coordinate $i$, while the second corresponds to its current category.
+
+There are $d(K - 1)$ possible coordinate–category updates. We define a categorical proposal over these updates by
+
+$$
+q_{\text{GWG}}(i, j \mid x) = \operatorname{Softmax}_{i \in [d],\, j \neq c_i} \left( \frac{1}{2} \widetilde{d}(x)_{i,j} \right).
+$$
+
+After sampling $(i, j) \sim q_{\text{GWG}}(\cdot, \cdot \mid x)$, the proposed state $x'$ is obtained by changing coordinate $i$ from $c_i$ to $j$ and leaving all other coordinates unchanged. The full categorical procedure is given in Algorithm 14.
+
+**Algorithm 14** Categorical Gibbs With Gradient Sampler
+
+```text
+Inputs : initial categorical state x = (x₁, …, x_d) ∈ 𝒳; unnormalised log-density U
+Outputs: sample sequence 𝒮
+𝒮 ← ()
+for each iteration do
+    compute d̃(x) and q_GWG(·, · | x)
+    sample (i, j) ∼ q_GWG(·, · | x)
+    cᵢ ← current category of coordinate i
+    x′ ← replace(x, i, j)
+    compute the reverse-move probability q_GWG(i, cᵢ | x′)
+    accept x′ with probability
+
+        min{ 1, exp(U(x′) − U(x)) · q_GWG(i, cᵢ | x′) / q_GWG(i, j | x) }
+
+    update x ← x′ if accepted
+    append x to 𝒮
+return 𝒮
+```
+
+Because the gradient-based proposal uses a first-order approximation and is generally asymmetric, it does not by itself preserve the target distribution. We therefore apply the standard Metropolis–Hastings acceptance correction, described in [Section 1.5.1](/blog/introduction-to-sampling#51-metropolishastings), which ensures that the target distribution is invariant. Under the ergodicity conditions stated above, the resulting Markov chain converges to the target distribution.
+
+### 4.2 Discrete Langevin proposal
+
+Gibbs-With-Gradient can outperform uninformed single-coordinate proposals by using the gradient to prioritize promising updates. Its Hamming-one restriction also keeps the Taylor approximation local, but only one coordinate can change per iteration, which may produce strongly correlated samples in high dimensions. Zhang et al. addresses this limitation with the Discrete Langevin Proposal (DLP), which retains gradient-based directionality while adding a distance penalty that permits multiple coordinates to be proposed simultaneously.
+
+<Figure caption="Figure 6.2: Comparison of gradient-based discrete proposals. Gibbs-With-Gradient samples one coordinate from q_GWG(i | x) and proposes a state that differs in that coordinate. The Discrete Langevin Proposal constructs coordinate-wise distributions {qᵢ}ᵢ₌₁ᵈ and can propose several changes in parallel. The displayed Metropolis–Hastings correction gives the adjusted variants; omitting it yields DULA in the discrete Langevin case. Based on Grathwohl et al. and Zhang et al.">
+  <Bdl06GwgVsDlp />
+</Figure>
+
+In the running binary example, Gibbs-With-Gradient proposes at most one bit flip, whereas DLP constructs a proposal for every bit and may change several bits in the same iteration.
+
+To derive the proposal, consider the discrete analog of a Gaussian random-walk kernel,
+
+$$
+K_\sigma(x' \mid x) \propto \exp\left( -\frac{1}{2\sigma} \|x' - x\|_2^2 \right).
+$$
+
+Combining this kernel with a first-order approximation of the locally balanced weight gives the DLP
+
+$$
+q(x' \mid x) \propto \exp\left( \frac{1}{2} \nabla U(x)^\top (x' - x) - \frac{1}{2\sigma} \|x' - x\|_2^2 \right). \tag{6.3}
+$$
+
+The linear term in Equation (6.3) favors moves predicted to increase $U$, while the quadratic term penalizes moves far from the Taylor expansion point. The step size $\sigma$ controls the strength of this penalty.
+
+Because the state space factorizes as $\mathcal{X} = \prod_{i=1}^{d} \mathcal{X}_i$ and the exponent in Equation (6.3) is a sum of coordinate-wise terms, the proposal factorizes as $q(x' \mid x) = \prod_{i=1}^{d} q_i(x'_i \mid x)$. Each factor is the categorical distribution
+
+$$
+q_i(x'_i \mid x) = \operatorname{Cat}\left( \operatorname{Softmax}_{x'_i \in \mathcal{X}_i} \left[ \frac{1}{2} \nabla_i U(x) (x'_i - x_i) - \frac{(x'_i - x_i)^2}{2\sigma} \right] \right).
+$$
+
+Thus, larger values of $\sigma$ permit more distant proposals, whereas smaller values concentrate the proposal near the current state.
+
+While this may look similar to the proposal formula for Gibbs with Gradient, it is important to note that in DLP, the softmax is computed per coordinate over the potential classes that can be realized. In Gibbs with Gradient, the softmax is over the entire sample to pick only one coordinate. This allows for the parallel update of all coordinates.
+
+The factorization makes it possible to propose all coordinates in parallel after one gradient evaluation. Although the proposal factors coordinate-wise conditional on the current state, the gradient of the joint log density still guides each coordinate using information from the full current configuration. A Metropolis–Hastings correction can then account for the remaining approximation error and dependence structure. Figure 6.2 contrasts this parallel update with the single-coordinate update used by Gibbs-With-Gradient.
+
+Using DLP yields two samplers: the discrete Metropolis-adjusted Langevin algorithm (DMALA), which includes a Metropolis–Hastings correction, and the discrete unadjusted Langevin algorithm (DULA), which omits it. DULA generally has asymptotic bias. For log-quadratic targets, however, Zhang et al. show that this bias vanishes as $\sigma \to 0$; they also bound the bias for targets whose gradients are close to those of a log-quadratic distribution.
+
+In terms of implementation, the cost difference between DULA and DMALA is negligible: while DMALA incorporates a Metropolis–Hastings correction that requires the computation of both $q(\cdot \mid x)$ and $q(\cdot \mid x')$, caching means that only one new proposal distribution is computed per step after initialization. The cached version of DMALA is given in Algorithm 15.
+
+**Algorithm 15** DMALA with Cache
+
+```text
+Inputs : initial state x = (x₁, …, x_d) ∈ 𝒳; unnormalised log-density U
+Outputs: sample sequence 𝒮
+𝒮 ← ()
+compute q(· | x) and cache proposal
+for each iteration do
+    sample x′ ∼ q(· | x)
+    compute q(· | x′) using DLP proposal
+    accept x′ with probability
+
+        min{ 1, exp(U(x′) − U(x)) · q(x | x′) / q(x′ | x) }
+
+    if accepted then
+        update cached proposal to q(· | x′)
+        x ← x′
+    append x to 𝒮
+return 𝒮
+```
+
+The core logic lies in the fact that the $x'$ of the current iteration is either rejected or becomes the $x$ for the next sampling step. In the case of rejection, the proposal function $q(\cdot \mid x)$ does not change as $x$ remains the same. In the case of acceptance, the proposal step simply gets updated to match the updated $x'$ by using $q(\cdot \mid x') \to q(\cdot \mid x)$, since this proposal must be computed anyway for the accept/reject step. Thus at each step, only one proposal function must be computed.
+
+## 5. Beyond locally balanced proposals
+
+Locally balanced proposals offer a convenient framework for incorporating gradients into discrete samplers, but their defining approximation concerns the small-scale limit $\sigma \to 0$. At finite scales, local proposals may take a long time to move between separated modes, necessitating longer chains or multiple chains.
+
+For example, if the binary target places high probability on two configurations separated by many low-probability intermediate states, a sequence of single-bit proposals may struggle to move from one mode to the other.
+
+This motivates proposals designed for non-local movement. Zanella already considers $g(t) = t$, calling the resulting proposal the *naively informed* choice because it has the form $P_{g,\sigma}(x' \mid x) \propto K_\sigma(x' \mid x) \pi(x')$. Building on this observation, Sun et al. formalize the large-scale interpretation: they call a proposal family *globally balanced* if the invariant distribution of its uncorrected informed proposal converges to $\pi$ as $\sigma \to \infty$. They assume that the base kernel becomes uniform in this limit. Since a state-independent constant cancels in the normalization of the informed proposal, they write this limit as $K_\sigma(x' \mid x) \to 1$; for a normalized kernel on a finite state space, the corresponding limit is $1/|\mathcal{X}|$. For $g(t) = t$, the limiting proposal is then
+
+$$
+\lim_{\sigma \to \infty} P_{g,\sigma}(x' \mid x) = \frac{\pi(x')/\pi(x)}{\sum_{z \in \mathcal{X}} \pi(z)/\pi(x)} = \pi(x').
+$$
+
+Thus the proposal becomes an independent draw from the target itself and is globally balanced in the sense of Sun et al. Notice that $g(t) = t$ does not satisfy the locally balanced identity $g(t) = t g(1/t)$; local and global balance refer to different limiting regimes.
+
+### 5.1 Any-scale balanced sampler
+
+The any-scale balanced sampler introduced by Sun et al. makes two distinct modifications for proposals outside the local regime. First, it adjusts the density-ratio weighting to match the proposal scale. The family $g(t) = t^\beta$, with $\beta \in [1/2, 1]$, interpolates between the locally balanced choice $g(t) = \sqrt{t}$ as $\sigma \to 0$ and the globally balanced choice $g(t) = t$ as $\sigma \to \infty$. This scale-dependent relationship is illustrated schematically in Figure 6.3(a).
+
+Adjusting $\beta$ changes how strongly the proposal favors high-density candidates, but it does not reduce the error in a first-order approximation of $U(x') - U(x)$. The method therefore makes a second modification: it introduces a quadratic approximation intended to remain informative over larger moves. The log-density difference is approximated by
+
+$$
+U(x') - U(x) \approx (x' - x)^\top \nabla U(x) + \frac{1}{2} (x' - x)^\top W (x' - x), \tag{6.4}
+$$
+
+where $W$ is a symmetric matrix shared across states. Setting $W = \nabla^2 U(x)$ would recover the usual second-order Taylor approximation locally, but repeatedly computing a Hessian is expensive. Instead, the sampler estimates a global $W$ from pairs $(x_n, x'_n)$ collected during burn-in:
+
+$$
+\widehat{W} = \operatorname*{arg\,min}_{W = W^\top} \sum_n \left\| W(x'_n - x_n) - \big(\nabla U(x'_n) - \nabla U(x_n)\big) \right\|_2^2.
+$$
+
+Thus $W$ is fitted to explain observed changes in the gradient and acts as a global curvature approximation. Scale-dependent balancing and curvature approximation address different problems: $\beta$ controls the density-ratio weighting, whereas $W$ improves the approximation used to score non-local candidates.
+
+Substituting the quadratic approximation in Equation (6.4) and $g(t) = t^\beta$ into the informed proposal gives
+
+$$
+q(x' \mid x) \propto \exp\left( \beta \left[ (x' - x)^\top \nabla U(x) + \frac{1}{2} (x' - x)^\top W (x' - x) \right] - \frac{1}{2\sigma} \|x' - x\|_2^2 \right). \tag{6.5}
+$$
+
+The quadratic term captures cross-coordinate interactions, but it also prevents direct coordinate-wise sampling. Sun et al. therefore introduce an augmented proposal with a Gaussian auxiliary variable. The augmented construction is used directly with the Metropolis–Hastings correction below.
+
+Choose a diagonal positive semi-definite matrix $D$ such that $W + D$ is positive semi-definite, and draw
+
+$$
+Y \mid x \sim \mathcal{N}\left( (W + D)^{1/2} x, I \right).
+$$
+
+The matrix square root can be computed by an eigendecomposition or Cholesky factorization. Conditional on $Y$, define
+
+$$
+q(x' \mid x, Y) \propto \exp\left( \beta x'^\top \left[ \nabla U(x) - W x + (W + D)^{1/2} Y \right] - \frac{1}{2} x'^\top \left( \beta D + \frac{1}{\sigma} I \right) x' \right),
+$$
+
+and sample $x'$ from this distribution. Because $D$ is diagonal and the state space factorizes, this conditional proposal factorizes across coordinates. Equations (6.5) and the augmented proposal express, respectively, the motivating quadratic approximation and the auxiliary-variable transition implemented by the sampler. The Metropolis–Hastings step accounts for the resulting augmented proposal exactly.
+
+The Metropolis–Hastings acceptance probability for the augmented proposal is
+
+$$
+A(x, x', Y) = \min\left\{ 1, \exp\big(U(x') - U(x)\big) \frac{q(Y \mid x') q(x \mid x', Y)}{q(Y \mid x) q(x' \mid x, Y)} \right\}.
+$$
+
+The diagonal matrix $D$ controls the conditional proposal variance. Sun et al. consider two semidefinite programs for choosing it. The AB-max variant minimizes the largest eigenvalue of $W + D$:
+
+$$
+(D^*, \lambda^*) = \operatorname*{arg\,min}_{D, \lambda} \lambda \quad \text{subject to} \quad D \succeq 0, \quad 0 \preceq W + D \preceq \lambda I.
+$$
+
+This criterion focuses on the worst spectral direction. The AB-trace variant instead solves
+
+$$
+D^* = \operatorname*{arg\,min}_{D} \operatorname{tr}(D) \quad \text{subject to} \quad D \succeq 0, \quad W + D \succeq 0.
+$$
+
+The motivation for this objective comes from the continuous quadratic surrogate studied by Sun et al. in the special case $\sigma = \infty$ and $\beta = 1$. In that surrogate, the covariance of the proposal increment is $2D^{-1}$, so minimizing the trace of $D$ encourages dispersion across coordinates. This covariance identity does not hold literally for the general discrete categorical proposal, whose dispersion also depends on $\beta$, $\sigma$, and the state space. The authors report that AB-trace performs better empirically and use it as their preferred variant.
+
+The proposal parameters $\beta$ and $\sigma$ are correlated and target-dependent. Sun et al. therefore adapt them by alternating coordinate-wise updates that seek to maximize the empirical average jump distance. For one parameter type $a \in \{\sigma, \beta\}$, let $\phi$ denote its current value and define the feasible sets $\mathcal{I}_\sigma = (0, \infty)$ and $\mathcal{I}_\beta = [1/2, 1]$. With the other parameter held fixed, the adaptation block compares $\phi$ with feasible multiplicative perturbations of it over three consecutive chain segments, as shown in Algorithm 16.
+
+**Algorithm 16** Any-scale Adaptation Block
+
+```text
+Inputs : parameter type a ∈ {σ, β}; current value ϕ ∈ 𝓘ₐ; adaptation rate γ ∈ (0, 1); initial state x⁽⁰⁾
+Outputs: updated parameter ϕ′; samples x⁽¹⁾, …, x⁽³ᴺ⁾
+ϕ₀ ← ϕ
+ϕ₊ ← proj_𝓘ₐ(ϕ(1 + γ))
+ϕ₋ ← proj_𝓘ₐ(ϕ(1 − γ))
+use ϕ₀ to compute the proposal and collect x⁽¹⁾, x⁽²⁾, …, x⁽ᴺ⁾
+compute d₀ ← Σᵢ₌₁ᴺ ‖x⁽ⁱ⁾ − x⁽ⁱ⁻¹⁾‖₁
+use ϕ₊ to sample x⁽ᴺ⁺¹⁾, …, x⁽²ᴺ⁾ using the proposal
+compute d₊ ← Σᵢ₌₁ᴺ ‖x⁽ᴺ⁺ⁱ⁾ − x⁽ᴺ⁺ⁱ⁻¹⁾‖₁
+use ϕ₋ to sample x⁽²ᴺ⁺¹⁾, …, x⁽³ᴺ⁾ using the proposal
+compute d₋ ← Σᵢ₌₁ᴺ ‖x⁽²ᴺ⁺ⁱ⁾ − x⁽²ᴺ⁺ⁱ⁻¹⁾‖₁
+if max(d₀, d₊, d₋) = d₊ then
+    ϕ′ ← ϕ₊
+else if max(d₀, d₊, d₋) = d₋ then
+    ϕ′ ← ϕ₋
+else
+    ϕ′ ← ϕ₀
+return ϕ′ and x⁽¹⁾, …, x⁽³ᴺ⁾
+```
+
+The three segments in Algorithm 16 are consecutive: the second begins from $x^{(N)}$ and the third from $x^{(2N)}$. The full adaptation alternates a block for $\phi = \sigma$ and a block for $\phi = \beta$. If neither parameter changes during an outer iteration, the update rate is reduced geometrically, $\gamma \leftarrow \rho\gamma$ for a decay factor $\rho \in (0, 1)$; otherwise the selected parameter values are retained for the next iteration. Because adaptation based on short-run jump distances can be noisy during early mixing, this procedure is intended for burn-in rather than continued adaptation after samples are retained for inference.
+
+Through the combination of a quadratic approximation of the log-probability difference $U(x') - U(x)$ and the adaptive scheme for $\beta$ and $\sigma$, the any-scale sampler interpolates between locally and globally balanced proposals.
+
+### 5.2 Automatic cyclical sampling
+
+One common issue with gradient-based samplers for continuous spaces is exploration: as the gradient points in the direction of the closest mode, it gives no information regarding further, more distant modes. This can hinder the accuracy of the sampler in terms of approximating the target distribution.
+
+The same problem applies to gradient-based discrete samplers. Unlike a continuous state space, a discrete space has no arbitrarily small non-trivial perturbations: even the most local move must change at least one coordinate. This granularity can make the trade-off between conservative, high-acceptance moves and larger exploratory moves especially pronounced. Interpolating between locally and globally balanced proposals is therefore a natural way to vary the proposal scale when large movements may be required to escape a local mode.
+
+In the continuous case, many approaches have been proposed for handling the mode-escape problem. One popular approach is cyclical SG-MCMC, discussed in [Chapter 2](/blog/stochastic-gradient-mcmc). A cyclical schedule gradually reduces the step-size of a gradient-based sampler from very large magnitudes to small magnitudes and repeats for several cycles. The large steps at the beginning allow for more exploratory movements, which enable mode discovery; and the smaller step-sizes at the end of the cycle allow for exploitation of the mode. The repetition of the cycles allows for the discovery and exploitation of many modes, which is required for effective characterization of multi-modal distributions.
+
+<Figure caption="Figure 6.3: Proposal scale, balancing, and cyclical scheduling. Panel (a) schematically illustrates that the preferred balancing exponent increases with the proposal scale: small-scale proposals favour β near 1/2, whereas larger-scale proposals favour values closer to 1. The curves show normalised illustrative efficiency rather than empirical measurements. Panel (b) shows coupled schedules for σₖ and βₖ over two cycles, progressing from large proposals with more globally balanced weighting to small, locally balanced proposals within each cycle. Panel (a) is adapted conceptually from Sun et al.; panel (b) is adapted from Pynadath et al. Redrawn as a schematic reproduction: the curves in (a) are illustrative bell shapes and the schedules in (b) are cosine cycles from σ = 2.0 to 0.1 and β = 1.00 to 0.50.">
+  <Bdl06ScaleSchedules />
+</Figure>
+
+Building on this intuition, Pynadath et al. introduce a sampler that cycles jointly through step sizes and balancing exponents. Varying $\sigma$ alone can produce poorly balanced proposals and low acceptance probabilities, so the method uses the generalized DLP
+
+$$
+q_i(x'_i \mid x) = \operatorname{Cat}\left( \operatorname{Softmax}_{x'_i \in \mathcal{X}_i} \left[ \beta \nabla_i U(x) (x'_i - x_i) - \frac{(x'_i - x_i)^2}{2\sigma} \right] \right). \tag{6.6}
+$$
+
+Setting $\beta = 1/2$ in Equation (6.6) recovers the standard DLP. Within each cycle, large values of $\sigma$ are paired with values of $\beta$ closer to 1 to encourage global exploration; as $\sigma$ decreases, $\beta$ moves towards 1/2 and the proposal becomes more local.
+
+The automatic tuning procedure begins with user-specified endpoint exponents $\beta_{\min}$ and $\beta_{\max}$ and a target acceptance rate. Short burn-in runs determine corresponding endpoint step sizes $\sigma_{\min}$ and $\sigma_{\max}$. These endpoints define the cyclical step-size schedule, following the continuous-space construction of Zhang et al.
+
+For each step size $\sigma_k$, the corresponding $\beta_k$ is selected to maximize an empirical acceptance-rate objective subject to $\beta_k \in [1/2, \beta_{k-1}]$. This monotonic constraint reflects the transition from large moves with more globally balanced weighting at the beginning of a cycle to small, locally balanced moves at its end, while reducing the cost of searching for the full schedule. Figure 6.3(b) shows the coupled schedules used to move repeatedly from global exploration to local characterization.
+
+## 6. Conclusion
+
+Gradient information can make sampling in high-dimensional discrete spaces substantially more efficient, even though the state space itself is not differentiable. Locally balanced proposals provide the organizing principle: they combine an uninformed local kernel with target-specific information and use a Metropolis–Hastings correction to retain the desired target distribution. Gibbs-With-Gradient uses a first-order approximation to choose an informed single-coordinate update, whereas DLP factorizes a Langevin-like proposal so that many coordinates can be proposed in parallel.
+
+The appropriate proposal depends on the scale of movement required. Small, locally balanced moves can characterize a mode accurately but may mix slowly between separated modes. Any-scale balancing adapts the balancing exponent and adds a global curvature approximation for more effective non-local moves. Automatic cyclical sampling instead repeats a schedule from large exploratory proposals to small exploitative proposals, pairing each step size with a suitable balancing exponent.
+
+In the running binary example, this progression moves from informed single-bit proposals, through parallel multi-bit updates, to methods that adapt the scale and weighting of those updates to improve movement between separated modes.
+
+These methods trade additional structure and tuning for improved exploration. Their practical performance depends on the quality of the differentiable extension of $U$, the accuracy of the local or quadratic approximation, and the cost of evaluating reverse proposals in the Metropolis–Hastings correction. The adjusted variants provide asymptotically exact sampling under the usual irreducibility and aperiodicity conditions; unadjusted variants can be cheaper, but generally introduce stationary bias.

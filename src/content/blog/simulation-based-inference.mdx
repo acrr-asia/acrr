@@ -1,0 +1,332 @@
+---
+title: "Simulation-Based Inference"
+description: "Bayesian inference from simulations alone: neural posterior, likelihood and ratio estimation, sequential methods, coverage diagnostics and current developments."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - simulation-based inference
+  - normalizing flows
+  - amortized inference
+series: bayesian-deep-learning
+seriesOrder: 5
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl03SbiOverview from '../../components/diagrams/Bdl03SbiOverview.astro';
+import Bdl03NpeSupervised from '../../components/diagrams/Bdl03NpeSupervised.astro';
+import Bdl03NormalizingFlow from '../../components/diagrams/Bdl03NormalizingFlow.astro';
+import Bdl03PosteriorFamilies from '../../components/diagrams/Bdl03PosteriorFamilies.astro';
+import Bdl03EmbeddingNet from '../../components/diagrams/Bdl03EmbeddingNet.astro';
+import Bdl03CoverageDiagnostics from '../../components/diagrams/Bdl03CoverageDiagnostics.astro';
+
+Simulation-based inference (SBI) has the same goal as Bayesian inference: Given observed data and a set of beliefs, apply Bayes' rule to update those beliefs accordingly. Unlike other Bayesian inference methods such as Markov chain Monte Carlo (MCMC) or variational inference, SBI does not rely on evaluations of the likelihood, but only on samples thereof. This makes SBI applicable to any kind of black-box function that takes in parameters and simulates observational data, a so-called forward simulator.
+
+As an illustrative example, imagine that you are an astronomer interested in the study of planets that orbit distant stars, i.e., exoplanets. Exoplanets are usually obscured by the bright light emanating from their host stars. Astronomers observe the brightness and spectrum of these stars in a time series called a light curve, and aim to infer from these light curves properties of the exoplanets using physical models. Suppose we want to estimate the mass of an exoplanet $\theta_o$ from the light curve observations $x_o$ of a distant star. Using relevant physical theory, we design a computer program that maps a hypothetical mass $\theta$ to a simulated light curve $x$ (the "forward model"). By running such a simulator, we can obtain samples $x$ from the likelihood $p(x \mid \theta)$, but evaluating the likelihood can be computationally expensive or impossible (e.g., if the simulator takes a long time to run, or if it contains many latent variables). Simulation-based inference computes the posterior distribution $p(\theta \mid x_o)$ while only relying on samples (or simulations) from the likelihood. To achieve this, recent SBI methods use neural networks to parameterize an "inference model" $q_\psi(\theta \mid x_o)$, where $\psi$ denotes the neural-network weights.
+
+## 1. Introduction
+
+Classical approaches for Bayesian inference (e.g., MCMC; [Chapter 1](/blog/introduction-to-sampling), or variational inference; Chapter 12) rely on repeated evaluations of the likelihood and prior in order to characterize the posterior distribution and to generate samples from it. While powerful, these approaches face limitations for some forward models: Many models in science and engineering are defined as stochastic simulators, which can efficiently be run in the forward direction (i.e., their likelihood can be sampled from), but whose likelihood (as well as its gradient with respect to parameters) cannot be evaluated, or only with great computational cost. For example, the simulator might sample a long series of latent variables $z_{1:N}$ before generating observations. Evaluating the likelihood of an observation $p(x_o \mid \theta)$ would require integrating out these latent variables via
+
+$$
+p(x_o \mid \theta) = \int p(x_o, z_{1:N} \mid \theta)\, \mathrm{d}z_{1:N},
+$$
+
+which can be computationally prohibitive even for a moderate number of latent variables. In addition, many classical Bayesian inference methods are expensive at test-time: Every time we want to perform inference on new data, we have to re-run the inference procedure, which might involve computationally expensive iterations (e.g., in MCMC sampling). As a result, it has been challenging to tackle high-throughput or real-time applications with Bayesian inference.
+
+Simulation-based inference (SBI) methods overcome these limitations. The basic goal of SBI is to perform inference given only access to simulations (i.e., samples from the likelihood), without having to explicitly evaluate the likelihood, or any access to the internal workings of the forward model or its gradients. In addition, many SBI methods also amortize the cost of Bayesian inference: After an initial phase of simulation and training, they can perform inference for any new data set within milliseconds, typically requiring only a single forward pass through a deep neural network at test time.
+
+<Figure caption="Figure 3.1: a: Simulators generate synthetic data x (right) given parameters θ (left). Bayesian inference computes the posterior distribution over parameters (left) given observations xₒ (right). b: Simulation-based inference uses simulations (i.e., samples from the likelihood, but no likelihood evaluations) to perform Bayesian inference. A recent SBI method, Neural Posterior Estimation (NPE) uses neural networks to improve inference. NPE draws samples from the prior and runs the simulator to generate pairs of (θ, x). These data are then used to train an inference network: A conditional generative model that estimates the posterior distribution given any data x. After training, the inference network is evaluated at any observation in order to draw samples from the posterior, without requiring further simulations or training. Figure modified from Deistler et al. (Schematic reproduction.)">
+  <Bdl03SbiOverview />
+</Figure>
+
+Early SBI methods were developed for cases in which the likelihood of the model cannot be evaluated, and are often referred to as *Approximate Bayesian Computation* methods. Wasserstein ABC provides an example of comparing observed and simulated empirical distributions directly, avoiding the need to choose summary statistics. More recently, the ability of SBI methods to perform inference on any black-box model, to massively parallelize model runs, and to amortize inference has expanded their scope. For example, even when the likelihood or model gradients can (in principle) be evaluated, this might require interfacing with code describing the forward model written across decades in outdated programming languages. In contrast, SBI methods entirely decouple the inference process from simulation runs, which makes it easy to apply SBI methods to simulators that are written in other programming languages or that have to be run on dedicated hardware (or, in principle, which might even correspond to a physical or living system generating the simulations from input). In other scenarios, the likelihood *can* be evaluated, but one needs fast inference for real-time or high-throughput analysis of observed phenomena, which is often out of reach for, e.g., MCMC sampling, but is possible with amortized SBI methods. Finally, in some cases, large-scale training can also yield highly accurate and robust inference results. Likely due to its simplicity, the core idea of SBI (to use forward simulations to train a supervised machine learning model) has been used in modified ways across many domains, for example, for tabular foundation models.
+
+The core insight of SBI is that performing Bayesian inference can be seen as a form of performing *conditional density estimation*. In recent years, a flurry of powerful conditional density estimation methods (such as normalizing flows) have been developed, often under the moniker of "Generative AI". This has enabled an explosion of powerful new SBI methods which build on these advances, and which have been successfully applied in a wide range of scientific disciplines, e.g., in neuroscience, cognitive science, biology, and physics. Here, we introduce the basic ideas and concepts of SBI. We focus on *Neural Posterior Estimation*, a conceptually simple yet powerful algorithm, but also review other approaches, diagnostic tools, and current developments. Two notable methods are *Neural Likelihood Estimation* and *Neural Ratio Estimation*, which we explain later in the chapter.
+
+## 2. Simulation-based inference with neural posterior estimation
+
+### 2.1 Neural posterior estimation
+
+The goal of Bayesian inference is to calculate (at least approximately) the posterior distribution of the form $p(\theta \mid x)$. Via Bayes' rule, the posterior is proportional to the product of the prior and the likelihood $p(\theta \mid x) = \frac{1}{Z(x)} p(x \mid \theta) p(\theta)$, where $Z(x) = \int p(x, \theta)\, \mathrm{d}\theta = p(x)$ is the normalizing constant, also called the marginal likelihood or evidence. Calculating $Z(x)$ is often challenging, and many classical Bayesian inference algorithms such as MCMC sampling therefore aim to obtain samples from the posterior without having to evaluate it. However, even these algorithms require (typically many) evaluations of the likelihood $p(x \mid \theta)$. However, many models in scientific applications are defined through numerical simulators: One can easily generate *samples* from the likelihood $p(x \mid \theta)$ by running the simulator, but *evaluating* the likelihood can be expensive or even impossible. How can one perform Bayesian inference in such setting?
+
+<Figure caption="Figure 3.2: Framing Bayesian inference as a supervised learning problem. Left: A database of simulations (θ, x), sampled from the joint distribution p(θ, x) by drawing samples from the prior and running the simulator. The posterior distribution (left, bottom) is a horizontal cut through the joint distribution. Right: NPE trains an inference network on these simulations. After training, the network can be evaluated at any observation xₒ and directly predicts the posterior distribution. Figure modified from Deistler et al. (Schematic reproduction computed from an assumed one-parameter simulator with a uniform prior on [0, 90].)">
+  <Bdl03NpeSupervised />
+</Figure>
+
+A key insight is that one does not need Bayes rule for Bayesian inference: The posterior distribution $p(\theta \mid x_o)$ at some particular $x = x_o$ is, by definition, a *conditional distribution*, i.e., a normalized slice through the joint distribution $p(\theta, x)$ at $x = x_o$ (Fig. 3.2, left). Thus, an alternative way to get the posterior is to generate a simulated data set with (possibly many) paired samples $D = \{(\theta_i, x_i)\}_{i=1}^N$, and then to directly estimate this posterior distribution via conditional density estimation. We can generate such a simulated data set by first sampling the $\theta_i$ from the prior, and then, for each $\theta_i$, to run the simulator once to get the associated $x_i$, as $p(\theta, x) = p(\theta) p(x \mid \theta)$.
+
+We want to learn a mapping from $x$ to the distribution $p(\theta \mid x)$. One way to tackle this is to parameterize the posterior distribution by a functional form, for example, a Gaussian with mean $\mu(x)$ and covariance $\Sigma(x)$, and to use a neural network (with parameters $\psi$) to capture the mapping from $x$ to associated posterior parameters $(\mu_\psi(x), \Sigma_\psi(x))$. One can learn $\psi$ by maximizing the log-likelihood of the parameters, i.e., by minimizing the loss
+
+$$
+\mathcal{L}(\psi) = -\frac{1}{N} \sum_{i=1}^{N} \log q_\psi(\theta_i \mid x_i), \tag{3.1}
+$$
+
+where in this case, the predicted posterior probabilities $q_\psi(\theta \mid x)$ would be given by a Gaussian, $q_\psi(\theta \mid x) = \mathcal{N}(\theta \mid \mu_\psi(x), \Sigma_\psi(x))$. Thus (and provided that one can generate a large set of simulations $D$) we have turned Bayesian inference into a supervised learning problem.
+
+Clearly, a Gaussian might be a poor approximation to the posterior, but this approach can readily be generalized to more flexible models. For example, one can use a Mixture of Gaussians, which requires the network to learn the mapping to multiple means $\mu_j(x)$, covariances $\Sigma_j(x)$ and associated mixture weights $\pi_j(x)$. In recent years, more flexible and easy-to-train neural conditional density estimators have been proposed, which can be used for estimating non-Gaussian posteriors. In particular, *Normalizing Flows* constitute a class of neural conditional densities estimators which have many favorable properties for SBI, as we will describe in the next section.
+
+Once the conditional density estimator (sometimes referred to as *inference network*) has been trained on simulated data $D$, it can readily be *evaluated* on any new observation $x_o$ to approximate the posterior $p(\theta \mid x_o) \approx q_\psi(\theta \mid x_o)$. Indeed, it can be shown that (provided that the density estimator is sufficiently flexible, that the model is well specified, and the optimization identifies the minimum) it will yield the true posterior. To demonstrate this, we rewrite the loss function (in the limit of infinite training data, i.e., in expectation of samples from $p(\theta, x) = p(\theta) p(x \mid \theta)$) as
+
+$$
+\begin{aligned}
+\mathcal{L} &= \mathbb{E}_{p(\theta) p(x \mid \theta)}[-\log q_\psi(\theta \mid x)] \\
+&= \iint -p(\theta) p(x \mid \theta) \log q_\psi(\theta \mid x)\, \mathrm{d}\theta\, \mathrm{d}x \\
+&= \iint -p(\theta) \frac{p(\theta \mid x) p(x)}{p(\theta)} \log q_\psi(\theta \mid x)\, \mathrm{d}\theta\, \mathrm{d}x \\
+&= \int p(x) \int -p(\theta \mid x) \log q_\psi(\theta \mid x)\, \mathrm{d}\theta\, \mathrm{d}x.
+\end{aligned}
+$$
+
+The inner integral differs from the Kullback–Leibler divergence $\mathrm{D}_{\mathrm{KL}}(p(\theta \mid x) \,\|\, q_\psi(\theta \mid x))$ only by the conditional entropy of $p(\theta \mid x)$, which does not depend on the neural-network parameters $\psi$. Therefore, if the conditional density estimator is well specified, the population loss is minimized when $q_\psi(\theta \mid x) = p(\theta \mid x)$ for $p(x)$-almost every $x$.
+
+<Figure caption="Figure 3.3: Normalizing flows. Left: A target distribution which we aim to estimate based on samples. Right: Normalizing flows define a base distribution (e.g., a multivariate Gaussian) and transform this distribution through multiple transformations Tᵢ. After training, the transformed distribution q_ψ(θ) approximates the target distribution. (Schematic reproduction drawn with samples.)">
+  <Bdl03NormalizingFlow />
+</Figure>
+
+One big advantage of these approaches is that (once the inference network has been trained) the posterior distribution for new observations $x_o$ can be evaluated by just plugging it into the inference network to get $q_\psi(\theta \mid x)$. Thus, inference can be performed with a single forward pass through a neural network, i.e., it is *amortized* (Fig. 3.2, right). Conversely, a drawback of this approach is that our simulations need to cover the entire prior, which might be wasteful as we might generate many simulations which look very different to an observation $x_o$ we are interested in, and which therefore do not help in constraining the relevant posterior. To address this issue (but which requires giving up on amortization), so-called *sequential* approaches have been developed, in which simulations are generated adaptively to target a posterior for a specific observation. We discuss these approaches in [Section 3](#3-amortized-and-sequential-inference).
+
+The approach described above is now commonly known as *Neural Posterior Estimation* (NPE). Given its conceptual simplicity and the many variations that it allows, it is challenging to track down its precise origins, and variants of it have likely been discovered independently in different application domains. Beaumont et al. and Blum and François introduced the idea of fitting a regression model from data to parameters to refine rejection-ABC approaches, which can be interpreted as NPE with a Gaussian inference network. Papamakarios and Murray showed that flexible density estimators can directly learn the posterior, when optimized with log-loss minimization (also see Le et al.), and introduced a sequential version. Lueckmann et al. (which, to our knowledge, introduced the term (S)NPE) introduced an alternative sequential formulation, and also embedding networks for learning summary statistics from time series data. Greenberg et al. provided the first method that could use normalizing flows and is compatible with sequential learning, and used convolutional embedding nets. Ardizzone et al. proposed using invertible neural networks for solving inverse problems, resulting in an algorithm very similar to flow-based NPE, and Radev et al. popularized the amortization property of NPE.
+
+### 2.2 Conditional density estimation with normalizing flows
+
+As described above, a core task in SBI is to estimate the conditional distribution of parameters given some observations. Normalizing flows have emerged as a popular conditional density estimator for SBI. They are simple and efficient to train, can be used to quickly generate samples, or to evaluate exact log-probabilities of the learned density. The latter can be useful for many downstream analyses such as maximum-a-posteriori estimation or visualization of the posterior distribution. Finally, normalizing flows are (typically) trained by minimizing the negative log-likelihood as loss function. This loss function is mass-covering, which, as we will discuss below, can be beneficial for SBI.
+
+<Figure caption="Figure 3.4: Expressiveness of different generative models for approximating the posterior distribution with NPE. The ground truth posterior (left) consists of two moons and has low posterior density in between. Using a Gaussian (second from left) as generative model produces a poor (albeit mass-covering) posterior distribution. A mixture of multiple Gaussians (second from right) improves accuracy, but fails to produce the moon shapes. Normalizing flows (right) enable NPE to accurately capture complex posterior distributions. (Schematic reproduction.)">
+  <Bdl03PosteriorFamilies />
+</Figure>
+
+Normalizing flows model a target density $q(\theta)$ by learning a transformation $T : Z \to \Theta$ such that a random variable $Z$, which is defined to follow a simple "base" distribution $p(z)$ (typically a multivariate standard Normal distribution) is transformed into a random variable $\Theta$, such that the probability density of $\Theta$ is $q(\theta)$. The probability density modeled by such a transformation can be computed with the change of variables formula
+
+$$
+q(\theta) = \left| \det\!\left( \frac{\partial T^{-1}}{\partial \theta} \right) \right| p_Z(T^{-1}(\theta)), \tag{3.2}
+$$
+
+where $T^{-1}$ is the inverse of the transformation $T$ and $\det\!\left(\frac{\partial T^{-1}}{\partial \theta}\right)$ is the determinant of the Jacobian of the inverse transformation $T^{-1}$. Normalizing flows stack many transformations $T$ in order to model complicated densities.
+
+To evaluate Eq. 3.2 and to efficiently train normalizing flows, the transformation $T$ must be a diffeomorphism (i.e., it must be differentiable and invertible). In addition, the Jacobian of $T^{-1}$ is of size $N \times N$ (for densities of dimensionality $N$), and computing the determinant of such a matrix is typically of computational complexity $\mathcal{O}(N^3)$, which would be prohibitive for large $N$. As such, normalizing flows require that the transformation is constructed such that the determinant of the Jacobian can be evaluated efficiently. Normalizing flows differ in how they define the transformation $T$ such that it fulfills these criteria. A popular class of transformations are autoregressive flows, and within SBI, masked autoregressive flows and neural spline flows are particularly popular. These normalizing flows define bijective transformations for every individual dimension and then couple dimensions with neural networks.
+
+Normalizing flows train the transformations $T$ by minimizing the negative log-likelihood of the data
+
+$$
+\psi = \arg\min_{\psi} -\log \prod_{i=1}^{M} q_\psi(\theta_i).
+$$
+
+In neural posterior estimation (NPE), normalizing flows are used to estimate the posterior probability density $p(\theta \mid x)$. To estimate a *conditional* probability density, NPE conditions that transformation $T$ on data $x$, or an embedding $s(x)$ thereof ([Section 2.3](#23-learning-from-high-dimensional-data-with-embedding-networks)). This enables NPE to learn different posterior distributions for different data.
+
+The normalizing flow is then trained over pairs of parameters and simulation outputs, where the parameters are sampled from the prior. NPE minimizes the loss
+
+$$
+\mathcal{L} = \mathbb{E}_{p(\theta) p(x \mid \theta)}[-\log q_\psi(\theta \mid x)]. \tag{3.3}
+$$
+
+If the normalizing flow is well-specified, i.e., the true conditional posterior $p(\theta \mid x)$ belongs to the family of normalizing-flow models, then there exists some $\psi^* \in \Psi$ such that $q_{\psi^*}(\theta \mid x) = p(\theta \mid x)$ for $p(x)$-almost every $x$, where $\Psi$ denotes the parameter space. In this case, the population loss is minimized at the true conditional posterior, assuming successful optimization. After training, one can then sample from the posterior for any observation $x_o$ by drawing a sample from the base distribution and transforming it with the series of transformations $T$ (which are conditioned on $x_o$). Notably, samples from normalizing flows are i.i.d. and follow the estimated density exactly (i.e., normalizing flows do not require any approximations to draw samples from the modeled density). In addition, normalizing flows can also evaluate the density of parameters under the posterior via Eq. 3.2.
+
+<Figure caption="Figure 3.5: Neural Posterior Estimation (NPE) with embedding networks. Left: For many models, simulation outputs can be high-dimensional. For example, simulators might produce long time series, images, or i.i.d. data given a particular parameter set. Middle: In order to perform inference based on such observations, NPE can be combined with suitable embedding networks that efficiently reduce these data to lower-dimensional summary statistics. These summary statistics are then processed by the inference network, and both neural networks can be trained end-to-end. Right: Illustration of a posterior distribution underlying such observations.">
+  <Bdl03EmbeddingNet />
+</Figure>
+
+An important property of this loss is that it tends to be mass-covering: it will strongly penalize the normalizing flow being too narrow (as $\log q(\theta \mid x)$ becomes a large negative number, leading to very high loss). As such, for limited training data or for imperfect convergence of the normalizing flow, $q(\theta \mid x)$ will tend towards being broader than the true posterior distribution $p(\theta \mid x)$. In many applications of SBI, this is a desirable feature: too narrow posteriors would indicate overly confident parameter estimates, which could lead to wrong claims of scientific discovery. This mass-covering behavior is in contrast to variational inference, which typically uses divergence objectives whose covering or seeking behavior depends on the divergence direction, with common formulations tending to be mode-seeking (i.e., towards a too narrow posterior approximation). Since we operate with finite samples, none of these are guarantees.
+
+### 2.3 Learning from high-dimensional data with embedding networks
+
+Many models in science and engineering produce high-dimensional simulation outputs such as images or long time series. In order to estimate parameters underlying such data, NPE can be combined with *embedding networks* (Fig. 3.5). Embedding networks are neural networks which take as input high-dimensional data $x$ and return a lower-dimensional summary statistic $s(x)$ of them. These summary statistics are then passed to the inference network, which uses the summary statistics to approximate the posterior. Ideally, these summary statistics will be (approximately) sufficient, i.e., still preserve all relevant information for the posterior, so that $p(\theta \mid x) \approx p(\theta \mid s(x))$.
+
+In NPE, the embedding network can be trained end-to-end with the inference network, that is, with the log-likelihood loss specified in Eq. 3.3. Provided that the embedding network is sufficiently expressive, it will automatically learn appropriate summary statistics, without requiring separate data-compression methods (although those might still be empirically useful in some cases). The choice of embedding network depends on the type of data modeled by the simulator. For example, for images, a popular choice for the embedding net are convolutional neural networks (CNNs), and recurrent neural networks (RNNs) might be useful for time-series data.
+
+An important case is the setting in which the observation $x_o$ does not constitute a single observation, but rather stands for a *set* of observations $x = \{x_1, \dots x_N\}$ which are thought to be sampled i.i.d. from the same parameter. In this case, the posterior distribution should be invariant to the ordering of the observations, which can be achieved by using a permutation invariant embedding network such as a set transformer, as proposed by Chan et al. for applications in population genetics. Radev et al. proposed and evaluated using such networks for data sets with varying size.
+
+Instead of learning summary statistics end-to-end with an embedding network, one can also manually extract summary statistics from the data and perform inference based on these statistics. This requires domain knowledge and, if the choice of summary statistics is poor, might lead to a significant loss of information about parameters, but it can be beneficial if one is interested in inferring parameters given particular features of data. Indeed, in many cases, the simulator is not able to reproduce *all* features of the (experimentally) observed data. Manually defined summary statistics can avoid such misspecification by focusing only on properties of the data which can be modeled by the simulator.
+
+## 3. Amortized and sequential inference
+
+As described above, NPE *amortizes* the cost of inference: After training on a simulated data set generated from prior predictives (i.e., simulation results based on parameters drawn from the prior distribution), they can perform inference for *any* new observed data $x_o$. In cases where one is interested in performing inference for many different observations, or where inference is time-critical, this can be highly beneficial. In cases where one only aims to perform inference for a single observation (or for few observations), NPE can be wasteful: By training a neural network on *prior* predictives, the neural network has to learn from a broad range of (simulated) data, even though it is eventually only evaluated at few observations.
+
+*Sequential* methods have been developed to improve the simulation-efficiency of SBI in these cases. These methods draw parameters (which are then used to generate the training data set) from a "proposal" distribution. This proposal distribution is chosen such that simulation outputs are expected to be closer to the observation than prior predictives. A popular choice for the proposal distribution is the posterior distribution obtained by running NPE with a limited number of simulations (but explicit active learning schemes have also been proposed).
+
+These methods are often called *sequential*, as the inference network is trained across multiple, sequentially simulated data sets, where the approximate posterior after each round guides generation of the next data set. It has been demonstrated that sequential methods can improve simulation efficiency, often by an order of magnitude or more.
+
+While potentially reducing the number of required simulations, using sequential methods with NPE can have a drawback: Drawing parameters from a proposal distribution (instead of from the prior) biases the posterior distribution towards regions that were oversampled in the proposal (compared to the prior). Several methods have been developed to overcome this. Papamakarios and Murray proposed to train the neural network with the standard log-likelihood loss, and to then correct the posterior post-hoc. Lueckmann et al. suggested to importance-weight the loss, such that the density estimator directly approximates the posterior after training. Greenberg et al. introduced a contrastive loss, which implicitly frames conditional density estimation as a classification problem, and which can be combined with arbitrary acquisition functions. Finally, Blum and François and Deistler et al. proposed to draw parameter sets from a restricted region of the prior, such that no modifications of the loss function or post-hoc corrections are required. Notably, for many other SBI methods, such as Neural Likelihood Estimation, NLE, or Neural Ratio Estimation, NRE, parameters for the training data set can be drawn from *any* distribution and the neural networks can nonetheless be trained with standard loss functions, as the prior is explicitly taken into account during inference with MCMC or variational inference.
+
+## 4. Evaluating the correctness of SBI methods
+
+### 4.1 The problem of evaluating SBI methods
+
+After having obtained an approximate posterior with SBI methods, a central challenge is to evaluate the quality of this posterior. This is difficult because, for any real-world task, the ground-truth posterior is unavailable.
+
+Several diagnostic tools have been developed to overcome this limitation. Note, however, that many of these tools do not provide *sufficient* conditions for posterior correctness. Instead, they provide *necessary* conditions for posterior correctness, and thus enable detection of inaccuracies in the posterior estimate. Other methods can, in principle, provide sufficient conditions for correctness, but rely on additional hyperparameters or the accuracy of other trained neural networks, which can compromise the accuracy of the diagnostic tool. Below, we focus on a set of diagnostic tools called coverage diagnostics, and we then briefly describe other methods.
+
+<Figure caption="Figure 3.6: Coverage diagnostics for identifying inaccuracies in the approximate posterior. Left: Expected coverage based on the highest-probability density (HPD) region aims to detect whether the joint posterior distribution is over- or under-confident. Marginal simulation-based calibration (SBC) aims to detect inaccuracies in the marginals of the posterior distribution. Both of these methods produce rank distributions, which are optimal if the posterior lies on the diagonal, and indicate issues if it lies above or below the diagonal. Figure modified from Deistler et al. (Schematic reproduction.)">
+  <Bdl03CoverageDiagnostics />
+</Figure>
+
+### 4.2 Coverage diagnostics
+
+A set of diagnostic tools that aim to detect inconsistencies in the posterior distribution are *coverage diagnostics*. These methods begin by generating a calibration data set: They sample parameters from the prior and run the simulator to generate samples $\theta, x \sim p(\theta, x)$. For every $x$ in the calibration data set, these methods then draw samples from the posterior $\theta_{\text{post}} \sim q_\psi(\theta \mid x)$ obtained with an SBI method. For amortized SBI methods, this process is fast, as inference can be performed for any $x$ without retraining or resimulating.
+
+Coverage diagnostics then reduce posterior samples $\theta_{\text{post}}$ and the ground truth parameters $\theta$ to 1-dimensional quantities, via a reducing function $f(\cdot) : \mathbb{R}^N \to \mathbb{R}$, where $N$ is the parameter dimensionality. The posterior approximation is *calibrated* if, for any reducing function $f(\cdot)$, the rank of $f(\theta)$ is distributed uniformly within $f(\theta_{\text{post}})$ (Fig. 3.6). Different diagnostic tools use different mappings $f(\cdot)$ to detect posterior inconsistencies. For example, $f(\theta)$ can compute the posterior log-probability $q_\psi(\theta \mid x)$ (often referred to as *expected coverage* based on the highest-probability density (HPD) region), or it can pick the 1D marginals of $\theta$. In the former case, coverage diagnostics can detect inconsistencies in higher-order moments of the posterior (Fig. 3.6, left). In the latter case, coverage diagnostics cannot detect inconsistencies in higher-order moments of the posterior, but they can provide intuition about which parameter is inconsistent (Fig. 3.6, right).
+
+A core advantage of coverage diagnostics is that they can be run with relatively small calibration sets (typically, $\sim 200$ simulations), and that they do not require further tuning of hyperparameters or training of a "diagnostic neural network". This makes them robust and easy to deploy. However, coverage diagnostics typically provide a necessary, but not a sufficient condition for posterior correctness. In particular, if the approximate posterior $q_\psi(\theta \mid x)$ always returns the prior distribution $p(\theta)$ (instead of an approximation to the posterior), then it passes the above described coverage diagnostics. This highlights the need for additional diagnostic tools.
+
+### 4.3 Other methods
+
+A simple tool for diagnosing the posterior approximation $q_\psi(\theta \mid x)$ is to perform *Posterior Predictive Checks* (PPCs). Given an observation, these methods draw samples from $q_\psi(\theta \mid x_o)$, simulate them, and then compare the simulation outputs (the posterior predictives) to the observation. For every posterior sample $\theta$, it should be possible to obtain a simulation result that closely matches the observation. If posterior predictive checks fail (e.g., because all posterior predictives are far away from the observation, or if some parameter sets can *never* match the observation), then this indicates issues in the accuracy of $q_\psi(\theta \mid x)$. In particular it might be trained on too few simulations, or it might hint towards *model misspecification* (a case where the observation $x_o$ cannot be matched by *any* parameter set, as discussed in [Section 6](#6-current-developments)).
+
+Beyond coverage checks and PPCs, many other diagnostic tools for SBI have been developed over the past years. For example, some local calibration diagnostics aim to provide sufficient and necessary conditions for posterior correctness. However, these methods often require to train an additional neural network and hinge on the accuracy of that additional trained neural network. Because of this, these diagnostic tools require larger calibration data sets and might themselves have issues (e.g., due to poor convergence of the additional trained neural network).
+
+## 5. Alternative methods
+
+Neural Posterior Estimation (NPE) directly estimates the posterior distribution. In addition to NPE, researchers have developed other methods for SBI. These approaches train neural networks to emulate either the likelihood $p(x \mid \theta)$ (Neural Likelihood Estimation, NLE) or the likelihood-to-evidence ratio $p(x \mid \theta)/p(x)$ (Neural Ratio Estimation, NRE) and then use traditional Bayesian inference methods (e.g., MCMC) to draw samples from the posterior. Finally, some recent methods also go beyond estimating only the posterior or the likelihood(-ratio). Below, we describe these alternative methods for SBI.
+
+### 5.1 Likelihood estimation
+
+Neural Likelihood Estimation (NLE) uses neural density estimators (such as conditional normalizing flows) to estimate the likelihood $p(x \mid \theta)$. This estimate can be learned from samples of the joint distribution $\{(\theta_i, x_i)\}_{i=1}^N \sim p(\theta, x)$ by optimizing the negative log likelihood of simulation outputs given parameters. NLE trains a conditional density estimator $\ell_\psi(x \mid \theta)$, such as a normalizing flow, by optimizing $\psi$ towards the objective
+
+$$
+\psi^* \in \arg\min_{\psi} \left[ -\frac{1}{N} \sum_{i=1}^{N} \log \ell_\psi(x_i \mid \theta_i) \right]. \tag{3.4}
+$$
+
+After training, the trained model can be used to *emulate* the simulation process by drawing samples from the likelihood approximation $\ell_\psi(x \mid \theta)$.
+
+For posterior inference, the trained model is multiplied by the prior to obtain the (unnormalized) posterior estimate
+
+$$
+\hat{p}(\theta \mid x) := \frac{1}{Z_\psi(x)} \ell_\psi(x \mid \theta) p(\theta), \qquad Z_\psi(x) := \int \ell_\psi(x \mid \theta) p(\theta)\, \mathrm{d}\theta. \tag{3.5}
+$$
+
+In order to draw samples from the (approximate) posterior distribution $\hat{p}(\theta \mid x_o)$, a method to draw samples from an unnormalized distribution is necessary, for example, rejection sampling or Markov chain Monte Carlo ([Section 5.3](#53-sampling-from-the-approximate-posterior-using-unnormalized-inference-models)). Normalizing flows enable (differentiable) evaluation of the likelihood approximation $\ell_\psi(x_o \mid \theta)$, making this possible, albeit being potentially computationally expensive. Variational inference has been shown to speed up high-dimensional sampling from NLE. However, any of these sampling methods are typically slow and can introduce additional errors into the inference procedure. An additional disadvantage of NLE (compared to NPE) is that it cannot be combined with an embedding network that is trained end-to-end. One can embed $x_o$ *before* training with a separate neural network, e.g., an autoencoder, then perform NLE on the embedded simulation outputs.
+
+NLE can also be used in a sequential scheme to reduce the number of required simulations for inference given a particular observation. These sequential NLE methods focus on a specific observation $x_o$, generating data nearby $x_o$ iteratively. A major advantage of NLE in that scenario is that it does not require modifications of the loss function: The neural density estimator will converge to the likelihood for any distribution $\tilde{p}(\theta)$ from which parameters are drawn.
+
+### 5.2 Likelihood-to-evidence ratio estimation
+
+The likelihood-to-evidence ratio $r(x \mid \theta) := \frac{p(x \mid \theta)}{p(x)} = \frac{p(\theta, x)}{p(\theta) p(x)}$ is a natural estimation target for simulation-based inference because Bayes' rule gives $p(\theta \mid x) = r(x \mid \theta) p(\theta)$. Ratio estimators allow more flexible architectures than diffeomorphic normalizing flow layers with tractable determinants. However, density ratios can span many orders of magnitude and therefore be numerically difficult to approximate directly. For this reason, one typically estimates $\log r(x \mid \theta)$. A stable approach to estimating $\log r(x \mid \theta)$ converts the problem into a classification task. Several variants have been developed; here, we focus on the method of Hermans et al.
+
+NRE introduces a binary class label $y$ and defines the joint distribution $\pi(\theta, x, y) := \pi(\theta, x \mid y) \pi(y)$. We assign equal class probabilities, $\pi(y = 0) := \pi(y = 1) := \frac{1}{2}$, and define the class-conditional distributions as
+
+$$
+\pi(\theta, x \mid y) :=
+\begin{cases}
+p(\theta) p(x), & y = 0, \\
+p(\theta, x), & y = 1.
+\end{cases} \tag{3.6}
+$$
+
+$p(\theta) p(x)$ is called the product of marginals. It is best understood algorithmically: One takes two independent samples $\theta_a, \theta_b \sim p(\theta)$ and simulates one of them $x_b \sim p(x \mid \theta_b)$. Then the samples are distributed $(\theta_a, x_b) \sim p(\theta) p(x)$. Sampling from the joint $p(\theta, x)$ is achieved by first sampling the prior $\theta_c \sim p(\theta)$ and simulating $x_c \sim p(x \mid \theta_c)$. We then have a sample $(\theta_c, x_c) \sim p(\theta, x)$.
+
+Bayes' rule shows why this classification problem identifies the desired ratio:
+
+$$
+\frac{\pi(y = 1 \mid \theta, x)}{\pi(y = 0 \mid \theta, x)} = \frac{\pi(\theta, x \mid y = 1) \pi(y = 1)}{\pi(\theta, x \mid y = 0) \pi(y = 0)} = \frac{p(\theta, x)}{p(\theta) p(x)} = r(x \mid \theta).
+$$
+
+Consequently, $\pi(y = 1 \mid \theta, x) = \frac{r(x \mid \theta)}{1 + r(x \mid \theta)} = \sigma(\log r(x \mid \theta))$, where $\sigma$ denotes the sigmoid function. We therefore construct
+
+$$
+\hat{\pi}(y = 1 \mid \theta, x) := \sigma(f_\psi(\theta, x)) \qquad \text{and} \qquad \hat{r}(x \mid \theta) := \exp(f_\psi(\theta, x)),
+$$
+
+where $\hat{\pi}(y = 1 \mid \theta, x)$ is a classifier, with $\hat{\pi}(y = 0 \mid \theta, x) = 1 - \hat{\pi}(y = 1 \mid \theta, x)$, and $\hat{r}(x \mid \theta)$ is a likelihood-to-evidence ratio estimate. Both are parameterized by the neural network $f_\psi(\theta, x)$ with weights $\psi$. We optimize $\psi$ by minimizing the conditional KL divergence,
+
+$$
+\psi^* \in \arg\min_{\psi} \mathrm{D}_{\mathrm{KL}}(\pi(y \mid \theta, x) \,\|\, \hat{\pi}(y \mid \theta, x)), \tag{3.7}
+$$
+
+$$
+\mathrm{D}_{\mathrm{KL}}(\pi(y \mid \theta, x) \,\|\, \hat{\pi}(y \mid \theta, x)) = \iint \pi(\theta, x) \sum_{y \in \{0, 1\}} \pi(y \mid \theta, x) \log \frac{\pi(y \mid \theta, x)}{\hat{\pi}(y \mid \theta, x)}\, \mathrm{d}x\, \mathrm{d}\theta. \tag{3.8}
+$$
+
+Here, $\pi(\theta, x)$ is the marginal mixture induced by the constructed classification problem:
+
+$$
+\pi(\theta, x) := \pi(y = 1) \pi(\theta, x \mid y = 1) + \pi(y = 0) \pi(\theta, x \mid y = 0) = \frac{p(\theta, x) + p(\theta) p(x)}{2}. \tag{3.9}
+$$
+
+The conditional KL divergence differs from the binary cross-entropy used to train the classifier only by the conditional entropy of $\pi(y \mid \theta, x)$, which is constant with respect to $\psi$. The two objectives therefore have the same minimizer. Assuming sufficient model capacity and successful optimization, the conditional KL divergence is zero at the optimum, so $\pi(y = 1 \mid \theta, x) = \sigma(f_{\psi^*}(\theta, x))$ and $f_{\psi^*}(\theta, x) = \log r(x \mid \theta)$ almost everywhere under $\pi(\theta, x)$.
+
+We can now form the unnormalized posterior approximation $\hat{p}'(\theta \mid x) := \hat{r}(x \mid \theta) p(\theta) = p(\theta) \exp(f_\psi(\theta, x))$. Unless the classifier recovers the exact ratio, $\hat{p}'$ need not integrate to one. Its normalized counterpart is
+
+$$
+\hat{p}(\theta \mid x) := \frac{\hat{p}'(\theta \mid x)}{Z_\psi(x)} = \frac{\hat{r}(x \mid \theta)}{Z_\psi(x)} p(\theta) = \frac{\exp(f_\psi(\theta, x))}{Z_\psi(x)} p(\theta), \tag{3.10}
+$$
+
+with $Z_\psi(x) := \int \exp(f_\psi(\theta, x)) p(\theta)\, \mathrm{d}\theta$. At the exact optimum, $\exp(f_{\psi^*}(\theta, x)) = r(x \mid \theta)$ and hence $Z_{\psi^*}(x) = 1$. In practice, posterior behavior is usually characterized using samples, and samplers for unnormalized distributions do not require $Z_\psi(x)$ to be computed.
+
+One can draw samples from $\hat{p}(\theta \mid x)$ using any sampling method for unnormalized distributions, just like with NLE ([Section 5.3](#53-sampling-from-the-approximate-posterior-using-unnormalized-inference-models)). The ratio-based neural network $f_\psi(\theta, x)$ can be both more expressive and cheaper than the normalizing flow-based likelihood approximation from NLE. Flows require parameterizing an efficient diffeomorphism with a tractable log determinant, whereas NRE permits arbitrary neural-network architectures. One limitation is that the standard NRE objective in (3.7) does not generally attain the same asymptotic efficiency as maximum-likelihood density estimation. Alternative objectives have therefore been explored for ratio estimation.
+
+### 5.3 Sampling from the approximate posterior using unnormalized inference models
+
+While NPE approximates the posterior directly, NLE and NRE require an additional inference step to draw samples from the posterior. To this end, one can use general-purpose sampling methods (see [Chapter 1](/blog/introduction-to-sampling)) and adapt them to sample from an unnormalized posterior estimate. Rejection sampling or reweighted sampling from the prior are natural choices for simple problems with low dimensionality due to straightforward embarrassingly parallel implementations. Both of these methods start by drawing $N$ samples from the prior
+
+$$
+\theta_i \sim p(\theta), \quad i \in \{1, 2, \dots, N\}. \tag{3.11}
+$$
+
+In *rejection sampling*, we choose a constant $M \geq 1$ such that $M \cdot p(\theta) \geq \hat{p}'(\theta \mid x_o)$ for all $\theta$ in the support of $\hat{p}'(\theta \mid x_o)$, where $\hat{p}'(\theta \mid x_o)$ denotes the unnormalized posterior density. For each of the $N$ samples, we draw
+
+$$
+u_i \sim \mathcal{U}(0, 1), \quad i \in \{1, 2, \dots, N\}, \tag{3.12}
+$$
+
+where we let $\mathcal{U}(a, b)$ denote the one-dimensional uniform distribution between $a$ and $b$. This algorithm yields samples from the approximate posterior $\hat{p}(\theta \mid x_o)$ in the following way:
+
+$$
+u_i < \frac{\hat{p}'(\theta_i \mid x_o)}{M \cdot p(\theta_i)} \implies \theta_i \sim \hat{p}(\theta \mid x_o). \tag{3.13}
+$$
+
+Rejection sampling generates $N/M$ samples, on average. It is efficient when $M \approx 1$, *i.e.*, in low dimensions and when the prior and approximate posterior have similar support. Rejection sampling is inefficient when the approximate posterior is narrow compared to the prior.
+
+In *reweighted sampling*, we use the samples from the prior in (3.11), but assign them a self-normalized importance weight. The weights and self-normalized weights are defined as
+
+$$
+\tilde{w}_i := \hat{p}'(\theta_i \mid x_o), \qquad w_i := \frac{\tilde{w}_i}{\sum_{j=1}^{N} \tilde{w}_j} = \frac{\hat{p}'(\theta_i \mid x_o)}{\sum_{j=1}^{N} \hat{p}'(\theta_j \mid x_o)}. \tag{3.14}
+$$
+
+Histograms and moments of the distribution can be computed using weighted samples $w_i \theta_i$. The variance of the weights can be large, implying one sample takes most of the probability mass. This occurs in the same situations when rejection sampling is inefficient.
+
+One sampling method that can be more robust to high dimensionality and approximate posteriors that make up only a small volume (compared to the prior) is *Markov chain Monte Carlo*. Rather than explaining further, we simply define the Metropolis-Hastings acceptance probability and refer the reader to [Chapter 1](/blog/introduction-to-sampling). Given a fixed $x$ and proposal distribution $\mathcal{T}$ with transition density $\mathcal{T}(\theta' \mid \theta)$ from $\theta$ to $\theta'$, the acceptance probability $\alpha(\theta' \mid \theta, x)$ in a Metropolis-Hastings step is
+
+$$
+\alpha(\theta' \mid \theta, x_o) := \min\left(1, \frac{\hat{p}(\theta' \mid x_o)\, \mathcal{T}(\theta \mid \theta')}{\hat{p}(\theta \mid x_o)\, \mathcal{T}(\theta' \mid \theta)}\right) = \min\left(1, \frac{\hat{p}'(\theta' \mid x_o) / \cancel{Z_\psi(x_o)}\; \mathcal{T}(\theta \mid \theta')}{\hat{p}'(\theta \mid x_o) / \cancel{Z_\psi(x_o)}\; \mathcal{T}(\theta' \mid \theta)}\right) \tag{3.15}
+$$
+
+This acceptance probability does not depend on $Z_\psi(x_o)$ and can therefore draw samples from the approximate posterior even when $\hat{p}'(\theta \mid x_o)$ is not normalized. Designing an efficient transition kernel and identifying convergence is an open area of research.
+
+### 5.4 Estimating multiple quantities at once
+
+Finally, some recent methods go beyond estimating the posterior, the likelihood, or the likelihood-ratio and estimate several of these quantities, typically with separate models. Recently, the Simformer has been proposed to estimate the full joint distribution $p(\theta, x)$ as well as all of its conditionals and marginals in a single model, based on transformers and a diffusion model. Thereby, the Simformer improves the flexibility of SBI and it combines desirable features of NPE (e.g., to directly draw samples from the posterior) and NLE (e.g., to emulate the simulator).
+
+## 6. Current developments
+
+Neural Posterior Estimation (NPE), as well as alternative methods such as Neural Likelihood Estimation (NLE) or Neural Ratio Estimation (NRE), have been demonstrated as powerful tools for SBI. Over the past years, researchers have extended these methods in many ways, and have developed new SBI methods that go beyond estimating the posterior or likelihood(-ratio). We outline recent trends in using neural networks for SBI.
+
+### 6.1 Better generative models
+
+Normalizing flows have been a popular choice for NPE for several years, likely due to their robustness in training, their ability to quickly (and exactly) evaluate the log-probability of samples, and their mass-covering property. However, the fact that the transformation $T$ trained by normalizing flows has to be invertible can constrain the flexibility of the normalizing flow. This may reduce the accuracy of posterior estimates of normalizing flows, especially for high-dimensional and structured parameter spaces (e.g., if the parameters are a time series or an image). To overcome this, recent methods have explored other conditional generative models for NPE. In recent years, diffusion models have been particularly popular due to their ability to estimate high-dimensional parameter spaces, and to maintain the ability to evaluate the log-probability via the probability flow ODE (albeit at significantly higher computational cost). Many other generative models have been explored for NPE, ranging from flow-matching to consistency models, generative adversarial networks, energy-based models, and tabular foundation models. We expect that any major advances in (conditional) generative modeling will directly carry over to improvements in NPE.
+
+### 6.2 Improving the flexibility of simulation-based inference
+
+A core limitation of NPE with normalizing flows is that it requires the inference task to be known upfront. If, for example, the prior changes, when the simulator is modified, or when the data representation changes, NPE has to be re-run in order to perform inference (including running simulations and training the neural network).
+
+To overcome this, many recent methods have improved the flexibility of NPE. First, in order to perform inference given any number of i.i.d. trials, permutation-invariant embedding networks can be used, as described above. Alternatively, diffusion models enable NPE to estimate the posterior distribution given any number of i.i.d. datapoints, even when the neural network was trained on pairs of parameters and a single simulation result. Second, in order to enable more flexible specification of prior or simulator, it has been proposed to amortize over hyperparameters of prior or simulator. In that case, the inference network is conditioned not only on data, but also on additional values describing the prior or simulator. At inference time, one can then perform inference for any prior and for any simulator. Third, in some cases and only for some observations, some parameters may be known and should not be inferred, but instead should be kept fixed. In other cases, data may not always be complete, and parts of an observation might be missing. In order to flexibly perform amortized inference in these cases, several methods enable the estimation of any parameter conditional of NPE and systematically deal with missing data.
+
+### 6.3 Improving robustness to model misspecification
+
+A fundamental challenge for SBI emerges when the simulator is *misspecified*, i.e., when it does not match reality. In the most extreme case, the observation $x_o$ cannot be generated by the simulator (i.e., the combination of prior and simulator) with any set of parameters and with any level of simulator noise.
+
+This can have a drastic impact on SBI: While one might expect that, for misspecified observations, the approximate posterior will have mass in parameter regions that generate predictives that are close to the observation, or that the approximate posterior should be very uncertain, this is not the case. Indeed, neural network-based methods for SBI have been shown to react erratically to the misspecified observations and can produce non-sensible posteriors.
+
+Several methods have been proposed to improve the robustness of SBI in these scenarios, including adding noise to the simulation outputs, learning statistics of the observations such that they are not misspecified, training on unlabeled and labeled observations when available, or changing the target of inference.
+
+### 6.4 Conservative and calibrated posterior approximations
+
+Approximate SBI posteriors can be overconfident[^1], particularly when simulations are limited, motivating methods that promote conservative or calibrated uncertainty estimates. Balanced neural ratio estimation modifies the NRE training objective to favor conservative approximations, while preserving its Bayes-optimal solution, by effectively regularizing the estimate to be closer to the prior. This balancing principle has also been extended to NPE and contrastive NRE. Alternatively, differentiable relaxations of coverage error can be included directly in the training objectives of amortized SBI methods, encouraging calibrated posteriors with moderate additional computational cost. However, expected coverage is a necessary rather than sufficient diagnostic: an approximation can exhibit nominal coverage while still differing substantially from the true posterior. Ratio coverage plots address some of these blind spots by comparing the approximate and true posteriors through an estimated density ratio.
+
+[^1]: This occurs when the approximate posterior is narrower than the ground truth.
+
+## 7. Discussion
+
+Many processes in the natural sciences and in engineering are best described by complex, stochastic, and potentially non-differentiable simulators. For many such models, the likelihood can become excessively expensive or even impossible to evaluate. In order to perform inference with traditional Bayesian inference methods such as MCMC, scientists and engineers had to modify their model such that the likelihood can be efficiently evaluated, but which comes at the cost of reducing the fidelity of the simulator.
+
+Simulation-based inference (SBI) makes Bayesian inference accessible to the widest class of models: It can be applied to any black-box simulator for which one can run forward simulations. In recent years, neural networks have largely improved the accuracy and applicability of SBI. These methods generate a database of parameters and corresponding simulation outputs, and then train neural networks to learn the statistical relationship between these quantities. After training, the neural network can be evaluated at any observation and enables us to infer the posterior distribution without further simulations or retraining.
+
+SBI with neural networks has already been applied to perform inference in a wide range of disciplines in science and engineering. We expect that the continued progress in improving the accuracy, flexibility, and robustness of these approaches will have a profound impact on many fields, and we hope that it will enable new scientific discoveries.
