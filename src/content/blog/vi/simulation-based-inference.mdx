@@ -1,0 +1,332 @@
+---
+title: "Suy luận dựa trên mô phỏng"
+description: "Suy luận Bayes chỉ từ mô phỏng: ước lượng hậu nghiệm, hàm hợp lý và tỉ số bằng mạng nơ-ron, phương pháp tuần tự, chẩn đoán độ phủ và các hướng phát triển hiện nay."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - simulation-based inference
+  - normalizing flows
+  - amortized inference
+series: bayesian-deep-learning
+seriesOrder: 5
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl03SbiOverview from '../../../components/diagrams/Bdl03SbiOverview.astro';
+import Bdl03NpeSupervised from '../../../components/diagrams/Bdl03NpeSupervised.astro';
+import Bdl03NormalizingFlow from '../../../components/diagrams/Bdl03NormalizingFlow.astro';
+import Bdl03PosteriorFamilies from '../../../components/diagrams/Bdl03PosteriorFamilies.astro';
+import Bdl03EmbeddingNet from '../../../components/diagrams/Bdl03EmbeddingNet.astro';
+import Bdl03CoverageDiagnostics from '../../../components/diagrams/Bdl03CoverageDiagnostics.astro';
+
+Suy luận dựa trên mô phỏng (simulation-based inference, SBI) có cùng mục tiêu với suy luận Bayes: cho dữ liệu quan sát và một tập niềm tin, áp dụng quy tắc Bayes để cập nhật các niềm tin đó cho phù hợp. Khác với các phương pháp suy luận Bayes khác như Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC) hay suy luận biến phân (variational inference), SBI không dựa vào việc tính giá trị hàm hợp lý (likelihood) mà chỉ dựa vào các mẫu rút từ nó. Nhờ vậy, SBI áp dụng được cho mọi loại hàm hộp đen nhận tham số làm đầu vào và mô phỏng dữ liệu quan sát, thứ được gọi là bộ mô phỏng thuận (forward simulator).
+
+Để minh họa, hãy hình dung bạn là một nhà thiên văn học quan tâm đến các hành tinh quay quanh những ngôi sao xa xôi, tức là các ngoại hành tinh (exoplanet). Ngoại hành tinh thường bị che khuất bởi ánh sáng chói từ ngôi sao chủ của chúng. Các nhà thiên văn quan sát độ sáng và phổ của những ngôi sao này dưới dạng một chuỗi thời gian gọi là đường cong ánh sáng (light curve), và tìm cách suy ra từ các đường cong ánh sáng đó những tính chất của ngoại hành tinh bằng các mô hình vật lý. Giả sử ta muốn ước lượng khối lượng $\theta_o$ của một ngoại hành tinh từ các quan sát đường cong ánh sáng $x_o$ của một ngôi sao xa. Dựa trên lý thuyết vật lý liên quan, ta thiết kế một chương trình máy tính ánh xạ một khối lượng giả định $\theta$ thành một đường cong ánh sáng mô phỏng $x$ ("mô hình thuận", forward model). Bằng cách chạy một bộ mô phỏng như vậy, ta có thể thu được các mẫu $x$ từ hàm hợp lý $p(x \mid \theta)$, nhưng việc tính giá trị hàm hợp lý có thể rất tốn kém hoặc không thể thực hiện (chẳng hạn khi bộ mô phỏng chạy rất lâu, hoặc khi nó chứa nhiều biến ẩn). *Suy luận dựa trên mô phỏng* tính phân phối hậu nghiệm (posterior distribution) $p(\theta \mid x_o)$ trong khi chỉ dựa vào các mẫu (hay các lần mô phỏng) từ hàm hợp lý. Để làm được điều này, các phương pháp SBI gần đây dùng mạng nơ-ron để tham số hóa một "mô hình suy luận" (inference model) $q_\psi(\theta \mid x_o)$, trong đó $\psi$ ký hiệu các trọng số của mạng nơ-ron.
+
+## 1. Giới thiệu
+
+Các cách tiếp cận cổ điển cho suy luận Bayes (ví dụ MCMC, xem [Chương 1](/vi/blog/introduction-to-sampling), hoặc suy luận biến phân, xem Chương 12) dựa vào việc tính lặp đi lặp lại giá trị của hàm hợp lý và tiên nghiệm (prior) để mô tả phân phối hậu nghiệm và sinh mẫu từ nó. Dù mạnh mẽ, các cách tiếp cận này gặp giới hạn đối với một số mô hình thuận: nhiều mô hình trong khoa học và kỹ thuật được định nghĩa dưới dạng các bộ mô phỏng ngẫu nhiên, có thể chạy hiệu quả theo chiều thuận (tức là có thể *lấy mẫu* từ hàm hợp lý của chúng), nhưng hàm hợp lý của chúng (cũng như gradient của nó theo các tham số) không thể tính được, hoặc chỉ tính được với chi phí tính toán rất lớn. Ví dụ, bộ mô phỏng có thể lấy mẫu một chuỗi dài các biến ẩn $z_{1:N}$ trước khi sinh ra các quan sát. Tính hàm hợp lý của một quan sát $p(x_o \mid \theta)$ sẽ đòi hỏi lấy tích phân loại bỏ các biến ẩn này theo
+
+$$
+p(x_o \mid \theta) = \int p(x_o, z_{1:N} \mid \theta)\, \mathrm{d}z_{1:N},
+$$
+
+điều có thể tốn kém đến mức không khả thi ngay cả với một số lượng biến ẩn vừa phải. Ngoài ra, nhiều phương pháp suy luận Bayes cổ điển tốn kém khi kiểm tra (test time): mỗi lần muốn suy luận trên dữ liệu mới, ta phải chạy lại thủ tục suy luận, điều có thể bao gồm những vòng lặp tốn kém về tính toán (ví dụ trong lấy mẫu MCMC). Vì thế, việc giải quyết các ứng dụng thông lượng cao hoặc thời gian thực bằng suy luận Bayes vẫn luôn là một thách thức.
+
+Các phương pháp *suy luận dựa trên mô phỏng* (SBI) vượt qua những giới hạn này. Mục tiêu cơ bản của SBI là thực hiện suy luận khi chỉ có quyền truy cập vào các lần mô phỏng (tức là các mẫu từ hàm hợp lý), mà không phải tính tường minh hàm hợp lý, cũng không cần truy cập vào cơ chế bên trong của mô hình thuận hay các gradient của nó. Ngoài ra, nhiều phương pháp SBI còn *khấu hao* (amortize) chi phí của suy luận Bayes: sau một giai đoạn mô phỏng và huấn luyện ban đầu, chúng có thể thực hiện suy luận cho bất kỳ tập dữ liệu mới nào trong vòng vài mili giây, thường chỉ cần một lượt truyền xuôi (forward pass) qua một mạng nơ-ron sâu khi kiểm tra.
+
+<Figure caption="Hình 3.1: a: Các bộ mô phỏng sinh dữ liệu tổng hợp x (bên phải) khi cho các tham số θ (bên trái). Suy luận Bayes tính phân phối hậu nghiệm trên các tham số (bên trái) khi cho các quan sát xₒ (bên phải). b: Suy luận dựa trên mô phỏng dùng các lần mô phỏng (tức là các mẫu từ hàm hợp lý, nhưng không tính giá trị hàm hợp lý) để thực hiện suy luận Bayes. Một phương pháp SBI gần đây, ước lượng hậu nghiệm bằng mạng nơ-ron (NPE), dùng mạng nơ-ron để cải thiện suy luận. NPE rút mẫu từ tiên nghiệm và chạy bộ mô phỏng để sinh các cặp (θ, x). Dữ liệu này sau đó được dùng để huấn luyện một mạng suy luận: một mô hình sinh có điều kiện ước lượng phân phối hậu nghiệm khi cho bất kỳ dữ liệu x nào. Sau khi huấn luyện, mạng suy luận được tính tại bất kỳ quan sát nào để rút mẫu từ phân phối hậu nghiệm, không cần thêm lần mô phỏng hay lần huấn luyện nào nữa. Hình được sửa đổi từ Deistler và cộng sự. (Bản tái hiện dạng sơ đồ.)">
+  <Bdl03SbiOverview />
+</Figure>
+
+Các phương pháp SBI ban đầu được phát triển cho những trường hợp không thể tính hàm hợp lý của mô hình, và thường được gọi là các phương pháp *tính toán Bayes xấp xỉ* (Approximate Bayesian Computation, ABC). ABC Wasserstein là một ví dụ về việc so sánh trực tiếp các phân phối thực nghiệm quan sát được và mô phỏng được, tránh được việc phải chọn các thống kê tóm tắt (summary statistics). Gần đây hơn, khả năng của các phương pháp SBI trong việc suy luận trên bất kỳ mô hình hộp đen nào, song song hóa ở quy mô lớn các lần chạy mô hình và khấu hao suy luận đã mở rộng phạm vi của chúng. Chẳng hạn, ngay cả khi hàm hợp lý hay gradient của mô hình (về nguyên tắc) tính được, việc này có thể đòi hỏi giao tiếp với mã mô tả mô hình thuận được viết qua nhiều thập kỷ bằng các ngôn ngữ lập trình lỗi thời. Ngược lại, các phương pháp SBI tách hoàn toàn quá trình suy luận khỏi các lần chạy mô phỏng, nhờ đó dễ dàng áp dụng SBI cho các bộ mô phỏng được viết bằng ngôn ngữ lập trình khác hoặc phải chạy trên phần cứng chuyên dụng (hoặc, về nguyên tắc, thậm chí có thể tương ứng với một hệ vật lý hay một hệ sống sinh ra các lần mô phỏng từ đầu vào). Trong những tình huống khác, hàm hợp lý *có thể* tính được, nhưng ta cần suy luận nhanh để phân tích thời gian thực hoặc thông lượng cao các hiện tượng quan sát được, điều thường nằm ngoài tầm với của, chẳng hạn, lấy mẫu MCMC, nhưng lại khả thi với các phương pháp SBI khấu hao. Cuối cùng, trong một số trường hợp, huấn luyện quy mô lớn cũng có thể cho kết quả suy luận rất chính xác và vững. Có lẽ nhờ sự đơn giản của nó, ý tưởng cốt lõi của SBI (dùng các lần mô phỏng thuận để huấn luyện một mô hình học máy có giám sát) đã được dùng dưới các dạng biến đổi trong nhiều lĩnh vực, ví dụ cho các mô hình nền tảng cho dữ liệu dạng bảng (tabular foundation models).
+
+Nhận thức cốt lõi của SBI là việc thực hiện suy luận Bayes có thể được xem như một dạng *ước lượng mật độ có điều kiện* (conditional density estimation). Trong những năm gần đây, hàng loạt phương pháp ước lượng mật độ có điều kiện mạnh mẽ (như luồng chuẩn hóa (normalizing flow)) đã được phát triển, thường dưới cái tên "AI tạo sinh" (Generative AI). Điều này đã tạo ra sự bùng nổ của các phương pháp SBI mới mạnh mẽ xây dựng trên những tiến bộ đó, và được áp dụng thành công trong nhiều ngành khoa học, ví dụ khoa học thần kinh, khoa học nhận thức, sinh học và vật lý. Ở đây, chúng tôi giới thiệu các ý tưởng và khái niệm cơ bản của SBI. Chúng tôi tập trung vào *ước lượng hậu nghiệm bằng mạng nơ-ron* (Neural Posterior Estimation), một thuật toán đơn giản về khái niệm nhưng mạnh mẽ, đồng thời điểm qua các cách tiếp cận khác, các công cụ chẩn đoán và các hướng phát triển hiện nay. Hai phương pháp đáng chú ý là *ước lượng hàm hợp lý bằng mạng nơ-ron* (Neural Likelihood Estimation) và *ước lượng tỉ số bằng mạng nơ-ron* (Neural Ratio Estimation), được giải thích ở phần sau của chương.
+
+## 2. Suy luận dựa trên mô phỏng với ước lượng hậu nghiệm bằng mạng nơ-ron
+
+### 2.1 Ước lượng hậu nghiệm bằng mạng nơ-ron
+
+Mục tiêu của suy luận Bayes là tính (ít nhất là xấp xỉ) phân phối hậu nghiệm có dạng $p(\theta \mid x)$. Theo quy tắc Bayes, phân phối hậu nghiệm tỉ lệ với tích của tiên nghiệm và hàm hợp lý $p(\theta \mid x) = \frac{1}{Z(x)} p(x \mid \theta) p(\theta)$, trong đó $Z(x) = \int p(x, \theta)\, \mathrm{d}\theta = p(x)$ là hằng số chuẩn hóa, còn gọi là hàm hợp lý biên (marginal likelihood) hay bằng chứng (evidence). Việc tính $Z(x)$ thường khó khăn, và vì vậy nhiều thuật toán suy luận Bayes cổ điển như lấy mẫu MCMC nhắm tới việc thu được các mẫu từ phân phối hậu nghiệm mà không phải tính giá trị của nó. Tuy nhiên, ngay cả các thuật toán này cũng đòi hỏi (thường là rất nhiều) lần tính giá trị hàm hợp lý $p(x \mid \theta)$. Thế nhưng nhiều mô hình trong các ứng dụng khoa học được định nghĩa qua các bộ mô phỏng số: ta có thể dễ dàng sinh *mẫu* từ hàm hợp lý $p(x \mid \theta)$ bằng cách chạy bộ mô phỏng, nhưng việc *tính giá trị* hàm hợp lý có thể tốn kém hoặc thậm chí không thể. Làm thế nào để thực hiện suy luận Bayes trong bối cảnh như vậy?
+
+<Figure caption="Hình 3.2: Diễn đạt suy luận Bayes thành một bài toán học có giám sát. Trái: Một cơ sở dữ liệu các lần mô phỏng (θ, x), được lấy mẫu từ phân phối đồng thời p(θ, x) bằng cách rút mẫu từ tiên nghiệm và chạy bộ mô phỏng. Phân phối hậu nghiệm (trái, dưới) là một lát cắt ngang qua phân phối đồng thời. Phải: NPE huấn luyện một mạng suy luận trên các lần mô phỏng này. Sau khi huấn luyện, mạng có thể được tính tại bất kỳ quan sát xₒ nào và dự đoán trực tiếp phân phối hậu nghiệm. Hình được sửa đổi từ Deistler và cộng sự. (Bản tái hiện dạng sơ đồ, tính từ một bộ mô phỏng một tham số giả định với tiên nghiệm đều trên [0, 90].)">
+  <Bdl03NpeSupervised />
+</Figure>
+
+Một nhận thức then chốt là ta không cần quy tắc Bayes để thực hiện suy luận Bayes: phân phối hậu nghiệm $p(\theta \mid x_o)$ tại một giá trị cụ thể $x = x_o$, theo định nghĩa, là một *phân phối có điều kiện*, tức là một lát cắt đã chuẩn hóa qua phân phối đồng thời $p(\theta, x)$ tại $x = x_o$ (Hình 3.2, trái). Vì vậy, một cách khác để có phân phối hậu nghiệm là sinh một tập dữ liệu mô phỏng gồm (có thể rất nhiều) cặp mẫu $D = \{(\theta_i, x_i)\}_{i=1}^N$, rồi ước lượng trực tiếp phân phối hậu nghiệm này bằng ước lượng mật độ có điều kiện. Ta có thể sinh một tập dữ liệu mô phỏng như vậy bằng cách trước hết lấy mẫu các $\theta_i$ từ tiên nghiệm, rồi với mỗi $\theta_i$, chạy bộ mô phỏng một lần để có $x_i$ tương ứng, vì $p(\theta, x) = p(\theta) p(x \mid \theta)$.
+
+Ta muốn học một ánh xạ từ $x$ đến phân phối $p(\theta \mid x)$. Một cách để giải quyết việc này là tham số hóa phân phối hậu nghiệm bằng một dạng hàm, ví dụ một phân phối Gauss với trung bình $\mu(x)$ và hiệp phương sai $\Sigma(x)$, và dùng một mạng nơ-ron (với tham số $\psi$) để biểu diễn ánh xạ từ $x$ đến các tham số hậu nghiệm tương ứng $(\mu_\psi(x), \Sigma_\psi(x))$. Ta có thể học $\psi$ bằng cách cực đại hóa log-hàm hợp lý của các tham số, tức là cực tiểu hóa hàm mất mát
+
+$$
+\mathcal{L}(\psi) = -\frac{1}{N} \sum_{i=1}^{N} \log q_\psi(\theta_i \mid x_i), \tag{3.1}
+$$
+
+trong đó, ở trường hợp này, xác suất hậu nghiệm dự đoán $q_\psi(\theta \mid x)$ được cho bởi một phân phối Gauss, $q_\psi(\theta \mid x) = \mathcal{N}(\theta \mid \mu_\psi(x), \Sigma_\psi(x))$. Như vậy (với điều kiện có thể sinh một tập lớn các lần mô phỏng $D$), ta đã biến suy luận Bayes thành một bài toán học có giám sát.
+
+Hiển nhiên, một phân phối Gauss có thể là một xấp xỉ kém cho phân phối hậu nghiệm, nhưng cách tiếp cận này dễ dàng tổng quát hóa cho các mô hình linh hoạt hơn. Ví dụ, có thể dùng một hỗn hợp Gauss (Mixture of Gaussians), khi đó mạng cần học ánh xạ đến nhiều trung bình $\mu_j(x)$, hiệp phương sai $\Sigma_j(x)$ và các trọng số hỗn hợp tương ứng $\pi_j(x)$. Trong những năm gần đây, các bộ ước lượng mật độ có điều kiện bằng mạng nơ-ron linh hoạt hơn và dễ huấn luyện hơn đã được đề xuất, có thể dùng để ước lượng các phân phối hậu nghiệm không Gauss. Đặc biệt, *luồng chuẩn hóa* tạo thành một lớp các bộ ước lượng mật độ có điều kiện bằng mạng nơ-ron có nhiều tính chất thuận lợi cho SBI, như chúng tôi sẽ mô tả trong mục tiếp theo.
+
+Khi bộ ước lượng mật độ có điều kiện (đôi khi được gọi là *mạng suy luận*, inference network) đã được huấn luyện trên dữ liệu mô phỏng $D$, nó có thể được *tính* ngay tại bất kỳ quan sát mới $x_o$ nào để xấp xỉ phân phối hậu nghiệm $p(\theta \mid x_o) \approx q_\psi(\theta \mid x_o)$. Thật vậy, có thể chứng minh rằng (với điều kiện bộ ước lượng mật độ đủ linh hoạt, mô hình được đặc tả đúng và quá trình tối ưu tìm được cực tiểu) nó sẽ cho phân phối hậu nghiệm đúng. Để chứng minh điều này, ta viết lại hàm mất mát (trong giới hạn dữ liệu huấn luyện vô hạn, tức là lấy kỳ vọng theo các mẫu từ $p(\theta, x) = p(\theta) p(x \mid \theta)$) thành
+
+$$
+\begin{aligned}
+\mathcal{L} &= \mathbb{E}_{p(\theta) p(x \mid \theta)}[-\log q_\psi(\theta \mid x)] \\
+&= \iint -p(\theta) p(x \mid \theta) \log q_\psi(\theta \mid x)\, \mathrm{d}\theta\, \mathrm{d}x \\
+&= \iint -p(\theta) \frac{p(\theta \mid x) p(x)}{p(\theta)} \log q_\psi(\theta \mid x)\, \mathrm{d}\theta\, \mathrm{d}x \\
+&= \int p(x) \int -p(\theta \mid x) \log q_\psi(\theta \mid x)\, \mathrm{d}\theta\, \mathrm{d}x.
+\end{aligned}
+$$
+
+Tích phân bên trong chỉ khác độ phân kỳ Kullback–Leibler $\mathrm{D}_{\mathrm{KL}}(p(\theta \mid x) \,\|\, q_\psi(\theta \mid x))$ một lượng bằng entropy có điều kiện của $p(\theta \mid x)$, đại lượng không phụ thuộc vào các tham số mạng nơ-ron $\psi$. Do đó, nếu bộ ước lượng mật độ có điều kiện được đặc tả đúng, hàm mất mát tổng thể (population loss) đạt cực tiểu khi $q_\psi(\theta \mid x) = p(\theta \mid x)$ với $p(x)$-hầu hết mọi $x$.
+
+<Figure caption="Hình 3.3: Luồng chuẩn hóa. Trái: Một phân phối mục tiêu mà ta muốn ước lượng dựa trên các mẫu. Phải: Luồng chuẩn hóa định nghĩa một phân phối cơ sở (ví dụ một phân phối Gauss nhiều chiều) và biến đổi phân phối này qua nhiều phép biến đổi Tᵢ. Sau khi huấn luyện, phân phối đã biến đổi q_ψ(θ) xấp xỉ phân phối mục tiêu. (Bản tái hiện dạng sơ đồ, vẽ bằng các mẫu.)">
+  <Bdl03NormalizingFlow />
+</Figure>
+
+Một ưu điểm lớn của các cách tiếp cận này là (khi mạng suy luận đã được huấn luyện) phân phối hậu nghiệm cho các quan sát mới $x_o$ có thể được tính chỉ bằng cách đưa quan sát vào mạng suy luận để nhận $q_\psi(\theta \mid x)$. Như vậy, suy luận có thể được thực hiện bằng một lượt truyền xuôi duy nhất qua một mạng nơ-ron, tức là nó được *khấu hao* (Hình 3.2, phải). Ngược lại, một nhược điểm của cách tiếp cận này là các lần mô phỏng của ta cần phủ toàn bộ tiên nghiệm, điều có thể lãng phí vì ta có thể sinh ra nhiều lần mô phỏng trông rất khác với quan sát $x_o$ mà ta quan tâm, và do đó không giúp thu hẹp phân phối hậu nghiệm liên quan. Để giải quyết vấn đề này (nhưng phải từ bỏ tính khấu hao), các cách tiếp cận được gọi là *tuần tự* (sequential) đã được phát triển, trong đó các lần mô phỏng được sinh một cách thích nghi để nhắm tới phân phối hậu nghiệm của một quan sát cụ thể. Chúng tôi bàn về các cách tiếp cận này ở mục 3.
+
+Cách tiếp cận mô tả ở trên hiện thường được gọi là *ước lượng hậu nghiệm bằng mạng nơ-ron* (NPE). Do sự đơn giản về khái niệm và nhiều biến thể mà nó cho phép, rất khó truy nguyên chính xác nguồn gốc của nó, và các biến thể của nó có lẽ đã được phát hiện độc lập trong nhiều lĩnh vực ứng dụng khác nhau. Beaumont và cộng sự cùng Blum và François đã đưa ra ý tưởng khớp một mô hình hồi quy từ dữ liệu đến tham số để tinh chỉnh các cách tiếp cận ABC loại bỏ (rejection ABC), điều có thể được hiểu là NPE với một mạng suy luận Gauss. Papamakarios và Murray đã chỉ ra rằng các bộ ước lượng mật độ linh hoạt có thể học trực tiếp phân phối hậu nghiệm khi được tối ưu bằng cách cực tiểu hóa hàm mất mát log (xem thêm Le và cộng sự), và đưa ra một phiên bản tuần tự. Lueckmann và cộng sự (theo hiểu biết của chúng tôi, là công trình đưa ra thuật ngữ (S)NPE) đã đưa ra một công thức tuần tự khác, cùng với các mạng nhúng (embedding network) để học thống kê tóm tắt từ dữ liệu chuỗi thời gian. Greenberg và cộng sự đưa ra phương pháp đầu tiên có thể dùng luồng chuẩn hóa và tương thích với học tuần tự, đồng thời dùng các mạng nhúng tích chập. Ardizzone và cộng sự đề xuất dùng mạng nơ-ron khả nghịch (invertible neural network) để giải các bài toán ngược, dẫn đến một thuật toán rất giống NPE dựa trên luồng, và Radev và cộng sự đã phổ biến tính khấu hao của NPE.
+
+### 2.2 Ước lượng mật độ có điều kiện bằng luồng chuẩn hóa
+
+Như đã mô tả ở trên, một nhiệm vụ cốt lõi trong SBI là ước lượng phân phối có điều kiện của các tham số khi cho một số quan sát. Luồng chuẩn hóa đã trở thành một bộ ước lượng mật độ có điều kiện phổ biến cho SBI. Chúng đơn giản và hiệu quả khi huấn luyện, có thể dùng để sinh mẫu nhanh, hoặc để tính chính xác log-xác suất của mật độ đã học. Điều sau có ích cho nhiều phân tích tiếp theo như ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP) hay trực quan hóa phân phối hậu nghiệm. Cuối cùng, luồng chuẩn hóa (thường) được huấn luyện bằng cách cực tiểu hóa log-hàm hợp lý âm làm hàm mất mát. Hàm mất mát này có tính phủ khối lượng (mass-covering), điều mà, như chúng tôi sẽ bàn dưới đây, có thể có lợi cho SBI.
+
+<Figure caption="Hình 3.4: Khả năng biểu diễn của các mô hình sinh khác nhau khi xấp xỉ phân phối hậu nghiệm bằng NPE. Phân phối hậu nghiệm đúng (trái) gồm hai hình trăng lưỡi liềm và có mật độ hậu nghiệm thấp ở giữa. Dùng một phân phối Gauss (thứ hai từ trái) làm mô hình sinh cho một phân phối hậu nghiệm kém (dù có tính phủ khối lượng). Một hỗn hợp nhiều phân phối Gauss (thứ hai từ phải) cải thiện độ chính xác, nhưng không tạo ra được hình trăng lưỡi liềm. Luồng chuẩn hóa (phải) cho phép NPE nắm bắt chính xác các phân phối hậu nghiệm phức tạp. (Bản tái hiện dạng sơ đồ.)">
+  <Bdl03PosteriorFamilies />
+</Figure>
+
+Luồng chuẩn hóa mô hình hóa một mật độ mục tiêu $q(\theta)$ bằng cách học một phép biến đổi $T : Z \to \Theta$ sao cho một biến ngẫu nhiên $Z$, được định nghĩa là tuân theo một phân phối "cơ sở" đơn giản $p(z)$ (thường là phân phối chuẩn tắc nhiều chiều), được biến đổi thành một biến ngẫu nhiên $\Theta$, sao cho mật độ xác suất của $\Theta$ là $q(\theta)$. Mật độ xác suất mà một phép biến đổi như vậy mô hình hóa có thể được tính bằng công thức đổi biến
+
+$$
+q(\theta) = \left| \det\!\left( \frac{\partial T^{-1}}{\partial \theta} \right) \right| p_Z(T^{-1}(\theta)), \tag{3.2}
+$$
+
+trong đó $T^{-1}$ là phép biến đổi ngược của $T$ và $\det\!\left(\frac{\partial T^{-1}}{\partial \theta}\right)$ là định thức của ma trận Jacobi (Jacobian) của phép biến đổi ngược $T^{-1}$. Luồng chuẩn hóa xếp chồng nhiều phép biến đổi $T$ để mô hình hóa các mật độ phức tạp.
+
+Để tính được Phương trình 3.2 và huấn luyện luồng chuẩn hóa một cách hiệu quả, phép biến đổi $T$ phải là một vi phôi (diffeomorphism), tức là nó phải khả vi và khả nghịch. Ngoài ra, ma trận Jacobi của $T^{-1}$ có kích thước $N \times N$ (với các mật độ có số chiều $N$), và việc tính định thức của một ma trận như vậy thường có độ phức tạp tính toán $\mathcal{O}(N^3)$, điều không khả thi khi $N$ lớn. Vì thế, luồng chuẩn hóa đòi hỏi phép biến đổi được xây dựng sao cho định thức của ma trận Jacobi tính được một cách hiệu quả. Các luồng chuẩn hóa khác nhau ở cách định nghĩa phép biến đổi $T$ để thỏa mãn các tiêu chí này. Một lớp phép biến đổi phổ biến là các luồng tự hồi quy (autoregressive flow), và trong SBI, luồng tự hồi quy có mặt nạ (masked autoregressive flow) và luồng spline nơ-ron (neural spline flow) đặc biệt phổ biến. Các luồng chuẩn hóa này định nghĩa các phép biến đổi song ánh cho từng chiều riêng lẻ rồi liên kết các chiều với nhau bằng mạng nơ-ron.
+
+Luồng chuẩn hóa huấn luyện các phép biến đổi $T$ bằng cách cực tiểu hóa log-hàm hợp lý âm của dữ liệu
+
+$$
+\psi = \arg\min_{\psi} -\log \prod_{i=1}^{M} q_\psi(\theta_i).
+$$
+
+Trong ước lượng hậu nghiệm bằng mạng nơ-ron (NPE), luồng chuẩn hóa được dùng để ước lượng mật độ xác suất hậu nghiệm $p(\theta \mid x)$. Để ước lượng một mật độ xác suất *có điều kiện*, NPE đặt điều kiện cho phép biến đổi $T$ theo dữ liệu $x$, hoặc theo một biểu diễn nhúng $s(x)$ của nó (mục 2.3). Điều này cho phép NPE học các phân phối hậu nghiệm khác nhau cho các dữ liệu khác nhau.
+
+Luồng chuẩn hóa sau đó được huấn luyện trên các cặp tham số và kết quả mô phỏng, trong đó các tham số được lấy mẫu từ tiên nghiệm. NPE cực tiểu hóa hàm mất mát
+
+$$
+\mathcal{L} = \mathbb{E}_{p(\theta) p(x \mid \theta)}[-\log q_\psi(\theta \mid x)]. \tag{3.3}
+$$
+
+Nếu luồng chuẩn hóa được đặc tả đúng, tức là phân phối hậu nghiệm có điều kiện đúng $p(\theta \mid x)$ thuộc họ các mô hình luồng chuẩn hóa, thì tồn tại một $\psi^* \in \Psi$ sao cho $q_{\psi^*}(\theta \mid x) = p(\theta \mid x)$ với $p(x)$-hầu hết mọi $x$, trong đó $\Psi$ ký hiệu không gian tham số. Trong trường hợp này, hàm mất mát tổng thể đạt cực tiểu tại phân phối hậu nghiệm có điều kiện đúng, với giả định quá trình tối ưu thành công. Sau khi huấn luyện, ta có thể lấy mẫu từ phân phối hậu nghiệm cho bất kỳ quan sát $x_o$ nào bằng cách rút một mẫu từ phân phối cơ sở và biến đổi nó qua chuỗi các phép biến đổi $T$ (được đặt điều kiện theo $x_o$). Đáng chú ý, các mẫu từ luồng chuẩn hóa là độc lập cùng phân phối (i.i.d.) và tuân theo chính xác mật độ đã ước lượng (tức là luồng chuẩn hóa không cần xấp xỉ nào để rút mẫu từ mật độ được mô hình hóa). Ngoài ra, luồng chuẩn hóa còn có thể tính mật độ của các tham số dưới phân phối hậu nghiệm qua Phương trình 3.2.
+
+<Figure caption="Hình 3.5: Ước lượng hậu nghiệm bằng mạng nơ-ron (NPE) với mạng nhúng. Trái: Với nhiều mô hình, kết quả mô phỏng có thể có số chiều lớn. Ví dụ, bộ mô phỏng có thể tạo ra các chuỗi thời gian dài, hình ảnh hoặc dữ liệu i.i.d. khi cho một bộ tham số cụ thể. Giữa: Để suy luận dựa trên các quan sát như vậy, NPE có thể được kết hợp với các mạng nhúng phù hợp, rút gọn hiệu quả dữ liệu này thành các thống kê tóm tắt có số chiều thấp hơn. Các thống kê tóm tắt này sau đó được mạng suy luận xử lý, và cả hai mạng nơ-ron có thể được huấn luyện đầu cuối (end-to-end). Phải: Minh họa một phân phối hậu nghiệm ứng với các quan sát như vậy.">
+  <Bdl03EmbeddingNet />
+</Figure>
+
+Một tính chất quan trọng của hàm mất mát này là nó có xu hướng phủ khối lượng: nó phạt nặng việc luồng chuẩn hóa quá hẹp (vì $\log q(\theta \mid x)$ trở thành một số âm lớn, dẫn đến hàm mất mát rất cao). Vì vậy, khi dữ liệu huấn luyện hạn chế hoặc khi luồng chuẩn hóa hội tụ không hoàn hảo, $q(\theta \mid x)$ sẽ có xu hướng rộng hơn phân phối hậu nghiệm đúng $p(\theta \mid x)$. Trong nhiều ứng dụng của SBI, đây là một đặc điểm đáng mong muốn: các phân phối hậu nghiệm quá hẹp sẽ biểu thị các ước lượng tham số quá tự tin, điều có thể dẫn đến những tuyên bố sai về phát hiện khoa học. Hành vi phủ khối lượng này trái ngược với suy luận biến phân, phương pháp thường dùng các mục tiêu dựa trên độ phân kỳ mà hành vi phủ hay tìm kiếm phụ thuộc vào chiều của độ phân kỳ, trong đó các công thức thông dụng có xu hướng tìm mode (mode-seeking), tức là nghiêng về một xấp xỉ hậu nghiệm quá hẹp. Vì ta làm việc với số mẫu hữu hạn, không điều nào trong số này là bảo đảm.
+
+### 2.3 Học từ dữ liệu nhiều chiều bằng mạng nhúng
+
+Nhiều mô hình trong khoa học và kỹ thuật tạo ra kết quả mô phỏng có số chiều lớn như hình ảnh hay chuỗi thời gian dài. Để ước lượng các tham số ứng với dữ liệu như vậy, NPE có thể được kết hợp với *mạng nhúng* (Hình 3.5). Mạng nhúng là các mạng nơ-ron nhận đầu vào là dữ liệu nhiều chiều $x$ và trả về một thống kê tóm tắt có số chiều thấp hơn $s(x)$ của chúng. Các thống kê tóm tắt này sau đó được đưa vào mạng suy luận, mạng dùng chúng để xấp xỉ phân phối hậu nghiệm. Lý tưởng nhất, các thống kê tóm tắt này sẽ (xấp xỉ) đủ (sufficient), tức là vẫn giữ toàn bộ thông tin liên quan đến phân phối hậu nghiệm, sao cho $p(\theta \mid x) \approx p(\theta \mid s(x))$.
+
+Trong NPE, mạng nhúng có thể được huấn luyện đầu cuối cùng với mạng suy luận, tức là với hàm mất mát log-hàm hợp lý nêu trong Phương trình 3.3. Với điều kiện mạng nhúng có đủ khả năng biểu diễn, nó sẽ tự động học được các thống kê tóm tắt thích hợp mà không cần các phương pháp nén dữ liệu riêng (dù những phương pháp đó vẫn có thể hữu ích về mặt thực nghiệm trong một số trường hợp). Việc chọn mạng nhúng phụ thuộc vào loại dữ liệu mà bộ mô phỏng mô hình hóa. Ví dụ, với hình ảnh, một lựa chọn phổ biến cho mạng nhúng là mạng nơ-ron tích chập (convolutional neural network, CNN), còn mạng nơ-ron hồi quy (recurrent neural network, RNN) có thể hữu ích cho dữ liệu chuỗi thời gian.
+
+Một trường hợp quan trọng là bối cảnh trong đó quan sát $x_o$ không phải là một quan sát đơn lẻ mà là một *tập* quan sát $x = \{x_1, \dots x_N\}$ được cho là lấy mẫu i.i.d. từ cùng một tham số. Trong trường hợp này, phân phối hậu nghiệm phải bất biến với thứ tự của các quan sát, điều có thể đạt được bằng một mạng nhúng bất biến hoán vị như *set transformer*, như Chan và cộng sự đã đề xuất cho các ứng dụng trong di truyền học quần thể. Radev và cộng sự đã đề xuất và đánh giá việc dùng các mạng như vậy cho các tập dữ liệu có kích thước thay đổi.
+
+Thay vì học thống kê tóm tắt đầu cuối bằng một mạng nhúng, ta cũng có thể trích xuất thủ công các thống kê tóm tắt từ dữ liệu và suy luận dựa trên các thống kê đó. Việc này đòi hỏi kiến thức chuyên môn về lĩnh vực và, nếu các thống kê tóm tắt được chọn kém, có thể làm mất đáng kể thông tin về các tham số, nhưng nó có thể có lợi nếu ta quan tâm đến việc suy ra các tham số khi cho những đặc điểm cụ thể của dữ liệu. Thật vậy, trong nhiều trường hợp, bộ mô phỏng không thể tái tạo *mọi* đặc điểm của dữ liệu quan sát (bằng thực nghiệm). Các thống kê tóm tắt được định nghĩa thủ công có thể tránh được sự đặc tả sai như vậy bằng cách chỉ tập trung vào những tính chất của dữ liệu mà bộ mô phỏng mô hình hóa được.
+
+## 3. Suy luận khấu hao và suy luận tuần tự
+
+Như đã mô tả ở trên, NPE *khấu hao* chi phí suy luận: sau khi huấn luyện trên một tập dữ liệu mô phỏng sinh từ các phân phối dự đoán tiên nghiệm (prior predictive), tức là các kết quả mô phỏng dựa trên các tham số rút từ phân phối tiên nghiệm, nó có thể suy luận cho *bất kỳ* dữ liệu quan sát mới $x_o$ nào. Trong những trường hợp ta muốn suy luận cho nhiều quan sát khác nhau, hoặc khi suy luận phải đáp ứng yêu cầu thời gian gắt gao, điều này có thể rất có lợi. Trong những trường hợp ta chỉ nhắm tới suy luận cho một quan sát duy nhất (hoặc cho vài quan sát), NPE có thể lãng phí: khi huấn luyện một mạng nơ-ron trên các dự đoán *tiên nghiệm*, mạng phải học từ một dải rộng dữ liệu (mô phỏng), dù cuối cùng nó chỉ được tính tại vài quan sát.
+
+Các phương pháp *tuần tự* đã được phát triển để cải thiện hiệu suất mô phỏng của SBI trong những trường hợp này. Các phương pháp này rút tham số (được dùng sau đó để sinh tập dữ liệu huấn luyện) từ một phân phối "đề xuất" (proposal). Phân phối đề xuất này được chọn sao cho kết quả mô phỏng được kỳ vọng sẽ gần quan sát hơn so với các dự đoán tiên nghiệm. Một lựa chọn phổ biến cho phân phối đề xuất là phân phối hậu nghiệm thu được khi chạy NPE với một số lượng mô phỏng hạn chế (nhưng các lược đồ học chủ động (active learning) tường minh cũng đã được đề xuất).
+
+Các phương pháp này thường được gọi là *tuần tự* vì mạng suy luận được huấn luyện qua nhiều tập dữ liệu được mô phỏng nối tiếp nhau, trong đó phân phối hậu nghiệm xấp xỉ sau mỗi vòng dẫn hướng việc sinh tập dữ liệu tiếp theo. Người ta đã chứng tỏ rằng các phương pháp tuần tự có thể cải thiện hiệu suất mô phỏng, thường tới một bậc độ lớn hoặc hơn.
+
+Dù có thể giảm số lần mô phỏng cần thiết, việc dùng các phương pháp tuần tự với NPE có thể có một nhược điểm: rút tham số từ một phân phối đề xuất (thay vì từ tiên nghiệm) làm phân phối hậu nghiệm bị chệch về phía các vùng được lấy mẫu dày hơn trong phân phối đề xuất (so với tiên nghiệm). Một số phương pháp đã được phát triển để khắc phục điều này. Papamakarios và Murray đề xuất huấn luyện mạng nơ-ron với hàm mất mát log-hàm hợp lý tiêu chuẩn, rồi hiệu chỉnh phân phối hậu nghiệm sau đó (post hoc). Lueckmann và cộng sự đề xuất gán trọng số quan trọng (importance weight) cho hàm mất mát, sao cho bộ ước lượng mật độ xấp xỉ trực tiếp phân phối hậu nghiệm sau khi huấn luyện. Greenberg và cộng sự đưa ra một hàm mất mát tương phản (contrastive loss), ngầm diễn đạt ước lượng mật độ có điều kiện thành một bài toán phân loại, và có thể kết hợp với các hàm thu nhận (acquisition function) tùy ý. Cuối cùng, Blum và François cùng Deistler và cộng sự đề xuất rút các bộ tham số từ một vùng bị giới hạn của tiên nghiệm, sao cho không cần sửa đổi hàm mất mát hay hiệu chỉnh sau đó. Đáng chú ý, với nhiều phương pháp SBI khác, như ước lượng hàm hợp lý bằng mạng nơ-ron (NLE) hay ước lượng tỉ số bằng mạng nơ-ron (NRE), các tham số cho tập dữ liệu huấn luyện có thể được rút từ *bất kỳ* phân phối nào và các mạng nơ-ron vẫn có thể được huấn luyện với các hàm mất mát tiêu chuẩn, vì tiên nghiệm được tính đến một cách tường minh trong quá trình suy luận bằng MCMC hoặc suy luận biến phân.
+
+## 4. Đánh giá tính đúng đắn của các phương pháp SBI
+
+### 4.1 Vấn đề đánh giá các phương pháp SBI
+
+Sau khi thu được một phân phối hậu nghiệm xấp xỉ bằng các phương pháp SBI, một thách thức trung tâm là đánh giá chất lượng của phân phối hậu nghiệm này. Việc này khó vì, với mọi bài toán thực tế, phân phối hậu nghiệm đúng đều không có sẵn.
+
+Một số công cụ chẩn đoán đã được phát triển để vượt qua hạn chế này. Tuy nhiên, cần lưu ý rằng nhiều công cụ trong số đó không cung cấp điều kiện *đủ* cho tính đúng đắn của phân phối hậu nghiệm. Thay vào đó, chúng cung cấp điều kiện *cần* cho tính đúng đắn của phân phối hậu nghiệm, và nhờ đó cho phép phát hiện những chỗ không chính xác trong ước lượng hậu nghiệm. Các phương pháp khác, về nguyên tắc, có thể cung cấp điều kiện đủ cho tính đúng đắn, nhưng dựa vào các siêu tham số bổ sung hoặc vào độ chính xác của các mạng nơ-ron đã huấn luyện khác, điều có thể làm suy giảm độ chính xác của công cụ chẩn đoán. Dưới đây, chúng tôi tập trung vào một nhóm công cụ chẩn đoán gọi là chẩn đoán độ phủ (coverage diagnostics), rồi mô tả ngắn gọn các phương pháp khác.
+
+<Figure caption="Hình 3.6: Chẩn đoán độ phủ để phát hiện những chỗ không chính xác trong phân phối hậu nghiệm xấp xỉ. Trái: Độ phủ kỳ vọng dựa trên vùng mật độ xác suất cao nhất (HPD) nhằm phát hiện liệu phân phối hậu nghiệm đồng thời có quá tự tin hay thiếu tự tin. Hiệu chuẩn dựa trên mô phỏng (SBC) theo biên nhằm phát hiện những chỗ không chính xác trong các phân phối biên của phân phối hậu nghiệm. Cả hai phương pháp đều tạo ra các phân phối hạng, là tối ưu nếu phân phối hậu nghiệm nằm trên đường chéo, và cho thấy có vấn đề nếu nó nằm trên hoặc dưới đường chéo. Hình được sửa đổi từ Deistler và cộng sự. (Bản tái hiện dạng sơ đồ.)">
+  <Bdl03CoverageDiagnostics />
+</Figure>
+
+### 4.2 Chẩn đoán độ phủ
+
+Một nhóm công cụ chẩn đoán nhằm phát hiện những điểm không nhất quán trong phân phối hậu nghiệm là *chẩn đoán độ phủ*. Các phương pháp này bắt đầu bằng việc sinh một tập dữ liệu hiệu chuẩn: chúng lấy mẫu tham số từ tiên nghiệm và chạy bộ mô phỏng để sinh các mẫu $\theta, x \sim p(\theta, x)$. Với mỗi $x$ trong tập dữ liệu hiệu chuẩn, các phương pháp này sau đó rút mẫu từ phân phối hậu nghiệm $\theta_{\text{post}} \sim q_\psi(\theta \mid x)$ thu được bằng một phương pháp SBI. Với các phương pháp SBI khấu hao, quá trình này nhanh, vì có thể suy luận cho bất kỳ $x$ nào mà không cần huấn luyện lại hay mô phỏng lại.
+
+Chẩn đoán độ phủ sau đó rút gọn các mẫu hậu nghiệm $\theta_{\text{post}}$ và các tham số đúng $\theta$ thành các đại lượng một chiều, qua một hàm rút gọn $f(\cdot) : \mathbb{R}^N \to \mathbb{R}$, trong đó $N$ là số chiều của tham số. Xấp xỉ hậu nghiệm được gọi là *được hiệu chuẩn* nếu, với mọi hàm rút gọn $f(\cdot)$, hạng của $f(\theta)$ phân bố đều trong $f(\theta_{\text{post}})$ (Hình 3.6). Các công cụ chẩn đoán khác nhau dùng các ánh xạ $f(\cdot)$ khác nhau để phát hiện những điểm không nhất quán của phân phối hậu nghiệm. Ví dụ, $f(\theta)$ có thể tính log-xác suất hậu nghiệm $q_\psi(\theta \mid x)$ (thường được gọi là *độ phủ kỳ vọng* (expected coverage) dựa trên vùng mật độ xác suất cao nhất (highest-probability density, HPD)), hoặc có thể chọn các phân phối biên một chiều của $\theta$. Trong trường hợp thứ nhất, chẩn đoán độ phủ có thể phát hiện những điểm không nhất quán trong các mô-men bậc cao của phân phối hậu nghiệm (Hình 3.6, trái). Trong trường hợp thứ hai, chẩn đoán độ phủ không thể phát hiện những điểm không nhất quán trong các mô-men bậc cao của phân phối hậu nghiệm, nhưng có thể cho trực giác về việc tham số nào không nhất quán (Hình 3.6, phải).
+
+Một ưu điểm cốt lõi của chẩn đoán độ phủ là có thể chạy chúng với các tập hiệu chuẩn tương đối nhỏ (thường là $\sim 200$ lần mô phỏng), và chúng không đòi hỏi tinh chỉnh thêm siêu tham số hay huấn luyện một "mạng nơ-ron chẩn đoán". Điều này làm chúng vững và dễ triển khai. Tuy nhiên, chẩn đoán độ phủ thường chỉ cung cấp một điều kiện cần, chứ không phải điều kiện đủ, cho tính đúng đắn của phân phối hậu nghiệm. Đặc biệt, nếu phân phối hậu nghiệm xấp xỉ $q_\psi(\theta \mid x)$ luôn trả về phân phối tiên nghiệm $p(\theta)$ (thay vì một xấp xỉ của phân phối hậu nghiệm), thì nó vẫn vượt qua các chẩn đoán độ phủ mô tả ở trên. Điều này cho thấy sự cần thiết của các công cụ chẩn đoán bổ sung.
+
+### 4.3 Các phương pháp khác
+
+Một công cụ đơn giản để chẩn đoán xấp xỉ hậu nghiệm $q_\psi(\theta \mid x)$ là thực hiện *kiểm tra dự đoán hậu nghiệm* (Posterior Predictive Checks, PPC). Khi cho một quan sát, các phương pháp này rút mẫu từ $q_\psi(\theta \mid x_o)$, mô phỏng chúng, rồi so sánh các kết quả mô phỏng (các dự đoán hậu nghiệm) với quan sát. Với mỗi mẫu hậu nghiệm $\theta$, phải có khả năng thu được một kết quả mô phỏng khớp sát với quan sát. Nếu kiểm tra dự đoán hậu nghiệm thất bại (ví dụ vì mọi dự đoán hậu nghiệm đều ở xa quan sát, hoặc nếu một số bộ tham số *không bao giờ* khớp được với quan sát), thì điều này cho thấy có vấn đề về độ chính xác của $q_\psi(\theta \mid x)$. Cụ thể, nó có thể đã được huấn luyện trên quá ít lần mô phỏng, hoặc điều này có thể gợi ý về *đặc tả sai mô hình* (model misspecification), trường hợp quan sát $x_o$ không thể được khớp bởi *bất kỳ* bộ tham số nào, như được bàn ở mục 6.
+
+Ngoài kiểm tra độ phủ và PPC, nhiều công cụ chẩn đoán khác cho SBI đã được phát triển trong những năm qua. Ví dụ, một số phương pháp chẩn đoán hiệu chuẩn cục bộ nhằm cung cấp điều kiện cần và đủ cho tính đúng đắn của phân phối hậu nghiệm. Tuy nhiên, các phương pháp này thường đòi hỏi huấn luyện thêm một mạng nơ-ron và phụ thuộc vào độ chính xác của mạng nơ-ron được huấn luyện thêm đó. Vì vậy, các công cụ chẩn đoán này cần các tập dữ liệu hiệu chuẩn lớn hơn và bản thân chúng có thể gặp vấn đề (ví dụ do mạng nơ-ron được huấn luyện thêm hội tụ kém).
+
+## 5. Các phương pháp thay thế
+
+Ước lượng hậu nghiệm bằng mạng nơ-ron (NPE) ước lượng trực tiếp phân phối hậu nghiệm. Ngoài NPE, các nhà nghiên cứu đã phát triển những phương pháp khác cho SBI. Các cách tiếp cận này huấn luyện mạng nơ-ron để mô phỏng lại (emulate) hoặc hàm hợp lý $p(x \mid \theta)$ (ước lượng hàm hợp lý bằng mạng nơ-ron, NLE), hoặc tỉ số hàm hợp lý trên bằng chứng (likelihood-to-evidence ratio) $p(x \mid \theta)/p(x)$ (ước lượng tỉ số bằng mạng nơ-ron, NRE), rồi dùng các phương pháp suy luận Bayes truyền thống (ví dụ MCMC) để rút mẫu từ phân phối hậu nghiệm. Cuối cùng, một số phương pháp gần đây còn vượt ra ngoài việc chỉ ước lượng phân phối hậu nghiệm hay hàm hợp lý (hoặc tỉ số hàm hợp lý). Dưới đây, chúng tôi mô tả các phương pháp thay thế này cho SBI.
+
+### 5.1 Ước lượng hàm hợp lý
+
+Ước lượng hàm hợp lý bằng mạng nơ-ron (NLE) dùng các bộ ước lượng mật độ bằng mạng nơ-ron (như luồng chuẩn hóa có điều kiện) để ước lượng hàm hợp lý $p(x \mid \theta)$. Ước lượng này có thể được học từ các mẫu của phân phối đồng thời $\{(\theta_i, x_i)\}_{i=1}^N \sim p(\theta, x)$ bằng cách tối ưu log-hàm hợp lý âm của các kết quả mô phỏng khi cho các tham số. NLE huấn luyện một bộ ước lượng mật độ có điều kiện $\ell_\psi(x \mid \theta)$, chẳng hạn một luồng chuẩn hóa, bằng cách tối ưu $\psi$ theo hàm mục tiêu
+
+$$
+\psi^* \in \arg\min_{\psi} \left[ -\frac{1}{N} \sum_{i=1}^{N} \log \ell_\psi(x_i \mid \theta_i) \right]. \tag{3.4}
+$$
+
+Sau khi huấn luyện, mô hình đã huấn luyện có thể được dùng để *mô phỏng lại* quá trình mô phỏng bằng cách rút mẫu từ xấp xỉ hàm hợp lý $\ell_\psi(x \mid \theta)$.
+
+Để suy luận hậu nghiệm, mô hình đã huấn luyện được nhân với tiên nghiệm để thu được ước lượng hậu nghiệm (chưa chuẩn hóa)
+
+$$
+\hat{p}(\theta \mid x) := \frac{1}{Z_\psi(x)} \ell_\psi(x \mid \theta) p(\theta), \qquad Z_\psi(x) := \int \ell_\psi(x \mid \theta) p(\theta)\, \mathrm{d}\theta. \tag{3.5}
+$$
+
+Để rút mẫu từ phân phối hậu nghiệm (xấp xỉ) $\hat{p}(\theta \mid x_o)$, cần một phương pháp rút mẫu từ phân phối chưa chuẩn hóa, ví dụ lấy mẫu loại bỏ (rejection sampling) hoặc Monte Carlo xích Markov (mục 5.3). Luồng chuẩn hóa cho phép tính (một cách khả vi) xấp xỉ hàm hợp lý $\ell_\psi(x_o \mid \theta)$, khiến việc này khả thi, dù có thể tốn kém về tính toán. Suy luận biến phân đã được chứng tỏ là tăng tốc việc lấy mẫu nhiều chiều từ NLE. Tuy nhiên, các phương pháp lấy mẫu này nhìn chung thường chậm và có thể đưa thêm sai số vào thủ tục suy luận. Một nhược điểm khác của NLE (so với NPE) là nó không thể kết hợp với một mạng nhúng được huấn luyện đầu cuối. Ta có thể nhúng $x_o$ *trước* khi huấn luyện bằng một mạng nơ-ron riêng, ví dụ một bộ tự mã hóa (autoencoder), rồi thực hiện NLE trên các kết quả mô phỏng đã được nhúng.
+
+NLE cũng có thể được dùng trong một lược đồ tuần tự để giảm số lần mô phỏng cần thiết cho suy luận khi cho một quan sát cụ thể. Các phương pháp NLE tuần tự này tập trung vào một quan sát cụ thể $x_o$, sinh dữ liệu gần $x_o$ một cách lặp. Một ưu điểm lớn của NLE trong tình huống đó là nó không cần sửa đổi hàm mất mát: bộ ước lượng mật độ bằng mạng nơ-ron sẽ hội tụ về hàm hợp lý với bất kỳ phân phối $\tilde{p}(\theta)$ nào mà từ đó các tham số được rút ra.
+
+### 5.2 Ước lượng tỉ số hàm hợp lý trên bằng chứng
+
+Tỉ số hàm hợp lý trên bằng chứng $r(x \mid \theta) := \frac{p(x \mid \theta)}{p(x)} = \frac{p(\theta, x)}{p(\theta) p(x)}$ là một mục tiêu ước lượng tự nhiên cho suy luận dựa trên mô phỏng vì quy tắc Bayes cho $p(\theta \mid x) = r(x \mid \theta) p(\theta)$. Các bộ ước lượng tỉ số cho phép dùng các kiến trúc linh hoạt hơn so với các lớp luồng chuẩn hóa vi phôi có định thức tính được. Tuy nhiên, các tỉ số mật độ có thể trải dài qua nhiều bậc độ lớn và do đó khó xấp xỉ trực tiếp về mặt số. Vì lý do này, người ta thường ước lượng $\log r(x \mid \theta)$. Một cách tiếp cận ổn định để ước lượng $\log r(x \mid \theta)$ là chuyển bài toán thành một nhiệm vụ phân loại. Một số biến thể đã được phát triển; ở đây, chúng tôi tập trung vào phương pháp của Hermans và cộng sự.
+
+NRE đưa vào một nhãn lớp nhị phân $y$ và định nghĩa phân phối đồng thời $\pi(\theta, x, y) := \pi(\theta, x \mid y) \pi(y)$. Ta gán xác suất lớp bằng nhau, $\pi(y = 0) := \pi(y = 1) := \frac{1}{2}$, và định nghĩa các phân phối có điều kiện theo lớp là
+
+$$
+\pi(\theta, x \mid y) :=
+\begin{cases}
+p(\theta) p(x), & y = 0, \\
+p(\theta, x), & y = 1.
+\end{cases} \tag{3.6}
+$$
+
+$p(\theta) p(x)$ được gọi là tích các phân phối biên (product of marginals). Cách dễ hiểu nhất là xét nó theo thuật toán: lấy hai mẫu độc lập $\theta_a, \theta_b \sim p(\theta)$ và mô phỏng một trong hai, $x_b \sim p(x \mid \theta_b)$. Khi đó các mẫu có phân phối $(\theta_a, x_b) \sim p(\theta) p(x)$. Việc lấy mẫu từ phân phối đồng thời $p(\theta, x)$ được thực hiện bằng cách trước hết lấy mẫu từ tiên nghiệm $\theta_c \sim p(\theta)$ rồi mô phỏng $x_c \sim p(x \mid \theta_c)$. Khi đó ta có một mẫu $(\theta_c, x_c) \sim p(\theta, x)$.
+
+Quy tắc Bayes cho thấy vì sao bài toán phân loại này xác định được tỉ số mong muốn:
+
+$$
+\frac{\pi(y = 1 \mid \theta, x)}{\pi(y = 0 \mid \theta, x)} = \frac{\pi(\theta, x \mid y = 1) \pi(y = 1)}{\pi(\theta, x \mid y = 0) \pi(y = 0)} = \frac{p(\theta, x)}{p(\theta) p(x)} = r(x \mid \theta).
+$$
+
+Do đó, $\pi(y = 1 \mid \theta, x) = \frac{r(x \mid \theta)}{1 + r(x \mid \theta)} = \sigma(\log r(x \mid \theta))$, trong đó $\sigma$ ký hiệu hàm sigmoid. Vì vậy ta xây dựng
+
+$$
+\hat{\pi}(y = 1 \mid \theta, x) := \sigma(f_\psi(\theta, x)) \qquad \text{and} \qquad \hat{r}(x \mid \theta) := \exp(f_\psi(\theta, x)),
+$$
+
+trong đó $\hat{\pi}(y = 1 \mid \theta, x)$ là một bộ phân loại, với $\hat{\pi}(y = 0 \mid \theta, x) = 1 - \hat{\pi}(y = 1 \mid \theta, x)$, và $\hat{r}(x \mid \theta)$ là một ước lượng của tỉ số hàm hợp lý trên bằng chứng. Cả hai được tham số hóa bởi mạng nơ-ron $f_\psi(\theta, x)$ với các trọng số $\psi$. Ta tối ưu $\psi$ bằng cách cực tiểu hóa độ phân kỳ KL có điều kiện,
+
+$$
+\psi^* \in \arg\min_{\psi} \mathrm{D}_{\mathrm{KL}}(\pi(y \mid \theta, x) \,\|\, \hat{\pi}(y \mid \theta, x)), \tag{3.7}
+$$
+
+$$
+\mathrm{D}_{\mathrm{KL}}(\pi(y \mid \theta, x) \,\|\, \hat{\pi}(y \mid \theta, x)) = \iint \pi(\theta, x) \sum_{y \in \{0, 1\}} \pi(y \mid \theta, x) \log \frac{\pi(y \mid \theta, x)}{\hat{\pi}(y \mid \theta, x)}\, \mathrm{d}x\, \mathrm{d}\theta. \tag{3.8}
+$$
+
+Ở đây, $\pi(\theta, x)$ là hỗn hợp biên sinh ra bởi bài toán phân loại đã xây dựng:
+
+$$
+\pi(\theta, x) := \pi(y = 1) \pi(\theta, x \mid y = 1) + \pi(y = 0) \pi(\theta, x \mid y = 0) = \frac{p(\theta, x) + p(\theta) p(x)}{2}. \tag{3.9}
+$$
+
+Độ phân kỳ KL có điều kiện chỉ khác entropy chéo nhị phân (binary cross-entropy) dùng để huấn luyện bộ phân loại một lượng bằng entropy có điều kiện của $\pi(y \mid \theta, x)$, đại lượng là hằng số đối với $\psi$. Do đó hai hàm mục tiêu có cùng điểm cực tiểu. Giả sử mô hình có đủ năng lực và quá trình tối ưu thành công, độ phân kỳ KL có điều kiện bằng không tại điểm tối ưu, nên $\pi(y = 1 \mid \theta, x) = \sigma(f_{\psi^*}(\theta, x))$ và $f_{\psi^*}(\theta, x) = \log r(x \mid \theta)$ hầu khắp nơi theo $\pi(\theta, x)$.
+
+Bây giờ ta có thể lập xấp xỉ hậu nghiệm chưa chuẩn hóa $\hat{p}'(\theta \mid x) := \hat{r}(x \mid \theta) p(\theta) = p(\theta) \exp(f_\psi(\theta, x))$. Trừ khi bộ phân loại khôi phục được tỉ số chính xác, tích phân của $\hat{p}'$ không nhất thiết bằng một. Phiên bản đã chuẩn hóa của nó là
+
+$$
+\hat{p}(\theta \mid x) := \frac{\hat{p}'(\theta \mid x)}{Z_\psi(x)} = \frac{\hat{r}(x \mid \theta)}{Z_\psi(x)} p(\theta) = \frac{\exp(f_\psi(\theta, x))}{Z_\psi(x)} p(\theta), \tag{3.10}
+$$
+
+với $Z_\psi(x) := \int \exp(f_\psi(\theta, x)) p(\theta)\, \mathrm{d}\theta$. Tại điểm tối ưu chính xác, $\exp(f_{\psi^*}(\theta, x)) = r(x \mid \theta)$ và do đó $Z_{\psi^*}(x) = 1$. Trong thực hành, hành vi của phân phối hậu nghiệm thường được mô tả bằng các mẫu, và các bộ lấy mẫu cho phân phối chưa chuẩn hóa không đòi hỏi phải tính $Z_\psi(x)$.
+
+Có thể rút mẫu từ $\hat{p}(\theta \mid x)$ bằng bất kỳ phương pháp lấy mẫu nào cho phân phối chưa chuẩn hóa, giống như với NLE (mục 5.3). Mạng nơ-ron dựa trên tỉ số $f_\psi(\theta, x)$ có thể vừa có khả năng biểu diễn tốt hơn vừa rẻ hơn so với xấp xỉ hàm hợp lý dựa trên luồng chuẩn hóa của NLE. Luồng chuẩn hóa đòi hỏi tham số hóa một vi phôi hiệu quả với log-định thức tính được, trong khi NRE cho phép các kiến trúc mạng nơ-ron tùy ý. Một hạn chế là hàm mục tiêu NRE tiêu chuẩn trong (3.7) nhìn chung không đạt được cùng hiệu suất tiệm cận như ước lượng mật độ hợp lý cực đại. Vì vậy, các hàm mục tiêu khác đã được khám phá cho ước lượng tỉ số.
+
+### 5.3 Lấy mẫu từ phân phối hậu nghiệm xấp xỉ bằng các mô hình suy luận chưa chuẩn hóa
+
+Trong khi NPE xấp xỉ trực tiếp phân phối hậu nghiệm, NLE và NRE đòi hỏi thêm một bước suy luận để rút mẫu từ phân phối hậu nghiệm. Để làm điều này, ta có thể dùng các phương pháp lấy mẫu đa dụng (xem [Chương 1](/vi/blog/introduction-to-sampling)) và điều chỉnh chúng để lấy mẫu từ một ước lượng hậu nghiệm chưa chuẩn hóa. Lấy mẫu loại bỏ hoặc lấy mẫu có trọng số lại (reweighted sampling) từ tiên nghiệm là những lựa chọn tự nhiên cho các bài toán đơn giản có số chiều thấp nhờ các cài đặt song song hoàn toàn (embarrassingly parallel) đơn giản. Cả hai phương pháp này đều bắt đầu bằng việc rút $N$ mẫu từ tiên nghiệm
+
+$$
+\theta_i \sim p(\theta), \quad i \in \{1, 2, \dots, N\}. \tag{3.11}
+$$
+
+Trong *lấy mẫu loại bỏ*, ta chọn một hằng số $M \geq 1$ sao cho $M \cdot p(\theta) \geq \hat{p}'(\theta \mid x_o)$ với mọi $\theta$ thuộc giá (support) của $\hat{p}'(\theta \mid x_o)$, trong đó $\hat{p}'(\theta \mid x_o)$ ký hiệu mật độ hậu nghiệm chưa chuẩn hóa. Với mỗi mẫu trong $N$ mẫu, ta rút
+
+$$
+u_i \sim \mathcal{U}(0, 1), \quad i \in \{1, 2, \dots, N\}, \tag{3.12}
+$$
+
+trong đó ta dùng $\mathcal{U}(a, b)$ để ký hiệu phân phối đều một chiều giữa $a$ và $b$. Thuật toán này cho các mẫu từ phân phối hậu nghiệm xấp xỉ $\hat{p}(\theta \mid x_o)$ theo cách sau:
+
+$$
+u_i < \frac{\hat{p}'(\theta_i \mid x_o)}{M \cdot p(\theta_i)} \implies \theta_i \sim \hat{p}(\theta \mid x_o). \tag{3.13}
+$$
+
+Lấy mẫu loại bỏ tạo ra trung bình $N/M$ mẫu. Nó hiệu quả khi $M \approx 1$, *tức là* khi số chiều thấp và khi tiên nghiệm và phân phối hậu nghiệm xấp xỉ có giá tương tự nhau. Lấy mẫu loại bỏ kém hiệu quả khi phân phối hậu nghiệm xấp xỉ hẹp so với tiên nghiệm.
+
+Trong *lấy mẫu có trọng số lại*, ta dùng các mẫu từ tiên nghiệm trong (3.11), nhưng gán cho chúng một trọng số quan trọng tự chuẩn hóa (self-normalized importance weight). Các trọng số và trọng số tự chuẩn hóa được định nghĩa là
+
+$$
+\tilde{w}_i := \hat{p}'(\theta_i \mid x_o), \qquad w_i := \frac{\tilde{w}_i}{\sum_{j=1}^{N} \tilde{w}_j} = \frac{\hat{p}'(\theta_i \mid x_o)}{\sum_{j=1}^{N} \hat{p}'(\theta_j \mid x_o)}. \tag{3.14}
+$$
+
+Biểu đồ tần suất (histogram) và các mô-men của phân phối có thể được tính bằng các mẫu có trọng số $w_i \theta_i$. Phương sai của các trọng số có thể lớn, nghĩa là một mẫu chiếm phần lớn khối lượng xác suất. Điều này xảy ra trong chính những tình huống mà lấy mẫu loại bỏ kém hiệu quả.
+
+Một phương pháp lấy mẫu có thể vững hơn trước số chiều lớn và trước các phân phối hậu nghiệm xấp xỉ chỉ chiếm một thể tích nhỏ (so với tiên nghiệm) là *Monte Carlo xích Markov*. Thay vì giải thích thêm, chúng tôi chỉ định nghĩa xác suất chấp nhận Metropolis-Hastings và giới thiệu bạn đọc đến [Chương 1](/vi/blog/introduction-to-sampling). Với một $x$ cố định và một phân phối đề xuất $\mathcal{T}$ có mật độ chuyển trạng thái $\mathcal{T}(\theta' \mid \theta)$ từ $\theta$ sang $\theta'$, xác suất chấp nhận $\alpha(\theta' \mid \theta, x)$ trong một bước Metropolis-Hastings là
+
+$$
+\alpha(\theta' \mid \theta, x_o) := \min\left(1, \frac{\hat{p}(\theta' \mid x_o)\, \mathcal{T}(\theta \mid \theta')}{\hat{p}(\theta \mid x_o)\, \mathcal{T}(\theta' \mid \theta)}\right) = \min\left(1, \frac{\hat{p}'(\theta' \mid x_o) / \cancel{Z_\psi(x_o)}\; \mathcal{T}(\theta \mid \theta')}{\hat{p}'(\theta \mid x_o) / \cancel{Z_\psi(x_o)}\; \mathcal{T}(\theta' \mid \theta)}\right) \tag{3.15}
+$$
+
+Xác suất chấp nhận này không phụ thuộc vào $Z_\psi(x_o)$ và do đó cho phép rút mẫu từ phân phối hậu nghiệm xấp xỉ ngay cả khi $\hat{p}'(\theta \mid x_o)$ chưa được chuẩn hóa. Thiết kế một nhân chuyển (transition kernel) hiệu quả và xác định sự hội tụ là một lĩnh vực nghiên cứu còn mở.
+
+### 5.4 Ước lượng đồng thời nhiều đại lượng
+
+Cuối cùng, một số phương pháp gần đây vượt ra ngoài việc ước lượng phân phối hậu nghiệm, hàm hợp lý hay tỉ số hàm hợp lý và ước lượng một số đại lượng trong số đó, thường bằng các mô hình riêng biệt. Gần đây, Simformer đã được đề xuất để ước lượng toàn bộ phân phối đồng thời $p(\theta, x)$ cùng mọi phân phối có điều kiện và phân phối biên của nó trong một mô hình duy nhất, dựa trên transformer và một mô hình khuếch tán (diffusion model). Nhờ đó, Simformer cải thiện tính linh hoạt của SBI và kết hợp các đặc điểm đáng mong muốn của NPE (ví dụ rút mẫu trực tiếp từ phân phối hậu nghiệm) và của NLE (ví dụ mô phỏng lại bộ mô phỏng).
+
+## 6. Các hướng phát triển hiện nay
+
+Ước lượng hậu nghiệm bằng mạng nơ-ron (NPE), cũng như các phương pháp thay thế như ước lượng hàm hợp lý bằng mạng nơ-ron (NLE) hay ước lượng tỉ số bằng mạng nơ-ron (NRE), đã được chứng tỏ là những công cụ mạnh mẽ cho SBI. Trong những năm qua, các nhà nghiên cứu đã mở rộng các phương pháp này theo nhiều cách, và đã phát triển những phương pháp SBI mới vượt ra ngoài việc ước lượng phân phối hậu nghiệm hay hàm hợp lý (hoặc tỉ số hàm hợp lý). Chúng tôi phác họa các xu hướng gần đây trong việc dùng mạng nơ-ron cho SBI.
+
+### 6.1 Các mô hình sinh tốt hơn
+
+Luồng chuẩn hóa đã là một lựa chọn phổ biến cho NPE trong nhiều năm, có lẽ nhờ tính vững khi huấn luyện, khả năng tính nhanh (và chính xác) log-xác suất của các mẫu, và tính phủ khối lượng của chúng. Tuy nhiên, việc phép biến đổi $T$ mà luồng chuẩn hóa huấn luyện phải khả nghịch có thể hạn chế tính linh hoạt của luồng chuẩn hóa. Điều này có thể làm giảm độ chính xác của các ước lượng hậu nghiệm của luồng chuẩn hóa, đặc biệt với các không gian tham số nhiều chiều và có cấu trúc (ví dụ khi các tham số là một chuỗi thời gian hay một hình ảnh). Để khắc phục điều này, các phương pháp gần đây đã khám phá những mô hình sinh có điều kiện khác cho NPE. Trong những năm gần đây, mô hình khuếch tán đặc biệt phổ biến nhờ khả năng ước lượng trên các không gian tham số nhiều chiều, và vẫn giữ được khả năng tính log-xác suất qua phương trình vi phân thường của luồng xác suất (probability flow ODE), dù với chi phí tính toán cao hơn đáng kể. Nhiều mô hình sinh khác đã được khám phá cho NPE, từ *flow matching* đến mô hình nhất quán (consistency model), mạng đối sinh (generative adversarial network), mô hình dựa trên năng lượng (energy-based model) và mô hình nền tảng cho dữ liệu dạng bảng. Chúng tôi kỳ vọng rằng mọi tiến bộ lớn trong mô hình hóa sinh (có điều kiện) sẽ trực tiếp chuyển thành những cải tiến cho NPE.
+
+### 6.2 Cải thiện tính linh hoạt của suy luận dựa trên mô phỏng
+
+Một hạn chế cốt lõi của NPE với luồng chuẩn hóa là nó đòi hỏi bài toán suy luận phải được biết trước. Ví dụ, nếu tiên nghiệm thay đổi, khi bộ mô phỏng được sửa đổi, hoặc khi cách biểu diễn dữ liệu thay đổi, NPE phải được chạy lại để thực hiện suy luận (bao gồm chạy mô phỏng và huấn luyện mạng nơ-ron).
+
+Để khắc phục điều này, nhiều phương pháp gần đây đã cải thiện tính linh hoạt của NPE. Thứ nhất, để suy luận khi cho một số lượng bất kỳ các lần thử i.i.d., có thể dùng các mạng nhúng bất biến hoán vị như đã mô tả ở trên. Ngoài ra, mô hình khuếch tán cho phép NPE ước lượng phân phối hậu nghiệm khi cho một số lượng bất kỳ các điểm dữ liệu i.i.d., ngay cả khi mạng nơ-ron được huấn luyện trên các cặp gồm tham số và một kết quả mô phỏng duy nhất. Thứ hai, để cho phép đặc tả tiên nghiệm hoặc bộ mô phỏng linh hoạt hơn, người ta đã đề xuất khấu hao theo các siêu tham số của tiên nghiệm hoặc bộ mô phỏng. Khi đó, mạng suy luận được đặt điều kiện không chỉ theo dữ liệu mà còn theo các giá trị bổ sung mô tả tiên nghiệm hoặc bộ mô phỏng. Khi suy luận, ta có thể thực hiện suy luận cho bất kỳ tiên nghiệm nào và cho bất kỳ bộ mô phỏng nào. Thứ ba, trong một số trường hợp và chỉ với một số quan sát, một số tham số có thể đã biết và không cần suy ra, mà nên được giữ cố định. Trong những trường hợp khác, dữ liệu có thể không phải lúc nào cũng đầy đủ, và một phần của quan sát có thể bị thiếu. Để thực hiện suy luận khấu hao một cách linh hoạt trong những trường hợp này, một số phương pháp cho phép ước lượng bất kỳ phân phối có điều kiện nào của tham số trong NPE và xử lý một cách có hệ thống dữ liệu bị thiếu.
+
+### 6.3 Cải thiện độ vững trước đặc tả sai mô hình
+
+Một thách thức cơ bản đối với SBI xuất hiện khi bộ mô phỏng bị *đặc tả sai* (misspecified), tức là khi nó không khớp với thực tế. Trong trường hợp cực đoan nhất, quan sát $x_o$ không thể được sinh ra bởi bộ mô phỏng (tức là tổ hợp của tiên nghiệm và bộ mô phỏng) với bất kỳ bộ tham số nào và với bất kỳ mức nhiễu mô phỏng nào.
+
+Điều này có thể tác động nghiêm trọng đến SBI: dù người ta có thể kỳ vọng rằng, với các quan sát bị đặc tả sai, phân phối hậu nghiệm xấp xỉ sẽ có khối lượng ở những vùng tham số sinh ra các dự đoán gần với quan sát, hoặc phân phối hậu nghiệm xấp xỉ sẽ rất bất định, thực tế không phải vậy. Thật vậy, các phương pháp SBI dựa trên mạng nơ-ron đã được chứng tỏ là phản ứng thất thường trước các quan sát bị đặc tả sai và có thể tạo ra những phân phối hậu nghiệm vô nghĩa.
+
+Một số phương pháp đã được đề xuất để cải thiện độ vững của SBI trong những tình huống này, bao gồm thêm nhiễu vào kết quả mô phỏng, học các thống kê của quan sát sao cho chúng không bị đặc tả sai, huấn luyện trên các quan sát không có nhãn và có nhãn khi có sẵn, hoặc thay đổi mục tiêu của suy luận.
+
+### 6.4 Các xấp xỉ hậu nghiệm thận trọng và được hiệu chuẩn
+
+Các phân phối hậu nghiệm SBI xấp xỉ có thể quá tự tin[^1], đặc biệt khi số lần mô phỏng hạn chế, điều thúc đẩy các phương pháp hướng tới những ước lượng độ bất định thận trọng (conservative) hoặc được hiệu chuẩn. Ước lượng tỉ số bằng mạng nơ-ron cân bằng (balanced neural ratio estimation) sửa đổi hàm mục tiêu huấn luyện của NRE để ưu tiên các xấp xỉ thận trọng, trong khi vẫn giữ nghiệm tối ưu Bayes của nó, bằng cách về thực chất điều chuẩn hóa ước lượng để nó gần tiên nghiệm hơn. Nguyên lý cân bằng này cũng đã được mở rộng cho NPE và NRE tương phản (contrastive NRE). Một cách khác là đưa trực tiếp các nới lỏng khả vi (differentiable relaxation) của sai số độ phủ vào hàm mục tiêu huấn luyện của các phương pháp SBI khấu hao, khuyến khích các phân phối hậu nghiệm được hiệu chuẩn với chi phí tính toán bổ sung vừa phải. Tuy nhiên, độ phủ kỳ vọng là một phép chẩn đoán cần chứ không đủ: một xấp xỉ có thể có độ phủ đúng danh nghĩa trong khi vẫn khác đáng kể so với phân phối hậu nghiệm đúng. Biểu đồ độ phủ tỉ số (ratio coverage plot) xử lý một số điểm mù này bằng cách so sánh phân phối hậu nghiệm xấp xỉ và phân phối hậu nghiệm đúng thông qua một tỉ số mật độ ước lượng.
+
+[^1]: Điều này xảy ra khi phân phối hậu nghiệm xấp xỉ hẹp hơn phân phối đúng.
+
+## 7. Thảo luận
+
+Nhiều quá trình trong khoa học tự nhiên và trong kỹ thuật được mô tả tốt nhất bằng các bộ mô phỏng phức tạp, ngẫu nhiên và có thể không khả vi. Với nhiều mô hình như vậy, hàm hợp lý có thể trở nên quá tốn kém hoặc thậm chí không thể tính được. Để suy luận bằng các phương pháp suy luận Bayes truyền thống như MCMC, các nhà khoa học và kỹ sư đã phải sửa đổi mô hình của mình sao cho hàm hợp lý có thể được tính hiệu quả, nhưng việc đó phải trả giá bằng việc giảm độ trung thực của bộ mô phỏng.
+
+Suy luận dựa trên mô phỏng (SBI) đưa suy luận Bayes đến với lớp mô hình rộng nhất: nó có thể được áp dụng cho bất kỳ bộ mô phỏng hộp đen nào mà ta có thể chạy các lần mô phỏng thuận. Trong những năm gần đây, mạng nơ-ron đã cải thiện đáng kể độ chính xác và khả năng áp dụng của SBI. Các phương pháp này sinh một cơ sở dữ liệu gồm các tham số và kết quả mô phỏng tương ứng, rồi huấn luyện mạng nơ-ron để học mối quan hệ thống kê giữa các đại lượng này. Sau khi huấn luyện, mạng nơ-ron có thể được tính tại bất kỳ quan sát nào và cho phép ta suy ra phân phối hậu nghiệm mà không cần thêm lần mô phỏng hay huấn luyện lại.
+
+SBI với mạng nơ-ron đã được áp dụng để suy luận trong nhiều ngành khoa học và kỹ thuật. Chúng tôi kỳ vọng rằng những tiến bộ liên tục trong việc cải thiện độ chính xác, tính linh hoạt và độ vững của các cách tiếp cận này sẽ có tác động sâu rộng đến nhiều lĩnh vực, và hy vọng rằng chúng sẽ giúp tạo ra những khám phá khoa học mới.
