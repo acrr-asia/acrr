@@ -1,0 +1,619 @@
+---
+title: "Giới thiệu về lấy mẫu"
+description: "Monte Carlo, lấy mẫu loại bỏ và lấy mẫu theo trọng số quan trọng, Metropolis–Hastings, Gibbs, MALA, Monte Carlo Hamilton và Monte Carlo tuần tự, cùng các phép chẩn đoán MCMC."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - sampling
+  - monte carlo methods
+  - markov chain monte carlo
+  - sequential monte carlo
+series: bayesian-deep-learning
+seriesOrder: 3
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl01RejectionBeta from '../../../components/diagrams/Bdl01RejectionBeta.astro';
+import Bdl01TracePlots from '../../../components/diagrams/Bdl01TracePlots.astro';
+import Bdl01AcfPlots from '../../../components/diagrams/Bdl01AcfPlots.astro';
+
+## 1. Giới thiệu
+
+Mục tiêu cơ bản của thống kê Bayes là tính phân phối hậu nghiệm (posterior distribution) của một biến ngẫu nhiên $\theta \in \Theta$ khi biết dữ liệu $\mathcal{D}$. Trong bối cảnh học có giám sát, khi dữ liệu $\mathcal{D} = \{X, Y\}$ gồm các đặc trưng/đầu vào $X$ và các đáp ứng/nhãn $Y$, công thức Bayes cho phân phối hậu nghiệm của tham số có dạng
+
+$$
+p(\theta \mid \mathcal{D}) = \frac{p(Y \mid \theta, X)\, p(\theta)}{\int_\Theta p(Y \mid \theta, X)\, p(\theta)\, \mathrm{d}\theta}\,, \tag{1.1}
+$$
+
+trong đó $p(Y \mid \theta, X)$ là hàm hợp lý (likelihood) của $N$ quan sát của biến mục tiêu $Y = \{y_1, \dots, y_N\}$ khi biết các đầu vào $X = \{x_1, \dots, x_N\}$, $p(\theta)$ là mật độ của phân phối tiên nghiệm (prior) của $\theta$, và
+
+$$
+p(\mathcal{D}) = \int_\Theta p(Y \mid \theta, X)\, p(\theta)\, \mathrm{d}\theta, \tag{1.2}
+$$
+
+là *bằng chứng mô hình* (model evidence) của dữ liệu. Lưu ý rằng, nói chung, phân phối hậu nghiệm thường chỉ được biết sai khác một hằng số chuẩn hóa, vì ngoài các mô hình đơn giản, việc tính tích phân trong bằng chứng mô hình là không khả thi khi $\theta$ có số chiều lớn, và tích phân này cũng thường không có dạng đóng. Do đó, người ta thường làm việc với phân phối hậu nghiệm chưa chuẩn hóa $p(\theta \mid \mathcal{D}) \propto p(Y \mid \theta, X)\, p(\theta)$.
+
+Chúng ta lưu ý rằng mục đích cuối cùng của việc giải (1.1) là ước lượng *phân phối dự đoán hậu nghiệm* (posterior predictive) cho các đầu vào mới $x^*$, tức là ảnh đẩy tới (pushforward) của phân phối hậu nghiệm qua hàm hợp lý kiểm tra:
+
+$$
+p(y^* \mid x^*, \theta)\,, \quad \text{for} \quad \theta \sim p(\theta \mid \mathcal{D})\,. \tag{1.3}
+$$
+
+Đây là một đại lượng có phân phối, bao hàm cả *độ bất định nhận thức và độ bất định ngẫu nhiên* (epistemic and aleatoric uncertainty) (độ bất định gây ra bởi việc thiếu dữ liệu hoặc thiếu hiểu biết, tương ứng), nhưng ta thường bằng lòng với kỳ vọng của nó như một ước lượng điểm $\hat{p}$:
+
+$$
+\hat{p}(y^* \mid x^*, \mathcal{D}) = \mathbb{E}_{\theta \mid \mathcal{D}}\left[p(y^* \mid x^*, \theta)\right] = \int_\Theta p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, \mathrm{d}\theta\,. \tag{1.4}
+$$
+
+Việc mô phỏng hay lấy mẫu từ $p(y^* \mid x^*, \theta)$, từ $\hat{p}(y^* \mid x^*)$, hoặc từ $p(y^* \mid x^*, \hat{\theta})$ với một ước lượng điểm $\hat{\theta}$ nào đó không được xét tường minh trong chương này, dù cũng đáng lưu ý rằng phân phối dự đoán hậu nghiệm thường có tính chất tốt hơn phân phối hậu nghiệm của tham số. Một lý do chính có thể là nó loại bỏ tính không khả định danh (non-identifiability) phát sinh từ tính hoán đổi được của các trọng số trong cùng một lớp.
+
+Trong phần còn lại của chương, chúng ta xét bài toán lấy mẫu từ một phân phối mục tiêu tổng quát $\pi(\theta) = \kappa(\theta)/Z$, trong đó $Z = \int_\Theta \kappa(\theta)\, \mathrm{d}\theta$ có thể đã biết hoặc chưa biết. Người đọc có thể hình dung $\pi(\theta) := p(\theta \mid \mathcal{D})$ là phân phối hậu nghiệm đã giới thiệu trong (1.1), nhưng ta bỏ dữ liệu $\mathcal{D}$ khỏi ký hiệu cho gọn.
+
+## 2. Monte Carlo
+
+Thuật toán lấy mẫu cơ bản nhất là thuật toán Monte Carlo, và nó là nền tảng của nhiều sơ đồ lấy mẫu khác. Monte Carlo hoạt động như sau. Giả sử ta có một biến ngẫu nhiên $\theta \in \Theta$ tuân theo một phân phối liên tục trên $\mathbb{R}^P$. Gọi $\pi$ là hàm mật độ xác suất của $\theta$ và giả sử ta có thể mô phỏng các mẫu độc lập và cùng phân phối (independent and identically distributed, i.i.d.) từ $\pi$. Lưu ý rằng ta cũng có thể gọi chính $\pi$ là phân phối. Với một hàm quan tâm $h$ khả tích theo $\pi$, ta muốn ước lượng kỳ vọng
+
+$$
+\mathbb{E}[h(\theta)] = \int h(\theta)\, \pi(\theta)\, \mathrm{d}\theta, \tag{1.5}
+$$
+
+vốn thường không có dạng đóng. Các phương pháp cầu phương (quadrature) phù hợp khi số chiều tham số thấp, $P \leq 5$, và với một số thủ thuật có thể lên tới $P \approx 20$ hoặc thậm chí $P \approx 100$. Tuy nhiên, khi $P$ lớn, Monte Carlo chiếm ưu thế tuyệt đối nhờ khả năng đáng chú ý là đạt được sai số bình phương trung bình (mean square error, MSE), định nghĩa bởi $\text{MSE} = \mathbb{E}\big[(\hat{h}_M - \mathbb{E}[h(\theta)])^2\big]$, giảm theo tốc độ chuẩn tắc $\mathcal{O}(1/M)$ theo số mẫu $M$, bất kể số chiều hay độ trơn của đại lượng quan tâm $h$.
+
+Phương pháp Monte Carlo cực kỳ đơn giản khi sử dụng. Ta muốn sinh $M$ mẫu độc lập $\theta_1, \theta_2, \dots, \theta_M$ như trong Thuật toán 1.
+
+**Thuật toán 1:** Thuật toán Monte Carlo
+
+```text
+Inputs : target density π
+Output: {θ_i}_{i=1}^M
+for i = 1 to M do
+    simulate θ_i ∼ π independently
+return {θ_i}_{i=1}^M
+```
+
+Dùng các mẫu Monte Carlo $\{\theta_i\}_{i=1}^M$ từ $\pi$, ta có thể ước lượng kỳ vọng như sau
+
+$$
+\mathbb{E}[h(\theta)] \approx \hat{h}_M := \frac{1}{M} \sum_{i=1}^M h(\theta_i)\,. \tag{1.6}
+$$
+
+Phương trình đẹp đẽ này có những tính chất hội tụ đáng chú ý, và chính tiêu chuẩn vàng này là điều mà ta muốn đạt được với các thuật toán lấy mẫu khác. Vì các mẫu $\theta_1, \dots, \theta_M$ là i.i.d. từ $\pi$, và ký hiệu $h_i = h(\theta_i)$, ta có
+
+$$
+\mathbb{E}[\hat{h}_M] = \mathbb{E}\Big[\tfrac{1}{M} \sum_{i=1}^M h_i\Big] = \tfrac{1}{M} \sum_{i=1}^M \mathbb{E}[h_i] = \mathbb{E}[h(\theta)]. \tag{1.7}
+$$
+
+Như vậy $\hat{h}_M$ là một ước lượng *không chệch* (unbiased) của tích phân mục tiêu. Hơn nữa, ta có thể tăng độ chính xác của ước lượng bằng cách tăng số mẫu $M$. Theo luật mạnh số lớn (strong law of large numbers), nếu $\mathbb{E}|h(\theta)| < \infty$, ta có thể bảo đảm rằng ước lượng Monte Carlo hội tụ hầu chắc chắn (almost surely) về giá trị đúng khi số mẫu tăng không giới hạn. Một cách hình thức,
+
+$$
+\frac{1}{M} \sum_{i=1}^M h(\theta_i) \;\to\; \mathbb{E}[h(\theta)] \quad \text{almost surely as } M \to \infty. \tag{1.8}
+$$
+
+Nghĩa là, với xác suất một, ước lượng cuối cùng sẽ tiến gần tùy ý tới giá trị đúng. Nếu viện dẫn định lý giới hạn trung tâm (central limit theorem), ta còn có thể định lượng độ chính xác của $\hat{h}_M$ với một $M$ hữu hạn cho trước. Định nghĩa phương sai
+
+$$
+V \;=\; \int \{h(\theta) - \mathbb{E}[h(\theta)]\}^2\, \pi(\theta)\, \mathrm{d}\theta, \tag{1.9}
+$$
+
+và giả sử $V < \infty$. Khi đó, khi $M \to \infty$,
+
+$$
+\sqrt{M} \left(\frac{\hat{h}_M - \mathbb{E}[h(\theta)]}{\sqrt{V}}\right) \xrightarrow{\;\mathsf{D}\;} \mathcal{N}(0, 1). \tag{1.10}
+$$
+
+Một cách tương đương, với $M$ lớn,
+
+$$
+\hat{h}_M \;\sim\; \mathcal{N}\Big(\mathbb{E}[h(\theta)],\, V/M\Big), \tag{1.11}
+$$
+
+nên sai số chuẩn của ước lượng Monte Carlo là $\sqrt{V/M}$ và MSE của nó giảm theo tốc độ chuẩn tắc $O(M^{-1})$ (tức là căn bậc hai của MSE giảm theo $O(M^{-1/2})$). Tốc độ hội tụ $M^{-1/2}$ này không phụ thuộc vào số chiều $P$ hay độ trơn của $h$, và là chuẩn mực mà mọi phương pháp lấy mẫu nâng cao hơn đều được so sánh với nó.
+
+Thách thức thường gặp là ta không thể lấy mẫu trực tiếp từ phân phối xác suất mục tiêu $\pi$, mà chỉ có thể tính giá trị hoặc lấy mẫu từ một ước lượng không âm, không chệch của $\kappa$. Việc giải quyết các thách thức này đã dẫn tới sự phát triển của các thuật toán được trình bày trong phần còn lại của chương.
+
+## 3. Lấy mẫu loại bỏ
+
+Giả sử $q(\theta)$ là một hàm mật độ xác suất mà ta *có thể* lấy mẫu từ nó tương đối dễ dàng, và $\pi(\theta)$ là mật độ mục tiêu mà ta muốn lấy mẫu. Giả sử thêm rằng tồn tại một hằng số $c > 0$ sao cho
+
+$$
+\frac{\pi(\theta)}{q(\theta)} \leq c, \tag{1.12}
+$$
+
+bất cứ khi nào $\pi(\theta) > 0$. Khi đó, ta có thể xây dựng một thuật toán để mô phỏng $M$ mẫu từ $\pi(\theta)$ như trong Thuật toán 2.
+
+**Thuật toán 2:** Lấy mẫu loại bỏ
+
+```text
+Inputs : target density π, proposal density q, constant c > 0
+Output: {θ_i}_{i=1}^M
+i ← 1
+while i ≤ M do
+    simulate θ′ ∼ q and u ∼ U(0, 1)
+    if u < π(θ′) / (c q(θ′)) then
+        θ_i ← θ′
+        i ← i + 1
+return {θ_i}_{i=1}^M
+```
+
+<Figure caption="Hình 1.1: Lấy mẫu loại bỏ từ mật độ mục tiêu Beta(2, 2) π(y) với mật độ đề xuất đều q(y). Trái: riêng q không trội hơn π, nhưng đường bao cq với c = 3/2 thì trội hơn. Phải: xác suất chấp nhận k(y) = π(y)/(cq(y)), vẽ thêm cho mật độ mục tiêu Beta(3, 3) (c = 15/8), với xác suất chấp nhận thấp hơn. (Vẽ lại từ các mật độ chính xác; nhãn trong hình giữ nguyên tiếng Anh.)">
+  <Bdl01RejectionBeta />
+</Figure>
+
+Thuật toán này được gọi là *lấy mẫu loại bỏ* (rejection sampling). Có thể thấy rằng quy trình này sẽ rất hiệu quả về mặt tính toán nếu các mật độ $q(\theta)$ và $\pi(\theta)$ xấp xỉ bằng nhau và hằng số $c$ có thể được chọn gần 1. Khi đó, xác suất chấp nhận nói chung sẽ gần 1. Ngược lại, nếu $\pi(\theta)$ và $q(\theta)$ rất khác nhau, thuật toán có thể phải chạy nhiều lần trước khi một giá trị cuối cùng được chấp nhận.
+
+**Ví dụ 1.1.** Ta minh họa việc dùng lấy mẫu loại bỏ để lấy mẫu từ phân phối Beta(2, 2). Trong trường hợp này $\pi(\theta) = 6x(1 - x), 0 \leq x \leq 1$. Giả sử ta chọn $q(\theta)$ là mật độ đều trên $(0, 1)$. Khi đó có thể thấy $\pi/q \leq 3/2$ và các điều kiện của lấy mẫu loại bỏ được thỏa mãn. Tuy nhiên, có thể thấy rằng xác suất chấp nhận thường sẽ nhỏ: chẳng hạn, nếu $\theta < 0.25$ hoặc $\theta > 0.75$ (điều xảy ra trong 1/2 số lần) thì việc chấp nhận xảy ra ít hơn 75% số lần, nghĩa là ta sẽ cần nhiều mẫu hơn đáng kể so với trường hợp i.i.d. lý tưởng. Với phân phối Beta(3, 3), tỉ lệ loại bỏ còn cao hơn nữa. Điều này có thể thấy ở khung bên phải của Hình 1.1.
+
+Dù có ưu điểm là dễ cài đặt và dễ mô phỏng, hiệu quả của lấy mẫu loại bỏ phụ thuộc vào (i) việc có một phân phối đề xuất tốt và (ii) một cận $c$. Lưu ý rằng có thể dễ dàng sửa đổi nó để chỉ cần $\kappa$, nhưng những khó khăn này vẫn còn nguyên.
+
+## 4. Lấy mẫu theo trọng số quan trọng
+
+Ước lượng lấy mẫu theo trọng số quan trọng (importance sampling) của $\mathbb{E}_\pi[h(\theta)]$ bắt đầu bằng việc viết lại tích phân như sau
+
+$$
+\int_\Theta h(\theta)\, \pi(\theta)\, \mathrm{d}\theta = \int \frac{\pi(\theta)}{q(\theta)}\, h(\theta)\, q(\theta)\, \mathrm{d}\theta\,, \tag{1.13}
+$$
+
+trong đó $q$ là một mật độ thỏa mãn $q(\theta) > 0$ bất cứ khi nào $\pi(\theta) h(\theta) \neq 0$. Bây giờ ta sinh các mẫu i.i.d. $(\theta_1, \dots, \theta_M)$ từ $q$ và ước lượng
+
+$$
+\hat{h} = \frac{1}{M} \sum_{i=1}^M \frac{\pi(\theta_i)}{q(\theta_i)}\, h(\theta_i) = \frac{1}{M} \sum_{i=1}^M w(\theta_i)\, h(\theta_i)\,. \tag{1.14}
+$$
+
+Ta gọi quy trình này là *lấy mẫu theo trọng số quan trọng*. Mật độ $q$ được gọi là mật độ đề xuất (proposal density) hay mật độ công cụ (instrumental density), và $w(\theta_i) = \frac{\pi(\theta_i)}{q(\theta_i)}$ là các *trọng số quan trọng* (importance weights). Lưu ý rằng $\hat{h}$ là một ước lượng Monte Carlo không chệch của $\mathbb{E}_\pi[h(\theta)]$, như đã chỉ ra trong Phương trình (1.7). Có hai lý do khiến ta có thể muốn thực hiện lấy mẫu theo trọng số quan trọng:
+
+1. Việc lấy mẫu từ $\pi(\theta)$ là không thể hoặc quá tốn kém.
+2. Hàm $h(\theta)$ có phương sai lớn, nên ước lượng không chệch thông thường có sai số Monte Carlo lớn.
+
+Nhắc lại các kết quả của Mục 2, hàm kiểm tra hiệu dụng bây giờ là $(\pi/q)h$, nên tính chính quy của nó quyết định hành vi hội tụ. Do đó, nếu có thể, ta nên chọn một mật độ đề xuất $q$ sao cho phương sai của $(\pi/q)h$ nhỏ. Có thể chứng minh rằng phân phối đề xuất tối ưu là $q \propto \pi|h|$; tuy nhiên, bản thân điều đó không giúp được nhiều, vì ta lại quay về đúng bài toán xấp xỉ $q$. Dù vậy, nó có thể cung cấp định hướng hữu ích.
+
+**Ví dụ 1.2.** Cho $\pi = \mathcal{N}(0, 1)$ và $h = \mathbf{1}(\theta > 4)$, trong đó $\mathbf{1}$ là hàm chỉ thị, nhận giá trị 1 nếu đối số đúng và 0 nếu ngược lại. Vì ta có thể mô phỏng i.i.d. từ $\pi$, ta dễ bị cám dỗ làm như vậy, tức là lấy $\theta_1, \dots, \theta_M \sim \pi$ i.i.d. và đặt
+
+$$
+\hat{h} = \frac{1}{M} \sum_{i=1}^M h(\theta_i)\,. \tag{1.15}
+$$
+
+Số mẫu $M$ sẽ phải rất lớn mới thu được một ước lượng khác không. Một cách khác là sinh một mẫu i.i.d. từ một biến ngẫu nhiên *mũ* với tham số tốc độ 1, tịnh tiến sang phải 4 đơn vị. Khi đó, ta thu được các mẫu $\theta > 4$ sao cho
+
+$$
+w(\theta) = \frac{\pi(\theta)}{q(\theta)} = \frac{1}{\sqrt{2\pi}} \exp\left(-\frac{\theta^2}{2} + (\theta - 4)\right). \tag{1.16}
+$$
+
+Giả sử ta chỉ biết cách tính giá trị của $\kappa$. Dễ thấy rằng có thể xây dựng một ước lượng không chệch của hằng số chuẩn hóa nhờ đồng nhất thức sau
+
+$$
+Z = \int_\Theta \kappa(\theta)\, \mathrm{d}\theta = \int_\Theta \frac{\kappa(\theta)}{q(\theta)}\, q(\theta)\, \mathrm{d}\theta\,. \tag{1.17}
+$$
+
+Việc xây dựng một ước lượng lấy mẫu theo trọng số quan trọng tự chuẩn hóa (self-normalized) vững (nhưng chệch) chỉ dùng $\kappa$ được dành làm bài tập cho người đọc. Khác với lấy mẫu loại bỏ, lấy mẫu theo trọng số quan trọng không lãng phí mẫu qua bước loại bỏ, vốn có thể chiếm một lượng lớn tùy theo ứng dụng cụ thể.
+
+Như đã ám chỉ ở trên, một nhược điểm lớn của lấy mẫu theo trọng số quan trọng là nó có thể dẫn tới phương sai cao. Có nhiều phương pháp ngoài những gì đã giới thiệu ở đây để giảm nhẹ vấn đề này, trong đó có các phương pháp *lấy mẫu theo trọng số quan trọng tuần tự và lấy mẫu lại* (sequential importance sampling and resampling), sẽ được giới thiệu ở Mục 6.
+
+## 5. Monte Carlo xích Markov
+
+Các mục trước đã giới thiệu tích phân Monte Carlo và hai cách tiếp cận cổ điển (lấy mẫu loại bỏ và lấy mẫu theo trọng số quan trọng) để rút mẫu từ một phân phối mục tiêu $\pi(\theta)$, thường là phân phối hậu nghiệm trong suy luận Bayes. Dù các phương pháp này đơn giản khi sử dụng và có cơ sở lý thuyết vững chắc, chúng gặp những hạn chế đáng kể trong không gian nhiều chiều. Lấy mẫu loại bỏ ngày càng kém hiệu quả khi số chiều tăng, do khó tìm được các phân phối đề xuất bao sát phân phối mục tiêu. Lấy mẫu theo trọng số quan trọng, dù linh hoạt hơn, có xu hướng có phương sai cao trừ khi phân phối đề xuất khớp tốt với phân phối mục tiêu, một điều kiện nổi tiếng là khó thỏa mãn trong thực hành, đặc biệt với các phân phối hậu nghiệm đa mode, đuôi nặng và nhiều chiều gặp phải trong học sâu Bayes (Bayesian deep learning).
+
+Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC) cung cấp một khung mạnh mẽ và tổng quát để vượt qua những thách thức này. Thay vì cố gắng sinh các mẫu độc lập từ $\pi(\theta)$, MCMC xây dựng một *xích Markov* (Markov chain) có phân phối dừng (stationary distribution) chính là $\pi$. Bằng cách mô phỏng một quỹ đạo qua không gian tham số sao cho, về mặt tiệm cận, phân phối thực nghiệm của các trạng thái đã đi qua hội tụ về phân phối mục tiêu, MCMC biến nhiệm vụ lấy mẫu độc lập thành nhiệm vụ thiết kế một cơ chế chuyển trạng thái phù hợp, bảo đảm cả *tính ergodic* (ergodicity) lẫn *tính bất biến* (invariance) đối với $\pi$.
+
+Về mặt thực hành, các phương pháp MCMC tạo ra một dãy mẫu có tương quan $\{\theta_1, \theta_2, \dots, \theta_M\}$, mà dưới các điều kiện phù hợp vẫn có thể dùng để xấp xỉ các kỳ vọng theo $\pi$ bằng các trung bình ergodic. Ước lượng chuẩn tắc có dạng:
+
+$$
+\hat{h}_M = \frac{1}{M} \sum_{i=1}^M h(\theta_i), \tag{1.18}
+$$
+
+và mặc dù các mẫu phụ thuộc lẫn nhau, ước lượng này hội tụ về kỳ vọng hậu nghiệm thực $\mathbb{E}_\pi[h(\theta)]$ dưới các giả định chính quy nhẹ.
+
+Trong phần tiếp theo, chúng ta giới thiệu một số thuật toán MCMC cơ bản, bắt đầu với *thuật toán Metropolis–Hastings*, vốn cung cấp một công thức tổng quát để xây dựng các xích Markov bất biến đối với $\pi$ từ các phân phối đề xuất tùy ý. Sau đó chúng ta xem xét các trường hợp đặc biệt quan trọng (Metropolis bước ngẫu nhiên, thuật toán Langevin hiệu chỉnh Metropolis (Metropolis-adjusted Langevin algorithm, MALA) và Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC)), đặc biệt liên quan tới suy luận hậu nghiệm nhiều chiều trong học sâu Bayes. Xuyên suốt, chúng ta chú ý kỹ tới các đánh đổi thuật toán, hành vi co giãn theo số chiều và các công cụ chẩn đoán để đánh giá sự hội tụ và hiệu quả lấy mẫu.
+
+### 5.1 Metropolis–Hastings
+
+Monte Carlo xích Markov (MCMC) hoạt động bằng cách sinh một xích Markov $\theta_1 \to \theta_2 \to \dots$ với nhân chuyển trạng thái (transition kernel) $\mathcal{M}$, được mô tả bởi một mật độ $p(\theta, \theta')$ trên $\Theta^2$, bất biến đối với phân phối hậu nghiệm mục tiêu $\pi$:
+
+$$
+\int_\Theta \pi(\theta')\, p(\theta', \theta)\, \mathrm{d}\theta' = \pi(\theta). \tag{1.19}
+$$
+
+Thuật toán Metropolis–Hastings (MH) đạt được tính bất biến này bằng cách trước hết chọn một mật độ đề xuất tùy ý $q(\theta, \theta')$, đề xuất $\theta'$ khi biết trạng thái hiện tại $\theta$ của xích Markov, rồi chấp nhận hoặc loại bỏ từng bước di chuyển được đề xuất sao cho cân bằng chi tiết (detailed balance) (và do đó (1.19)) được thỏa mãn.
+
+Cụ thể, ta có thể định nghĩa nhân chuyển trạng thái MH là
+
+$$
+p(\theta, \theta') = q(\theta, \theta')\, \alpha(\theta, \theta'), \tag{1.20}
+$$
+
+trong đó xác suất chấp nhận là
+
+$$
+\alpha(\theta, \theta') = \min\left\{1,\; \frac{\pi(\theta')\, q(\theta', \theta)}{\pi(\theta)\, q(\theta, \theta')}\right\}. \tag{1.21}
+$$
+
+Vì $\pi(\theta) \propto \kappa(\theta)$, mọi hằng số chuẩn hóa chưa biết đều bị triệt tiêu và chỉ cần mật độ chưa chuẩn hóa $\kappa$. Xem Thuật toán 3 để có một cài đặt đầy đủ.
+
+**Mệnh đề 1.1.** *Thuật toán Metropolis-Hastings thỏa mãn phương trình (1.19).*
+
+*Chứng minh.* Trước hết, giả sử đề xuất được chấp nhận. Nhắc lại định nghĩa của $p(\theta, \theta')$, ta có
+
+$$
+p(\theta, \theta') = q(\theta, \theta') \times \alpha(\theta, \theta') = \min\left\{q(\theta, \theta'),\; \frac{\pi(\theta')\, q(\theta', \theta)}{\pi(\theta)}\right\}. \tag{1.22}
+$$
+
+Suy ra
+
+$$
+\pi(\theta)\, p(\theta, \theta') = \min\{\pi(\theta)\, q(\theta, \theta'),\, \pi(\theta')\, q(\theta', \theta)\} = \pi(\theta')\, p(\theta', \theta)\,, \tag{1.23}
+$$
+
+do tính đối xứng. Tính đối xứng trong trường hợp bị loại bỏ được dành làm bài tập. Tính chất này được gọi là *cân bằng chi tiết* và là một điều kiện đủ cho tính bất biến (1.19). $\square$
+
+**Thuật toán 3:** Thuật toán Metropolis-Hastings
+
+```text
+Inputs : unnormalized target density κ, proposal distribution q
+Output: {θ_i}_{i=1}^M
+Generate initial sample θ_0 ∼ p, with π ≪ p (absolute continuity)
+for i = 0 to M − 1 do
+    propose new state θ′ ∼ q(θ_i, ·)
+    compute the acceptance probability
+
+        α(θ_i, θ′) = min{1, π(θ′)q(θ′, θ_i) / (π(θ_i)q(θ_i, θ′))}
+                   = min{1, κ(θ′)q(θ′, θ_i) / (κ(θ_i)q(θ_i, θ′))}
+
+    draw u ∼ 𝒰[0, 1]
+    if u ≤ α(θ_i, θ′) then
+        θ_{i+1} ← θ′
+    else
+        θ_{i+1} ← θ_i
+return {θ_i}_{i=1}^M
+```
+
+Tính bất biến đối với $\pi$ là một điều kiện cần để xây dựng các ước lượng hội tụ từ một xích Markov. Xích cũng cần có một số tính chất ổn định khác, gọi chung là *tính ergodic*, để bảo đảm các trung bình thực nghiệm (1.6) xây dựng từ đầu ra của nó hội tụ. Một tính chất đáng mong muốn và đạt được là *tính ergodic hình học* (geometric ergodicity), về cơ bản bảo đảm sự hội tụ tuyến tính, tức là sự phụ thuộc vào điều kiện ban đầu biến mất theo cấp số nhân.
+
+#### Metropolis bước ngẫu nhiên
+
+Một trường hợp đặc biệt đặc biệt đơn giản (và quan trọng về mặt lịch sử) của thuật toán Metropolis–Hastings là đề xuất *Metropolis bước ngẫu nhiên* (random-walk Metropolis, RWM), trong đó ta đặt
+
+$$
+q(\theta, \theta') = q(\theta' - \theta), \tag{1.24}
+$$
+
+với $q$ là một mật độ đối xứng bất kỳ, $q(\theta) = q(-\theta)$. Lựa chọn chuẩn tắc là
+
+$$
+\theta' = \theta + \epsilon, \qquad \epsilon \sim \mathcal{N}\big(0,\; \lambda^2 I_P\big), \tag{1.25}
+$$
+
+sao cho $\theta' \sim \mathcal{N}\big(\theta, \lambda^2 I_P\big)$, tức là $q(\theta, \cdot) = \mathcal{N}\big(\theta, \lambda^2 I_P\big)$. Nhờ tính đối xứng, xác suất chấp nhận Metropolis rút gọn thành
+
+$$
+\alpha(\theta, \theta') = \min\left\{1,\; \frac{\kappa(\theta')}{\kappa(\theta)}\right\}. \tag{1.26}
+$$
+
+**Bước di chuyển cục bộ và điều chỉnh.** Các đề xuất RWM về bản chất là *cục bộ*: mỗi ứng viên $\theta'$ nằm trong một lân cận của $\theta$. Nếu $\lambda$ quá nhỏ, xích chỉ đi những bước rất nhỏ và trộn (mix) rất chậm; nếu $\lambda$ quá lớn, phần lớn các đề xuất rơi vào các vùng mật độ thấp và bị loại bỏ. Các kết quả về co giãn tối ưu (optimal scaling) cho thấy rằng, với một lớp rộng các phân phối mục tiêu $P$ chiều, tỉ lệ chấp nhận (acceptance rate) ở trạng thái dừng tiến tới $\approx 0.234$ khi $P \to \infty$ nếu $\lambda \propto P^{-1/2}$. Vì vậy, trong thực hành, người ta điều chỉnh thích nghi $\lambda$ sao cho tỉ lệ chấp nhận thực nghiệm nằm trong khoảng 20% đến 30%.
+
+**Tiền điều kiện hóa.** Khi các thành phần của $\theta$ có thang đo rất khác nhau hoặc tương quan mạnh, ta có thể thay $\lambda^2 I_P$ bằng $\lambda^2 V$, trong đó $V$ là một ma trận "tiền điều kiện" (preconditioning) xác định dương (thường là một ước lượng của hiệp phương sai hậu nghiệm). *RWM tiền điều kiện hóa* này giữ nguyên tính đối xứng và do đó giữ nguyên xác suất chấp nhận rút gọn, nhưng có thể cải thiện hiệu quả tính toán tới nhiều bậc độ lớn, tức là cần ít mẫu hơn để lấy mẫu phân phối mục tiêu, vì các tham số được đề xuất $\theta'$ sẽ khớp sát hơn với phân phối hậu nghiệm và do đó ít có khả năng bị loại bỏ hơn.
+
+#### Bộ lấy mẫu Gibbs
+
+Với một biến nhiều chiều $\theta = (\theta_1, \theta_2 \dots \theta_n)$, việc lấy mẫu toàn bộ cùng một lúc có thể là bất khả thi. Tuy nhiên, nếu biết các phân phối có điều kiện đầy đủ (full conditional distributions) của từng tọa độ, ta có thể áp dụng *lấy mẫu Gibbs* (Gibbs sampling).
+
+Thuật toán lấy mẫu Gibbs khá đơn giản. Khi các đề xuất đã biết, thuật toán Gibbs cập nhật mẫu bằng cách cập nhật lần lượt từng tọa độ, tức là $\theta_i' \sim P(\theta_i \mid \theta_{\neg i})$, trong đó $\theta_{\neg i}$ ký hiệu tất cả các tọa độ trừ tọa độ $i$. Dù có thể muốn cập nhật tất cả các tọa độ cùng lúc, cách làm đó sẽ không bảo toàn đúng phân phối đồng thời vì mọi tọa độ sẽ được cập nhật một cách độc lập. Chúng tôi đưa ra một phát biểu đơn giản trong Thuật toán 4.
+
+**Thuật toán 4:** Bộ lấy mẫu Gibbs
+
+```text
+Inputs : initial state θ = (θ_1, θ_2 … θ_n); full conditional distributions P(θ_i | θ_¬i) for i ∈ {1, …, n}
+Outputs: sample set 𝒮
+𝒮 ← ∅
+for each iteration do
+    for i ∈ {1, …, n} do
+        θ_i′ ∼ P(θ_i | θ_¬i)
+        θ ← (θ_1, θ_2, … θ_i′, … θ_n)
+        𝒮 ← 𝒮 ∪ {θ}
+```
+
+Vì bộ lấy mẫu Gibbs rút mẫu từ đúng phân phối đề xuất, bước chấp nhận Metropolis-Hastings thông thường là không cần thiết trong trường hợp này. Tuy nhiên, bộ lấy mẫu này chịu nhược điểm là chậm và cho các mẫu tương quan mạnh do bản chất của cách cập nhật từng tọa độ một.
+
+Có thể mở rộng bộ lấy mẫu Gibbs ban đầu thành một cách tiếp cận theo khối trong trường hợp biết phân phối đồng thời trên nhiều tọa độ. Thay vì phân phối biên của một tọa độ, nếu ta biết phân phối đồng thời trên một tập tọa độ khi biết một tập khác, ta có thể lấy mẫu nhanh bằng cách lấy mẫu luân phiên từ từng phân phối đồng thời. Cách này được gọi là bộ lấy mẫu Gibbs khối (Block-Gibbs sampler). Một cách hình thức hơn, nếu ta có hai tập tọa độ $I, J$, bộ lấy mẫu Gibbs khối tiến hành bằng cách lấy mẫu $\theta_I' \sim P(\theta_I \mid \theta_J)$, rồi lấy mẫu $\theta_J' \sim P(\theta_J \mid \theta_I')$. Thuật toán lấy mẫu này tránh được những nhược điểm của bộ lấy mẫu Gibbs thông thường. Tuy nhiên, nó chỉ dùng được trong những trường hợp biết các phân phối có điều kiện trên các khối tọa độ.
+
+#### Thuật toán Langevin hiệu chỉnh Metropolis
+
+Metropolis bước ngẫu nhiên bỏ qua thông tin gradient của $\pi$. Thuật toán Langevin hiệu chỉnh Metropolis (MALA) khắc phục điều này bằng cách dùng phép rời rạc hóa Euler–Maruyama của quá trình khuếch tán Langevin quá cản (overdamped Langevin diffusion)
+
+$$
+\mathrm{d}\theta_t = \tfrac{1}{2} \nabla \log \pi(\theta_t)\, \mathrm{d}t + \mathrm{d}W_t, \tag{1.27}
+$$
+
+trong đó $\{W_t\}_{t \geq 0}$ là chuyển động Brown (Brownian motion) chuẩn trên $\mathbb{R}^P$, và quá trình này có phân phối dừng là $\pi$. Cụ thể, đề xuất MALA là
+
+$$
+\theta' \mid \theta \sim \mathcal{N}\left(\theta + \tfrac{\lambda^2}{2} \nabla \log \kappa(\theta),\, \lambda^2 I_P\right). \tag{1.28}
+$$
+
+Số hạng trôi (drift) $\nabla \log \kappa(\theta)$ này đẩy các bước di chuyển được đề xuất về phía các vùng có mật độ hậu nghiệm cao hơn, cho phép dùng kích thước bước (step size) lớn hơn RWM và đạt tỉ lệ chấp nhận tốt hơn. Đề xuất MALA cũng là nền tảng của nhiều thuật toán Monte Carlo tuyệt vời khác, bao gồm động lực học Langevin gradient ngẫu nhiên (stochastic gradient Langevin dynamics, SGLD) và mọi thuật toán MCMC gradient ngẫu nhiên (stochastic gradient MCMC, SG-MCMC) khác, vốn là trọng tâm của chương tiếp theo.
+
+**Điều chỉnh dựa trên gradient.** Dưới các điều kiện chính quy, chọn $\lambda \propto P^{-1/6}$ cho tỉ lệ chấp nhận tối ưu ở trạng thái dừng xấp xỉ 0.574 khi $P \to \infty$. Trong các ứng dụng, người ta thường điều chỉnh thích nghi $\lambda$ để nhắm tới tỉ lệ chấp nhận khoảng 50% đến 60%. Điều này có thể thực hiện bằng cách theo dõi tỉ lệ chấp nhận và điều chỉnh $\lambda$ cho phù hợp, hoặc bằng các sơ đồ thích nghi tinh vi hơn, điều chỉnh kích thước bước dựa trên thông tin gradient thực nghiệm.
+
+**MALA tiền điều kiện hóa và tính bền vững.** Tương tự RWM, ta có thể đưa vào một ma trận tiền điều kiện đối xứng $V$, thay $I_P$ bằng $V$ cả trong ma trận hiệp phương sai lẫn trong số hạng trôi:
+
+$$
+\theta' \sim \mathcal{N}\left(\theta + \tfrac{\lambda^2}{2} V \nabla \log \kappa(\theta),\, \lambda^2 V\right). \tag{1.29}
+$$
+
+Tiền điều kiện hóa thường tăng tốc đáng kể sự hội tụ trên các phân phối hậu nghiệm bất đẳng hướng. Tuy nhiên, vì MALA dựa vào $\nabla \log \kappa$, nó có thể nhạy cảm với những vùng mà gradient lớn hoặc có hành vi xấu (ví dụ đuôi nhẹ hơn đuôi Gauss). Các biện pháp giảm nhẹ phổ biến gồm cắt gradient (gradient clipping) hoặc quay về RWM bên ngoài một "vùng tin cậy" (trust region).
+
+#### Theo dõi hiệu năng
+
+Việc đánh giá chất lượng của một lần chạy MCMC là thiết yếu để bảo đảm các trung bình thực nghiệm $\hat{h}_M = \frac{1}{M} \sum_{i=1}^M h(\theta_i)$ xấp xỉ $\mathbb{E}_\pi[h(\theta)]$ một cách tin cậy. Ba phép chẩn đoán được dùng rộng rãi là:
+
+**1. Tự tương quan và thời gian tự tương quan tích phân.** Với một đại lượng tóm tắt vô hướng $h(\theta)$, định nghĩa hệ số tự tương quan (autocorrelation) ở độ trễ $k$
+
+$$
+\rho_k = \frac{\operatorname{Cov}\big[h(\theta_i),\, h(\theta_{i+k})\big]}{\operatorname{Var}_\pi\big[h(\theta)\big]}. \tag{1.30}
+$$
+
+Vì xích Markov ở trạng thái dừng, $\rho_0 = 1$, và $\rho_k \to 0$ khi $k \to \infty$. $\rho_k$ giảm càng chậm thì xích càng tương quan. Có thể chứng minh, qua định lý giới hạn trung tâm cho xích Markov, rằng
+
+$$
+\sqrt{M}\big(\hat{h}_M - \mathbb{E}_\pi[h]\big) \xrightarrow{\mathcal{D}} \mathcal{N}\big(0, V_{\text{eff}}\big), \quad \text{where} \quad V_{\text{eff}} = \operatorname{Var}_\pi[h]\Big(1 + 2\sum_{k=1}^{\infty} \rho_k\Big). \tag{1.31}
+$$
+
+Đại lượng $\tau_{\text{int}} = 1 + 2\sum_{k=1}^\infty \rho_k$ là *thời gian tự tương quan tích phân* (integrated autocorrelation time), và *cỡ mẫu hiệu dụng* (effective sample size) $\mathrm{ESS} = M/\tau_{\text{int}}$ đo số mẫu độc lập mà $M$ mẫu tương quan đại diện. Hình 1.3 minh họa sự suy giảm của tự tương quan. Một độ đo liên quan là *khoảng cách bước nhảy bình phương kỳ vọng* (expected squared jumping distance, ESJD) $\mathbb{E}[\|\theta_{i+1} - \theta_i\|^2]$, cân bằng giữa độ lớn bước di chuyển và tỉ lệ chấp nhận. Các bước di chuyển lớn hơn sẽ làm giảm tương quan giữa các phần tử của xích Markov; tuy nhiên, chúng cũng ít có khả năng được chấp nhận hơn, nghĩa là xích không tiến triển. Vì vậy, thách thức đối với người thực hành là cân bằng giữa các bước nhỏ (tương quan cao và tỉ lệ chấp nhận cao) và các bước lớn (tương quan thấp và tỉ lệ chấp nhận thấp).
+
+**2. Biểu đồ vết.** Vẽ dãy $\{h(\theta_i)\}_{i=1}^M$ theo số vòng lặp $i$ cho một biểu diễn trực quan, dễ diễn giải về độ trộn và tính dừng; đó là *biểu đồ vết* (trace plot). Các xích trộn tốt nhanh chóng đi qua phần chính của phân phối hậu nghiệm, không có xu hướng rõ rệt hay hiện tượng "dính" (xem khung trái của Hình 1.2). Ngược lại, việc trộn chậm hay tính đa mode được báo hiệu bởi những giai đoạn dài trôi dạt hoặc bị mắc kẹt trong các vùng con của phân phối hậu nghiệm (xem khung phải của Hình 1.2). Biểu đồ vết là một công cụ trực quan hữu ích để chẩn đoán hiệu quả của một thuật toán MCMC; tuy nhiên, chúng thường hữu ích nhất với các phân phối hậu nghiệm ít chiều, vì khi đó dễ trực quan hóa toàn bộ các tham số $\theta$, còn với các phân phối hậu nghiệm nhiều chiều, việc trực quan hóa riêng từng tham số trong xích Markov thường là không khả thi.
+
+**3. Phép chẩn đoán hệ số giảm thang đo tiềm năng (Gelman–Rubin).** Khi chạy nhiều xích $\{\theta_i^{(c)}\}$ từ các điểm xuất phát phân tán rộng (overdispersed), ta có thể so sánh *phương sai giữa các xích* (between-chain variance) $B$ với *phương sai trong từng xích* (within-chain variance) $W$. *Hệ số giảm thang đo tiềm năng* (potential scale reduction factor)
+
+$$
+\widehat{R} = \sqrt{\frac{\frac{M-1}{M} W + \frac{1}{M} B}{W}} \tag{1.32}
+$$
+
+tiến tới 1 khi tất cả các xích hội tụ về cùng một phân phối mục tiêu. Các giá trị $\widehat{R} < 1.1$ thường được coi là cho thấy sự hội tụ thỏa đáng, sau đó các mẫu từ mọi xích có thể được gộp lại để tạo ra một xấp xỉ của phân phối hậu nghiệm $\pi$.
+
+Trong thực hành, người ta thường kết hợp các phép chẩn đoán này: biểu đồ vết để bảo đảm về mặt định tính, tự tương quan và ESS cho độ chính xác định lượng, và $\widehat{R}$ để phòng ngừa việc không khám phá được các phân phối mục tiêu đa mode.
+
+**Ví dụ 1.3.** Chúng tôi trình bày một thí nghiệm Metropolis-Hastings nhằm lấy mẫu từ phân phối mục tiêu $\pi(\theta) = N(0, 1)$. Đề xuất của chúng tôi dựa trên một sơ đồ bước ngẫu nhiên (Mục 5.1) $\theta' = \theta + \epsilon$, trong đó $\epsilon \sim \mathcal{N}(0, \lambda^2 I)$ là nhiễu Gauss cộng. Chúng tôi chạy hai thí nghiệm với hai giá trị khác nhau của tham số kích thước bước $\lambda \in \{0.01, 0.9\}$. Kết quả mô phỏng được vẽ ở Hình 1.2 và 1.3 bên dưới. Với giá trị $\lambda$ lớn hơn, ta thấy xích khám phá không gian tốt khi số vòng lặp tăng, với hàm tự tương quan (autocorrelation function, ACF) giảm nhanh. Tuy nhiên, với giá trị $\lambda$ nhỏ hơn, xích lang thang chậm và trộn kém, và ACF giảm chậm hơn nhiều, vẫn gần bằng một ở các độ trễ vừa phải.
+
+<Figure caption="Hình 1.2: Biểu đồ vết với λ = 0.9 (trái) và λ = 0.01 (phải). (Tái hiện minh họa: hai xích được mô phỏng lại cho trang này với thiết lập của Ví dụ 1.3, 5000 vòng lặp xuất phát từ θ = 0, nên từng giá trị cụ thể khác với lần chạy trong sách; nhãn trong hình giữ nguyên tiếng Anh.)">
+  <Bdl01TracePlots />
+</Figure>
+
+<Figure caption="Hình 1.3: ACF tương ứng với λ = 0.9 (trái) và λ = 0.01 (phải). (Tái hiện minh họa, tính từ các xích của Hình 1.2; các đường nét đứt đánh dấu ±1.96/√5000; nhãn trong hình giữ nguyên tiếng Anh.)">
+  <Bdl01AcfPlots />
+</Figure>
+
+### 5.2 Monte Carlo Hamilton
+
+Metropolis bước ngẫu nhiên (RWM) cần các bước đề xuất có kích thước $\lambda = O(d^{-1/2})$ để duy trì một tỉ lệ chấp nhận không suy biến trong không gian $d$ chiều, trong khi MALA có thể dùng các bước kích thước $O(d^{-1/6})$. *Monte Carlo Hamilton* (HMC) tiến thêm một bước: với kích thước bước tích phân $\epsilon = O(d^{-1/4})$, nó vẫn giữ được tỉ lệ chấp nhận bị chặn xa 0, đồng thời khám phá những vùng lớn hơn nhiều của không gian tham số giữa hai quyết định chấp nhận – loại bỏ liên tiếp. Chìa khóa là nhúng tham số $d$ chiều $\theta$ vào một *không gian pha* (phase space) $2d$ chiều và mô phỏng xấp xỉ động lực học Hamilton, vốn bảo toàn một "tổng năng lượng" thay thế.
+
+**Phân phối mục tiêu mở rộng và hàm Hamilton.** Đưa vào một biến phụ trợ *động lượng* (momentum) $z \in \mathbb{R}^d$ và một *ma trận khối lượng* (mass matrix) xác định dương $M_0$. Định nghĩa hàm Hamilton (Hamiltonian)
+
+$$
+H(\theta, z) = U(\theta) + K(z) := -\log \pi(\theta) + \tfrac{1}{2} z^\top M_0^{-1} z, \tag{1.33}
+$$
+
+sao cho mật độ đồng thời $\widetilde{\pi}(\theta, z) \propto \exp[-H(\theta, z)]$ có phân phối biên $\pi(\theta)$ và $z \sim \mathcal{N}(0, M_0)$ độc lập.
+
+**Động lực học Hamilton.** Các phương trình chuyển động liên tục là
+
+$$
+\frac{\mathrm{d}\theta}{\mathrm{d}t} = M_0^{-1} z, \qquad \frac{\mathrm{d}z}{\mathrm{d}t} = \nabla_\theta \log \pi(\theta), \tag{1.34}
+$$
+
+bảo toàn chính xác $H$ và do đó di chuyển dọc theo các mặt có mật độ đồng thời không đổi. Với các phân phối mục tiêu $\pi$ tổng quát, không thể mô phỏng chính xác, nên HMC dùng bộ tích phân *leapfrog* (leapfrog integrator) bậc hai, có tính *symplectic*, với bước thời gian $\Delta t$:
+
+$$
+\begin{aligned}
+z_{t+\frac{1}{2}\Delta t} &= z_t + \tfrac{\Delta t}{2} \nabla_\theta \log \pi(\theta_t), \\
+\theta_{t+\Delta t} &= \theta_t + \Delta t\, M_0^{-1} z_{t+\frac{1}{2}\Delta t}, \\
+z_{t+\Delta t} &= z_{t+\frac{1}{2}\Delta t} + \tfrac{\Delta t}{2} \nabla_\theta \log \pi(\theta_{t+\Delta t}).
+\end{aligned} \tag{1.35}
+$$
+
+Ánh xạ này được lặp lại $L$ lần, với $\epsilon = \Delta t$, và $T = L\, \epsilon$ là *thời gian tích phân* (integration time).
+
+**Nhân HMC.** Xuất phát từ $\theta_{i-1}$:
+
+1. Rút động lượng $z \sim \mathcal{N}(0, M_0)$.
+2. Áp dụng $L$ bước leapfrog (1.35) để thu được $(\theta', z')$.
+3. Chấp nhận $(\theta', z')$ với xác suất
+
+   $$
+   \alpha = \min\Big\{1,\, \exp\big[H(\theta_{i-1}, z) - H(\theta', z')\big]\Big\}. \tag{1.36}
+   $$
+
+4. Đặt $\theta_i = \theta'$ nếu được chấp nhận, ngược lại $\theta_i = \theta_{i-1}$; bỏ $z'$.
+
+Vì ánh xạ leapfrog bảo toàn thể tích (tức là định thức Jacobi $= 1$) và đối xứng (nghịch đảo của nó thu được bằng $(\theta, z) \mapsto (\theta, -z)$ rồi chạy ngược $L$ bước), bước hiệu chỉnh Metropolis bảo đảm $\widetilde{\pi}$ là bất biến; do đó phân phối hậu nghiệm $\pi$ là phân phối dừng của xích biên trên $\theta$.
+
+**Thuật toán 5:** Nhân Monte Carlo Hamilton
+
+```text
+Inputs : initial state θ_0, target distribution π, mass matrix M_0
+Output: {θ_i}_{i=1}^M
+for i = 1 to M do
+    generate initial momentum z ∼ 𝒩(0, M_0)
+    for l = 1 to L do
+        generate θ_{lΔt} and z_{lΔt} from (1.35) applied at (θ_{(l−1)Δt}, z_{(l−1)Δt}), with θ_0 = θ_{i−1} and z_0 = z
+    let (θ′, z′) ← (θ_{LΔt}, z_{LΔt}) and generate u ∼ U[0, 1]
+    if u ≤ min{1, exp[H(θ, z) − H(θ′, z′)]} then
+        θ_i ← θ′
+    else
+        θ_i ← θ_{i−1}
+return {θ_i}_{i=1}^M
+```
+
+**Co giãn theo số chiều lớn.** Với các phân phối mục tiêu dạng tích $\pi(\theta) = \prod_{i=1}^d f(\theta^i)$ và $M_0 = I_d$, có thể chứng minh rằng để giữ tỉ lệ chấp nhận ở mức hợp lý, phải chọn $\epsilon = O(d^{-1/4})$, do đó $L = O(d^{1/4})$. Vì vậy chi phí tính toán cho mỗi mẫu độc lập hiệu dụng là $O(d^{1/4})$, so với $O(d^{1/3})$ của MALA và $O(d)$ của RWM.
+
+**Điều chỉnh trong thực hành.**
+
+- **Kích thước bước $\epsilon$.** Trong giai đoạn khởi động (warm-up), điều chỉnh thích nghi $\epsilon$ (ví dụ bằng phương pháp trung bình kép (dual averaging)) để nhắm tới tỉ lệ chấp nhận trong khoảng 60–80%; lý thuyết cho thấy 65% là tối ưu tiệm cận.
+- **Độ dài quỹ đạo $T = L\, \epsilon$.** $T$ quá nhỏ cho hành vi giống RWM; $T$ quá lớn lãng phí tính toán và có thể quay về gần điểm xuất phát. Các phương pháp kinh nghiệm phổ biến chọn $L$ ngẫu nhiên hoặc dùng tiêu chí No-U-Turn.
+- **Ma trận khối lượng $M_0$.** Đặt $M_0$ bằng một ước lượng của hiệp phương sai hậu nghiệm (hoặc đường chéo của nó) có tác dụng như các ma trận tiền điều kiện dùng với RWM và MALA, cải thiện đáng kể sự hội tụ khi các tham số có thang đo khác nhau.
+
+Vì HMC kết hợp các đề xuất dài, được dẫn dắt bởi động lượng, với xác suất chấp nhận cao, nó đã trở thành bộ lấy mẫu mặc định trong nhiều ứng dụng học sâu Bayes, nơi các phân phối hậu nghiệm có số chiều lớn, tương quan mạnh và có những thung lũng hẹp gây khó khăn cho các phương pháp MCMC đơn giản hơn.
+
+## 6. Monte Carlo tuần tự
+
+Các phương pháp Monte Carlo tuần tự (sequential Monte Carlo, SMC) là một tập các thuật toán Monte Carlo được thiết kế để lấy mẫu từ một dãy các mật độ xác suất mục tiêu $\{\pi_n(\theta_{1:n})\}$ có số chiều tăng dần, trong đó mỗi mật độ được định nghĩa trên không gian tích $\Theta^n = \prod_{i=1}^n \Theta$. Trong bối cảnh các mô hình không gian trạng thái (state-space model), đây được gọi là *phân phối làm trơn* (smoothing distribution). Thường thì ta chỉ quan tâm tới phân phối biên tại thời điểm $n$, $\pi_n(\theta_n)$, được gọi là *phân phối lọc* (filtering distribution). Giả sử
+
+$$
+\pi_n(\theta_{1:n}) = \frac{\kappa_n(\theta_{1:n})}{Z_n}\,, \tag{1.37}
+$$
+
+trong đó mật độ chưa chuẩn hóa có phân tích
+
+$$
+\kappa_n(\theta_{1:n}) = \kappa_n(\theta_n \mid \theta_{1:n-1})\, \kappa_{n-1}(\theta_{1:n-1})\,, \tag{1.38}
+$$
+
+và có thể tính giá trị của $\kappa_n(\theta_n \mid \theta_{1:n-1})$ và $\kappa_1(\theta_1)$, còn $Z_n$ là hằng số chuẩn hóa chưa biết, cho bởi
+
+$$
+Z_n = \int \kappa_n(\theta_{1:n})\, \mathrm{d}\theta_{1:n}. \tag{1.39}
+$$
+
+Lưu ý rằng ta viết
+
+$$
+\int \mathrm{d}\theta_{1:n} \quad \text{which is equivalent to} \quad \int_\Theta \int_\Theta \cdots \int_\Theta \mathrm{d}\theta_1\, \mathrm{d}\theta_2 \cdots \mathrm{d}\theta_n.
+$$
+
+SMC cung cấp một xấp xỉ của $\pi_1(\theta_1)$ và một ước lượng của $Z_1$ tại thời điểm 1, rồi một xấp xỉ của $\pi_2(\theta_{1:2})$ và một ước lượng của $Z_2$ tại thời điểm 2, và cứ thế tiếp tục. Các xấp xỉ được thực hiện tuần tự theo thời gian:
+
+- Tại bước thời gian 1, ta rút $N$ mẫu $\{\theta_1^{(i)}\}_{i=1}^N$ từ một hàm cho trước $q_1(\theta_1)$ rồi xấp xỉ $\pi_1(\theta_1)$ và $Z_1$ bằng các mẫu này;
+- Tại bước thời gian 2, rút các mẫu $\{\theta_2^{(i)}\}_{i=1}^N$ từ một hàm $q_2(\theta_2 \mid \theta_1)$, và dùng các mẫu tích lũy để xấp xỉ $\pi_2(\theta_{1:2})$ và $Z_2$.
+
+Xét một mật độ xác suất khác $q_n(\theta_{1:n}) = q_n(\theta_n \mid \theta_{1:n-1})\, q_{n-1}(\theta_{1:n-1})$ dễ lấy mẫu, và sao cho giá (support) của $q_n(\theta_{1:n})$ chứa giá của $\pi_n(\theta_{1:n})$. Khi đó, ta có các đồng nhất thức lấy mẫu theo trọng số quan trọng (importance sampling, IS) sau
+
+$$
+\pi_n(\theta_{1:n}) = \frac{\kappa_n(\theta_{1:n})}{Z_n} = \frac{w_n(\theta_{1:n})\, q_n(\theta_{1:n})}{Z_n}, \tag{1.40}
+$$
+
+$$
+Z_n = \int w_n(\theta_{1:n})\, q_n(\theta_{1:n})\, \mathrm{d}\theta_{1:n}, \tag{1.41}
+$$
+
+trong đó $w_n(\theta_{1:n})$ là hàm trọng số chưa chuẩn hóa, và từ (1.38) ta có định nghĩa đệ quy sau của các trọng số
+
+$$
+w_n(\theta_{1:n}) = \frac{\kappa_n(\theta_{1:n})}{q_n(\theta_{1:n})} = \frac{\kappa_n(\theta_n \mid \theta_{1:n-1})}{q_n(\theta_n \mid \theta_{1:n-1})}\, w_{n-1}(\theta_{1:n-1}) =: \alpha(\theta_n \mid \theta_{1:n-1})\, w_{n-1}(\theta_{1:n-1})\,. \tag{1.42}
+$$
+
+Giả sử ta rút, tuần tự theo thời gian, $M$ mẫu độc lập $\theta_{1:n}^{(i)}$, $i = 1, \cdots, M$, từ $q_n(\theta_{1:n})$ (xem Thuật toán 6). Ta có ước lượng không chệch sau của $Z_n$:
+
+$$
+\widehat{Z}_n = \frac{1}{M} \sum_{i=1}^M w_n(\theta_{1:n}^{(i)}). \tag{1.43}
+$$
+
+Một ước lượng lấy mẫu theo trọng số quan trọng tự chuẩn hóa vững của $\mathbb{E}_n(h_n)$, với một hàm tùy ý $h_n : \Theta^n \to \mathbb{R}$, được cho bởi
+
+$$
+\widehat{\mathbb{E}}_n(h_n) = \frac{\sum_{i=1}^N w_n(\theta_{1:n}^{(i)})\, h_n(\theta_{1:n}^{(i)})}{\sum_{i=1}^N w_n(\theta_{1:n}^{(i)})} = \sum_{i=1}^M W_n^{(i)}\, h_n(\theta_{1:n}^{(i)})\,,
+$$
+
+trong đó
+
+$$
+W_n^{(i)} = \frac{w_n(\theta_{1:n}^{(i)})}{\sum_{i=1}^M w_n(\theta_{1:n}^{(i)})}\,. \tag{1.44}
+$$
+
+**Thuật toán 6:** Lấy mẫu theo trọng số quan trọng tuần tự (SIS) để ước lượng $\mathbb{E}_n(\theta_n)$ với $n \geq 1$
+
+```text
+Inputs : number of particles M, proposal distributions q_n, adjustment multipliers α_n
+Outputs: estimates θ̂_n and Ẑ_n for n ≥ 1
+for i = 1 to M do
+    initialize weights w_1^(i) ← 1/M
+n ← 1
+repeat
+    for i = 1 to M do
+        sample θ_n^(i) ∼ q_n(θ_n | θ_{1:n−1}^(i))
+        update unnormalized weight
+
+            w_n(θ_{1:n}^(i)) ← α_n(θ_n^(i) | θ_{1:n−1}^(i)) w_{n−1}(θ_{1:n−1}^(i))
+
+        normalize weight
+
+            W_n^(i) ← w_n(θ_{1:n}^(i)) / Σ_{j=1}^M w_n(θ_{1:n}^(j))
+
+    compute estimates
+
+        θ̂_n ← Σ_{i=1}^M W_n^(i) θ_n^(i),    Ẑ_n ← (1/M) Σ_{i=1}^M w_n(θ_{1:n}^(i))
+
+    n ← n + 1
+until termination criterion met
+```
+
+Đây là các thành phần của thuật toán *lấy mẫu theo trọng số quan trọng tuần tự* (sequential importance sampling, SIS), được trình bày trong Thuật toán 6. Trong Thuật toán 6 và 7, ta lấy $h_n(\theta_{1:n}) = \theta_n$.
+
+Khi $n$ tăng, các trọng số sẽ suy biến, theo nghĩa là một trọng số sẽ áp đảo tất cả các trọng số còn lại. Hiện tượng này có thể được theo dõi bằng cỡ mẫu hiệu dụng, đại lượng liên quan tới phương sai của các trọng số:
+
+$$
+\mathsf{ESS} = \frac{\left(\sum_{i=1}^M w_n^{(i)}\right)^2}{\sum_{i=1}^M (w_n^{(i)})^2}\,. \tag{1.45}
+$$
+
+Một cách để giảm nhẹ phần nào hiện tượng này là lấy mẫu lại (resampling), tức là với $i = 1, \dots, M$, đặt
+
+$$
+\theta_{1:n}^{(i)} \leftarrow \theta_{1:n}^{(j)}\,, \quad \text{for} \quad j \sim (W_n^{(1)}, \dots, W_n^{(M)})\,, \quad \text{and} \quad w_n^{(i)} \leftarrow 1/M\,. \tag{1.46}
+$$
+
+Lấy mẫu lại làm tăng nhẹ phương sai của ước lượng, nhưng các hạt (particle) được làm mới ở đầu lọc (filtering end), và dưới các điều kiện phù hợp, bộ lọc thậm chí có thể duy trì ổn định trực tuyến trong thời gian vô hạn. Lưu ý rằng việc các hạt phân nhánh tiến theo thời gian đồng nghĩa với việc chúng hợp nhất (coalescence) khi đi ngược thời gian, nên các hạt vẫn suy biến ở những thời điểm sớm, điều này gây vấn đề cho bài toán làm trơn. SIS kết hợp với lấy mẫu lại được gọi là lấy mẫu lại theo trọng số quan trọng tuần tự (sequential importance resampling, SIR) hay Monte Carlo tuần tự (SMC). Xem Thuật toán 7. Trong bối cảnh mô hình không gian trạng thái, $q_n$ thường được chọn là nhân tiến hóa thuận (forward evolution kernel) của quá trình ẩn, và trong bối cảnh lọc, lựa chọn cụ thể này thường được gọi là *bộ lọc hạt bootstrap* (bootstrap particle filter). Trong thực hành, người ta lấy mẫu lại khi ESS nhỏ hơn một ngưỡng (ví dụ $M/2$ hoặc $M/4$). Xem Chopin và Papaspiliopoulos để có một nhập môn toàn diện gần đây.
+
+**Thuật toán 7:** Monte Carlo tuần tự (SMC) để ước lượng $\mathbb{E}(\theta_n)$ với $n \geq 1$
+
+```text
+Inputs : number of particles M, proposals q_n, adjustment multipliers α_n
+Outputs: estimates θ̂_n and Ẑ_n for n ≥ 1
+// Initialization at n = 1
+for i = 1 to M do
+    sample θ_1^(i) ∼ q_1(θ_1)
+    compute w_1(θ_1^(i)) ← κ_1(θ_1^(i)) / q_1(θ_1^(i))
+
+    W_1^(i) ← w_1(θ_1^(i)) / Σ_{j=1}^M w_1(θ_1^(j))    for i = 1, …, M,    Ẑ ← 1
+
+// Iterate for subsequent times
+n ← 1
+repeat
+    // Effective sample size at time n
+
+        ESS_n ← ( Σ_{i=1}^M (W_n^(i))² )^(−1)
+
+    // Optional resampling at time n
+    if ESS_n ≤ M/2 then
+        // Multinomial resampling with probabilities W_n^(1:M)
+        for i = 1 to M do
+            draw j ∼ Categorical(W_n^(1), …, W_n^(M))
+            θ_{1:n}^(i) ← θ_{1:n}^(j)
+            w_n^(i) ← 1/M
+
+        Ẑ ← ( (1/M) Σ_{i=1}^M w_n(θ_{1:n}^(i)) ) Ẑ
+
+    // Advance to time n + 1
+    n ← n + 1
+    for i = 1 to M do
+        sample θ_n^(i) ∼ q_n(θ_n | θ_{1:n−1}^(i))
+        update unnormalized weight
+
+            w_n(θ_{1:n}^(i)) ← α_n(θ_n^(i) | θ_{1:n−1}^(i)) w_{n−1}(θ_{1:n−1}^(i))
+
+    W_n^(i) ← w_n(θ_{1:n}^(i)) / Σ_{j=1}^M w_n(θ_{1:n}^(j))    for i = 1, …, M
+
+    // Estimates at time n
+
+        θ̂_n ← Σ_{i=1}^M W_n^(i) θ_n^(i),    Ẑ_n ← (1/M) Σ_{i=1}^M w_n(θ_{1:n}^(i)) Ẑ
+
+until termination criterion met
+```
+
+## 7. Tóm tắt
+
+Chương này đã giới thiệu thuật toán Monte Carlo và một số phương pháp phát triển từ nó. Mỗi phương pháp giải quyết cùng một khó khăn cơ bản: mô phỏng từ, hoặc ước lượng các kỳ vọng theo, một phân phối mục tiêu $\pi(\theta)$ mà trong phần lớn các ứng dụng chỉ có thể tính giá trị sai khác một hằng số chuẩn hóa chưa biết.
+
+Khi có các mẫu độc lập từ $\pi$, tích phân Monte Carlo (Mục 2) được áp dụng trực tiếp. Khi không có, lấy mẫu loại bỏ (Mục 3) và lấy mẫu theo trọng số quan trọng xây dựng các ước lượng từ một phân phối đề xuất dễ tiếp cận. Cả hai về nguyên tắc đều chính xác, nhưng trở nên kém hiệu quả trong không gian nhiều chiều trừ khi phân phối đề xuất khớp sát với phân phối mục tiêu.
+
+Monte Carlo xích Markov (Mục 5) loại bỏ nhu cầu về các mẫu rút độc lập bằng cách xây dựng một xích Markov có phân phối dừng là phân phối mục tiêu. Thuật toán Metropolis–Hastings (Mục 5.1) cung cấp công thức tổng quát, với thuật toán Metropolis bước ngẫu nhiên (Mục 5.1), bộ lấy mẫu Gibbs, thuật toán Langevin hiệu chỉnh Metropolis (Mục 5.1) và Monte Carlo Hamilton (Mục 5.2) là các trường hợp đặc biệt được xét ở đây. Vì các mẫu có tương quan, việc điều chỉnh kích thước bước và các phép chẩn đoán hội tụ ở Mục 5.1 là thiết yếu trong thực hành.
+
+Monte Carlo tuần tự (Mục 6) mở rộng lấy mẫu theo trọng số quan trọng cho một dãy phân phối mục tiêu trên các không gian tích lồng nhau, như trong bài toán lọc. Lấy mẫu theo trọng số quan trọng tuần tự kết hợp lấy mẫu lại lan truyền các hạt có trọng số tiến theo thời gian, và lấy mẫu lại khi cỡ mẫu hiệu dụng giảm xuống.
+
+Các phương pháp này đóng những vai trò bổ sung cho nhau: lấy mẫu loại bỏ và lấy mẫu theo trọng số quan trọng phù hợp với các bài toán ít chiều hoặc có phân phối đề xuất khớp tốt, MCMC là công cụ tiêu chuẩn cho tính toán Bayes nhiều chiều, còn Monte Carlo tuần tự phù hợp với suy luận dọc theo một dãy. Những ý tưởng này được phát triển thêm trong các chương tiếp theo. Chẳng hạn, MCMC gradient ngẫu nhiên được trình bày trong [Chương 2](/vi/blog/stochastic-gradient-mcmc), còn các *bộ lấy mẫu* Monte Carlo tuần tự, vốn áp dụng SMC cho một dãy nhân tạo các phân phối mục tiêu trung gian với các bước biến đổi MCMC, cùng các mở rộng điều chỉnh nhiệt độ (tempering) và đa mức cho phân phối hậu nghiệm của mạng nơ-ron, được trình bày trong [Chương 4](/vi/blog/sequential-monte-carlo-samplers).
