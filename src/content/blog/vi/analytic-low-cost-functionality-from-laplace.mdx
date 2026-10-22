@@ -1,0 +1,304 @@
+---
+title: "Các chức năng giải tích, chi phí thấp từ xấp xỉ Laplace"
+description: "Laplace tuyến tính hóa khắc phục sự quá tự tin của mạng ReLU, ngăn quên thảm họa trong học liên tục và định hướng học chủ động cùng tối ưu hóa Bayes như thế nào."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - continual learning
+  - active learning
+  - calibration
+series: bayesian-deep-learning
+seriesOrder: 13
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl10OverconfidenceRgpr from '../../../components/diagrams/Bdl10OverconfidenceRgpr.astro';
+
+Trong các phần trước, chúng ta đã thấy xấp xỉ Laplace (Laplace approximation) trang bị cho một mạng nơ-ron độ bất định Gauss trong không gian trọng số như thế nào (xem [Chương 7](/vi/blog/laplace-introduction)), và độ bất định này có thể được biến đổi thành một biểu thức dạng đóng cho độ bất định dự đoán (xem [Chương 8](/vi/blog/linearized-laplace-approximations)) mang thông tin từ dữ liệu huấn luyện (xem [Chương 9](/vi/blog/differential-geometric-perspective-on-laplace)) ra sao. Kết hợp ảnh đẩy tới (pushforward) tuyến tính hóa với các xấp xỉ giải tích cho tích phân softmax trong bài toán phân loại, ta thu được một bộ công cụ giải tích linh hoạt cho việc ra quyết định dựa trên độ bất định.
+
+Các phương pháp thống kê Bayes cổ điển (như dự đoán xác suất, phát hiện dữ liệu ngoài phân phối (out-of-distribution detection), học chủ động (active learning), tối ưu hóa Bayes (Bayesian optimization), học liên tục (continual learning) và lựa chọn mô hình (model selection)) trở nên khả dụng trực tiếp trong học sâu dưới giả định Gauss. Bối cảnh này cũng cho phép những xấp xỉ tiếp theo để thực hiện suy luận ở nhiều mức ngân sách tính toán khác nhau.
+
+Trong chương này, chúng ta xem xét hai nghiên cứu tình huống minh họa cách tận dụng các ước lượng độ bất định như vậy để giải quyết những thách thức còn bỏ ngỏ trong học sâu. Nghiên cứu thứ nhất tập trung vào cách giảm thiểu sự quá tự tin (overconfidence) trong dự đoán của các mạng ReLU. Nghiên cứu thứ hai đề cập đến học liên tục: chúng ta sẽ thấy rằng xấp xỉ Laplace cung cấp một số hạng chính quy hóa tự nhiên, giúp giảm nhẹ hiện tượng quên thảm họa (catastrophic forgetting). Sau đó, chúng ta kết thúc bằng một số nhận xét bổ sung về cách tận dụng mối liên hệ giữa Laplace và quá trình Gauss (Gaussian process) để lựa chọn dữ liệu tối ưu theo các mục tiêu khác nhau. Về các kỹ thuật tính toán để mở rộng những cách tiếp cận này cho các mạng lớn, chẳng hạn KFAC và các xấp xỉ mạng con (subnetwork), xin xem [Chương 8, Mục 4](/vi/blog/linearized-laplace-approximations) và Chương 40.
+
+> **Điểm cần ghi nhớ**
+>
+> Vì Laplace tuyến tính hóa biến hầu như mọi mạng nơ-ron sâu thành một phân phối dự đoán dạng quá trình Gauss, các chức năng thực tiễn mạnh mẽ của hồi quy quá trình Gauss (định lượng độ tự tin và độ bất định; thích nghi mô hình; học chủ động và thiết kế thí nghiệm; học liên tục; v.v.) đều trở nên khả dụng trực tiếp trong học sâu. Dĩ nhiên, vì đây là một khuôn khổ xấp xỉ, các chức năng này chỉ có thể được kỳ vọng hoạt động ở những mức độ xấp xỉ khác nhau.
+
+## 1. Khắc phục sự quá tự tin bằng độ bất định được hiệu chuẩn
+
+### 1.1 Sự quá tự tin có thể chứng minh được trong các mạng nơ-ron kiểu ReLU
+
+Trong phân loại có giám sát, các mạng nơ-ron sâu được huấn luyện để ánh xạ một đầu vào $x \in \mathbb{R}^d$ thành một vector logit của các lớp $f_\theta(x) \in \mathbb{R}^C$, sau đó được chuyển thành các xác suất phân loại qua hàm softmax [(8.56)](/vi/blog/linearized-laplace-approximations). Lý tưởng nhất, các xác suất này phải phản ánh đúng độ bất định thực sự trong các dự đoán của mô hình. Tuy nhiên, trong thực tế, các mạng sâu hiện đại có xu hướng *quá tự tin*: chúng gán xác suất rất cao cho một số lớp ngay cả khi đầu vào nằm xa phân phối huấn luyện. Hành vi này đặc biệt đáng lo ngại trong các bối cảnh đòi hỏi an toàn cao, như chẩn đoán y tế hay lái xe tự hành, nơi sự chắc chắn không có cơ sở có thể dẫn đến hậu quả nghiêm trọng.
+
+Hein và cộng sự đã đưa ra một lời giải thích lý thuyết chính xác cho hành vi này ở các mạng kiểu ReLU. Những mạng như vậy gồm các lớp tuyến tính (kết nối đầy đủ hoặc tích chập) kết hợp với các hàm kích hoạt tuyến tính từng khúc như ReLU hay LeakyReLU. Do đó, chúng hiện thực một ánh xạ affine từng khúc:
+
+$$
+f(x) = \mathbf{V}^{(l)} x + \mathbf{a}^{(l)}, \quad x \in \mathcal{Q}_l, \quad l = 1, \dots, R
+$$
+
+trong đó các đa diện (polytope) $\mathcal{Q}_1, \dots, \mathcal{Q}_R$ phân hoạch không gian đầu vào $\mathbb{R}^d$ thành các vùng có mẫu kích hoạt không đổi. Trong mỗi vùng như vậy, các logit tăng tuyến tính theo $\lVert x \rVert$. Khi đầu vào di chuyển ra xa dữ liệu huấn luyện, hành vi của mạng bị chi phối bởi một thành phần affine duy nhất mà logit lớn nhất của nó có thể tăng không giới hạn, trong khi tất cả các logit khác vẫn tương đối nhỏ hơn. Vì hàm softmax khuếch đại chênh lệch giữa các logit, điều này khiến xác suất dự đoán cho một lớp duy nhất tiến tới một.
+
+**Định lý 10.1** (xem Định lý 3.1, Hein và cộng sự). *Giả sử $\mathbf{V}^l$ không chứa các hàng giống hệt nhau với mọi $l = 1, \dots, R$; khi đó với hầu hết mọi đầu vào khác không $x$ và mọi $\varepsilon > 0$, tồn tại một hệ số co giãn $\alpha > 0$ sao cho với một lớp $k$ nào đó,*
+
+$$
+\operatorname{softmax}_k(f(\alpha x)) \geq 1 - \varepsilon,
+$$
+
+*và*
+
+$$
+\lim_{\alpha \to \infty} \operatorname{softmax}_k(f(\alpha x)) = 1.
+$$
+
+Nói cách khác, các mạng ReLU tất định ngoại suy với *độ chắc chắn ngày càng tăng* khi ta di chuyển ra xa dữ liệu huấn luyện, bất chấp việc thiếu bằng chứng.
+
+### 1.2 Góc nhìn Bayes như một biện pháp đối phó
+
+Vấn đề được chỉ ra trong mục trước là một hệ quả phụ trực tiếp của việc dùng ước lượng điểm. Cách tự nhiên để giải quyết nó là gán một độ đo xác suất trên các trọng số $\theta$ thay vì cố định vào một giá trị duy nhất. Như chúng ta sẽ thấy, điều này dẫn một cách tự nhiên đến phương sai tăng dần khi đi xa dữ liệu, làm dịu độ tự tin sau khi áp dụng softmax.
+
+Xấp xỉ Laplace cung cấp một con đường khả thi về mặt tính toán để đưa hành vi này vào mạng nơ-ron. Xin nhắc lại, với một mạng đã huấn luyện có tham số $\theta_*$ (ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP)), ta xấp xỉ phân phối hậu nghiệm trên các tham số bằng một phân phối Gauss:
+
+$$
+p(\theta \mid \mathcal{D}) \approx \mathcal{N}(\theta_*, \Psi(\theta_*)^{-1}),
+$$
+
+trong đó $\Psi$ mô tả độ cong của logarit âm của phân phối hậu nghiệm tại $\theta_*$. Khi tuyến tính hóa ảnh đẩy tới quanh $\theta_*$, các logit cũng trở thành Gauss (xem [Chương 8, Mục 1](/vi/blog/linearized-laplace-approximations)):
+
+$$
+z(x) \sim \mathcal{N}(\mu(x), k(x, x))
+$$
+
+với
+
+$$
+\mu(x) = f(x, \theta_*), \quad k(x, x) = J_\theta f(x, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x, \theta_*)^\top. \tag{10.1}
+$$
+
+Với các mạng ReLU, các thành phần của $J_\theta f(x, \theta_*)$ tăng nhiều nhất là tuyến tính theo $\lVert x \rVert$, nên phương sai logit $k(x, x)$ tăng theo bình phương của $\lVert x \rVert$ (tương đương, độ lệch chuẩn tăng tuyến tính). Điều này có nghĩa là, ở xa tập huấn luyện, phương sai trong mỗi logit theo kịp sự tăng tuyến tính của giá trị trung bình. Bây giờ chúng ta sẽ thấy điều này dẫn đến độ tự tin tiệm cận hữu hạn cho mỗi lớp, bị chặn cách xa 1 và 0.
+
+Các xác suất dự đoán của các lớp thu được bằng cách lấy biên theo phân phối hậu nghiệm Gauss
+
+$$
+p(y = k \mid x, \mathcal{D}) = \mathbb{E}_{z \sim \mathcal{N}(\mu(x), k(x, x))} \left[\operatorname{softmax}_k(z)\right].
+$$
+
+Dù việc tính chính xác là không khả thi, vẫn tồn tại những xấp xỉ giải tích chính xác (xem [Chương 8, Mục 5](/vi/blog/linearized-laplace-approximations)). Một xấp xỉ nổi tiếng trong trường hợp nhị phân là của MacKay:
+
+$$
+\mathbb{E}[\sigma(z)] \approx \sigma\!\left(\frac{\mu}{\sqrt{1 + \frac{\pi}{8} s^2}}\right),
+$$
+
+trong đó $z \sim \mathcal{N}(\mu, s^2)$ là logit Gauss với trung bình $\mu$ và phương sai $s^2 = k(x, x)$, còn $\sigma(t) = 1/(1 + e^{-t})$ là hàm sigmoid logistic.
+
+Giải pháp này được Kristiadi và cộng sự xác lập trong bài báo *Being Bayesian, Even Just A Bit, Fixes Overconfidence In ReLU Networks*, trong đó *Even Just A Bit* ("dù chỉ một chút") ám chỉ nhận xét rằng định lý dưới đây vẫn đúng ngay cả khi chỉ các trọng số của lớp cuối được xử lý theo xác suất, và *ngay cả khi* hiệp phương sai $\Psi(\theta_*)^{-1}$ trong xấp xỉ Laplace được chọn một cách *tùy ý* (chẳng hạn, bằng ma trận đơn vị $\mathbf{I}$).
+
+<Figure caption="Hình 10.1: Giảm thiểu sự quá tự tin của một mạng ReLU bằng xấp xỉ Laplace. Hình cho thấy độ tự tin dự đoán trên bài toán phân loại nhị phân hai mặt trăng (two-moons) của ba mô hình khác nhau. Nền càng đậm thể hiện độ tự tin càng cao, còn đường liền màu đen đánh dấu biên quyết định tại p = 0.5. (Trái) Mạng ReLU tiêu chuẩn huấn luyện theo MAP thể hiện sự quá tự tin nghiêm trọng. Như mô tả trong Định lý 10.1, độ tự tin dự đoán của nó tiến tới 1 (chắc chắn tối đa) một cách sai lầm với các đầu vào ở xa dữ liệu huấn luyện. (Giữa) Áp dụng xấp xỉ Laplace đưa vào độ bất định trên các trọng số của mạng. Phương sai logit thu được tăng theo bình phương khoảng cách tới dữ liệu, làm dịu softmax và giảm độ tự tin dự đoán ở các vùng ngoài phân phối. (Phải) Thêm một số hạng phần dư ReLU-GP (RGPR) vào các logit đã xấp xỉ Laplace đưa vào một nguồn phương sai bổ sung tăng theo lũy thừa bậc ba. Điều này bảo đảm độ tự tin dự đoán hội tụ đúng về phân phối đều (0.5) với các đầu vào ở xa dữ liệu huấn luyện, cho độ hiệu chuẩn tốt hơn. (Ngoài cùng bên phải) Ô này xác nhận định lượng các kết quả trực quan bằng cách vẽ độ tự tin cực đại của mỗi mô hình khi một điểm đầu vào được co giãn ra xa gốc tọa độ. (Bản tái hiện mang tính sơ đồ được tính riêng cho trang này: một mạng ReLU nhỏ huấn luyện trên bộ dữ liệu hai mặt trăng, xấp xỉ Laplace lớp cuối với xấp xỉ probit, và một phương sai phần dư tăng theo lũy thừa bậc ba bên ngoài vùng dữ liệu; các con số không phải là của hình gốc.)">
+  <Bdl10OverconfidenceRgpr />
+</Figure>
+
+**Định lý 10.2** (xem Mệnh đề 2.5, Kristiadi và cộng sự). *Xét một mạng ReLU phân loại nhị phân $f_\theta$ với phân phối hậu nghiệm Laplace $\theta \sim \mathcal{N}(\theta_*, \Psi(\theta_*)^{-1})$. Khi đó, độ tự tin dự đoán tại đầu vào $x$ giảm đơn điệu khi phương sai tiên nghiệm $\sigma_0^2$ tăng, và thỏa mãn*
+
+$$
+\lim_{\sigma_0^2 \to \infty} \sigma(\lvert z(x) \rvert) \leq \sigma\!\left(\frac{\lvert \mu(x) \rvert}{1 + \sqrt{\frac{\pi}{8} \lambda_{\max}(H) \, \lVert J_\theta f(x, \theta_*) \rVert^2}}\right), \qquad \lim_{\sigma_0^2 \to 0} \sigma(\lvert z(x) \rvert) = \sigma(\lvert \mu(x) \rvert).
+$$
+
+Ở đây, $\lambda_{\max}(H)$ ký hiệu trị riêng lớn nhất của ma trận Hesse (Hessian) của logarit âm hàm hợp lý tại trung bình hậu nghiệm $\theta_*$, còn $\mu(x) = f(x, \theta_*)$ và $J_\theta f(x, \theta_*)$ là logit trung bình và ma trận Jacobi (Jacobian) của mạng tại $\theta_*$, đúng như trong phương trình (10.1). Lưu ý rằng $H$ chỉ khác độ chính xác hậu nghiệm $\Psi(\theta_*)$ ở số hạng tiên nghiệm Gauss, $\Psi(\theta_*) = H + \sigma_0^{-2} \mathbf{I}$, và đóng góp tiên nghiệm này biến mất khi $\sigma_0^2 \to \infty$, nên chỉ ma trận Hesse của hàm hợp lý còn lại trong cận.
+
+Dĩ nhiên, định lý này chỉ cho một phát biểu tiệm cận. Nói bằng lời: nếu ta gán *bất kỳ* độ đo Gauss nào cho các trọng số của mạng (dù được xây dựng tường minh như một xấp xỉ Laplace hay chỉ đơn giản là áp đặt) thì sự quá tự tin tiệm cận được "chữa lành" theo nghĩa yếu là nó bị chặn cách xa 1 và 0. Dù ở dạng yếu, kết quả này là một lập luận rất tốt cho việc cân đối chi phí của các xấp xỉ Laplace với mục tiêu của chúng. Nếu tất cả những gì bạn muốn là khắc phục độ tự tin tiệm cận, bạn có thể làm điều đó với chi phí tính toán hầu như bằng không: chỉ cần áp đặt một độ tự tin tùy ý lên các tham số. Như vậy vẫn tốt hơn là dùng một ước lượng điểm.
+
+### 1.3 Vai trò của phương sai tiên nghiệm
+
+Định lý 10.2 làm nổi bật vai trò đặc biệt của phương sai tiên nghiệm $\sigma_0^2$: tăng $\sigma_0^2$ làm phân phối hậu nghiệm trên các trọng số rộng ra, từ đó làm phương sai trong các logit tăng nhanh hơn và giảm độ tự tin dự đoán ở xa dữ liệu. Mặt khác, cho $\sigma_0^2 \to 0$ sẽ khôi phục dự đoán tất định. Dù $\sigma_0^2$ theo truyền thống được lý giải từ suy giảm trọng số (weight decay) dùng trong huấn luyện, trong bối cảnh Laplace nó có thể được điều chỉnh *sau huấn luyện* (post hoc) để cải thiện độ hiệu chuẩn.
+
+Các siêu tham số như phương sai tiên nghiệm hoặc các hệ số bổ sung tham gia vào độ cong có thể được điều chỉnh bằng những kỹ thuật thường bắt nguồn từ tài liệu về quá trình Gauss. Điều này bao gồm các mục tiêu ở khâu ứng dụng (ví dụ, logarit âm hàm hợp lý, entropy trên dữ liệu ngoài phân phối) hoặc các tiêu chí độ khớp mô hình (ví dụ, logarit hàm hợp lý biên (log marginal likelihood)). Ở đây, cấu trúc Gauss của xấp xỉ Laplace cho phép các hàm mục tiêu dạng đóng phù hợp với việc điều chỉnh dựa trên gradient, vấn đề được thảo luận chi tiết hơn, cùng với các ứng dụng khác, trong chương tiếp theo (xem [Chương 11](/vi/blog/model-selection-with-the-marginal-likelihood)).
+
+Với bối cảnh cụ thể là hiệu chuẩn $\sigma_0^2$ sao cho cấu trúc độ bất định thu được phản ánh tốt dữ liệu ngoài phân phối, Kristiadi và cộng sự đề xuất dùng
+
+$$
+\operatorname{argmin}_{\sigma_0^2} -\frac{1}{n} \sum_{i=1}^{n} \log p(y = \hat{t}_i \mid \hat{x}_i, \mathcal{D}) - \gamma \, \mathrm{H}[p(y \mid \tilde{x}_i, \mathcal{D})], \tag{10.2}
+$$
+
+trong đó số hạng thứ nhất là hàm mất mát entropy chéo (cross-entropy) tiêu chuẩn trên một tập kiểm định trong phân phối $\{\hat{x}_i, \hat{t}_i\}$, còn số hạng thứ hai là entropy dự đoán trên một tập các đầu vào ngoài phân phối $\{\tilde{x}_i\}$, mà hàm mục tiêu khuyến khích nó lớn nhờ dấu trừ đứng trước. Tham số $\gamma \in [0, 1]$ điều khiển sự đánh đổi giữa hai số hạng này.
+
+### 1.4 Cách giảm thiểu vấn đề hơn nữa
+
+Một tóm tắt đơn giản hóa của Định lý 10.2 là: gán một độ đo Gauss cho các trọng số sẽ chặn độ tự tin tiệm cận cách xa các giá trị bệnh lý 1 và 0. Nhưng nó sẽ không đưa độ tự tin tiệm cận xuống tới giới hạn lý tưởng của phân phối đều (entropy cực đại) $1/C$, trong đó $C$ là số lớp. Và dĩ nhiên định lý không nói gì về độ tự tin "gần" hay "ở giữa" dữ liệu huấn luyện. Để giải quyết một trong hai vấn đề, Kristiadi và cộng sự xem xét hai mở rộng nhằm điều chỉnh cấu trúc độ tự tin tổng thể: một mở rộng định hình lại độ cong cục bộ để hiệu chuẩn tốt hơn ở gần dữ liệu, mở rộng còn lại kết hợp độ bất định trong không gian trọng số với một độ bất định bổ sung trong không gian đầu ra để bảo đảm giới hạn độ tự tin đều lý tưởng.
+
+Cách tiếp cận *Learnable Uncertainty under Laplace approximations* (độ bất định học được dưới xấp xỉ Laplace, LULA) bổ sung cho một mạng đã huấn luyện các tham số mới, gọi là *đơn vị bất định* (uncertainty units), được chèn vào kiến trúc theo cách giữ nguyên dự đoán MAP $f_{\theta_*}(x)$ nhưng thay đổi ma trận Hesse $H$; ví dụ, với ba lớp tuyến tính không có hàm phi tuyến và độ chệch (bias) cho đơn giản, ta có
+
+$$
+f(x) = \begin{bmatrix} W^{(3)}_{\text{MAP}} \end{bmatrix} \begin{bmatrix} W^{(2)}_{\text{MAP}} \end{bmatrix} \begin{bmatrix} W^{(1)}_{\text{MAP}} \end{bmatrix} x \tag{10.3}
+$$
+
+$$
+\Rightarrow f^{(\text{LULA})}(x) = \begin{bmatrix} W^{(3)}_{\text{MAP}} & 0 \end{bmatrix} \begin{bmatrix} W^{(2)}_{\text{MAP}} & 0 \\ \hat{W}^{(2)}_1 & \hat{W}^{(2)}_2 \end{bmatrix} \begin{bmatrix} W^{(1)}_{\text{MAP}} \\ \hat{W}^{(1)}_1 \end{bmatrix} x. \tag{10.4}
+$$
+
+Do đó, phương sai cuối cùng thay đổi trong khi dự đoán trung bình giữ nguyên, điều này lý giải tên gọi *đơn vị bất định*. Các đơn vị này sau đó được huấn luyện bằng một hàm mất mát có tính đến độ bất định, khuyến khích entropy dự đoán cao trên các đầu vào ngoài phân phối (out-of-distribution, OOD) và entropy thấp trên các đầu vào trong phân phối (in-distribution, ID), với gradient được che (mask) để dự đoán ban đầu không thay đổi. Khi đó có thể chứng minh rằng xấp xỉ Laplace thu được, với xấp xỉ độ cong dạng đường chéo, có phương sai trên đầu ra cao hơn so với Laplace đường chéo của mạng không có các đơn vị bất định (xem Mệnh đề 2, Kristiadi và cộng sự).
+
+Tuy nhiên, sự quá tự tin còn sót lại vẫn có thể tồn tại với các đầu vào ở cực xa dữ liệu huấn luyện. Đây là hệ quả của việc các mạng ReLU chỉ có hữu hạn đặc trưng hiệu dụng, trong khi một quá trình Gauss (GP) với tập vô hạn các đặc trưng ReLU có phương sai tăng theo lũy thừa bậc ba, buộc độ tự tin softmax tiến về phân phối đều khi $\lVert x \rVert \to \infty$. Cách tiếp cận *phần dư ReLU-GP* (ReLU-GP residual, RGPR) thêm một GP như vậy làm số hạng phần dư độc lập $\hat{f} \sim \mathcal{GP}(0, \hat{k})$ vào mạng nơ-ron Bayes (Bayesian neural network):
+
+$$
+\tilde{f}(x) = f(x) + \hat{f}(x)
+$$
+
+với một hàm nhân (kernel) spline bậc ba hai phía cụ thể $\hat{k}$, được chọn sao cho $\hat{k}(x, x) \approx 0$ gần gốc tọa độ nhưng tăng theo lũy thừa bậc ba của $\lVert x \rVert$. Phân phối logit thu được là
+
+$$
+z(x) \sim \mathcal{N}\big(\mu(x), k(x, x) + \hat{k}(x, x) \, \mathbf{I}\big)
+$$
+
+giữ nguyên trung bình trong khi thêm phương sai chiếm ưu thế ở các vùng đuôi. Áp dụng một xấp xỉ softmax cho phân phối Gauss này cho ra một phân phối dự đoán hội tụ về phân phối đều trong giới hạn (xem Định lý 4, Kristiadi và cộng sự).
+
+Điều quan trọng là số hạng quá trình Gauss này có thể được thêm vào theo cách mà việc tính nó có chi phí không đổi và không đáng kể, độc lập với dữ liệu huấn luyện. Lý do là nó được xây dựng một cách tường minh để không bị ảnh hưởng bởi dữ liệu trong vùng huấn luyện, chỉ đóng góp độ bất định tiên nghiệm trong chế độ OOD. Vì vậy, đây là một ví dụ khác về việc xấp xỉ Laplace bổ sung một chức năng cụ thể với chi phí phụ trội cực kỳ nhỏ. Hàm nhân spline bậc ba hai phía được chọn trong công trình này còn có một cách diễn giải đẹp như một quá trình giới hạn phát sinh từ vô số các đơn vị bất định ReLU nói trên, tất cả được phân bố đều đặn quanh miền huấn luyện, hướng "ra ngoài" để chúng không bị dữ liệu huấn luyện ảnh hưởng. Trực giác hàm ý ở đây là các đơn vị này "hoàn thiện" hay bổ sung cho hữu hạn các ReLU tạo nên mạng sâu mà ta thực sự huấn luyện trên dữ liệu (hữu hạn) sẵn có, và cung cấp một biển ReLU phi tham số phủ kín miền về phía chân trời. Nói theo lối ẩn dụ hơn nữa, đây có thể xem là một ví dụ về việc góc nhìn Bayes đối với học sâu cung cấp một trực giác (và một giải pháp cụ thể, thực tiễn!) cho một bệnh lý của các mô hình sâu ước lượng điểm. Hình 10.1 so sánh độ tự tin dự đoán của mạng MAP, xấp xỉ Laplace của nó và mở rộng RGPR trên bài toán hai mặt trăng, minh họa cách mỗi bước kế tiếp làm dịu sự quá tự tin ở xa dữ liệu.
+
+> **Điểm cần ghi nhớ**
+>
+> Sự quá tự tin tiệm cận và sự quá tự tin ngoài phân phối là những ví dụ về các bệnh lý phát sinh từ việc dùng ước lượng điểm trong học sâu. Khuôn khổ xấp xỉ Laplace (hay tổng quát hơn, gán một độ đo Gauss cho các trọng số và dùng tuyến tính hóa để đẩy tới miền đầu ra) có thể khắc phục những vấn đề này ở một mức độ hữu hình, định lượng được, trong khi chỉ thêm một chi phí tính toán phụ trội đôi khi không đáng kể, hoặc ít nhất là rất dễ kiểm soát. Có thể lập luận rằng điều này là do các vấn đề đó thực chất chỉ phát sinh một cách rời rạc từ cách xử lý phi Bayes, và biến mất ngay khi ta gán *một* độ đo xác suất, *bất kỳ* loại phân phối hậu nghiệm nào, cho các tham số.
+
+## 2. Khắc phục hiện tượng quên thảm họa trong học liên tục
+
+Trong *học liên tục*, một mạng nơ-ron duy nhất được huấn luyện trên một chuỗi các tác vụ
+
+$$
+t = 1, \dots, T, \qquad \text{with data sets } \mathcal{D}_t, \tag{10.5}
+$$
+
+với mục tiêu duy trì hiệu năng tốt trên các tác vụ trước đó. Bối cảnh này ngày càng phù hợp với các triển khai thực tế: các mô hình quy mô lớn hiện đại được huấn luyện một lần, nhưng sau đó phải đối mặt với một dòng dữ liệu và mục tiêu liên tục thay đổi. Một trở ngại chính đối với sự thích nghi là *quên thảm họa*, tức là việc đánh mất các khả năng đã học trước đó khi học các tác vụ mới.
+
+Một cách tiếp cận ngây thơ là tinh chỉnh (fine-tune) các tham số hiện tại $\theta_t$ bằng cách cực tiểu hóa hàm mất mát trên tập dữ liệu tiếp theo $D_{t+1}$:
+
+$$
+\theta^*_{t+1} = \operatorname{argmin}_\theta \; \mathcal{L}(\theta; \mathcal{D}_{t+1}). \tag{10.6}
+$$
+
+Tuy nhiên, cách này loại bỏ mọi thông tin về các tác vụ trước: các tham số trôi về phía điểm tối ưu mới để thích nghi với dữ liệu mới $\mathcal{D}_{t+1}$, và cuối cùng xóa đi thông tin do bỏ qua những trọng số then chốt cho hiệu năng trước đó.
+
+### 2.1 Một lời giải Bayes
+
+Từ góc nhìn Bayes, việc huấn luyện trên $\mathcal{D}_{t+1}$ không nên bắt đầu từ một phân phối tiên nghiệm không mang thông tin. Thay vào đó, phân phối hậu nghiệm sau tác vụ $t$ nên trở thành phân phối tiên nghiệm cho tác vụ $t + 1$:
+
+$$
+p(\theta_{t+1} \mid D_{1:t+1}) \propto p(\mathcal{D}_{t+1} \mid \theta_{t+1}) \, p(\theta_t \mid \mathcal{D}_{1:t}), \tag{10.7}
+$$
+
+thay cho phân phối Gauss đẳng hướng không mang thông tin ban đầu $p(\theta)$ dưới dạng suy giảm trọng số. Lấy logarit âm biến điều này thành một bài toán tối ưu có chính quy hóa, trong đó số hạng chính quy hóa mã hóa tri thức từ các tác vụ trước.
+
+Nếu $p(\theta_t \mid D_{1:t})$ được xấp xỉ bằng một phân phối Gauss $\mathcal{N}(\theta^*_t, \Psi_t^{-1})$ qua xấp xỉ Laplace, hàm mục tiêu cho tác vụ tiếp theo trở thành:
+
+$$
+\mathcal{L}^{\text{reg}}_{t+1}(\theta) = \mathcal{L}(\theta; \mathcal{D}_{t+1}) + \tfrac{\lambda}{2} \lVert \theta - \theta^*_t \rVert^2_{\Psi_t}, \tag{10.8}
+$$
+
+trong đó $\lVert v \rVert^2_{\Psi_t} := v^\top \Psi_t v$ ký hiệu bình phương chuẩn Mahalanobis cảm sinh bởi độ chính xác (precision) $\Psi_t$. Ma trận độ chính xác $\Psi_t$ xác định mức độ bảo vệ mạnh yếu của mỗi hướng trong không gian tham số: độ chính xác lớn (độ cong cao) nghĩa là một hình phạt cứng theo hướng đó, vì hàm mất mát trên tác vụ trước sẽ thay đổi nhanh, trong khi độ chính xác thấp cho phép thích nghi. Điều này tạo ra một phân phối tiên nghiệm *dị hướng* trong không gian trọng số, có chọn lọc chống lại sự thay đổi ở những nơi thay đổi sẽ làm hại hiệu năng trong quá khứ. Cường độ chính quy hóa $\lambda$ điều khiển sự đánh đổi giữa việc giữ hiệu năng trên các tác vụ cũ và thích nghi với các tác vụ mới bằng cách co giãn độ chính xác của phân phối tiên nghiệm: giá trị cao thể hiện sự tin tưởng lớn hơn vào các tham số cũ, giá trị thấp thể hiện độ bất định lớn hơn và sự cởi mở hơn với thay đổi.
+
+### 2.2 Lọc Bayes trong không gian trọng số
+
+Xuất phát từ cách diễn giải vừa nêu và theo Sliwa và cộng sự, ta có thể hình thức hóa học liên tục như bài toán ước lượng trạng thái Bayes trong không gian trọng số:
+
+$$
+\theta_0 \to \theta_1 \to \cdots \to \theta_T \tag{10.9}
+$$
+
+với một mô hình *chuyển trạng thái* (state-transition) Gauss và một hàm hợp lý được định nghĩa bởi hàm mất mát của tác vụ
+
+$$
+p(\theta_{t+1} \mid \theta_t) = \mathcal{N}(\theta_t, Q) \qquad \text{(process model)} \tag{10.10}
+$$
+
+$$
+p(D_t \mid \theta_t) \propto \exp\!\Big(-\frac{1}{\tau} \mathcal{L}(\theta_t; D_t)\Big), \qquad \text{(observation model)}. \tag{10.11}
+$$
+
+Theo cách diễn giải này, học liên tục trở thành bài toán bám theo một mục tiêu di động trong không gian trọng số: mô hình quá trình (process model) dự đoán mục tiêu có thể đi đến đâu tiếp theo, và mô hình quan sát (observation model) hiệu chỉnh dự đoán đó dựa trên bằng chứng mới. Hiệp phương sai nhiễu quá trình bổ sung $Q$ mô hình hóa độ trôi kỳ vọng giữa các tác vụ: $Q$ lớn tương ứng với *tính dẻo* (plasticity) cao (các tham số có thể thay đổi đáng kể), còn $Q$ nhỏ áp đặt *tính ổn định* (stability) (các tham số giữ gần nhau).
+
+Phép đệ quy lọc Bayes gồm:
+
+1. *Bước dự đoán*: lan truyền phân phối hậu nghiệm qua mô hình quá trình để thu được một phân phối tiên nghiệm cho $\theta_t$, (có thể) làm tăng độ bất định thêm $Q$.
+2. *Bước cập nhật*: đưa vào hàm hợp lý từ $\mathcal{D}_t$, kéo trung bình về phía điểm tối ưu mới và thu hẹp độ bất định theo độ cong.
+
+Điều này tương tự một bộ lọc Kalman trong không gian tham số, nhưng với một mô hình quan sát phi tuyến, phi Gauss phát sinh từ hàm mất mát của mạng nơ-ron. Xấp xỉ Laplace thay số hạng không khả thi này bằng một phân phối Gauss cục bộ, làm cho bước cập nhật trở nên khả thi về mặt giải tích trong khuôn khổ lọc.
+
+### 2.3 Từ EWC qua OSLA đến Lo-Fi
+
+Cách phát biểu theo không gian trạng thái cung cấp một góc nhìn Bayes thống nhất về học liên tục. Các phương pháp khác nhau trong tài liệu có thể được xem là những lựa chọn cụ thể về (i) cách biểu diễn và cập nhật hiệp phương sai hậu nghiệm, và (ii) có cho phép các tham số trôi giữa các tác vụ hay không. Xấp xỉ Laplace cung cấp dạng Gauss cần thiết cho các bước cập nhật khả thi, nhưng chất lượng và khả năng mở rộng của cách tiếp cận phụ thuộc vào xấp xỉ độ cong được dùng.
+
+**Củng cố trọng số đàn hồi (Elastic Weight Consolidation, EWC).** Kirkpatrick và cộng sự đề xuất *củng cố trọng số đàn hồi* (EWC), ràng buộc các tham số ở gần điểm tối ưu trước đó $\theta^*_t$ bằng đường chéo của metric thông tin Fisher $F_t$:
+
+$$
+\mathcal{L} = \mathcal{L}(\theta; \mathcal{D}_{t+1}) + \tfrac{\lambda}{2} (\theta - \theta^*_t)^\top \operatorname{diag}(F_t) (\theta - \theta^*_t). \tag{10.12}
+$$
+
+Điều này tương đương với khuôn khổ lọc đã đề xuất khi chọn $Q = 0$ và độ chính xác dạng đường chéo. Trong bối cảnh tuần tự, có thể thêm một hình phạt bậc hai riêng cho mỗi tác vụ trước đó (đa hình phạt), hoặc tương đương, có thể cộng dồn các ma trận Fisher vào một hình phạt duy nhất được cập nhật liên tục. EWC hiệu quả về mặt tính toán nhưng không có tương quan giữa các tham số.
+
+**Xấp xỉ Laplace có cấu trúc trực tuyến (Online Structured Laplace Approximation, OSLA).** Ritter và cộng sự mở rộng EWC bằng cách thay ma trận Fisher đường chéo bằng một xấp xỉ độ cong *phân tích nhân tử Kronecker* (KFAC) (xem [Chương 8, Mục 4](/vi/blog/linearized-laplace-approximations)), nắm bắt tương quan giữa các tham số trong cùng một lớp mà vẫn có thể mở rộng. Theo góc nhìn lọc Bayes, OSLA duy trì một phân phối hậu nghiệm Gauss duy nhất trên các tham số và cập nhật nó một cách *đệ quy* sau mỗi tác vụ:
+
+$$
+\Psi_t = \lambda \, \operatorname{KFAC}(F_t) + \Psi_{t-1}, \tag{10.13}
+$$
+
+trong đó $F_t$ một lần nữa là ma trận thông tin Fisher được tính với ước lượng MAP hiện tại trên tác vụ $t$. Phép cập nhật cộng dồn này loại bỏ nhu cầu lưu các hình phạt riêng cho mỗi tác vụ như trong EWC đa hình phạt, và hiện thực một cách tự nhiên phép cập nhật Bayes tuần tự với $Q = 0$ (không giả định độ trôi). Nhờ đưa vào tương quan bên trong lớp, OSLA tạo ra một xấp xỉ hậu nghiệm trung thực hơn và khả năng ghi nhớ tốt hơn qua những chuỗi tác vụ dài.
+
+**Lọc Laplace – Gauss hạng thấp (Low-Rank Laplace-Gaussian Filtering, Lo-Fi).** Chang và cộng sự và Sliwa và cộng sự đã tổng quát hóa khuôn khổ Bayes cho $Q$ tùy ý, cho phép mô hình hóa tường minh độ trôi kỳ vọng giữa các tác vụ. Họ xấp xỉ ma trận độ chính xác bằng một xấp xỉ hạng thấp của ma trận Gauss–Newton tổng quát (GGN) (cộng thêm một ma trận đường chéo biểu diễn phân phối tiên nghiệm ban đầu), khiến cả bước dự đoán lẫn bước cập nhật đều có thể mở rộng, trong khi vẫn mô hình hóa tương quan giữa các lớp khác nhau.
+
+Trong góc nhìn lọc Bayes tổng quát này, khái niệm *làm trơn* (smoothing) cũng trở nên khả dụng. Sau lượt lọc tiến, một lượt lùi tùy chọn tinh chỉnh ước lượng tham số riêng của mỗi tác vụ bằng thông tin từ các tác vụ sau mà không cần xem lại dữ liệu gốc của chúng. Quá trình này có thể được so sánh với việc chuyền một bức thư qua một chuỗi người đưa tin, trong đó mỗi người đưa tin (tác vụ) chỉ tiếp cận được bức thư (các tham số) họ vừa nhận và những quan sát cục bộ của riêng mình; theo thời gian, bức thư có thể bị xuống cấp (quên thảm họa). Làm trơn cho phép những người đưa tin phía sau gửi các lời làm rõ hoặc đính chính ngược trở lại, cải thiện các phiên bản trước mà không cần đọc lại những lá thư gốc (dữ liệu). Trong bối cảnh học sâu, điều này có nghĩa là các mô hình của những tác vụ trước có thể được cải thiện dựa trên tri thức từ các tác vụ sau, đồng thời bảo vệ quyền riêng tư dữ liệu vì không bao giờ chia sẻ hay phát lại các tập dữ liệu gốc của những tác vụ khác.
+
+> **Điểm cần ghi nhớ**
+>
+> Xấp xỉ Laplace thu được từ việc tiền huấn luyện một mạng có thể được dùng làm logarit tiên nghiệm (một số hạng chính quy hóa) cho các tác vụ tiếp theo. Làm như vậy khuyến khích mô hình dùng những phần "chưa dùng đến" của không gian tham số để "lưu trữ" thông tin huấn luyện mới, và do đó giảm thiểu sự quên trong học liên tục. Ý tưởng đại số nền tảng là định lý Bayes cho các phân phối Gauss có tính đóng: điều kiện hóa một phân phối tiên nghiệm Gauss (một số hạng chính quy hóa $\ell_2$) trên một hàm hợp lý Gauss (tuyến tính) (một hàm mất mát huấn luyện đã xấp xỉ Laplace) cho ra một phân phối hậu nghiệm Gauss (một mạng đã huấn luyện được xấp xỉ Laplace). Do đó, cập nhật một *phân phối hậu nghiệm* Gauss với dữ liệu mới về mặt khái niệm cũng chính là cập nhật một *phân phối tiên nghiệm* Gauss. Thách thức thực sự duy nhất là quản lý tốt các cấu trúc dữ liệu thu được để giữ chi phí tính toán trong tầm kiểm soát. Nhưng vì Laplace ánh xạ quá trình này lên các phân phối Gauss, các khía cạnh tính toán này đều được quy về đại số tuyến tính số, lĩnh vực có sẵn những thuật toán rất mạnh và được nghiên cứu kỹ.
+
+## 3. Các mục tiêu lấy dữ liệu làm trung tâm
+
+Xấp xỉ Laplace cung cấp một cách khả thi để hiểu mối quan hệ giữa một mô hình và dữ liệu huấn luyện của nó, từ đó cải thiện các tính chất như độ hiệu chuẩn dự đoán (xem Mục 1) và khả năng học tuần tự (xem Mục 2). Chính mối quan hệ mô hình – dữ liệu này là trung tâm của các lĩnh vực nghiên cứu việc lựa chọn dữ liệu tối ưu. Thay vì dựa vào lấy mẫu ngẫu nhiên, người ta đã phát triển các phương pháp chọn một cách chiến lược dữ liệu giàu thông tin nhất để gán nhãn (học chủ động) và các điểm hiệu quả nhất để đánh giá (tối ưu hóa Bayes). Một cách tiếp cận Bayes về bản chất làm nền tảng cho các chiến lược này, tận dụng niềm tin hiện tại của mô hình để định hướng việc thu thập dữ liệu. Cũng tồn tại những câu hỏi lấy dữ liệu làm trung tâm tinh tế hơn, chẳng hạn xác định thứ tự huấn luyện hiệu quả nhất (học theo giáo trình (curriculum learning)), đã được nghiên cứu từ góc nhìn Bayes với sự hỗ trợ của xấp xỉ Laplace. Tuy nhiên, ở đây chúng ta tập trung vào học chủ động và tối ưu hóa Bayes vì mối liên hệ nền tảng của chúng với các nguyên lý Bayes.
+
+### 3.1 Học chủ động: chọn dữ liệu nào để gán nhãn tiếp theo
+
+Mục tiêu của **học chủ động** là huấn luyện một mô hình tối ưu với công sức thu thập dữ liệu tối thiểu. Chẳng hạn, việc huấn luyện các bộ giải nơ-ron cho phương trình đạo hàm riêng thường đòi hỏi một lượng lớn dữ liệu huấn luyện được sinh ra bởi các mô phỏng số tốn kém. Thay vì sinh dữ liệu ngẫu nhiên, học chủ động nhắm tới việc chọn một cách chiến lược các điểm dữ liệu giàu thông tin nhất để gán nhãn, nhờ đó đạt được cùng độ chính xác của mô hình với số mô phỏng số ít hơn đáng kể.
+
+Từ góc nhìn Bayes, quá trình lựa chọn này có thể được hình thức hóa thành một bài toán tối ưu được định hướng bởi lý thuyết thông tin. MacKay đề xuất phát biểu học chủ động như một bài toán thiết kế tuần tự, trong đó mục tiêu là chọn điểm dữ liệu tiếp theo được kỳ vọng mang lại lượng thông tin thu được (information gain) lớn nhất về các tham số $\theta$ của mô hình. Lượng thông tin này được đo bằng mức giảm kỳ vọng của entropy của phân phối hậu nghiệm trên tham số sau khi quan sát một điểm dữ liệu mới $(x_i, y_i)$:
+
+$$
+\mathcal{U}(x_i) = \mathrm{H}[p(\theta \mid \mathcal{D})] - \mathbb{E}_{y \sim p(y \mid x_i, \mathcal{D})}\big[\mathrm{H}[p(\theta \mid \mathcal{D}, x_i, y)]\big] \tag{10.14}
+$$
+
+trong đó $\mathrm{H}[p] = -\int p(u) \log p(u) \, \mathrm{d}u$ ký hiệu entropy (vi phân) của một phân phối $p$; với một phân phối rời rạc, chẳng hạn phân phối dự đoán nhãn lớp $p(y \mid \cdot)$, tích phân được thay bằng tổng $-\sum_u p(u) \log p(u)$.
+
+Nói chung, việc tính lượng thông tin thu được kỳ vọng này là không khả thi, nhưng xấp xỉ Laplace tuyến tính hóa một lần nữa cung cấp lời giải. Bằng cách xấp xỉ phân phối hậu nghiệm $p(\theta \mid \mathcal{D})$ bằng một phân phối Gauss, MacKay chỉ ra rằng lượng thông tin thu được kỳ vọng từ một điểm dữ liệu mới tiềm năng tại đầu vào $x$ là một hàm đơn điệu của phương sai dự đoán hiện tại của mô hình tại vị trí đó, $s^2(x) = J_\theta f(x, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x, \theta_*)^\top$. Điều này cung cấp một cơ sở có nguyên tắc cho heuristic lấy mẫu theo độ bất định (uncertainty sampling) trực quan và được dùng rộng rãi: *để học được nhiều nhất, ta nên truy vấn những điểm mà mô hình hiện đang bất định nhất*.
+
+Mục tiêu cực đại hóa thông tin về tham số ngày nay được biết đến rộng rãi với tên *Bayesian Active Learning by Disagreement* (học chủ động Bayes qua bất đồng, BALD). Điểm BALD là một cách phát biểu lại tương đương về mặt toán học của hàm mục tiêu ban đầu:
+
+$$
+\operatorname{BALD}(x) = \mathrm{H}[p(y \mid x, \mathcal{D})] - \mathbb{E}_{p(\theta \mid \mathcal{D})} \, \mathrm{H}[p(y \mid x, \theta)]. \tag{10.15}
+$$
+
+Phiên bản này cho một trực giác mạnh mẽ: ta nên truy vấn những điểm mà mô hình nhìn chung bất định về dự đoán của mình (số hạng thứ nhất), nhưng tại đó từng tham số $\theta$ riêng lẻ lấy từ phân phối hậu nghiệm lại tự tin vào những dự đoán có thể bất đồng với nhau của chúng (số hạng thứ hai thấp).
+
+Người ta đã nhận thấy rằng việc BALD tập trung vào độ bất định của tham số có thể không khớp với mục tiêu về hiệu năng dự đoán, vì nó thiếu một khái niệm tường minh về phân phối dữ liệu đầu vào liên quan. Điều này có thể dẫn tới việc chọn các điểm dữ liệu khác thường hoặc không liên quan, đem lại ít lợi ích cho các đầu vào kiểm tra điển hình. Để khắc phục những thiếu sót này, *Expected Predictive Information Gain* (lượng thông tin dự đoán thu được kỳ vọng, EPIG) đã được đề xuất; nó đo lượng thông tin kỳ vọng mà một nhãn ứng viên $y$ tại đầu vào $x$ cung cấp về nhãn $y_*$ của một đầu vào mục tiêu ngẫu nhiên $x_*$ được rút từ một phân phối mục tiêu $p_*(x_*)$. Hàm mục tiêu này được hình thức hóa thành mức giảm kỳ vọng của entropy dự đoán tại một điểm mục tiêu ngẫu nhiên, lấy trung bình trên mọi kết quả có thể của truy vấn ứng viên:
+
+$$
+\operatorname{EPIG}(x) = \mathbb{E}_{p_*(x_*)}\big[\mathrm{H}[p(y_* \mid x_*)] - \mathrm{H}[p(y_* \mid x_*, x, y)]\big]. \tag{10.16}
+$$
+
+Cả hai hàm mục tiêu BALD và EPIG đều không phụ thuộc vào phương pháp dùng để xấp xỉ phân phối hậu nghiệm. Bằng cách chuyển việc tính entropy sang không gian dự đoán có số chiều thấp hơn (BALD) hoặc chỉ xét entropy dự đoán (EPIG), cách tiếp cận dựa trên lý thuyết thông tin này giảm sự phụ thuộc vào một dạng cụ thể của độ bất định trong không gian trọng số, mở đường cho nhiều công cụ định lượng độ bất định khác nhau. Xấp xỉ Laplace vẫn là một phương pháp nhanh và khả thi để thu được độ bất định dự đoán cần cho việc tính một trong hai điểm số. Tuy nhiên, rốt cuộc, hiệu năng của các hàm thu nhận (acquisition function) này gắn chặt với chất lượng của các ước lượng độ bất định thu được.
+
+### 3.2 Tối ưu hóa Bayes: tìm điểm tối ưu
+
+Nhiều bài toán có thể được phát biểu thành việc tìm tối ưu toàn cục của một hàm mục tiêu rất tốn kém để đánh giá. Tối ưu hóa Bayes (BO) là một chiến lược tuần tự để tìm tối ưu toàn cục của những hàm hộp đen tốn kém như vậy, hoạt động bằng cách kết hợp một mô hình thay thế (surrogate model) xác suất của hàm mục tiêu với các hàm thu nhận để chọn điểm tiếp theo cần đánh giá. Các quá trình Gauss (GP) là mô hình thay thế tiêu chuẩn vì chúng mang tính Bayes một cách cố hữu, cung cấp một phân phối hậu nghiệm trên hàm và cho phép tính giải tích nhiều hàm thu nhận phổ biến, làm cho toàn bộ quá trình hiệu quả và có nguyên tắc.
+
+Xấp xỉ Laplace tuyến tính hóa (linearized Laplace approximation, LLA) cung cấp một cách dùng mạng nơ-ron làm mô hình thay thế bằng cách diễn giải chúng như một quá trình Gauss, cho phép tái sử dụng các hàm thu nhận giải tích sẵn có, chẳng hạn cực đại hóa *cận tin cậy trên* (upper confidence bound, UCB) cho bởi
+
+$$
+\alpha_{\text{UCB}}(x) = f(x, \theta_*) + \beta \, s(x) \tag{10.17}
+$$
+
+trong đó $f(x, \theta_*)$ là dự đoán trung bình của mạng tại ước lượng MAP, $s(x)$ là độ lệch chuẩn dự đoán từ phân phối hậu nghiệm LLA, và $\beta$ là một siêu tham số cân bằng giữa khám phá (exploration) và khai thác (exploitation).
+
+Quá trình tối ưu cuối cùng khi đó mang tính lặp. Ở mỗi bước, một mạng nơ-ron được huấn luyện trên tập dữ liệu hiện có và được truy vấn bằng LLA cùng một hàm thu nhận để tìm điểm dữ liệu tiếp theo cần đánh giá trên hàm hộp đen gốc. Sau đó, thông tin mới này phải được đưa vào bằng cách huấn luyện lại hoặc điều chỉnh mạng nơ-ron trên tập dữ liệu đã mở rộng để tìm một ước lượng hậu nghiệm cực đại (MAP) mới, rồi tính lại xấp xỉ Laplace quanh điểm mới này. Điều này tinh chỉnh niềm tin của mô hình và độ bất định trong không gian trọng số của nó, định hướng quyết định tiếp theo trong chuỗi.
+
+Kristiadi và cộng sự đã chứng minh rằng mô hình thay thế LLA thừa hưởng năng lực dự đoán mạnh và các thiên hướng quy nạp (inductive bias) của mạng nơ-ron nền tảng, cho phép nó vượt trội các GP tiêu chuẩn trên những tác vụ phức tạp, nhiều chiều như tìm kiếm trong không gian ảnh. Tuy nhiên, họ cũng lưu ý rằng hành vi dự đoán sai lệch ở các vùng ngoại suy có thể làm quá trình tối ưu đi chệch hướng đáng kể. Điều này trở nên rõ ràng khi xét cận tin cậy trên làm ví dụ. Với một mạng ReLU, trung bình dự đoán bên ngoài vùng dữ liệu trở thành một hàm tuyến tính khác hằng. Điều này có nghĩa là giá trị dự đoán sẽ tăng hoặc giảm vô hạn khi ta di chuyển ra xa dữ liệu, trong khi số hạng độ bất định cũng có xu hướng tăng tuyến tính ở các vùng ngoại suy này, theo thảo luận trong Mục 1.2. Vì cả hai số hạng đều tăng tuyến tính và điểm UCB dùng tổng của chúng, hàm lợi ích này cũng tăng không giới hạn theo cùng hướng, dẫn bộ tối ưu tới việc chọn một điểm xa vô hạn trong một không gian tìm kiếm không bị chặn. Lưu ý rằng hành vi này là nhất quán trong ngữ cảnh UCB: một vùng có phần thưởng kỳ vọng cực lớn *và* độ bất định cực lớn là một mục tiêu rất hấp dẫn cho một thí nghiệm tiếp theo. Vì vậy, có thể lập luận rằng vấn đề ở đây không phải là cách xử lý Bayes, mà là một lớp mô hình được chọn kém. Cụ thể là một lớp mô hình tin, theo đúng nghĩa đen, vào những hũ vàng ở cuối cầu vồng.
+
+> **Điểm cần ghi nhớ**
+>
+> Các xấp xỉ Laplace trang bị cho mạng sâu *độ bất định* xác suất với chi phí tính toán khả thi. Tuy nhiên, bản thân một độ đo xác suất chỉ là một khái niệm toán học trung gian. Mục đích triết học chủ yếu của nó, có lẽ, là cho phép đưa ra những *quyết định* có ý nghĩa. Chẳng hạn, phân phối hậu nghiệm Laplace có thể được dùng để quyết định nên thu thập thêm dữ liệu huấn luyện ở đâu nhằm giảm độ bất định một cách hiệu quả nhất và qua đó cải thiện mô hình. Hoặc, gián tiếp hơn, để tìm những điểm mà hàm mục tiêu (hay một hàm của nó) đạt giá trị cực trị, mang lại lợi ích lớn nhất. Điều thú vị là, vì những quyết định này phải được đưa ra trong một miền cố định, phân phối hậu nghiệm Bayes dùng cho mục đích này không cần "đúng" theo nghĩa tuyệt đối, mà chỉ cần đúng theo nghĩa tương đối. Điều này nhấn mạnh rằng khi chọn một sơ đồ suy luận xấp xỉ cho học sâu Bayes, ta nên cân nhắc trường hợp sử dụng ở khâu sau.
