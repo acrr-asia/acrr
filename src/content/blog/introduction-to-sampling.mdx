@@ -1,0 +1,619 @@
+---
+title: "Introduction to Sampling"
+description: "Monte Carlo, rejection and importance sampling, Metropolis–Hastings, Gibbs, MALA, Hamiltonian Monte Carlo and sequential Monte Carlo, with MCMC diagnostics."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - sampling
+  - monte carlo methods
+  - markov chain monte carlo
+  - sequential monte carlo
+series: bayesian-deep-learning
+seriesOrder: 3
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl01RejectionBeta from '../../components/diagrams/Bdl01RejectionBeta.astro';
+import Bdl01TracePlots from '../../components/diagrams/Bdl01TracePlots.astro';
+import Bdl01AcfPlots from '../../components/diagrams/Bdl01AcfPlots.astro';
+
+## 1. Introduction
+
+The fundamental objective of Bayesian statistics is to compute the posterior distribution of a random variable $\theta \in \Theta$ given data $\mathcal{D}$. In the context of supervised learning, where the data $\mathcal{D} = \{X, Y\}$ comprises features/inputs $X$ and responses/labels $Y$, Bayes' formula for the parameter posterior distribution takes the following form
+
+$$
+p(\theta \mid \mathcal{D}) = \frac{p(Y \mid \theta, X)\, p(\theta)}{\int_\Theta p(Y \mid \theta, X)\, p(\theta)\, \mathrm{d}\theta}\,, \tag{1.1}
+$$
+
+where $p(Y \mid \theta, X)$ denotes the likelihood of $N$ observations for the target $Y = \{y_1, \dots, y_N\}$ given inputs $X = \{x_1, \dots, x_N\}$, $p(\theta)$ is the density of the prior distribution for $\theta$, and
+
+$$
+p(\mathcal{D}) = \int_\Theta p(Y \mid \theta, X)\, p(\theta)\, \mathrm{d}\theta, \tag{1.2}
+$$
+
+denotes the *model evidence* of the data. Note that, in general the posterior is often only known up-to a normalizing constant, because, aside from simple models, calculating the integral in the model evidence is not feasible for high-dimensional $\theta$ nor is it often available in closed form. Therefore, it is more common to work with the unnormalized posterior $p(\theta \mid \mathcal{D}) \propto p(Y \mid \theta, X)\, p(\theta)$.
+
+We note that the ultimate goal in solving (1.1) is estimating the *posterior predictive* for new inputs $x^*$, i.e. the pushforward of the posterior through the test likelihood:
+
+$$
+p(y^* \mid x^*, \theta)\,, \quad \text{for} \quad \theta \sim p(\theta \mid \mathcal{D})\,. \tag{1.3}
+$$
+
+This is a distributed quantity that incorporates both *epistemic and aleatoric uncertainty* (uncertainty caused by a lack of data or knowledge, respectively), but often we content ourselves with its expectation as a point estimator $\hat{p}$:
+
+$$
+\hat{p}(y^* \mid x^*, \mathcal{D}) = \mathbb{E}_{\theta \mid \mathcal{D}}\left[p(y^* \mid x^*, \theta)\right] = \int_\Theta p(y^* \mid x^*, \theta)\, p(\theta \mid \mathcal{D})\, \mathrm{d}\theta\,. \tag{1.4}
+$$
+
+Simulating or sampling from $p(y^* \mid x^*, \theta)$, or from $\hat{p}(y^* \mid x^*)$, or $p(y^* \mid x^*, \hat{\theta})$ for some point estimator $\hat{\theta}$ is not considered explicitly in this chapter, although it is worth noting that the posterior predictive is often better behaved than the parameter posterior. One primary reason for this may be that it eliminates the non-identifiability arising from exchangeability of the weights on a given layer.
+
+For the remainder of this chapter, we will consider sampling from a generic target distribution $\pi(\theta) = \kappa(\theta)/Z$, where $Z = \int_\Theta \kappa(\theta)\, \mathrm{d}\theta$ may or may not be known. The reader can think of $\pi(\theta) := p(\theta \mid \mathcal{D})$ as the posterior already introduced in (1.1), but where we drop the data $\mathcal{D}$ for notational convenience.
+
+## 2. Monte Carlo
+
+The most fundamental sampling algorithm is the Monte Carlo algorithm, and it is the basis for many other sampling schemes. Monte Carlo works as follows. Suppose we have a random variable $\theta \in \Theta$ from a distribution which is continuous on $\mathbb{R}^P$. Let $\pi$ be the probability density function for $\theta$ and assume that we are able to simulate independent and identically distributed (i.i.d.) samples from $\pi$. Note that we may refer to $\pi$ as the distribution itself. For some function of interest $h$, which is integrable with respect to $\pi$, we wish to estimate an expectation
+
+$$
+\mathbb{E}[h(\theta)] = \int h(\theta)\, \pi(\theta)\, \mathrm{d}\theta, \tag{1.5}
+$$
+
+which is often not available in closed form. Quadrature methods are suitable in low parameter dimension $P \leq 5$, and with tricks up to $P \approx 20$ or even $P \approx 100$. However, for large $P$, Monte Carlo reigns supreme due to its remarkable ability to achieve a mean square error (MSE), defined as $\text{MSE} = \mathbb{E}\big[(\hat{h}_M - \mathbb{E}[h(\theta)])^2\big]$, that decays at the canonical rate $\mathcal{O}(1/M)$ in the number of samples $M$, regardless of dimension or smoothness of the quantity of interest $h$.
+
+The Monte Carlo method is extremely simple to use. We wish to generate $M$ independent samples $\theta_1, \theta_2, \dots, \theta_M$ as shown in Algorithm 1.
+
+**Algorithm 1:** Monte Carlo Algorithm
+
+```text
+Inputs : target density π
+Output: {θ_i}_{i=1}^M
+for i = 1 to M do
+    simulate θ_i ∼ π independently
+return {θ_i}_{i=1}^M
+```
+
+Using the Monte Carlo samples $\{\theta_i\}_{i=1}^M$ from $\pi$, we can estimate the expectation as follows
+
+$$
+\mathbb{E}[h(\theta)] \approx \hat{h}_M := \frac{1}{M} \sum_{i=1}^M h(\theta_i)\,. \tag{1.6}
+$$
+
+This beautiful equation has remarkable convergence properties, and it is this gold standard that we aim to achieve with other sampling algorithms. Since the samples $\theta_1, \dots, \theta_M$ are i.i.d. from $\pi$, and writing $h_i = h(\theta_i)$, we have
+
+$$
+\mathbb{E}[\hat{h}_M] = \mathbb{E}\Big[\tfrac{1}{M} \sum_{i=1}^M h_i\Big] = \tfrac{1}{M} \sum_{i=1}^M \mathbb{E}[h_i] = \mathbb{E}[h(\theta)]. \tag{1.7}
+$$
+
+Thus $\hat{h}_M$ is an *unbiased* estimator of the target integral. Moreover, we can increase the accuracy of our estimator by increasing the number of samples $M$. By the strong law of large numbers, if $\mathbb{E}|h(\theta)| < \infty$, we can guarantee that the Monte Carlo estimator converges almost surely to the true value as the number of samples grows without bound. Formally,
+
+$$
+\frac{1}{M} \sum_{i=1}^M h(\theta_i) \;\to\; \mathbb{E}[h(\theta)] \quad \text{almost surely as } M \to \infty. \tag{1.8}
+$$
+
+That is, with probability one the estimator will eventually get arbitrarily close to the truth. If we invoke the central limit theorem, then we can also quantify how accurate $\hat{h}_M$ is for a given finite $M$. Define the variance
+
+$$
+V \;=\; \int \{h(\theta) - \mathbb{E}[h(\theta)]\}^2\, \pi(\theta)\, \mathrm{d}\theta, \tag{1.9}
+$$
+
+and assume $V < \infty$. Then as $M \to \infty$,
+
+$$
+\sqrt{M} \left(\frac{\hat{h}_M - \mathbb{E}[h(\theta)]}{\sqrt{V}}\right) \xrightarrow{\;\mathsf{D}\;} \mathcal{N}(0, 1). \tag{1.10}
+$$
+
+Equivalently, for large $M$,
+
+$$
+\hat{h}_M \;\sim\; \mathcal{N}\Big(\mathbb{E}[h(\theta)],\, V/M\Big), \tag{1.11}
+$$
+
+so that the standard error of the Monte Carlo estimator is $\sqrt{V/M}$ and its MSE decays at the canonical rate $O(M^{-1})$ (i.e. root-MSE $O(M^{-1/2})$). This $M^{-1/2}$ convergence is independent of the dimension $P$ or smoothness of $h$, and is the benchmark against which all more advanced sampling methods are compared.
+
+Often, a challenge is that we cannot sample from our target probability distribution $\pi$ directly, and can only evaluate or sample from a non-negative unbiased estimator of $\kappa$. Addressing these challenges has led to the development of the algorithms presented in the remainder of this chapter.
+
+## 3. Rejection sampling
+
+Suppose that $q(\theta)$ is a probability density function from which we *can* sample relatively easily and that $\pi(\theta)$ is the target density from which we would like to sample. Suppose in addition that there exists a constant, $c > 0$, such that
+
+$$
+\frac{\pi(\theta)}{q(\theta)} \leq c, \tag{1.12}
+$$
+
+whenever $\pi(\theta) > 0$. Then, we can formulate an algorithm for simulating $M$ samples from $\pi(\theta)$ as given in Algorithm 2.
+
+**Algorithm 2:** Rejection Sampling
+
+```text
+Inputs : target density π, proposal density q, constant c > 0
+Output: {θ_i}_{i=1}^M
+i ← 1
+while i ≤ M do
+    simulate θ′ ∼ q and u ∼ U(0, 1)
+    if u < π(θ′) / (c q(θ′)) then
+        θ_i ← θ′
+        i ← i + 1
+return {θ_i}_{i=1}^M
+```
+
+<Figure caption="Figure 1.1: Rejection sampling from a Beta(2, 2) target π(y) using a uniform proposal q(y). Left: q alone does not dominate π, but the envelope cq with c = 3/2 does. Right: the acceptance probability k(y) = π(y)/(cq(y)), shown also for a Beta(3, 3) target (c = 15/8), for which acceptance is lower. (Redrawn from the exact densities.)">
+  <Bdl01RejectionBeta />
+</Figure>
+
+This algorithm is referred to as *rejection sampling*. We can see that this recipe will be very computationally efficient if the densities $q(\theta)$ and $\pi(\theta)$ are approximately equal and the constant $c$ can be chosen close to 1. In this case, the acceptance probability will generally be close to 1. On the other hand, if $\pi(\theta)$ and $q(\theta)$ are very different, then many runs of the algorithm may be required before a value is finally accepted.
+
+**Example 1.1.** We illustrate the use of rejection sampling to sample from the Beta(2, 2) distribution. In this case $\pi(\theta) = 6x(1 - x), 0 \leq x \leq 1$. Suppose that we select $q(\theta)$ to be the uniform density on $(0, 1)$. Then we can see that $\pi/q \leq 3/2$ and the conditions for rejection sampling hold. However, we can see that the acceptance probability will often be small, for example if $\theta < 0.25$ or $\theta > 0.75$ (something that will happen 1/2 of the time) then acceptance happens less than 75% of the time, meaning that we will require significantly more samples than in the ideal i.i.d. case. For the Beta(3, 3) distribution, the rejection rate would be even higher. This can be seen from the right panel of Figure 1.1.
+
+Despite its attraction of ease of implementation and simulation, the efficiency of rejection sampling relies on (i) having a good proposal distribution and (ii) a bound $c$. Note that it can easily be modified to work with only $\kappa$, but these difficulties remain.
+
+## 4. Importance sampling
+
+The importance sampling estimator of $\mathbb{E}_\pi[h(\theta)]$ begins by re-writing the integral as follows
+
+$$
+\int_\Theta h(\theta)\, \pi(\theta)\, \mathrm{d}\theta = \int \frac{\pi(\theta)}{q(\theta)}\, h(\theta)\, q(\theta)\, \mathrm{d}\theta\,, \tag{1.13}
+$$
+
+where $q$ is a density such that $q(\theta) > 0$, whenever $\pi(\theta) h(\theta) \neq 0$. We now produce i.i.d. samples $(\theta_1, \dots, \theta_M)$ from $q$, and estimate
+
+$$
+\hat{h} = \frac{1}{M} \sum_{i=1}^M \frac{\pi(\theta_i)}{q(\theta_i)}\, h(\theta_i) = \frac{1}{M} \sum_{i=1}^M w(\theta_i)\, h(\theta_i)\,. \tag{1.14}
+$$
+
+We call this procedure *importance sampling*. The density $q$ is called the proposal or instrumental density and $w(\theta_i) = \frac{\pi(\theta_i)}{q(\theta_i)}$ are the *importance weights*. Note that $\hat{h}$ is an unbiased Monte Carlo estimator of $\mathbb{E}_\pi[h(\theta)]$, as shown in Equation (1.7). There are two reasons why we might be interested in performing importance sampling:
+
+1. Sampling from $\pi(\theta)$ is not possible or too expensive.
+2. The function $h(\theta)$ has a large variance, so the conventional unbiased estimator has large Monte Carlo error.
+
+Recalling the results of Section 2, the effective test function is now $(\pi/q)h$, and so its regularity dictates the convergence behavior. Hence, if possible, we should choose a proposal density $q$ such that the variance of $(\pi/q)h$ is small. It can be shown that the optimal proposal distribution is $q \propto \pi|h|$, however that does little good by itself, since we are back to the same problem of approximating $q$. However, it can provide useful guidance.
+
+**Example 1.2.** Let $\pi = \mathcal{N}(0, 1)$ and $h = \mathbf{1}(\theta > 4)$, where $\mathbf{1}$ is the indicator function taking the value 1 if the argument is true and 0 otherwise. Since we can simulate i.i.d. from $\pi$, it is tempting to do so, i.e. let $\theta_1, \dots, \theta_M \sim \pi$ i.i.d. and set
+
+$$
+\hat{h} = \frac{1}{M} \sum_{i=1}^M h(\theta_i)\,. \tag{1.15}
+$$
+
+The number of samples $M$ would have to be very large to get a non-zero estimator. An alternative is to produce an i.i.d. sample from an exponential random variable with rate 1 translated to the right by 4. In this case, we obtain samples $\theta > 4$ such that
+
+$$
+w(\theta) = \frac{\pi(\theta)}{q(\theta)} = \frac{1}{\sqrt{2\pi}} \exp\left(-\frac{\theta^2}{2} + (\theta - 4)\right). \tag{1.16}
+$$
+
+Suppose that we only know how to evaluate $\kappa$. It is easy to see that an unbiased estimator of the normalizing constant can be built using the following identity
+
+$$
+Z = \int_\Theta \kappa(\theta)\, \mathrm{d}\theta = \int_\Theta \frac{\kappa(\theta)}{q(\theta)}\, q(\theta)\, \mathrm{d}\theta\,. \tag{1.17}
+$$
+
+It is left as an exercise to the reader to build a consistent (but biased) self-normalized importance sampling estimator using only $\kappa$. Unlike rejection sampling, importance sampling does not waste samples through the rejection step, which could be a high amount depending on the application at hand.
+
+As alluded to already, a major disadvantage of importance sampling is that it can result in high variance. There are numerous methods beyond what has been introduced here to alleviate such issues, including the *sequential importance sampling and resampling* methods which will be introduced later in Section 6.
+
+## 5. Markov chain Monte Carlo
+
+The preceding sections have introduced Monte Carlo integration and two classical approaches (rejection sampling and importance sampling) for drawing samples from a target distribution $\pi(\theta)$, typically the posterior in Bayesian inference. While these methods are simple to use and theoretically well-founded, they suffer significant limitations in high-dimensional settings. Rejection sampling becomes increasingly inefficient as the dimension grows, due to the difficulty of finding proposal distributions that tightly bound the target. Importance sampling, although more flexible, tends to suffer from high variance unless the proposal distribution is well matched to the target, a condition that is notoriously hard to satisfy in practice, especially in the multimodal, heavy-tailed, and high-dimensional posteriors encountered in Bayesian deep learning.
+
+Markov Chain Monte Carlo (MCMC) provides a powerful and general framework to overcome these challenges. Rather than attempting to generate independent samples from $\pi(\theta)$, MCMC constructs a *Markov chain* whose stationary distribution is $\pi$ itself. By simulating a trajectory through parameter space in such a way that, asymptotically, the empirical distribution of visited states converges to the target, MCMC transforms the task of independent sampling into one of designing a suitable transition mechanism that ensures both *ergodicity* and *invariance* with respect to $\pi$.
+
+In practical terms, MCMC methods produce a correlated sequence of samples $\{\theta_1, \theta_2, \dots, \theta_M\}$, which, under suitable conditions, can still be used to approximate expectations under $\pi$ using ergodic averages. The canonical estimator takes the form:
+
+$$
+\hat{h}_M = \frac{1}{M} \sum_{i=1}^M h(\theta_i), \tag{1.18}
+$$
+
+which, despite the dependence between samples, converges to the true posterior expectation $\mathbb{E}_\pi[h(\theta)]$ under mild regularity assumptions.
+
+In what follows, we introduce several fundamental MCMC algorithms, starting with the *Metropolis–Hastings algorithm*, which provides a generic recipe for constructing $\pi$-invariant Markov chains from arbitrary proposal distributions. We then examine key special cases (random-walk Metropolis, the Metropolis-adjusted Langevin algorithm (MALA), and Hamiltonian Monte Carlo (HMC)) that are particularly relevant in the context of high-dimensional posterior inference in Bayesian deep learning. Throughout, we pay close attention to algorithmic trade-offs, scaling behavior, and diagnostic tools for assessing convergence and sampling efficiency.
+
+### 5.1 Metropolis–Hastings
+
+Markov chain Monte Carlo (MCMC) proceeds by generating a Markov chain $\theta_1 \to \theta_2 \to \dots$ with transition kernel $\mathcal{M}$, described by a density $p(\theta, \theta')$ on $\Theta^2$, which is invariant with respect to the target posterior $\pi$:
+
+$$
+\int_\Theta \pi(\theta')\, p(\theta', \theta)\, \mathrm{d}\theta' = \pi(\theta). \tag{1.19}
+$$
+
+The Metropolis–Hastings (MH) algorithm achieves this invariance by first choosing an arbitrary proposal density $q(\theta, \theta')$ that proposes $\theta'$ given the current iterate of the Markov chain $\theta$, and then accepting or rejecting each proposed move so that detailed balance (and hence (1.19)) holds.
+
+Concretely, we can define the MH transition kernel as
+
+$$
+p(\theta, \theta') = q(\theta, \theta')\, \alpha(\theta, \theta'), \tag{1.20}
+$$
+
+where the acceptance probability is
+
+$$
+\alpha(\theta, \theta') = \min\left\{1,\; \frac{\pi(\theta')\, q(\theta', \theta)}{\pi(\theta)\, q(\theta, \theta')}\right\}. \tag{1.21}
+$$
+
+Because $\pi(\theta) \propto \kappa(\theta)$, any unknown normalization cancels and only the unnormalized density $\kappa$ is needed. See Algorithm 3 for a full implementation.
+
+**Proposition 1.1.** *The Metropolis-Hastings algorithm satisfies the equation (1.19).*
+
+*Proof.* Let us first assume the proposal is accepted. Recalling the definition of $p(\theta, \theta')$ we have
+
+$$
+p(\theta, \theta') = q(\theta, \theta') \times \alpha(\theta, \theta') = \min\left\{q(\theta, \theta'),\; \frac{\pi(\theta')\, q(\theta', \theta)}{\pi(\theta)}\right\}. \tag{1.22}
+$$
+
+It follows that
+
+$$
+\pi(\theta)\, p(\theta, \theta') = \min\{\pi(\theta)\, q(\theta, \theta'),\, \pi(\theta')\, q(\theta', \theta)\} = \pi(\theta')\, p(\theta', \theta)\,, \tag{1.23}
+$$
+
+by symmetry. The symmetry of the rejection case is left as an exercise. This property is called *detailed balance* and is a sufficient condition for invariance (1.19). $\square$
+
+**Algorithm 3:** Metropolis-Hastings Algorithm
+
+```text
+Inputs : unnormalized target density κ, proposal distribution q
+Output: {θ_i}_{i=1}^M
+Generate initial sample θ_0 ∼ p, with π ≪ p (absolute continuity)
+for i = 0 to M − 1 do
+    propose new state θ′ ∼ q(θ_i, ·)
+    compute the acceptance probability
+
+        α(θ_i, θ′) = min{1, π(θ′)q(θ′, θ_i) / (π(θ_i)q(θ_i, θ′))}
+                   = min{1, κ(θ′)q(θ′, θ_i) / (κ(θ_i)q(θ_i, θ′))}
+
+    draw u ∼ U[0, 1]
+    if u ≤ α(θ_i, θ′) then
+        θ_{i+1} ← θ′
+    else
+        θ_{i+1} ← θ_i
+return {θ_i}_{i=1}^M
+```
+
+Invariance with respect to $\pi$ is a necessary condition for building convergent estimators from a Markov chain. The chain also needs to have certain other stability properties, collectively known as *ergodicity*, to ensure empirical averages (1.6) built from its output converge. A desirable and achievable property is called *geometric ergodicity*, which essentially guarantees linear convergence, i.e. the dependence on the initial condition vanishes geometrically.
+
+#### Random walk Metropolis
+
+A particularly simple (and historically important) special case of the Metropolis–Hastings algorithm is the *random–walk Metropolis* (RWM) proposal, in which one sets
+
+$$
+q(\theta, \theta') = q(\theta' - \theta), \tag{1.24}
+$$
+
+where $q$ is any symmetric density, $q(\theta) = q(-\theta)$. The canonical choice is
+
+$$
+\theta' = \theta + \epsilon, \qquad \epsilon \sim \mathcal{N}\big(0,\; \lambda^2 I_P\big), \tag{1.25}
+$$
+
+so that $\theta' \sim \mathcal{N}\big(\theta, \lambda^2 I_P\big)$, i.e. $q(\theta, \cdot) = \mathcal{N}\big(\theta, \lambda^2 I_P\big)$. Due to symmetry, the Metropolis acceptance probability simplifies to
+
+$$
+\alpha(\theta, \theta') = \min\left\{1,\; \frac{\kappa(\theta')}{\kappa(\theta)}\right\}. \tag{1.26}
+$$
+
+**Local moves and tuning.** RWM proposals are inherently *local*: each candidate $\theta'$ lies in a neighborhood of $\theta$. If $\lambda$ is too small, the chain makes only tiny steps and mixes very slowly; if $\lambda$ is too large, most proposals fall in low-density regions and are rejected. Optimal scaling results show that, for a wide class of $P$-dimensional targets, the stationary acceptance rate tends to $\approx 0.234$ as $P \to \infty$ when $\lambda \propto P^{-1/2}$. In practice, one therefore adapts $\lambda$ so that the empirical acceptance rate lies between about 20% and 30%.
+
+**Preconditioning.** When components of $\theta$ have very different scales or strong correlations, one can replace $\lambda^2 I_P$ by $\lambda^2 V$, where $V$ is a positive-definite "preconditioning" matrix (often an estimate of the posterior covariance). This *preconditioned RWM* retains symmetry and thus the same simplified acceptance probability, but can yield orders-of-magnitude improvements in computational efficiency, i.e. less samples required to sample the target, because the proposed parameters $\theta'$ will be more closely aligned with the posterior distribution, and thus less likely to be rejected.
+
+#### Gibbs sampler
+
+Given a multi-variate $\theta = (\theta_1, \theta_2 \dots \theta_n)$, it may be intractable to sample all at once. However if the full conditional distributions for each coordinate are known, then it becomes possible to apply *Gibbs sampling*.
+
+The Gibbs sampling algorithm is fairly straightforward. Given the proposals are known, the Gibbs algorithm updates the sample by updating each coordinate one at a time, i.e. $\theta_i' \sim P(\theta_i \mid \theta_{\neg i})$, where $\theta_{\neg i}$ denotes all coordinates except $i$. While it may be tempting to update all coordinates at the same time, this would not properly preserve the joint distribution as all coordinates would be updated independently. We include a simple formulation in Algorithm 4.
+
+**Algorithm 4:** Gibbs Sampler
+
+```text
+Inputs : initial state θ = (θ_1, θ_2 … θ_n); full conditional distributions P(θ_i | θ_¬i) for i ∈ {1, …, n}
+Outputs: sample set S
+S ← ∅
+for each iteration do
+    for i ∈ {1, …, n} do
+        θ_i′ ∼ P(θ_i | θ_¬i)
+        θ ← (θ_1, θ_2, … θ_i′, … θ_n)
+        S ← S ∪ {θ}
+```
+
+Given that the Gibbs sampler is drawing from the correct proposal, the typical Metropolis-Hastings acceptance step is not needed in this case. However, this sampler suffers from slow and highly correlated samples due to the nature of the single coordinate update approach.
+
+It is possible to extend the initial Gibbs sampler to a block-style approach in the case where the joint distribution over multiple coordinates is known. Instead of the single-coordinate marginal, if we know the joint distribution over one-set of coordinates conditioned on another set, it is possible to quickly sample by alternative sampling from each joint distribution. This is known as the Block-Gibbs sampler. More formally, if we have two sets of coordinates $I, J$, the block Gibbs sampler proceeds by sampling $\theta_I' \sim P(\theta_I \mid \theta_J)$, and then sampling $\theta_J' \sim P(\theta_J \mid \theta_I')$. This sampling algorithm avoids the pitfalls of the typical Gibbs sampler. However, it is only possible to use this in cases where the conditional distributions over blocks of coordinates is known.
+
+#### Metropolis-adjusted Langevin algorithm
+
+The random-walk Metropolis ignores gradient information about $\pi$. The Metropolis–Adjusted Langevin Algorithm (MALA) rectifies this by using an Euler–Maruyama discretization of the overdamped Langevin diffusion
+
+$$
+\mathrm{d}\theta_t = \tfrac{1}{2} \nabla \log \pi(\theta_t)\, \mathrm{d}t + \mathrm{d}W_t, \tag{1.27}
+$$
+
+where $\{W_t\}_{t \geq 0}$ is standard Brownian motion on $\mathbb{R}^P$, and whose stationary law is $\pi$. Concretely, the MALA proposal is
+
+$$
+\theta' \mid \theta \sim \mathcal{N}\left(\theta + \tfrac{\lambda^2}{2} \nabla \log \kappa(\theta),\, \lambda^2 I_P\right). \tag{1.28}
+$$
+
+This drift term $\nabla \log \kappa(\theta)$ biases proposed moves towards regions of higher posterior density, enabling larger step-sizes than RWM and better acceptance rates. The MALA proposal also forms the basis for many other wonderful Monte Carlo algorithms, including the stochastic gradient Langevin dynamics (SGLD) and all other stochastic gradient MCMC (SG-MCMC) algorithms, which will be the focus of the next chapter.
+
+**Gradient-based tuning.** Under regularity conditions, choosing $\lambda \propto P^{-1/6}$ yields an optimal stationary acceptance rate of approximately 0.574 as $P \to \infty$. In applications, one often adapts $\lambda$ to target an acceptance rate of about 50% to 60%. This can be done by monitoring the acceptance rate and adjusting $\lambda$ accordingly, or by using more sophisticated adaptive schemes that adjust the step size based on the empirical gradient information.
+
+**Preconditioned MALA and robustness.** Analogous to RWM, one can introduce a symmetric preconditioning matrix $V$, replacing $I_P$ by $V$ both in the covariance and in the drift:
+
+$$
+\theta' \sim \mathcal{N}\left(\theta + \tfrac{\lambda^2}{2} V \nabla \log \kappa(\theta),\, \lambda^2 V\right). \tag{1.29}
+$$
+
+Preconditioning often dramatically accelerates convergence on anisotropic posteriors. However, because MALA relies on $\nabla \log \kappa$, it can be sensitive to regions where the gradient is large or ill-behaved (e.g. lighter-than-Gaussian tails). Common mitigations include gradient clipping or fallback to RWM outside of a "trust region."
+
+#### Monitoring performance
+
+Assessing the quality of an MCMC run is essential to ensure that empirical averages $\hat{h}_M = \frac{1}{M} \sum_{i=1}^M h(\theta_i)$ reliably approximates $\mathbb{E}_\pi[h(\theta)]$. Three widely used diagnostics are:
+
+**1. Autocorrelation and Integrated Autocorrelation Time.** For a scalar summary of $h(\theta)$, define the lag-$k$ autocorrelation
+
+$$
+\rho_k = \frac{\operatorname{Cov}\big[h(\theta_i),\, h(\theta_{i+k})\big]}{\operatorname{Var}_\pi\big[h(\theta)\big]}. \tag{1.30}
+$$
+
+As the Markov chain is stationary, $\rho_0 = 1$, and $\rho_k \to 0$ as $k \to \infty$. The slower $\rho_k$ decays, the more correlated is the chain. One can show that, via the Markov-chain central limit theorem,
+
+$$
+\sqrt{M}\big(\hat{h}_M - \mathbb{E}_\pi[h]\big) \xrightarrow{\mathcal{D}} \mathcal{N}\big(0, V_{\text{eff}}\big), \quad \text{where} \quad V_{\text{eff}} = \operatorname{Var}_\pi[h]\Big(1 + 2\sum_{k=1}^{\infty} \rho_k\Big). \tag{1.31}
+$$
+
+The quantity $\tau_{\text{int}} = 1 + 2\sum_{k=1}^\infty \rho_k$ is the *integrated autocorrelation time*, and the *effective sample size* $\mathrm{ESS} = M/\tau_{\text{int}}$ measures the number of independent draws represented by $M$ correlated samples. Figure 1.3 illustrates autocorrelation decay. A related metric is the *expected squared jumping distance* (ESJD) $\mathbb{E}[\|\theta_{i+1} - \theta_i\|^2]$, which balances move size against acceptance rate. Larger moves will reduce the correlation between elements of the Markov chain, however, larger moves are also less likely to be accepted, which means that the chain does not evolve. Therefore, the challenge for practitioners, is to balance between small moves (high correlation and high acceptance rate) and large moves (low correlation and low acceptance rate).
+
+**2. Trace Plots.** Plotting the sequence $\{h(\theta_i)\}_{i=1}^M$ versus iteration $i$ provides a simple-to-interpret visual representation of mixing and stationarity. Well-mixed chains rapidly traverse the bulk of the posterior, showing no apparent trends or "stickiness" (see Left Panel Figure 1.2). Conversely, slow mixing or multimodality is signaled by long periods of drift or entrapment in subregions of the posterior (see Right Panel Figure 1.2). Trace plots are a useful visual tool for diagnosing the efficiency of an MCMC algorithm, however, they tend to be most useful for low-dimensional posteriors as it is easier to visualize all of the parameters $\theta$, whereas, for high-dimensional posteriors, visualizing all of the parameters in the Markov chain individually is often impractical.
+
+**3. Potential Scale Reduction (Gelman–Rubin) Diagnostic.** When multiple chains $\{\theta_i^{(c)}\}$ are run from overdispersed starting points, one can compare the *between-chain variance* $B$ to the *within-chain variance* $W$. The *potential scale reduction factor*
+
+$$
+\widehat{R} = \sqrt{\frac{\frac{M-1}{M} W + \frac{1}{M} B}{W}} \tag{1.32}
+$$
+
+tends to 1 as all chains converge to the same target distribution. Values of $\widehat{R} < 1.1$ are commonly taken to indicate satisfactory convergence, after which samples from all chains may be pooled to produce an approximation to the posterior $\pi$.
+
+In practice, one would usually employ a combination of these diagnostics: trace plots for qualitative assurance, autocorrelation and ESS for quantitative accuracy, and $\widehat{R}$ to guard against failure to explore multimodal targets.
+
+**Example 1.3.** We present a Metropolis-Hastings experiment aiming to sample from a target $\pi(\theta) = N(0, 1)$. Our proposal is based on a random walk scheme (Section 5.1) $\theta' = \theta + \epsilon$, where $\epsilon \sim \mathcal{N}(0, \lambda^2 I)$ is additive Gaussian noise. We run two different experiments, with different choices of step size parameter $\lambda \in \{0.01, 0.9\}$. Our simulations are plotted below in Figures 1.2 and 1.3. For the larger choice of $\lambda$, we notice that the chain explores the space well as the iterations progress, with the ACF decorrelating rapidly. However, for the smaller value of $\lambda$, the chain wanders slowly and mixes poorly, and the ACF decreases much slower, remaining close to one at moderate lags.
+
+<Figure caption="Figure 1.2: Trace plots for λ = 0.9 (left) and λ = 0.01 (right). (Schematic reproduction: the two chains were simulated anew for this page with the setup of Example 1.3, 5000 iterations from θ = 0, so individual values differ from the book's run.)">
+  <Bdl01TracePlots />
+</Figure>
+
+<Figure caption="Figure 1.3: Corresponding ACFs for λ = 0.9 (left) and λ = 0.01 (right). (Schematic reproduction computed from the chains of Figure 1.2; dashed lines mark ±1.96/√5000.)">
+  <Bdl01AcfPlots />
+</Figure>
+
+### 5.2 Hamiltonian Monte Carlo
+
+Random–walk Metropolis (RWM) requires proposal steps of size $\lambda = O(d^{-1/2})$ to maintain a non–degenerate acceptance rate in dimension $d$, whereas MALA can take steps of size $O(d^{-1/6})$. *Hamiltonian Monte Carlo* (HMC) goes a step further: with an integration step size $\epsilon = O(d^{-1/4})$ it still enjoys an acceptance rate bounded away from 0 while exploring much larger regions of parameter space between consecutive accept–reject decisions. The key is to embed the $d$-dimensional parameter $\theta$ in a $2d$-dimensional *phase space* and simulate approximate Hamiltonian dynamics that preserve a surrogate "total energy".
+
+**Extended target and Hamiltonian.** Introduce an auxiliary *momentum* variable $z \in \mathbb{R}^d$ and a positive–definite *mass matrix* $M_0$. Define the Hamiltonian
+
+$$
+H(\theta, z) = U(\theta) + K(z) := -\log \pi(\theta) + \tfrac{1}{2} z^\top M_0^{-1} z, \tag{1.33}
+$$
+
+so that the joint density $\widetilde{\pi}(\theta, z) \propto \exp[-H(\theta, z)]$ has marginal $\pi(\theta)$ and independent $z \sim \mathcal{N}(0, M_0)$.
+
+**Hamiltonian dynamics.** The continuous equations of motion are
+
+$$
+\frac{\mathrm{d}\theta}{\mathrm{d}t} = M_0^{-1} z, \qquad \frac{\mathrm{d}z}{\mathrm{d}t} = \nabla_\theta \log \pi(\theta), \tag{1.34}
+$$
+
+which conserve $H$ exactly and therefore move along surfaces of constant joint density. Exact simulation is impossible for general targets $\pi$, so HMC uses the second–order, symplectic *leapfrog* integrator with step size $\Delta t$:
+
+$$
+\begin{aligned}
+z_{t+\frac{1}{2}\Delta t} &= z_t + \tfrac{\Delta t}{2} \nabla_\theta \log \pi(\theta_t), \\
+\theta_{t+\Delta t} &= \theta_t + \Delta t\, M_0^{-1} z_{t+\frac{1}{2}\Delta t}, \\
+z_{t+\Delta t} &= z_{t+\frac{1}{2}\Delta t} + \tfrac{\Delta t}{2} \nabla_\theta \log \pi(\theta_{t+\Delta t}).
+\end{aligned} \tag{1.35}
+$$
+
+One repeats this map $L$ times, with $\epsilon = \Delta t$ and $T = L\, \epsilon$ is the *integration time*.
+
+**HMC kernel.** Starting from $\theta_{i-1}$:
+
+1. Draw momentum $z \sim \mathcal{N}(0, M_0)$.
+2. Apply $L$ leapfrog steps (1.35) to obtain $(\theta', z')$.
+3. Accept $(\theta', z')$ with probability
+
+   $$
+   \alpha = \min\Big\{1,\, \exp\big[H(\theta_{i-1}, z) - H(\theta', z')\big]\Big\}. \tag{1.36}
+   $$
+
+4. Set $\theta_i = \theta'$ if accepted, otherwise $\theta_i = \theta_{i-1}$; discard $z'$.
+
+Because the leapfrog map is volume–preserving (i.e. the Jacobian $= 1$) and symmetric (its inverse is obtained by $(\theta, z) \mapsto (\theta, -z)$ and running the $L$ steps backward), the Metropolis correction guarantees $\widetilde{\pi}$ is invariant; the posterior $\pi$ is therefore stationary for the marginal chain on $\theta$.
+
+**Algorithm 5:** Hamiltonian Monte Carlo Kernel
+
+```text
+Inputs : initial state θ_0, target distribution π, mass matrix M_0
+Output: {θ_i}_{i=1}^M
+for i = 1 to M do
+    generate initial momentum z ∼ N(0, M_0)
+    for l = 1 to L do
+        generate θ_{lΔt} and z_{lΔt} from (1.35) applied at (θ_{(l−1)Δt}, z_{(l−1)Δt}), with θ_0 = θ_{i−1} and z_0 = z
+    let (θ′, z′) ← (θ_{LΔt}, z_{LΔt}) and generate u ∼ U[0, 1]
+    if u ≤ min{1, exp[H(θ, z) − H(θ′, z′)]} then
+        θ_i ← θ′
+    else
+        θ_i ← θ_{i−1}
+return {θ_i}_{i=1}^M
+```
+
+**High-dimensional scaling.** For product targets $\pi(\theta) = \prod_{i=1}^d f(\theta^i)$ with $M_0 = I_d$, one can show that to keep a well-behaved acceptance rate, one must scale $\epsilon = O(d^{-1/4})$, hence $L = O(d^{1/4})$. The computational cost per effectively independent draw is therefore $O(d^{1/4})$, compared with $O(d^{1/3})$ for MALA and $O(d)$ for RWM.
+
+**Practical tuning.**
+
+- **Step size $\epsilon$.** During warm–up, adapt $\epsilon$ (e.g. with dual-averaging) to target an acceptance rate in the 60–80% range; theory suggests 65% is asymptotically optimal.
+- **Trajectory length $T = L\, \epsilon$.** Too small $T$ gives RWM-like behavior; too large wastes computation and may return to near the starting point. Popular heuristics randomize $L$ or employ the No-U-Turn criterion.
+- **Mass matrix $M_0$.** Setting $M_0$ to an estimate of the posterior covariance (or its diagonal) acts like the preconditioning matrices used with RWM and MALA, dramatically improving convergence when parameters are on different scales.
+
+Because HMC combines long, momentum-driven proposals with high acceptance probabilities, it has become the default sampler in many Bayesian deep-learning applications, where posteriors are high-dimensional, strongly correlated and feature narrow valleys that thwart simpler MCMC methods.
+
+## 6. Sequential Monte Carlo
+
+Sequential Monte Carlo (SMC) methods are a set of Monte Carlo algorithms designed to sample from a sequence of target probability densities $\{\pi_n(\theta_{1:n})\}$ of increasing dimension, where each one is defined on the product space $\Theta^n = \prod_{i=1}^n \Theta$. This is referred to as the *smoothing distribution* in the context of state-space models. Often one may be interested only in the time $n$ marginal $\pi_n(\theta_n)$, which is known as the *filtering distribution*. Suppose
+
+$$
+\pi_n(\theta_{1:n}) = \frac{\kappa_n(\theta_{1:n})}{Z_n}\,, \tag{1.37}
+$$
+
+where the un-normalized density admits the decomposition
+
+$$
+\kappa_n(\theta_{1:n}) = \kappa_n(\theta_n \mid \theta_{1:n-1})\, \kappa_{n-1}(\theta_{1:n-1})\,, \tag{1.38}
+$$
+
+and $\kappa_n(\theta_n \mid \theta_{1:n-1})$ and $\kappa_1(\theta_1)$ can be evaluated, and $Z_n$ is the unknown normalizing constant given by
+
+$$
+Z_n = \int \kappa_n(\theta_{1:n})\, \mathrm{d}\theta_{1:n}. \tag{1.39}
+$$
+
+Note that we write
+
+$$
+\int \mathrm{d}\theta_{1:n} \quad \text{which is equivalent to} \quad \int_\Theta \int_\Theta \cdots \int_\Theta \mathrm{d}\theta_1\, \mathrm{d}\theta_2 \cdots \mathrm{d}\theta_n.
+$$
+
+SMC provides an approximation of $\pi_1(\theta_1)$ and an estimate of $Z_1$ at time 1 then an approximation of $\pi_2(\theta_{1:2})$ and an estimate of $Z_2$ at time 2 and so on. The approximations are done sequentially in time:
+
+- At time step 1, one samples $N$ samples $\{\theta_1^{(i)}\}_{i=1}^N$ from some given function $q_1(\theta_1)$ and then approximates $\pi_1(\theta_1)$ and $Z_1$ using these samples;
+- At time step 2, sample $\{\theta_2^{(i)}\}_{i=1}^N$ from some function $q_2(\theta_2 \mid \theta_1)$, and use the cumulative samples to approximate $\pi_2(\theta_{1:2})$ and $Z_2$.
+
+Consider another probability density $q_n(\theta_{1:n}) = q_n(\theta_n \mid \theta_{1:n-1})\, q_{n-1}(\theta_{1:n-1})$ that is easy to sample from, and such that the support of $q_n(\theta_{1:n})$ includes the support of $\pi_n(\theta_{1:n})$. Then, we have the following importance sampling (IS) identities
+
+$$
+\pi_n(\theta_{1:n}) = \frac{\kappa_n(\theta_{1:n})}{Z_n} = \frac{w_n(\theta_{1:n})\, q_n(\theta_{1:n})}{Z_n}, \tag{1.40}
+$$
+
+$$
+Z_n = \int w_n(\theta_{1:n})\, q_n(\theta_{1:n})\, \mathrm{d}\theta_{1:n}, \tag{1.41}
+$$
+
+where $w_n(\theta_{1:n})$ is the unnormalized weight function and in light of (1.38) we have the following recursive definition of the weights
+
+$$
+w_n(\theta_{1:n}) = \frac{\kappa_n(\theta_{1:n})}{q_n(\theta_{1:n})} = \frac{\kappa_n(\theta_n \mid \theta_{1:n-1})}{q_n(\theta_n \mid \theta_{1:n-1})}\, w_{n-1}(\theta_{1:n-1}) =: \alpha(\theta_n \mid \theta_{1:n-1})\, w_{n-1}(\theta_{1:n-1})\,. \tag{1.42}
+$$
+
+Assume we draw, sequentially in time, $M$ independent samples $\theta_{1:n}^{(i)}$, $i = 1, \cdots, M$, from $q_n(\theta_{1:n})$ (see Algorithm 6). We have the following unbiased estimator of $Z_n$:
+
+$$
+\widehat{Z}_n = \frac{1}{M} \sum_{i=1}^M w_n(\theta_{1:n}^{(i)}). \tag{1.43}
+$$
+
+A consistent self-normalized importance sampling estimator of $\mathbb{E}_n(h_n)$, for an arbitrary function $h_n : \Theta^n \to \mathbb{R}$, is given by
+
+$$
+\widehat{\mathbb{E}}_n(h_n) = \frac{\sum_{i=1}^N w_n(\theta_{1:n}^{(i)})\, h_n(\theta_{1:n}^{(i)})}{\sum_{i=1}^N w_n(\theta_{1:n}^{(i)})} = \sum_{i=1}^M W_n^{(i)}\, h_n(\theta_{1:n}^{(i)})\,,
+$$
+
+where
+
+$$
+W_n^{(i)} = \frac{w_n(\theta_{1:n}^{(i)})}{\sum_{i=1}^M w_n(\theta_{1:n}^{(i)})}\,. \tag{1.44}
+$$
+
+**Algorithm 6:** Sequential Importance Sampling (SIS) to estimate $\mathbb{E}_n(\theta_n)$ for $n \geq 1$
+
+```text
+Inputs : number of particles M, proposal distributions q_n, adjustment multipliers α_n
+Outputs: estimates θ̂_n and Ẑ_n for n ≥ 1
+for i = 1 to M do
+    initialize weights w_1^(i) ← 1/M
+n ← 1
+repeat
+    for i = 1 to M do
+        sample θ_n^(i) ∼ q_n(θ_n | θ_{1:n−1}^(i))
+        update unnormalized weight
+
+            w_n(θ_{1:n}^(i)) ← α_n(θ_n^(i) | θ_{1:n−1}^(i)) w_{n−1}(θ_{1:n−1}^(i))
+
+        normalize weight
+
+            W_n^(i) ← w_n(θ_{1:n}^(i)) / Σ_{j=1}^M w_n(θ_{1:n}^(j))
+
+    compute estimates
+
+        θ̂_n ← Σ_{i=1}^M W_n^(i) θ_n^(i),    Ẑ_n ← (1/M) Σ_{i=1}^M w_n(θ_{1:n}^(i))
+
+    n ← n + 1
+until termination criterion met
+```
+
+These are the ingredients of the *sequential importance sampling* (SIS) algorithm, given in Algorithm 6. In Algorithms 6 and 7 we take $h_n(\theta_{1:n}) = \theta_n$.
+
+As $n$ grows the weights will degenerate, in the sense that one will dominate the rest. This can be monitored by the effective sample size, which is related to the variance of the weights:
+
+$$
+\mathsf{ESS} = \frac{\left(\sum_{i=1}^M w_n^{(i)}\right)^2}{\sum_{i=1}^M (w_n^{(i)})^2}\,. \tag{1.45}
+$$
+
+One way to mitigate this somewhat is by resampling, i.e. for $i = 1, \dots, M$, let
+
+$$
+\theta_{1:n}^{(i)} \leftarrow \theta_{1:n}^{(j)}\,, \quad \text{for} \quad j \sim (W_n^{(1)}, \dots, W_n^{(M)})\,, \quad \text{and} \quad w_n^{(i)} \leftarrow 1/M\,. \tag{1.46}
+$$
+
+Resampling slightly increases the variance of the estimator, but the particles are rejuvenated at the filtering end, and under suitable conditions the filter can even remain stable online for infinite time. Note that this branching of the particles forward in time means coalescence backward in time, so the particles still degenerate for small times, which is problematic for the smoother. SIS along with resampling is called sequential importance resampling (SIR) or sequential Monte Carlo (SMC). See Algorithm 7. In the context of a state-space model, $q_n$ is often chosen as the forward evolution kernel of the hidden process, and in the filtering context this specific choice is often called the *bootstrap particle filter*. In practice, one resamples when the ESS is less than a threshold (e.g. $M/2$ or $M/4$). See Chopin and Papaspiliopoulos for a recent comprehensive introduction.
+
+**Algorithm 7:** Sequential Monte Carlo (SMC) to estimate $\mathbb{E}(\theta_n)$ for $n \geq 1$
+
+```text
+Inputs : number of particles M, proposals q_n, adjustment multipliers α_n
+Outputs: estimates θ̂_n and Ẑ_n for n ≥ 1
+// Initialization at n = 1
+for i = 1 to M do
+    sample θ_1^(i) ∼ q_1(θ_1)
+    compute w_1(θ_1^(i)) ← κ_1(θ_1^(i)) / q_1(θ_1^(i))
+
+    W_1^(i) ← w_1(θ_1^(i)) / Σ_{j=1}^M w_1(θ_1^(j))    for i = 1, …, M,    Ẑ ← 1
+
+// Iterate for subsequent times
+n ← 1
+repeat
+    // Effective sample size at time n
+
+        ESS_n ← ( Σ_{i=1}^M (W_n^(i))² )^(−1)
+
+    // Optional resampling at time n
+    if ESS_n ≤ M/2 then
+        // Multinomial resampling with probabilities W_n^(1:M)
+        for i = 1 to M do
+            draw j ∼ Categorical(W_n^(1), …, W_n^(M))
+            θ_{1:n}^(i) ← θ_{1:n}^(j)
+            w_n^(i) ← 1/M
+
+        Ẑ ← ( (1/M) Σ_{i=1}^M w_n(θ_{1:n}^(i)) ) Ẑ
+
+    // Advance to time n + 1
+    n ← n + 1
+    for i = 1 to M do
+        sample θ_n^(i) ∼ q_n(θ_n | θ_{1:n−1}^(i))
+        update unnormalized weight
+
+            w_n(θ_{1:n}^(i)) ← α_n(θ_n^(i) | θ_{1:n−1}^(i)) w_{n−1}(θ_{1:n−1}^(i))
+
+    W_n^(i) ← w_n(θ_{1:n}^(i)) / Σ_{j=1}^M w_n(θ_{1:n}^(j))    for i = 1, …, M
+
+    // Estimates at time n
+
+        θ̂_n ← Σ_{i=1}^M W_n^(i) θ_n^(i),    Ẑ_n ← (1/M) Σ_{i=1}^M w_n(θ_{1:n}^(i)) Ẑ
+
+until termination criterion met
+```
+
+## 7. Summary
+
+This chapter introduced the Monte Carlo algorithm and a number of methods that develop it. Each addresses the same underlying difficulty: simulating from, or estimating expectations under, a target distribution $\pi(\theta)$ that in most applications can only be evaluated up to an unknown normalizing constant.
+
+When independent samples from $\pi$ are available, Monte Carlo integration (Section 2) applies directly. When they are not, rejection sampling (Section 3) and importance sampling construct estimators from an accessible proposal distribution. Both are exact in principle, but become inefficient in high dimension unless the proposal closely matches the target.
+
+Markov chain Monte Carlo (Section 5) removes the need for independent draws by constructing a Markov chain whose stationary distribution is the target. The Metropolis–Hastings algorithm (Section 5.1) provides the general recipe, with the random-walk Metropolis algorithm (Section 5.1), the Gibbs sampler, the Metropolis-adjusted Langevin algorithm (Section 5.1), and Hamiltonian Monte Carlo (Section 5.2) as the special cases treated here. Since the samples are correlated, step-size tuning and the convergence diagnostics of Section 5.1 are essential in practice.
+
+Sequential Monte Carlo (Section 6) extends importance sampling to a sequence of targets on nested product spaces, as in filtering. Sequential importance sampling with resampling propagates weighted particles forward in time, with resampling when the effective sample size drops.
+
+The methods play complementary roles: rejection and importance sampling suit low-dimensional or well-matched problems, MCMC is the standard tool for high-dimensional Bayesian computation, and sequential Monte Carlo is suited to inference along a sequence. These ideas are taken further in the chapters that follow. For example, stochastic gradient MCMC is covered in Chapter 2, and sequential Monte Carlo *samplers*, which applies SMC to an artificial sequence of intermediate targets with MCMC mutations, with tempering and multilevel extensions for neural network posteriors, in Chapter 4.

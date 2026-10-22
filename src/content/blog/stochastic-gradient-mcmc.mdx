@@ -1,0 +1,147 @@
+---
+title: "Stochastic Gradient MCMC"
+description: "Stochastic gradient MCMC for deep learning: SGLD, SG-HMC, cyclical step sizes and Entropy-MCMC for sampling diverse and wide local minima."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - markov chain monte carlo
+  - stochastic gradients
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 4
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl02CyclicalSchedule from '../../components/diagrams/Bdl02CyclicalSchedule.astro';
+import Bdl02EntropyMcmc from '../../components/diagrams/Bdl02EntropyMcmc.astro';
+
+Deep learning models extensively use stochastic gradients (i.e., mini-batches) to reduce the memory requirements of model training. Under suitable assumptions, stochastic gradients computed from individual samples or minibatches can be used in place of full-batch gradients while retaining almost-sure convergence guarantees. In this chapter, we introduce stochastic gradient MCMC (SG-MCMC) methods, in which stochastic gradients make MCMC suitable for modern deep learning models.
+
+## 1. Introduction
+
+Standard MCMC algorithms are asymptotically exact samplers under suitable conditions; Chapter 1 provides an introduction to MCMC and HMC. For Langevin-based methods, an appropriate decaying step-size schedule yields asymptotic convergence to the target distribution. However, using the entire data set to compute each update makes full-batch MCMC impractical for deep learning models, which commonly have tens of millions of parameters. Inspired by stochastic gradient descent (SGD), stochastic gradient MCMC (SG-MCMC) uses stochastic gradients to approximate full-batch MCMC updates. Similar ideas have been transferred to mini-batch Metropolis–Hastings (MH) algorithms. However, mini-batch MH often relies on strong assumptions, such as bounded log-likelihoods or bounded gradients, which are not guaranteed for deep learning models. SG-MCMC addresses these practical concerns under fewer assumptions and with substantially lower memory requirements, thereby bridging the gap between MCMC and Bayesian neural networks (BNNs).
+
+## 2. Classic SG-MCMC algorithms
+
+In this section, we introduce two concrete examples of SG-MCMC algorithms that are widely used for deep learning models.
+
+### 2.1 Notation
+
+Let $\theta$ be the parameters of a deep learning model, and let $\mathcal{S} = \{\theta_s\}_{s=1}^{M}$ be a sample set collected during the MCMC process. Due to memory constraints, we can collect only a finite number of samples to characterize the posterior distribution:
+
+$$
+p(\theta \mid \mathcal{D}) \approx \frac{1}{M} \sum_{s=1}^{M} \delta(\theta - \theta_s), \tag{2.1}
+$$
+
+where $\delta(\cdot)$ is the Dirac delta function (also known as the unit impulse). At inference time, the sample set is used for Bayesian model averaging (BMA), in which the predictive probabilities of all collected samples contribute to the final prediction:
+
+$$
+\hat{y} = \operatorname*{arg\,max}_{y \in \mathcal{Y}} \mathbb{E}_{\theta \sim p(\theta \mid \mathcal{D})}[p(y \mid x, \theta)] \approx \operatorname*{arg\,max}_{y \in \mathcal{Y}} \frac{1}{M} \sum_{s=1}^{M} p(y \mid x, \theta_s). \tag{2.2}
+$$
+
+The goal of each SG-MCMC algorithm is to sample from the posterior distribution and collect such a sample set to reconstruct an approximate posterior distribution.
+
+### 2.2 Stochastic gradient Langevin dynamics
+
+Stochastic Gradient Langevin Dynamics (SGLD) is the first well-known SG-MCMC algorithm. The full-batch energy function is $U(\theta) = -\sum_{(\boldsymbol{x}, \boldsymbol{y}) \in \mathcal{D}} \log p(\boldsymbol{y} \mid \boldsymbol{x}, \theta) - \log p(\theta)$. Its mini-batch estimate is
+
+$$
+\widetilde{U}(\theta) = -\frac{|\mathcal{D}|}{|\Xi|} \sum_{(\boldsymbol{x}, \boldsymbol{y}) \in \Xi} \log p(\boldsymbol{y} \mid \boldsymbol{x}, \theta) - \log p(\theta), \tag{2.3}
+$$
+
+where $\Xi \subset \mathcal{D}$ is the sampled batch. The sampling process for SGLD follows the Langevin dynamics:
+
+$$
+\theta_{t+1} \leftarrow \theta_t - \alpha_t \nabla_{\theta_t} \widetilde{U}(\theta_t) + \sqrt{2\alpha_t}\, \boldsymbol{\epsilon}_t, \qquad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}), \tag{2.4}
+$$
+
+where $\alpha_t$ is the step size at iteration $t$. The complete SGLD framework is outlined in Algorithm 8. Compared with standard SGD, SGLD introduces an additional random-noise term $\sqrt{2\alpha_t}\, \boldsymbol{\epsilon}_t$. As noted by Welling and Teh, SGLD approaches standard unadjusted Langevin dynamics when the step size $\alpha_t$ is sufficiently small, as the injected noise dominates the stochastic-gradient noise. Under standard regularity conditions, convergence is guaranteed by a decaying step-size schedule. Any schedule satisfying i) $\sum_{t=1}^{\infty} \alpha_t = \infty$ and ii) $\sum_{t=1}^{\infty} \alpha_t^2 < \infty$ allows the sampler to explore the target distribution while controlling its asymptotic error. Notably, mini-batch noise in SGD without externally injected noise can produce behavior qualitatively similar to SGLD, but converges to a biased approximate posterior.
+
+**Algorithm 8** Stochastic Gradient Langevin Dynamics (SGLD)
+
+```text
+Inputs : dataset 𝒟, initial sample θ₀ ∈ Θ, step-size schedule {αₜ}ₜ≥₀
+Outputs: collected samples 𝒮 ⊂ Θ
+θ ← θ₀; 𝒮 ← ∅
+for each iteration do
+    Ξ ← a mini-batch sampled from 𝒟
+    Ũ ← −(|𝒟|/|Ξ|) log p(Ξ | θ) − log p(θ)                 // Compute energy
+    θ ← θ − αₜ ∇_θ Ũ + √(2αₜ) ϵ                            // ϵ ∼ 𝒩(0, I)
+    𝒮 ← 𝒮 ∪ {θ}
+```
+
+### 2.3 Stochastic gradient Hamiltonian Monte Carlo
+
+Full-batch Hamiltonian Monte Carlo (HMC) has achieved gold-standard performance in Bayesian inference. HMC incorporates a kinetic-energy term characterized by a set of auxiliary "momentum" variables. To adapt HMC to deep learning models and reduce its memory requirements, stochastic gradient HMC (SG-HMC) eliminates the need for full-batch gradients and removes the MH correction used by full-batch HMC. Specifically, naive SG-HMC replaces the full-batch energy in the Hamiltonian with its mini-batch estimate:
+
+$$
+\widetilde{H}(\theta, \boldsymbol{r}) = \widetilde{U}(\theta) + \frac{1}{2} \boldsymbol{r}^\top \boldsymbol{M}^{-1} \boldsymbol{r} = -\frac{|\mathcal{D}|}{|\Xi|} \sum_{(\boldsymbol{x}, \boldsymbol{y}) \in \Xi} \log p(\boldsymbol{y} \mid \boldsymbol{x}, \theta) - \log p(\theta) + \frac{1}{2} \boldsymbol{r}^\top \boldsymbol{M}^{-1} \boldsymbol{r}, \tag{2.5}
+$$
+
+where $\boldsymbol{r}$ is the momentum and $\boldsymbol{M}$ is a positive-definite mass matrix. Despite its intuitive appeal and simplicity, naive SG-HMC does not preserve the target posterior: stochastic-gradient noise makes the desired joint distribution $\pi(\theta, \boldsymbol{r}) \propto \exp(-H(\theta, \boldsymbol{r}))$, where $H(\theta, \boldsymbol{r}) = U(\theta) + \frac{1}{2} \boldsymbol{r}^\top \boldsymbol{M}^{-1} \boldsymbol{r}$, non-invariant. To mitigate this problem, Chen et al. introduces a "friction" term $C\boldsymbol{M}^{-1}\boldsymbol{r}$. If $\widehat{B}$ estimates the stochastic-gradient noise coefficient and $C \geq \widehat{B}$, the practical dynamics are
+
+$$
+\mathrm{d}\theta = \boldsymbol{M}^{-1} \boldsymbol{r}\, \mathrm{d}t \quad \text{and} \quad \mathrm{d}\boldsymbol{r} = -\nabla_\theta \widetilde{U}(\theta)\, \mathrm{d}t - C\boldsymbol{M}^{-1}\boldsymbol{r}\, \mathrm{d}t + \sqrt{2(C - \widehat{B})}\, \mathrm{d}\boldsymbol{W}_t. \tag{2.6}
+$$
+
+Here, $\boldsymbol{W}_t$ is standard Brownian motion. The friction and injected-noise terms counteract the stochastic-gradient noise. These modified dynamics are commonly known as second-order Langevin dynamics. The complete SG-HMC framework is outlined in Algorithm 9.
+
+**Algorithm 9** Stochastic Gradient Hamiltonian Monte Carlo (SG-HMC)
+
+```text
+Inputs : dataset 𝒟, initial sample θ₀ ∈ Θ, initial momentum r₀, step-size schedule {αₜ}ₜ≥₀, inner steps
+         m, friction coefficient C, noise estimate B̂
+Outputs: collected samples 𝒮 ⊂ Θ
+θ ← θ₀; r ← r₀; 𝒮 ← ∅
+for each iteration do
+    r ∼ 𝒩(0, M)                                              // Optionally resample momentum
+    (θ⁽⁰⁾, r⁽⁰⁾) ← (θ, r)
+    for i = 1 to m do
+        Ξ ← a mini-batch sampled from 𝒟
+        Ũ ← −(|𝒟|/|Ξ|) log p(Ξ | θ⁽ⁱ⁻¹⁾) − log p(θ⁽ⁱ⁻¹⁾)       // Compute energy
+        θ⁽ⁱ⁾ ← θ⁽ⁱ⁻¹⁾ + αₜ M⁻¹ r⁽ⁱ⁻¹⁾
+        r⁽ⁱ⁾ ← r⁽ⁱ⁻¹⁾ − αₜ ∇_θ Ũ − αₜ C M⁻¹ r⁽ⁱ⁻¹⁾ + √(2αₜ(C − B̂)) ϵₜ   // ϵₜ ∼ 𝒩(0, I)
+    (θ, r) ← (θ⁽ᵐ⁾, r⁽ᵐ⁾)                                      // No Metropolis-Hastings step
+    𝒮 ← 𝒮 ∪ {θ}
+```
+
+## 3. Practical concerns and recent improvements
+
+SG-MCMC methods have been shown to be effective on many small-scale deep learning models. However, their application to large-scale deep learning is hindered by several practical concerns. In this section, we discuss these concerns and selected attempts to address them. Chapter 5 presents a complementary perspective on scalable, low-precision sampling.
+
+### 3.1 Sampling from diverse local minima
+
+The loss surface (or energy landscape) of deep learning models is highly non-convex and multimodal, which makes it difficult for sampling algorithms to move between modes. Moreover, a loss surface typically contains multiple local minima that may all represent good solutions. However, traditional SG-MCMC samplers commonly use a decaying step size and converge to only one local minimum, reducing their ability to explore the entire loss surface.
+
+To mitigate this problem, Zhang et al. proposed cyclical stochastic gradient MCMC (cSG-MCMC), which uses the cyclical step-size schedule shown in Figure 2.1. The schedule is defined as
+
+$$
+\alpha_t = \frac{\alpha_0}{2} \left[ \cos\left( \frac{\pi \operatorname{mod}(t - 1, \lceil T/K \rceil)}{\lceil T/K \rceil} \right) + 1 \right], \tag{2.7}
+$$
+
+where $\alpha_0$ is the initial step size, $K$ is the number of cycles, and $T$ is the total number of iterations. The cyclical step-size schedule enables the sampler to leave the current mode when the step size increases. It can therefore explore and characterize multiple modes while retaining asymptotic convergence to the target distribution.
+
+### 3.2 Sampling from wide and robust local minima
+
+Distribution shift between training and test data creates a generalization challenge for SG-MCMC algorithms. Local minima identified using the training data may not remain local minima under the test data, especially when they are sharp. To mitigate this problem, Li and Zhang introduces Entropy-MCMC (EMCMC), which incorporates flatness-aware optimization methods into the SG-MCMC framework. Specifically, EMCMC introduces local entropy into the posterior distribution of model parameters:
+
+$$
+p(\widetilde{\theta} \mid \mathcal{D}) = p(\theta, \theta_a \mid \mathcal{D}) \propto \exp\left\{ -f(\theta) - \frac{1}{2\eta} \|\theta - \theta_a\|^2 \right\}, \tag{2.8}
+$$
+
+where $f(\theta) = U(\theta)$ is the negative log-posterior energy, $\eta > 0$ is a coupling constant, and $\theta_a$ is an auxiliary parameter vector that locally explores the neighborhood of $\theta$. This posterior induces an extended energy whose gradient is
+
+$$
+\nabla_{\widetilde{\theta}} U(\widetilde{\theta}) = \begin{bmatrix} \nabla_\theta U(\widetilde{\theta}) \\ \nabla_{\theta_a} U(\widetilde{\theta}) \end{bmatrix} = \begin{bmatrix} \nabla_\theta f(\theta) + \frac{1}{\eta}(\theta - \theta_a) \\ \frac{1}{\eta}(\theta_a - \theta) \end{bmatrix}. \tag{2.9}
+$$
+
+<Figure caption="Figure 2.1: Comparison of cyclical and decaying step-size schedules. Adapted with the permission of Ruqi Zhang. Redrawn as a schematic reproduction: the cyclical curves follow Equation (2.7) with α₀ = 0.1, K = 4 and T = 200, and the decaying schedule is drawn with an assumed polynomial decay.">
+  <Bdl02CyclicalSchedule />
+</Figure>
+
+This form provides a clear interpretation of the EMCMC sampling process: i) $\theta$ seeks low-energy regions of the energy landscape, and ii) $\theta_a$ acts as a "direction-correction force" that pulls $\theta$ away from sharp minima. Figure 2.2 illustrates this process. EMCMC frames flatness-aware sampling as a standard MCMC process on an extended energy function without introducing an additional correction step. It also has convergence guarantees and can converge faster than previous flatness-aware methods.
+
+<Figure caption="Figure 2.2: The sampling dynamics of Entropy-MCMC, showing how the guiding variable θₐ pulls θ toward flat regions in the energy landscape. Adapted from Li and Zhang with the permission of Bolian Li. Redrawn as a schematic reproduction on an illustrative energy landscape.">
+  <Bdl02EntropyMcmc />
+</Figure>
