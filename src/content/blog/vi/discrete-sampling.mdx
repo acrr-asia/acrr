@@ -1,0 +1,383 @@
+---
+title: "Lấy mẫu rời rạc"
+description: "Lấy mẫu trên không gian rời rạc nhiều chiều: đề xuất cân bằng cục bộ, Gibbs-With-Gradient, Discrete Langevin Proposal, bộ lấy mẫu mọi thang đo và tuần hoàn."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - markov chain monte carlo
+  - discrete sampling
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 8
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl06GradientInformed from '../../../components/diagrams/Bdl06GradientInformed.astro';
+import Bdl06GwgVsDlp from '../../../components/diagrams/Bdl06GwgVsDlp.astro';
+import Bdl06ScaleSchedules from '../../../components/diagrams/Bdl06ScaleSchedules.astro';
+
+Nhiều bài toán trong học sâu đòi hỏi lấy mẫu trên các không gian rời rạc. Những bài toán lấy mẫu này khác với lấy mẫu trên không gian liên tục: tuy các khung lấy mẫu chính được giới thiệu trong [Chương 1](/vi/blog/introduction-to-sampling) (Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC), lấy mẫu loại bỏ (rejection sampling) và lấy mẫu theo trọng số quan trọng (importance sampling)) có thể áp dụng cho không gian rời rạc bằng cách điều chỉnh phân phối đề xuất (proposal distribution), việc điều chỉnh này thường hoàn toàn không đơn giản. Chương này tập trung vào các phân phối mục tiêu nhiều chiều có log mật độ chưa chuẩn hóa (unnormalized log density) tính được nhưng có không gian trạng thái quá lớn để liệt kê. Những phân phối mục tiêu như vậy xuất hiện trong các mô hình dựa trên năng lượng (energy-based model) nhị phân, các mô hình biến ẩn dạng phân loại (categorical latent-variable model) và các mô hình nơ-ron trên các cấu trúc tổ hợp.
+
+## 1. Giới thiệu
+
+Lấy mẫu rời rạc đặc biệt khó vì bản chất thưa, không liên tục và tổ hợp của các không gian rời rạc. Nếu một trạng thái gồm $d$ biến phân loại, mỗi biến có $K$ giá trị khả dĩ, thì không gian trạng thái của nó có thể chứa $K^d$ cấu hình. Về nguyên tắc, ta có thể tính mật độ chưa chuẩn hóa tại mọi cấu hình, chuẩn hóa các trọng số thu được và lấy mẫu từ phân phối phân loại (categorical distribution) tương ứng. Cách tiếp cận dựa trên liệt kê này trở nên bất khả thi khi số chiều tăng. Các phương pháp MCMC cục bộ tiêu chuẩn tránh được việc liệt kê toàn bộ, nhưng các phân phối đề xuất không phụ thuộc vào phân phối mục tiêu có thể trộn (mix) chậm, vì chúng không phân biệt được các bước di chuyển hứa hẹn với các bước đi vào vùng có mật độ thấp.
+
+Làm ví dụ xuyên suốt, xét một mô hình dựa trên năng lượng nhị phân với $x \in \{0, 1\}^d$ và log mật độ chưa chuẩn hóa $U(x)$. Mô hình gán một điểm số cho mỗi cấu hình trong số $2^d$ cấu hình khả dĩ, khiến việc liệt kê là bất khả thi khi $d$ lớn. Tuy vậy, $U(x)$, và thường cả gradient của một phần mở rộng khả vi của $U$, có thể được tính tại bất kỳ cấu hình nào cho trước. Chúng ta dùng mô hình nhị phân này để minh họa các phương pháp dưới đây, dù khung lý thuyết cũng áp dụng cho các bối cảnh phân loại và tổ hợp rộng hơn đã nêu ở trên.
+
+Gradient là thành phần quen thuộc của việc lấy mẫu trong học sâu, như các phương pháp Langevin trên không gian liên tục ở [Chương 1, Mục 5.1](/vi/blog/introduction-to-sampling) cho thấy. Một hàm chỉ được xác định trên không gian rời rạc thì không có gradient nội tại, nhưng nhiều phân phối mục tiêu trong học sâu được biểu diễn qua một hàm khả vi trên một không gian bao (ambient space) liên tục và được tính tại các trạng thái nhị phân, phân loại hoặc rời rạc khác. Gradient của phần mở rộng này có thể là một nguồn thông tin cục bộ rẻ về các bước di chuyển rời rạc hứa hẹn.
+
+Chúng ta bắt đầu với một phân phối đề xuất MCMC cục bộ không có thông tin (uninformed) và cho thấy cách các phân phối đề xuất có thông tin theo điểm (pointwise-informed) và cân bằng cục bộ (locally balanced) đưa thông tin riêng của phân phối mục tiêu vào. Sau đó chúng ta dùng khung này để xây dựng các bộ lấy mẫu rời rạc dựa trên gradient, trước hết cho các bước di chuyển trên một tọa độ, rồi cho các bước di chuyển song song trên nhiều tọa độ. Cuối cùng, chúng ta bàn về các phương pháp được thiết kế cho việc khám phá ở quy mô lớn hơn.
+
+## 2. Ký hiệu
+
+Ta giả sử một không gian trạng thái rời rạc $\mathcal{X}$. Ta ký hiệu một trạng thái là $x = (x_1, \dots, x_d) \in \mathcal{X}$, trong đó mỗi tọa độ có thể nhận một trong $K$ giá trị khả dĩ. Trong toàn chương, $\pi$ ký hiệu phân phối mục tiêu đã chuẩn hóa và $U$ là log mật độ chưa chuẩn hóa của nó. Như vậy phân phối mục tiêu là
+
+$$
+\pi(x) = \frac{1}{Z} \exp(U(x)), \quad Z = \sum_{x' \in \mathcal{X}} \exp U(x') \tag{6.1}
+$$
+
+Hằng số chuẩn hóa, hay hàm phân hoạch (partition function), $Z$ trong Phương trình (6.1) nói chung đòi hỏi một tổng trên tới $K^d$ trạng thái. Điều này khiến việc lấy mẫu trực tiếp dựa trên liệt kê là bất khả thi về mặt tính toán trong không gian nhiều chiều. Tuy vậy, MCMC có thể làm việc với các hiệu như $U(x') - U(x)$, trong đó $Z$ bị triệt tiêu.
+
+## 3. Các phân phối đề xuất cân bằng cục bộ
+
+Một cách tiếp cận Metropolis–Hastings đơn giản đề xuất một trạng thái lân cận bằng một hạt nhân (kernel) $K_\sigma(x' \mid x)$ không phụ thuộc vào phân phối mục tiêu. Chẳng hạn, hạt nhân có thể chọn đều một tọa độ và thay giá trị của nó. Một phân phối đề xuất như vậy rẻ, nhưng nó gán cùng một xác suất đề xuất cho các bước di chuyển tới trạng thái có mật độ cao và có mật độ thấp. Các bước di chuyển lớn có thể khám phá nhanh nhưng thường đi tới các trạng thái có mật độ thấp và bị bác bỏ; các bước di chuyển nhỏ dễ được chấp nhận hơn nhưng có thể tạo ra các mẫu tương quan mạnh và đi qua không gian trạng thái một cách chậm chạp.
+
+Với ví dụ nhị phân xuyên suốt, hạt nhân cục bộ đơn giản nhất chọn đều một trong $d$ bit và lật nó, không dùng giá trị của $U$ để ưu tiên các bước di chuyển khả dĩ.
+
+Zanella đưa ra một khung lý thuyết giải quyết sự đánh đổi này bằng cách gán trọng số cho các bước di chuyển ứng viên từ $K_\sigma$ nhờ thông tin về mật độ mục tiêu. Phân phối đề xuất có thông tin theo điểm thu được là
+
+$$
+P_{g,\sigma}(x' \mid x) = \frac{g\!\left(\frac{\pi(x')}{\pi(x)}\right) K_\sigma(x' \mid x)}{Z_{g,\sigma}(x)}. \tag{6.2}
+$$
+
+Phân phối đề xuất có thông tin theo điểm trong Phương trình (6.2) gồm tỉ số mật độ mục tiêu; một hạt nhân cơ sở, hay trọng số, đối xứng $K_\sigma$ có thang đo điều khiển kích thước của các bước di chuyển ứng viên; một hàm cân bằng (balancing function) $g$ gán trọng số cho các bước di chuyển theo tỉ số mật độ; và hằng số chuẩn hóa phụ thuộc trạng thái $Z_{g,\sigma}(x)$. Hạt nhân cơ sở có thể chỉ được xác định sai khác một hằng số nhân không phụ thuộc trạng thái, vì hằng số đó bị triệt tiêu qua $Z_{g,\sigma}(x)$. Ta giả sử $K_\sigma(x' \mid x) = K_\sigma(x \mid x')$. Giới hạn $\sigma \to 0$ biểu diễn một họ hạt nhân ngày càng tập trung tại trạng thái hiện tại.
+
+Vai trò của tính bất biến và tính ergodic (ergodicity) trong MCMC được ôn lại ở [Chương 1, Mục 5](/vi/blog/introduction-to-sampling), còn cân bằng chi tiết (detailed balance) và cách xây dựng Metropolis–Hastings được bàn ở [Chương 1, Mục 5.1](/vi/blog/introduction-to-sampling). Trong bối cảnh hiện tại, $P_{g,\sigma}$ khả nghịch (reversible) đối với $\pi_{g,\sigma}$ nếu nó thỏa mãn cân bằng chi tiết,
+
+$$
+\pi_{g,\sigma}(x) P_{g,\sigma}(x' \mid x) = \pi_{g,\sigma}(x') P_{g,\sigma}(x \mid x').
+$$
+
+Cân bằng chi tiết là điều kiện đủ để $\pi_{g,\sigma}$ bất biến dưới phép chuyển trạng thái. Riêng tính bất biến không bảo đảm sự hội tụ từ một trạng thái ban đầu bất kỳ. Với một xích rời rạc, tính tối giản (irreducibility) nghĩa là mọi trạng thái có xác suất mục tiêu dương cuối cùng đều có thể đạt tới từ mọi trạng thái ban đầu chấp nhận được, còn tính không tuần hoàn (aperiodicity) nghĩa là xích không bị ràng buộc phải quay lại theo một chu kỳ cố định. Cùng với tính bất biến và các điều kiện chính quy liên quan, các tính chất này cho một xích ergodic. Vai trò chung của tính ergodic trong MCMC được ôn lại ở [Chương 1, Mục 5](/vi/blog/introduction-to-sampling).
+
+Một phân phối đề xuất có thông tin theo điểm được gọi là *cân bằng cục bộ* nếu hạt nhân chuyển trạng thái $P_{g,\sigma}$ khả nghịch đối với một phân phối $\pi_{g,\sigma}$ nào đó sao cho $\pi_{g,\sigma}$ hội tụ yếu về $\pi$ khi $\sigma \to 0$. Nói đơn giản, khi phân phối đề xuất ngày càng cục bộ, phân phối bất biến (invariant distribution) của phân phối đề xuất có thông tin chưa hiệu chỉnh tiến tới phân phối mục tiêu mong muốn. Zanella chứng minh rằng một phân phối đề xuất có thông tin theo điểm là cân bằng cục bộ khi và chỉ khi hàm cân bằng thỏa mãn $g(t) = t g(1/t)$.
+
+Nếu tính chất này đúng với hàm $g$, thì phân phối đề xuất cân bằng cục bộ sẽ khả nghịch đối với phân phối sau mà không cần bất kỳ hiệu chỉnh nào:
+
+$$
+\pi_{g,\sigma}(x) = \frac{\pi(x) Z_{g,\sigma}(x)}{\sum_{x' \in \mathcal{X}} \pi(x') Z_{g,\sigma}(x')}.
+$$
+
+Ở đây, $Z_{g,\sigma}$ được định nghĩa như sau:
+
+$$
+Z_{g,\sigma}(x) = \sum_{x' \in \mathcal{X}} g\!\left(\frac{\pi(x')}{\pi(x)}\right) K_\sigma(x' \mid x).
+$$
+
+Với một hạt nhân cục bộ thỏa mãn $K_\sigma(x' \mid x) \to \mathbf{1}\{x' = x\}$ và cách chuẩn hóa thông thường $g(1) = 1$, ta có $Z_{g,\sigma}(x) \to 1$. Do đó $\pi_{g,\sigma}$ hội tụ về $\pi$ khi $\sigma \to 0$.
+
+Ở một thang đo khác không, $\pi_{g,\sigma}$ không nhất thiết bằng $\pi$, nên vẫn cần một bước hiệu chỉnh Metropolis–Hastings để lấy mẫu chính xác. Tính cân bằng cục bộ làm cho phân phối đề xuất chưa hiệu chỉnh gần với phân phối mục tiêu trong chế độ thang đo nhỏ, điều có thể cải thiện tỉ lệ chấp nhận (acceptance rate), trong khi cần một $\sigma$ khác không để tạo ra sự di chuyển không suy biến trên không gian trạng thái.
+
+Zanella cho thấy các phân phối đề xuất cân bằng cục bộ có thể hiệu quả hơn các phân phối đề xuất cục bộ không có thông tin trong các chế độ tiệm cận được xét ở đó. Tuy vậy, việc xây dựng một phân phối đề xuất có thông tin chính xác đòi hỏi tính tỉ số mật độ cho mọi ứng viên. Liệt kê toàn bộ có thể liên quan tới $K^d$ trạng thái; ngay cả một lân cận Hamming bán kính một (Hamming-one neighborhood) cũng chứa $d(K - 1)$ ứng viên. Các phương pháp dựa trên gradient dưới đây thay những lần tính lặp lại tại các trạng thái lân cận này bằng một lần tính gradient tại trạng thái hiện tại.
+
+## 4. Lấy mẫu rời rạc dựa trên gradient
+
+Một hàm chỉ được xác định trên không gian trạng thái rời rạc thì không có gradient nội tại. Vì vậy, các bộ lấy mẫu rời rạc dựa trên gradient giả sử rằng log mật độ chưa chuẩn hóa $U$ được cung cấp kèm, hoặc được biểu diễn qua, một phần mở rộng khả vi sang một không gian bao liên tục. Chẳng hạn, một mạng nơ-ron có thể nhận một biểu diễn vector liên tục dù bộ lấy mẫu chỉ tính nó tại các trạng thái nhị phân hoặc mã hóa one-hot. Phần mở rộng này không nhất thiết duy nhất, và gradient của nó chỉ hữu ích trong chừng mực nó dự đoán được các thay đổi giữa các trạng thái rời rạc đang quan tâm.
+
+Với một phần mở rộng như vậy, hiệu log mật độ đối với một trạng thái lân cận có thể được xấp xỉ bởi
+
+$$
+U(x') - U(x) \approx \nabla U(x)^\top (x' - x).
+$$
+
+Phép xấp xỉ này đáng tin cậy nhất khi phần mở rộng đủ trơn và $x'$ gần $x$; riêng tính khả vi không bảo đảm độ chính xác nếu hàm thay đổi đột ngột giữa các trạng thái lân cận. Vì $\log \pi(x) = U(x) - \log Z$, gradient của chúng trùng nhau và không cần đến hằng số chuẩn hóa chưa biết. Khi đó một lượt truyền xuôi và một lượt truyền ngược tại $x$ cung cấp điểm số xấp xỉ cho mọi bước di chuyển ứng viên cục bộ, với cái giá là sai số của xấp xỉ Taylor.
+
+### 4.1 Gibbs với gradient
+
+Grathwohl và cộng sự lần đầu đưa ra ý tưởng lấy mẫu rời rạc dựa trên gradient này qua thuật toán Gibbs-With-Gradient. Thuật toán này có thể được xem là một phiên bản của thuật toán Gibbs tiêu chuẩn, trong đó tọa độ được cập nhật được chọn dựa trên gradient.
+
+Quay lại bộ lấy mẫu cân bằng cục bộ tổng quát, ta có thể suy ra bước cập nhật Gibbs-With-Gradient bằng cách chọn một hạt nhân không có thông tin, chọn đều một trạng thái khác trạng thái hiện tại ở đúng một tọa độ. Định nghĩa lân cận Hamming bán kính một bởi
+
+$$
+H(x) = \left\{ x' \in \mathcal{X} : \sum_{i=1}^{d} \mathbf{1}\{x'_i \neq x_i\} = 1 \right\}.
+$$
+
+Trong ví dụ nhị phân xuyên suốt, $H(x)$ chứa đúng $d$ trạng thái thu được bằng cách lật một bit của $x$.
+
+Với bước cập nhật có thang đo cố định này, hạt nhân đều là
+
+$$
+K_\sigma(x' \mid x) = \frac{\mathbf{1}\{x' \in H(x)\}}{|H(x)|}.
+$$
+
+Khi mọi tọa độ có $K$ hạng mục (category) khả dĩ, $|H(x)| = d(K - 1)$. Thừa số này không đổi giữa các bước di chuyển ứng viên nên được gộp vào hệ số tỉ lệ bên dưới.
+
+Tiếp theo, ta chọn hàm cân bằng $g(t) = \sqrt{t}$. Trước khi xấp xỉ, lựa chọn này cho phân phối đề xuất có thông tin chính xác
+
+$$
+q_{\text{exact}}(x' \mid x) \propto \mathbf{1}\{x' \in H(x)\} \sqrt{\frac{\pi(x')}{\pi(x)}}
+$$
+
+Dùng log mật độ chưa chuẩn hóa $U$ từ Phương trình (6.1), phân phối đề xuất này có thể được biểu diễn mà không cần tính $Z$:
+
+$$
+q_{\text{exact}}(x' \mid x) \propto \mathbf{1}\{x' \in H(x)\} \exp\left( \frac{1}{2} (U(x') - U(x)) \right).
+$$
+
+Thay hiệu log mật độ chính xác bằng xấp xỉ Taylor bậc nhất của nó cho ta phân phối đề xuất Gibbs-With-Gradient:
+
+$$
+q_{\text{GWG}}(x' \mid x) \propto \mathbf{1}\{x' \in H(x)\} \exp\left( \frac{1}{2} \nabla U(x)^\top (x' - x) \right).
+$$
+
+<Figure caption="Hình 6.1: Lấy mẫu có thông tin từ gradient trên một không gian trạng thái rời rạc. Gradient ∇U(x) của một phần mở rộng khả vi cung cấp thông tin hình học cục bộ tại trạng thái hiện tại x, từ đó sinh ra các trọng số đề xuất khác nhau trên lân cận Hamming bán kính một H(x) của nó. Trạng thái được đánh dấu sao x′ biểu diễn một mẫu rút từ phân phối đề xuất này. Phỏng theo Grathwohl và cộng sự. Vẽ lại dưới dạng sơ đồ trên một địa hình minh họa.">
+  <Bdl06GradientInformed />
+</Figure>
+
+Hình 6.1 minh họa cách xây dựng Gibbs-With-Gradient này. Gradient tại $x$ gán các trọng số xấp xỉ khác nhau cho các trạng thái trong $H(x)$, rồi $x'$ được lấy mẫu từ phân phối đề xuất thu được trên các lân cận rời rạc đó.
+
+Phân phối này có thể được tính nhanh nếu xem bước cập nhật là việc chọn một tọa độ để thay đổi. Trong trường hợp nhị phân, bước cập nhật này luôn là một phép lật bit. Ở đây, Softmax chuẩn hóa một vector điểm số thực thành các xác suất, và Cat ký hiệu phân phối phân loại với các xác suất đó. Phân phối đề xuất thu được là
+
+$$
+q_{\text{GWG}}(\cdot \mid x) = \operatorname{Cat}\left( \operatorname{Softmax}\left( -\frac{1}{2} (2x - 1) \odot \nabla U(x) \right) \right).
+$$
+
+Trường hợp phân loại đòi hỏi chọn cả một tọa độ lẫn hạng mục được đề xuất cho nó. Gọi $c_i$ là hạng mục hiện tại của tọa độ $i$. Ta biểu diễn mỗi tọa độ phân loại bằng một vector one-hot khi tính gradient. Với mọi hạng mục thay thế $j \neq c_i$, định nghĩa hiệu log xác suất xấp xỉ
+
+$$
+\widetilde{d}(x)_{i,j} = \nabla_{x_{i,j}} U(x) - \nabla_{x_{i,c_i}} U(x).
+$$
+
+Số hạng thứ nhất đo tác động cục bộ của việc gán hạng mục $j$ cho tọa độ $i$, còn số hạng thứ hai ứng với hạng mục hiện tại của nó.
+
+Có $d(K - 1)$ bước cập nhật tọa độ – hạng mục khả dĩ. Ta định nghĩa một phân phối đề xuất phân loại trên các bước cập nhật này bởi
+
+$$
+q_{\text{GWG}}(i, j \mid x) = \operatorname{Softmax}_{i \in [d],\, j \neq c_i} \left( \frac{1}{2} \widetilde{d}(x)_{i,j} \right).
+$$
+
+Sau khi lấy mẫu $(i, j) \sim q_{\text{GWG}}(\cdot, \cdot \mid x)$, trạng thái đề xuất $x'$ thu được bằng cách đổi tọa độ $i$ từ $c_i$ sang $j$ và giữ nguyên mọi tọa độ khác. Toàn bộ quy trình cho trường hợp phân loại được nêu trong Thuật toán 14.
+
+**Thuật toán 14** Bộ lấy mẫu Gibbs With Gradient cho biến phân loại
+
+```text
+Inputs : initial categorical state x = (x₁, …, x_d) ∈ 𝒳; unnormalized log-density U
+Outputs: sample sequence 𝒮
+𝒮 ← ()
+for each iteration do
+    compute d̃(x) and q_GWG(·, · | x)
+    sample (i, j) ∼ q_GWG(·, · | x)
+    cᵢ ← current category of coordinate i
+    x′ ← replace(x, i, j)
+    compute the reverse-move probability q_GWG(i, cᵢ | x′)
+    accept x′ with probability
+
+        min{ 1, exp(U(x′) − U(x)) · q_GWG(i, cᵢ | x′) / q_GWG(i, j | x) }
+
+    update x ← x′ if accepted
+    append x to 𝒮
+return 𝒮
+```
+
+Vì phân phối đề xuất dựa trên gradient dùng một xấp xỉ bậc nhất và nói chung không đối xứng, tự nó không bảo toàn phân phối mục tiêu. Do đó ta áp dụng bước hiệu chỉnh chấp nhận Metropolis–Hastings tiêu chuẩn, được mô tả ở [Chương 1, Mục 5.1](/vi/blog/introduction-to-sampling), bước này bảo đảm phân phối mục tiêu là bất biến. Dưới các điều kiện ergodic đã nêu ở trên, xích Markov thu được hội tụ về phân phối mục tiêu.
+
+### 4.2 Đề xuất Langevin rời rạc
+
+Gibbs-With-Gradient có thể vượt trội các phân phối đề xuất một tọa độ không có thông tin nhờ dùng gradient để ưu tiên các bước cập nhật hứa hẹn. Giới hạn Hamming bán kính một của nó cũng giữ cho xấp xỉ Taylor mang tính cục bộ, nhưng mỗi vòng lặp chỉ một tọa độ được thay đổi, điều có thể tạo ra các mẫu tương quan mạnh trong không gian nhiều chiều. Zhang và cộng sự khắc phục hạn chế này bằng đề xuất Langevin rời rạc (Discrete Langevin Proposal, DLP), vẫn giữ tính định hướng dựa trên gradient nhưng thêm một hình phạt khoảng cách cho phép đề xuất đồng thời nhiều tọa độ.
+
+<Figure caption="Hình 6.2: So sánh các phân phối đề xuất rời rạc dựa trên gradient. Gibbs-With-Gradient lấy mẫu một tọa độ từ q_GWG(i | x) và đề xuất một trạng thái khác biệt ở tọa độ đó. Đề xuất Langevin rời rạc xây dựng các phân phối theo từng tọa độ {qᵢ}ᵢ₌₁ᵈ và có thể đề xuất song song nhiều thay đổi. Bước hiệu chỉnh Metropolis–Hastings được vẽ trong hình cho các biến thể có hiệu chỉnh; bỏ bước này cho DULA trong trường hợp Langevin rời rạc. Dựa trên Grathwohl và cộng sự và Zhang và cộng sự. Vẽ lại dưới dạng sơ đồ.">
+  <Bdl06GwgVsDlp />
+</Figure>
+
+Trong ví dụ nhị phân xuyên suốt, Gibbs-With-Gradient đề xuất nhiều nhất một phép lật bit, còn DLP xây dựng một phân phối đề xuất cho mọi bit và có thể thay đổi nhiều bit trong cùng một vòng lặp.
+
+Để suy ra phân phối đề xuất, xét phiên bản rời rạc tương tự của hạt nhân bước ngẫu nhiên (random walk) Gauss,
+
+$$
+K_\sigma(x' \mid x) \propto \exp\left( -\frac{1}{2\sigma} \|x' - x\|_2^2 \right).
+$$
+
+Kết hợp hạt nhân này với một xấp xỉ bậc nhất của trọng số cân bằng cục bộ cho ta DLP
+
+$$
+q(x' \mid x) \propto \exp\left( \frac{1}{2} \nabla U(x)^\top (x' - x) - \frac{1}{2\sigma} \|x' - x\|_2^2 \right). \tag{6.3}
+$$
+
+Số hạng tuyến tính trong Phương trình (6.3) ưu tiên các bước di chuyển được dự đoán làm tăng $U$, còn số hạng bậc hai phạt các bước di chuyển xa điểm khai triển Taylor. Kích thước bước (step size) $\sigma$ điều khiển độ mạnh của hình phạt này.
+
+Vì không gian trạng thái phân tích được thành tích $\mathcal{X} = \prod_{i=1}^{d} \mathcal{X}_i$ và số mũ trong Phương trình (6.3) là tổng của các số hạng theo từng tọa độ, phân phối đề xuất phân tích được thành $q(x' \mid x) = \prod_{i=1}^{d} q_i(x'_i \mid x)$. Mỗi thừa số là phân phối phân loại
+
+$$
+q_i(x'_i \mid x) = \operatorname{Cat}\left( \operatorname{Softmax}_{x'_i \in \mathcal{X}_i} \left[ \frac{1}{2} \nabla_i U(x) (x'_i - x_i) - \frac{(x'_i - x_i)^2}{2\sigma} \right] \right).
+$$
+
+Như vậy, giá trị $\sigma$ lớn hơn cho phép các đề xuất ở xa hơn, còn giá trị nhỏ hơn tập trung phân phối đề xuất gần trạng thái hiện tại.
+
+Dù công thức này trông giống công thức đề xuất của Gibbs với gradient, cần lưu ý rằng trong DLP, softmax được tính theo từng tọa độ trên các lớp giá trị mà tọa độ đó có thể nhận. Trong Gibbs với gradient, softmax được tính trên toàn bộ mẫu để chọn ra chỉ một tọa độ. Điều này cho phép cập nhật song song mọi tọa độ.
+
+Phép phân tích thành tích giúp có thể đề xuất mọi tọa độ song song sau một lần tính gradient. Dù phân phối đề xuất phân tích được theo từng tọa độ khi có điều kiện trên trạng thái hiện tại, gradient của log mật độ đồng thời vẫn dẫn hướng mỗi tọa độ bằng thông tin từ toàn bộ cấu hình hiện tại. Khi đó một bước hiệu chỉnh Metropolis–Hastings có thể xử lý phần sai số xấp xỉ và cấu trúc phụ thuộc còn lại. Hình 6.2 đối chiếu bước cập nhật song song này với bước cập nhật một tọa độ mà Gibbs-With-Gradient sử dụng.
+
+Dùng DLP cho ta hai bộ lấy mẫu: thuật toán Langevin rời rạc có hiệu chỉnh Metropolis (discrete Metropolis-adjusted Langevin algorithm, DMALA), có bước hiệu chỉnh Metropolis–Hastings, và thuật toán Langevin rời rạc không hiệu chỉnh (discrete unadjusted Langevin algorithm, DULA), bỏ bước đó. DULA nói chung có độ chệch tiệm cận. Tuy nhiên, với các phân phối mục tiêu log bậc hai (log-quadratic), Zhang và cộng sự chỉ ra rằng độ chệch này biến mất khi $\sigma \to 0$; họ cũng chặn trên độ chệch đối với các phân phối mục tiêu có gradient gần với gradient của một phân phối log bậc hai.
+
+Về mặt cài đặt, chênh lệch chi phí giữa DULA và DMALA là không đáng kể: tuy DMALA có bước hiệu chỉnh Metropolis–Hastings đòi hỏi tính cả $q(\cdot \mid x)$ lẫn $q(\cdot \mid x')$, nhờ lưu đệm (caching) nên sau bước khởi tạo mỗi bước chỉ phải tính một phân phối đề xuất mới. Phiên bản DMALA có lưu đệm được nêu trong Thuật toán 15.
+
+**Thuật toán 15** DMALA có lưu đệm
+
+```text
+Inputs : initial state x = (x₁, …, x_d) ∈ 𝒳; unnormalized log-density U
+Outputs: sample sequence 𝒮
+𝒮 ← ()
+compute q(· | x) and cache proposal
+for each iteration do
+    sample x′ ∼ q(· | x)
+    compute q(· | x′) using DLP proposal
+    accept x′ with probability
+
+        min{ 1, exp(U(x′) − U(x)) · q(x | x′) / q(x′ | x) }
+
+    if accepted then
+        update cached proposal to q(· | x′)
+        x ← x′
+    append x to 𝒮
+return 𝒮
+```
+
+Logic cốt lõi nằm ở chỗ $x'$ của vòng lặp hiện tại hoặc bị bác bỏ, hoặc trở thành $x$ cho bước lấy mẫu tiếp theo. Trong trường hợp bị bác bỏ, hàm đề xuất $q(\cdot \mid x)$ không đổi vì $x$ giữ nguyên. Trong trường hợp được chấp nhận, phân phối đề xuất chỉ cần được cập nhật để khớp với $x'$ mới bằng cách dùng $q(\cdot \mid x') \to q(\cdot \mid x)$, vì đằng nào phân phối đề xuất này cũng phải được tính cho bước chấp nhận/bác bỏ. Như vậy ở mỗi bước chỉ phải tính một hàm đề xuất.
+
+## 5. Vượt ra ngoài các phân phối đề xuất cân bằng cục bộ
+
+Các phân phối đề xuất cân bằng cục bộ là một khung thuận tiện để đưa gradient vào các bộ lấy mẫu rời rạc, nhưng phép xấp xỉ định nghĩa nên chúng liên quan đến giới hạn thang đo nhỏ $\sigma \to 0$. Ở các thang đo hữu hạn, các phân phối đề xuất cục bộ có thể mất nhiều thời gian để di chuyển giữa các mode tách biệt, khiến phải dùng các xích dài hơn hoặc nhiều xích.
+
+Chẳng hạn, nếu phân phối mục tiêu nhị phân đặt xác suất cao vào hai cấu hình bị ngăn cách bởi nhiều trạng thái trung gian có xác suất thấp, một dãy các đề xuất lật một bit có thể khó di chuyển từ mode này sang mode kia.
+
+Điều này thúc đẩy các phân phối đề xuất được thiết kế cho sự di chuyển phi cục bộ. Zanella đã xét $g(t) = t$, gọi phân phối đề xuất thu được là lựa chọn *có thông tin ngây thơ* (naively informed) vì nó có dạng $P_{g,\sigma}(x' \mid x) \propto K_\sigma(x' \mid x) \pi(x')$. Dựa trên nhận xét này, Sun và cộng sự hình thức hóa cách diễn giải ở thang đo lớn: họ gọi một họ phân phối đề xuất là *cân bằng toàn cục* (globally balanced) nếu phân phối bất biến của phân phối đề xuất có thông tin chưa hiệu chỉnh của nó hội tụ về $\pi$ khi $\sigma \to \infty$. Họ giả sử rằng hạt nhân cơ sở trở nên đều trong giới hạn này. Vì một hằng số không phụ thuộc trạng thái bị triệt tiêu khi chuẩn hóa phân phối đề xuất có thông tin, họ viết giới hạn này là $K_\sigma(x' \mid x) \to 1$; với một hạt nhân đã chuẩn hóa trên một không gian trạng thái hữu hạn, giới hạn tương ứng là $1/|\mathcal{X}|$. Với $g(t) = t$, phân phối đề xuất giới hạn khi đó là
+
+$$
+\lim_{\sigma \to \infty} P_{g,\sigma}(x' \mid x) = \frac{\pi(x')/\pi(x)}{\sum_{z \in \mathcal{X}} \pi(z)/\pi(x)} = \pi(x').
+$$
+
+Như vậy phân phối đề xuất trở thành một phép rút độc lập từ chính phân phối mục tiêu và là cân bằng toàn cục theo nghĩa của Sun và cộng sự. Lưu ý rằng $g(t) = t$ không thỏa mãn đồng nhất thức cân bằng cục bộ $g(t) = t g(1/t)$; cân bằng cục bộ và cân bằng toàn cục nói về hai chế độ giới hạn khác nhau.
+
+### 5.1 Bộ lấy mẫu cân bằng mọi thang đo
+
+Bộ lấy mẫu cân bằng mọi thang đo (any-scale balanced sampler) do Sun và cộng sự đề xuất thực hiện hai sửa đổi riêng biệt cho các phân phối đề xuất nằm ngoài chế độ cục bộ. Thứ nhất, nó điều chỉnh cách gán trọng số theo tỉ số mật độ cho khớp với thang đo của phân phối đề xuất. Họ hàm $g(t) = t^\beta$, với $\beta \in [1/2, 1]$, nội suy giữa lựa chọn cân bằng cục bộ $g(t) = \sqrt{t}$ khi $\sigma \to 0$ và lựa chọn cân bằng toàn cục $g(t) = t$ khi $\sigma \to \infty$. Quan hệ phụ thuộc thang đo này được minh họa dưới dạng sơ đồ trong Hình 6.3(a).
+
+Điều chỉnh $\beta$ làm thay đổi mức độ phân phối đề xuất ưu tiên các ứng viên có mật độ cao, nhưng không làm giảm sai số của xấp xỉ bậc nhất đối với $U(x') - U(x)$. Vì vậy phương pháp thực hiện sửa đổi thứ hai: nó đưa vào một xấp xỉ bậc hai nhằm vẫn mang thông tin trên các bước di chuyển lớn hơn. Hiệu log mật độ được xấp xỉ bởi
+
+$$
+U(x') - U(x) \approx (x' - x)^\top \nabla U(x) + \frac{1}{2} (x' - x)^\top W (x' - x), \tag{6.4}
+$$
+
+trong đó $W$ là một ma trận đối xứng dùng chung cho mọi trạng thái. Đặt $W = \nabla^2 U(x)$ sẽ cho lại xấp xỉ Taylor bậc hai thông thường tại chỗ, nhưng tính đi tính lại ma trận Hesse (Hessian) là tốn kém. Thay vào đó, bộ lấy mẫu ước lượng một $W$ toàn cục từ các cặp $(x_n, x'_n)$ thu thập được trong giai đoạn khởi động (burn-in):
+
+$$
+\widehat{W} = \operatorname*{arg\,min}_{W = W^\top} \sum_n \left\| W(x'_n - x_n) - \big(\nabla U(x'_n) - \nabla U(x_n)\big) \right\|_2^2.
+$$
+
+Như vậy $W$ được khớp để giải thích các thay đổi quan sát được của gradient và đóng vai trò một xấp xỉ độ cong toàn cục. Cân bằng phụ thuộc thang đo và xấp xỉ độ cong giải quyết hai vấn đề khác nhau: $\beta$ điều khiển cách gán trọng số theo tỉ số mật độ, còn $W$ cải thiện phép xấp xỉ dùng để chấm điểm các ứng viên phi cục bộ.
+
+Thay xấp xỉ bậc hai trong Phương trình (6.4) và $g(t) = t^\beta$ vào phân phối đề xuất có thông tin cho ta
+
+$$
+q(x' \mid x) \propto \exp\left( \beta \left[ (x' - x)^\top \nabla U(x) + \frac{1}{2} (x' - x)^\top W (x' - x) \right] - \frac{1}{2\sigma} \|x' - x\|_2^2 \right). \tag{6.5}
+$$
+
+Số hạng bậc hai nắm bắt tương tác giữa các tọa độ, nhưng nó cũng ngăn việc lấy mẫu trực tiếp theo từng tọa độ. Vì vậy Sun và cộng sự đưa vào một phân phối đề xuất mở rộng với một biến phụ trợ (auxiliary variable) Gauss. Cách xây dựng mở rộng này được dùng trực tiếp với bước hiệu chỉnh Metropolis–Hastings dưới đây.
+
+Chọn một ma trận đường chéo nửa xác định dương $D$ sao cho $W + D$ nửa xác định dương, và rút
+
+$$
+Y \mid x \sim \mathcal{N}\left( (W + D)^{1/2} x, I \right).
+$$
+
+Căn bậc hai ma trận có thể được tính bằng phân rã trị riêng hoặc phân tích Cholesky. Có điều kiện trên $Y$, định nghĩa
+
+$$
+q(x' \mid x, Y) \propto \exp\left( \beta x'^\top \left[ \nabla U(x) - W x + (W + D)^{1/2} Y \right] - \frac{1}{2} x'^\top \left( \beta D + \frac{1}{\sigma} I \right) x' \right),
+$$
+
+và lấy mẫu $x'$ từ phân phối này. Vì $D$ là ma trận đường chéo và không gian trạng thái phân tích được thành tích, phân phối đề xuất có điều kiện này phân tích được theo các tọa độ. Phương trình (6.5) và phân phối đề xuất mở rộng lần lượt biểu diễn phép xấp xỉ bậc hai làm động cơ và phép chuyển trạng thái với biến phụ trợ mà bộ lấy mẫu thực sự cài đặt. Bước Metropolis–Hastings tính đến chính xác phân phối đề xuất mở rộng thu được.
+
+Xác suất chấp nhận Metropolis–Hastings cho phân phối đề xuất mở rộng là
+
+$$
+A(x, x', Y) = \min\left\{ 1, \exp\big(U(x') - U(x)\big) \frac{q(Y \mid x') q(x \mid x', Y)}{q(Y \mid x) q(x' \mid x, Y)} \right\}.
+$$
+
+Ma trận đường chéo $D$ điều khiển phương sai của phân phối đề xuất có điều kiện. Sun và cộng sự xét hai bài toán quy hoạch nửa xác định (semidefinite program) để chọn nó. Biến thể AB-max cực tiểu hóa trị riêng lớn nhất của $W + D$:
+
+$$
+(D^*, \lambda^*) = \operatorname*{arg\,min}_{D, \lambda} \lambda \quad \text{subject to} \quad D \succeq 0, \quad 0 \preceq W + D \preceq \lambda I.
+$$
+
+Tiêu chí này tập trung vào hướng phổ xấu nhất. Biến thể AB-trace thì giải
+
+$$
+D^* = \operatorname*{arg\,min}_{D} \operatorname{tr}(D) \quad \text{subject to} \quad D \succeq 0, \quad W + D \succeq 0.
+$$
+
+Động cơ của hàm mục tiêu này đến từ hàm thay thế (surrogate) bậc hai liên tục mà Sun và cộng sự nghiên cứu trong trường hợp đặc biệt $\sigma = \infty$ và $\beta = 1$. Trong hàm thay thế đó, hiệp phương sai của số gia đề xuất là $2D^{-1}$, nên việc cực tiểu hóa vết của $D$ khuyến khích sự phân tán trên các tọa độ. Đồng nhất thức hiệp phương sai này không đúng theo nghĩa đen với phân phối đề xuất phân loại rời rạc tổng quát, vốn có độ phân tán còn phụ thuộc vào $\beta$, $\sigma$ và không gian trạng thái. Các tác giả báo cáo rằng AB-trace hoạt động tốt hơn về mặt thực nghiệm và dùng nó làm biến thể ưu tiên.
+
+Các tham số đề xuất $\beta$ và $\sigma$ tương quan với nhau và phụ thuộc vào phân phối mục tiêu. Vì vậy Sun và cộng sự thích nghi chúng bằng các bước cập nhật luân phiên theo từng tham số nhằm cực đại hóa khoảng cách bước nhảy (jump distance) trung bình thực nghiệm. Với một loại tham số $a \in \{\sigma, \beta\}$, gọi $\phi$ là giá trị hiện tại của nó và định nghĩa các tập khả thi $\mathcal{I}_\sigma = (0, \infty)$ và $\mathcal{I}_\beta = [1/2, 1]$. Giữ cố định tham số còn lại, khối thích nghi so sánh $\phi$ với các nhiễu loạn nhân khả thi của nó trên ba đoạn xích liên tiếp, như trong Thuật toán 16.
+
+**Thuật toán 16** Khối thích nghi của bộ lấy mẫu mọi thang đo
+
+```text
+Inputs : parameter type a ∈ {σ, β}; current value ϕ ∈ 𝓘ₐ; adaptation rate γ ∈ (0, 1); initial state x⁽⁰⁾
+Outputs: updated parameter ϕ′; samples x⁽¹⁾, …, x⁽³ᴺ⁾
+ϕ₀ ← ϕ
+ϕ₊ ← proj_𝓘ₐ(ϕ(1 + γ))
+ϕ₋ ← proj_𝓘ₐ(ϕ(1 − γ))
+use ϕ₀ to compute the proposal and collect x⁽¹⁾, x⁽²⁾, …, x⁽ᴺ⁾
+compute d₀ ← Σᵢ₌₁ᴺ ‖x⁽ⁱ⁾ − x⁽ⁱ⁻¹⁾‖₁
+use ϕ₊ to sample x⁽ᴺ⁺¹⁾, …, x⁽²ᴺ⁾ using the proposal
+compute d₊ ← Σᵢ₌₁ᴺ ‖x⁽ᴺ⁺ⁱ⁾ − x⁽ᴺ⁺ⁱ⁻¹⁾‖₁
+use ϕ₋ to sample x⁽²ᴺ⁺¹⁾, …, x⁽³ᴺ⁾ using the proposal
+compute d₋ ← Σᵢ₌₁ᴺ ‖x⁽²ᴺ⁺ⁱ⁾ − x⁽²ᴺ⁺ⁱ⁻¹⁾‖₁
+if max(d₀, d₊, d₋) = d₊ then
+    ϕ′ ← ϕ₊
+else if max(d₀, d₊, d₋) = d₋ then
+    ϕ′ ← ϕ₋
+else
+    ϕ′ ← ϕ₀
+return ϕ′ and x⁽¹⁾, …, x⁽³ᴺ⁾
+```
+
+Ba đoạn trong Thuật toán 16 là liên tiếp: đoạn thứ hai bắt đầu từ $x^{(N)}$ và đoạn thứ ba từ $x^{(2N)}$. Quy trình thích nghi đầy đủ luân phiên một khối cho $\phi = \sigma$ và một khối cho $\phi = \beta$. Nếu không tham số nào thay đổi trong một vòng lặp ngoài, tốc độ cập nhật được giảm theo cấp số nhân, $\gamma \leftarrow \rho\gamma$ với hệ số suy giảm $\rho \in (0, 1)$; nếu không, các giá trị tham số đã chọn được giữ cho vòng lặp tiếp theo. Vì việc thích nghi dựa trên khoảng cách bước nhảy trong các đoạn chạy ngắn có thể nhiễu khi xích mới bắt đầu trộn, quy trình này dành cho giai đoạn khởi động chứ không phải để tiếp tục thích nghi sau khi các mẫu đã được giữ lại cho suy luận.
+
+Nhờ kết hợp một xấp xỉ bậc hai của hiệu log xác suất $U(x') - U(x)$ với cơ chế thích nghi cho $\beta$ và $\sigma$, bộ lấy mẫu mọi thang đo nội suy giữa các phân phối đề xuất cân bằng cục bộ và cân bằng toàn cục.
+
+### 5.2 Lấy mẫu tuần hoàn tự động
+
+Một vấn đề thường gặp của các bộ lấy mẫu dựa trên gradient trên không gian liên tục là sự khám phá: vì gradient chỉ về phía mode gần nhất, nó không cho thông tin gì về các mode khác ở xa hơn. Điều này có thể làm giảm độ chính xác của bộ lấy mẫu trong việc xấp xỉ phân phối mục tiêu.
+
+Vấn đề tương tự cũng xảy ra với các bộ lấy mẫu rời rạc dựa trên gradient. Khác với một không gian trạng thái liên tục, một không gian rời rạc không có các nhiễu loạn không tầm thường nhỏ tùy ý: ngay cả bước di chuyển cục bộ nhất cũng phải thay đổi ít nhất một tọa độ. Tính hạt (granularity) này có thể khiến sự đánh đổi giữa các bước di chuyển thận trọng, có tỉ lệ chấp nhận cao, và các bước di chuyển khám phá lớn hơn trở nên đặc biệt rõ rệt. Vì vậy, nội suy giữa các phân phối đề xuất cân bằng cục bộ và cân bằng toàn cục là một cách tự nhiên để thay đổi thang đo của phân phối đề xuất khi có thể cần những bước di chuyển lớn để thoát khỏi một mode cục bộ.
+
+Trong trường hợp liên tục, nhiều cách tiếp cận đã được đề xuất để xử lý bài toán thoát mode. Một cách tiếp cận phổ biến là SG-MCMC tuần hoàn (cyclical SG-MCMC), được bàn trong [Chương 2](/vi/blog/stochastic-gradient-mcmc). Một lịch trình tuần hoàn (cyclical schedule) giảm dần kích thước bước của một bộ lấy mẫu dựa trên gradient từ các giá trị rất lớn xuống các giá trị nhỏ và lặp lại qua nhiều chu kỳ. Các bước lớn ở đầu chu kỳ cho phép những bước di chuyển mang tính khám phá hơn, giúp phát hiện các mode; còn các kích thước bước nhỏ hơn ở cuối chu kỳ cho phép khai thác mode đó. Việc lặp lại các chu kỳ cho phép phát hiện và khai thác nhiều mode, điều cần thiết để mô tả hiệu quả các phân phối đa mode.
+
+<Figure caption="Hình 6.3: Thang đo đề xuất, sự cân bằng và lịch trình tuần hoàn. Panel (a) minh họa dưới dạng sơ đồ rằng số mũ cân bằng được ưa chuộng tăng theo thang đo đề xuất: các đề xuất thang đo nhỏ ưu tiên β gần 1/2, còn các đề xuất thang đo lớn hơn ưu tiên các giá trị gần 1 hơn. Các đường cong biểu thị hiệu quả minh họa đã chuẩn hóa chứ không phải số đo thực nghiệm. Panel (b) cho thấy các lịch trình ghép cặp của σₖ và βₖ qua hai chu kỳ, trong mỗi chu kỳ đi từ các đề xuất lớn với cách gán trọng số cân bằng toàn cục hơn tới các đề xuất nhỏ, cân bằng cục bộ. Panel (a) phỏng theo ý tưởng của Sun và cộng sự; panel (b) phỏng theo Pynadath và cộng sự. Vẽ lại dưới dạng sơ đồ: các đường cong trong (a) là các dạng hình chuông minh họa, còn các lịch trình trong (b) là các chu kỳ cosin từ σ = 2.0 xuống 0.1 và từ β = 1.00 xuống 0.50.">
+  <Bdl06ScaleSchedules />
+</Figure>
+
+Dựa trên trực giác này, Pynadath và cộng sự đưa ra một bộ lấy mẫu quay vòng đồng thời qua các kích thước bước và các số mũ cân bằng. Chỉ thay đổi $\sigma$ có thể tạo ra các phân phối đề xuất cân bằng kém và xác suất chấp nhận thấp, nên phương pháp dùng DLP tổng quát hóa
+
+$$
+q_i(x'_i \mid x) = \operatorname{Cat}\left( \operatorname{Softmax}_{x'_i \in \mathcal{X}_i} \left[ \beta \nabla_i U(x) (x'_i - x_i) - \frac{(x'_i - x_i)^2}{2\sigma} \right] \right). \tag{6.6}
+$$
+
+Đặt $\beta = 1/2$ trong Phương trình (6.6) cho lại DLP tiêu chuẩn. Trong mỗi chu kỳ, các giá trị $\sigma$ lớn được ghép với các giá trị $\beta$ gần 1 hơn để khuyến khích khám phá toàn cục; khi $\sigma$ giảm, $\beta$ dịch dần về 1/2 và phân phối đề xuất trở nên cục bộ hơn.
+
+Quy trình tinh chỉnh tự động bắt đầu với các số mũ đầu mút $\beta_{\min}$ và $\beta_{\max}$ do người dùng chỉ định và một tỉ lệ chấp nhận mục tiêu. Các lượt chạy khởi động ngắn xác định các kích thước bước đầu mút tương ứng $\sigma_{\min}$ và $\sigma_{\max}$. Các đầu mút này xác định lịch trình kích thước bước tuần hoàn, theo cách xây dựng trên không gian liên tục của Zhang và cộng sự.
+
+Với mỗi kích thước bước $\sigma_k$, $\beta_k$ tương ứng được chọn để cực đại hóa một hàm mục tiêu tỉ lệ chấp nhận thực nghiệm với ràng buộc $\beta_k \in [1/2, \beta_{k-1}]$. Ràng buộc đơn điệu này phản ánh sự chuyển tiếp từ các bước di chuyển lớn với cách gán trọng số cân bằng toàn cục hơn ở đầu chu kỳ sang các bước di chuyển nhỏ, cân bằng cục bộ ở cuối chu kỳ, đồng thời giảm chi phí tìm kiếm toàn bộ lịch trình. Hình 6.3(b) cho thấy các lịch trình ghép cặp được dùng để lặp đi lặp lại việc chuyển từ khám phá toàn cục sang mô tả cục bộ.
+
+## 6. Kết luận
+
+Thông tin gradient có thể làm việc lấy mẫu trong các không gian rời rạc nhiều chiều hiệu quả hơn đáng kể, dù bản thân không gian trạng thái không khả vi. Các phân phối đề xuất cân bằng cục bộ cung cấp nguyên lý tổ chức: chúng kết hợp một hạt nhân cục bộ không có thông tin với thông tin riêng của phân phối mục tiêu và dùng bước hiệu chỉnh Metropolis–Hastings để giữ đúng phân phối mục tiêu mong muốn. Gibbs-With-Gradient dùng một xấp xỉ bậc nhất để chọn một bước cập nhật một tọa độ có thông tin, còn DLP phân tích một phân phối đề xuất kiểu Langevin thành tích để có thể đề xuất song song nhiều tọa độ.
+
+Phân phối đề xuất phù hợp phụ thuộc vào thang đo di chuyển cần thiết. Các bước di chuyển nhỏ, cân bằng cục bộ có thể mô tả chính xác một mode nhưng có thể trộn chậm giữa các mode tách biệt. Cân bằng mọi thang đo thích nghi số mũ cân bằng và thêm một xấp xỉ độ cong toàn cục để các bước di chuyển phi cục bộ hiệu quả hơn. Lấy mẫu tuần hoàn tự động thì lặp lại một lịch trình từ các đề xuất khám phá lớn tới các đề xuất khai thác nhỏ, ghép mỗi kích thước bước với một số mũ cân bằng phù hợp.
+
+Trong ví dụ nhị phân xuyên suốt, tiến trình này đi từ các đề xuất lật một bit có thông tin, qua các bước cập nhật song song nhiều bit, tới các phương pháp thích nghi thang đo và cách gán trọng số của các bước cập nhật đó để cải thiện sự di chuyển giữa các mode tách biệt.
+
+Các phương pháp này đánh đổi thêm cấu trúc và công tinh chỉnh để có khả năng khám phá tốt hơn. Hiệu năng thực tế của chúng phụ thuộc vào chất lượng của phần mở rộng khả vi của $U$, độ chính xác của xấp xỉ cục bộ hoặc bậc hai, và chi phí tính các phân phối đề xuất ngược trong bước hiệu chỉnh Metropolis–Hastings. Các biến thể có hiệu chỉnh cho phép lấy mẫu chính xác một cách tiệm cận dưới các điều kiện tối giản và không tuần hoàn thông thường; các biến thể không hiệu chỉnh có thể rẻ hơn, nhưng nói chung gây ra độ chệch ở trạng thái dừng.
