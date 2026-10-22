@@ -1,0 +1,116 @@
+---
+title: "Xấp xỉ Laplace: giới thiệu"
+description: "Vì sao xấp xỉ Laplace mang tính cục bộ và vi phân, điều gì khiến nó hấp dẫn với mạng sâu, chi phí thực tế của nó và những chỗ nó không đáp ứng được."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - curvature
+  - neural networks
+series: bayesian-deep-learning
+seriesOrder: 10
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl07LaplaceContours from '../../../components/diagrams/Bdl07LaplaceContours.astro';
+
+Người đọc tinh ý ở chương trước hẳn đã nhận thấy rằng các phương pháp giới thiệu trong Phần I đi kèm một chi phí tính toán và bộ nhớ đáng lo ngại. Ngay cả một phương pháp Monte Carlo hiệu quả hoàn hảo, rút được một mẫu độc lập cùng phân phối (i.i.d.) từ phân phối hậu nghiệm (posterior) ở mỗi bước, vẫn phải *lưu trữ* nhiều mẫu (những bản sao đầy đủ của vector tham số) trong bộ nhớ. Đến lúc dự đoán, lượt truyền xuôi (forward pass) của mô hình lại phải được tính cho từng mẫu đó. Số mẫu $k$ tham gia ít nhất theo kiểu nhân vào chi phí tính toán $c$ của bất kỳ phép tính nào được thực hiện với mạng nơ-ron: để biến một phép tính không Bayes thành một phép tính Bayes, phải trả một cái giá $\Omega(kc)$ (ký hiệu $\Omega$ của Landau; đúng vậy, đó là một cận *dưới*), cả về bộ nhớ lẫn tính toán. Vào thời điểm mà các mô hình sâu không Bayes nổi bật đã dùng hết công suất của những máy trạm nhiều GPU tốt nhất, điều này là không thể chấp nhận, và có lẽ đó là lý do chính khiến học sâu Bayes (Bayesian deep learning) mang tiếng có chi phí tính toán cao không thể chấp nhận được.
+
+Tuy nhiên, Phần này sẽ giới thiệu một cách khác, thiên về thực tiễn hơn, để trang bị cho mạng nơ-ron độ bất định Bayes. Lịch sử của nó lâu đời không kém các phương pháp lấy mẫu, và nó ra đời từ nhu cầu tính toán trong những ngày đầu của học sâu. Thật ra, nó vốn được phát minh vào đầu thế kỷ 19, rất lâu trước khi có máy tính số, để biến những tích phân không tính được thành tích phân tính được, bằng bất cứ giá nào. Khi tính toán một lần nữa trở thành điểm nghẽn trong thời đại học sâu, xấp xỉ Laplace (Laplace approximation) đã tái xuất như một công cụ thực tiễn, với những biến tấu mới đẩy xa giới hạn của vi phân tự động (automatic differentiation) và đại số tuyến tính số (numerical linear algebra). Nó cũng mang lại những góc nhìn mới về học sâu từ quan điểm hình học vi phân. Như sẽ thấy rõ, giờ đây nó vừa đem lại sức mạnh lớn, vừa ẩn chứa những hiểm họa nghiêm trọng.
+
+## 1. Xấp xỉ Laplace mang tính cục bộ và vi phân
+
+Như ở các chương trước, xét một chương trình khả vi (differential program) $f : \mathbb{R}^D \times \mathbb{R}^P \to \mathbb{R}^C$ ánh xạ các đầu vào $x \in \mathbb{R}^D$ thành các đầu ra $f(x, \theta) \in \mathbb{R}^C$, được tham số hóa bởi $\theta \in \mathbb{R}^P$. Xét rủi ro thực nghiệm có chính quy hóa (regularized empirical risk) $\mathcal{L}_\Omega \in \mathbb{R}$ được định nghĩa bởi
+
+$$
+\mathcal{L}_\Omega(\theta) = \sum_{n=1}^{N} \ell(f(x_n, \theta), y_n) + \Omega(\theta). \tag{7.1}
+$$
+
+với hàm mất mát (loss function) $\ell \colon \mathbb{R}^C \times \mathbb{R}^C \to \mathbb{R}$ và số hạng chính quy hóa (regularizer) $\Omega \colon \mathbb{R}^P \to \mathbb{R}$, cả hai đều lồi chặt và khả vi liên tục hai lần.[^1]
+
+Cũng như ở các chương trước, hàm này được hiểu như một hàm năng lượng (energy function), tức logarit âm chưa chuẩn hóa của một phân phối hậu nghiệm:
+
+$$
+\mathcal{L}_\Omega(\theta) = -\log p(Y \mid X, \theta) - \log p(\theta) + \text{const} = -\log p(\theta \mid \mathcal{D}) + \text{const}. \tag{7.2}
+$$
+
+**Định nghĩa 7.1.** *Một xấp xỉ Laplace là bất kỳ thuật toán nào thuộc một lớp phương pháp tổng quát xấp xỉ* $\mathcal{L}_\Omega(\theta)$ *bằng một hàm bậc hai*
+
+$$
+\mathcal{L}_\Omega(\theta) \approx \frac{1}{2}(\theta - \theta_*)^\top \Psi(\theta_*)(\theta - \theta_*) + \text{const}, \tag{7.3}
+$$
+
+*trong đó* $\Psi(\theta_*) \in \mathbb{R}^{P \times P}$ *là một toán tử vi phân tuyến tính cấp hai tác động lên* $\mathcal{L}_\Omega(\theta_*)$ *tại điểm* $\theta_* \in \mathbb{R}^P$. *Như vậy, một xấp xỉ Laplace được xác định bởi bộ* $(\theta_*, \Psi)$, *mà hai thành phần lần lượt được gọi là* ***ước lượng điểm*** *(point estimate) và* ***độ cong*** *(curvature) của nó.*
+
+<Figure caption="Hình 7.1: Một xấp xỉ Laplace tuyến tính hóa trên perceptron truyền thẳng cơ bản nhất f(x, θ) = θ₂·ReLU(θ₁x + 1) cho tập dữ liệu X = (1, −1), Y = (−1, −1), với số hạng chính quy hóa Ω(θ) = 0.2·‖θ‖² và hàm mất mát bình phương. Các đường đồng mức màu xám biểu diễn hàm năng lượng. Chấm đen biểu diễn điểm cực tiểu θ*; các elip đen đậm biểu diễn một (nét liền) và hai (nét đứt) độ lệch chuẩn của xấp xỉ Laplace. Phân phối Gauss xấp xỉ do xấp xỉ Laplace xác định nắm bắt rõ ràng hình học cục bộ, nhưng không nắm bắt được toàn bộ hình dạng toàn cục của phân phối hậu nghiệm. Bản vẽ lại dạng sơ đồ: thiết lập như đã nêu không tạo ra hai điểm cực tiểu đối xứng qua một điểm như trong hình gốc, nên các đường đồng mức vẽ lại được tính cho θ₂·tanh(θ₁x + 1) với các giá trị đích (1, −1) cùng số hạng chính quy hóa và hàm mất mát như trên, cho lại đúng địa hình đó; các elip dùng độ cong Gauss–Newton tổng quát cộng độ chính xác tiên nghiệm của mô hình thay thế này tại điểm cực tiểu của nó, nên kích thước và độ nghiêng của chúng khác với hình gốc, và điểm cực tiểu được vẽ bằng một chấm màu.">
+  <Bdl07LaplaceContours />
+</Figure>
+
+Dưới giả định của Phương trình 7.2, mọi xấp xỉ Laplace đều gắn trực tiếp với một **độ đo Gauss xấp xỉ trên không gian tham số** (Gaussian measure on the parameter space),
+
+$$
+\begin{aligned}
+p(\theta \mid \mathcal{D}) &= \frac{1}{Z(\mathcal{D})} \exp(-\mathcal{L}_\Omega(\theta)) && \text{(7.4a)} \\
+&\approx \frac{1}{Z(\mathcal{D})} \exp\left(-\frac{1}{2}(\theta - \theta_*)^\top \Psi(\theta_*)(\theta - \theta_*)\right) && \text{(7.4b)} \\
+&= \mathcal{N}(\theta; \theta_*, \Psi^{-1}(\theta_*)). && \text{(7.4c)}
+\end{aligned}
+$$
+
+Phiên bản sách giáo khoa của xấp xỉ Laplace, nhưng không thực tế, xuất phát từ khai triển Taylor tại một điểm cực tiểu cục bộ của rủi ro có chính quy hóa:
+
+$$
+[\Psi(\theta)]_{ij} = \left[\nabla_\theta \nabla_\theta^\top \mathcal{L}_\Omega(\theta)\right]_{ij} = \frac{\partial^2 \mathcal{L}_\Omega(\theta)}{\partial \theta_i \partial \theta_j}, \qquad \theta_* = \operatorname*{arg\,min}_{\theta \in \mathbb{R}^P} \mathcal{L}_\Omega(\theta). \tag{7.5}
+$$
+
+Nghĩa là: chọn một điểm $\theta_*$ tại đó gradient bằng không, rồi tính ma trận Hesse (Hessian) tại đó (ma trận $\Psi(\theta_*)$ là biểu diễn ma trận của toán tử nói trên, được đánh giá tại $\theta_*$).
+
+## 2. Xấp xỉ Laplace có gì đáng giá?
+
+Điểm cốt lõi tạo nên sức hấp dẫn của xấp xỉ Laplace là nó là một bước *hậu xử lý giải tích* (analytic post-processing) có thể gắn thêm vào cách huấn luyện mô hình sâu đã quen thuộc:
+
+> **Cách xây dựng một xấp xỉ Laplace:**
+>
+> 1. Huấn luyện mạng sâu theo bất kỳ cách nào đã biết và tin tưởng, với bất kỳ bộ tối ưu nào ưa thích. Chờ vòng lặp huấn luyện kết thúc và trả về ước lượng điểm $\theta_*$.
+> 2. Sau khi huấn luyện đã xong (!), tính $\Psi(\theta_*)$. Vì đây là một toán tử vi phân cấp hai, có thể tính nó bằng vi phân tự động, với framework vi phân tự động ưa thích.
+
+Và chỉ có vậy! Giờ đã có một ước lượng "độ bất định Bayes" trong không gian tham số, dưới dạng phân phối Gauss của Phương trình 7.4c. Những ưu điểm của công thức này, có cái hiển nhiên, có cái ít hiển nhiên hơn, đáng được nêu ra rõ ràng:
+
+- **Giữ nguyên được ước lượng điểm**. Những người huấn luyện mạng nơ-ron, nhất là với mô hình lớn, bỏ ra nguồn lực cực lớn để tìm một giá trị $\theta_*$ tốt. Dù giá trị cụ thể này có thể không đáp ứng các đòi hỏi lý thuyết của phân tích Bayes, nó vẫn là kết tinh của một khoản đầu tư đáng kể, nên việc tiếp tục làm việc với đối tượng quý giá này là điều hấp dẫn. Với xấp xỉ Laplace, ước lượng điểm này trở thành trực tiếp trung bình hậu nghiệm. Và để nói điều hiển nhiên: chi phí tính toán thêm của phần này đúng bằng *không* so với chi phí huấn luyện vốn có.
+- **Dùng được các công cụ đã thành thục**. Xây dựng phân phối Gauss của Phương trình 7.4c đòi hỏi đúng hai công cụ tính toán: *vi phân tự động* để có $\Psi$, và *đại số tuyến tính số* để tìm nghịch đảo (xấp xỉ) của nó. Có thể nói đây là *những* chức năng mạnh nhất, đáng tin cậy nhất và được tối ưu kỹ nhất mà một kỹ sư học máy có trong tay. Chúng có thể được làm cho cực kỳ ổn định về mặt số học và tự động hóa thuận tiện, hoặc được tinh chỉnh để đạt hiệu quả tính toán triệt để. Hơn nữa, nhờ đại số tuyến tính số xác suất (probabilistic numerical linear algebra), sai số rời rạc hóa và sai số lặp của những phép tính bên trong này có thể được theo dõi để xem xét ở các bước sau (thêm về các thủ thuật đại số tuyến tính số trong [Chương 8](/vi/blog/linearized-laplace-approximations) và Phần VIII).
+- **Xấp xỉ Laplace được thực hiện sau huấn luyện** (post hoc). Vì $\Psi$ chỉ cần đến sau khi đã tìm được $\theta_*$, chi phí của nó không phụ thuộc vào độ phức tạp của quá trình huấn luyện. Thật ra, việc xây dựng một xấp xỉ Laplace về thực chất tách biệt hoàn toàn khỏi huấn luyện, và có thể được thực hiện trên một mô hình đã huấn luyện sẵn tải về từ Internet. Lưu ý duy nhất là, vì $\Psi$ là một hàm của rủi ro có chính quy hóa, việc xây dựng nó đòi hỏi truy cập dữ liệu huấn luyện $\mathcal{D}$, hoặc một biểu diễn nén nào đó của dữ liệu này.
+- **Xấp xỉ Laplace mang tính giải tích**. Xấp xỉ Laplace trả về một độ đo xác suất Gauss, với các tham số được tính bằng tối ưu hóa, vi phân tự động và đại số tuyến tính. Tức là một đại lượng tất định (một hàm mật độ xác suất) được xây dựng một cách tất định. Không có nguồn ngẫu nhiên nào tham gia, ngoài bản chất có thể ngẫu nhiên của quá trình huấn luyện để tìm $\theta_*$. Như [Chương 10](/vi/blog/analytic-low-cost-functionality-from-laplace) sẽ cho thấy, điều này khiến xấp xỉ Laplace trở nên đáng quan tâm cho các ứng dụng và quyết định ở khâu sau đòi hỏi lấy biên (marginalization) giải tích theo các tham số.
+- **Ý nghĩa lý thuyết sâu sắc**. Chương [8](/vi/blog/linearized-laplace-approximations) và Chương [9](/vi/blog/differential-geometric-perspective-on-laplace) sẽ cho thấy bản chất vi phân cục bộ của độ cong, vốn là cốt lõi của xấp xỉ Laplace, mang lại cho nó những mối liên hệ lý thuyết sâu sắc và những cách diễn giải trực quan. Thật ra, chúng mở ra cả một lý thuyết tự chứa về học sâu, xây dựng trên hình học vi phân của đa tạp năng lượng (energy manifold) gắn với $\mathcal{L}_\Omega$.
+- **Xấp xỉ Laplace biến mọi mạng sâu thành một quá trình Gauss**. [Chương 8](/vi/blog/linearized-laplace-approximations) sẽ cho thấy độ đo Gauss $\mathcal{N}(\theta; \theta_*, \Psi^{-1}(\theta_*))$ do xấp xỉ Laplace xây dựng có thể được đẩy tới (pushforward) một cách giải tích sang không gian đầu ra của mạng $f(x, \theta)$, nơi nó hiện ra dưới dạng một quá trình Gauss (Gaussian process) có hàm trung bình đúng bằng mạng đã huấn luyện $f(x, \theta_*)$, và có hàm hiệp phương sai (hàm nhân, kernel) là một đối tượng có cấu trúc, một *hàm nhân tiếp tuyến* (tangent kernel) (được phát triển thêm trong Phần V). Đây là một góc nhìn mạnh mẽ vì cả lý do thực tiễn lẫn khái niệm. Về mặt thực tiễn, nhiều khái niệm trong tài liệu về quá trình Gauss có thể được chuyển gần như trực tiếp sang học sâu, khôi phục những chức năng nâng cao mà học sâu không Bayes đang thiếu trầm trọng. Về mặt khái niệm, hàm nhân tiếp tuyến chứa những số hạng rất cụ thể, nắm bắt các phát biểu mô-đun, diễn giải được về vai trò của dữ liệu huấn luyện, kiến trúc mạng và chính quy hóa, giúp học sâu trở nên minh bạch và dễ diễn giải hơn.
+
+## 3. Các cân nhắc thực tiễn
+
+Khi lần đầu gặp xấp xỉ Laplace trong học sâu, người ta thường có một trong hai phản ứng gần như mâu thuẫn với nhau:
+
+### 3.1 Phải chăng cách này quá đơn giản?
+
+Một khai triển Taylor? Thật sao? Từ góc nhìn Bayes chính thống triệt để, một hàm bậc hai là một xấp xỉ kém của phân phối hậu nghiệm, với toàn bộ vẻ phi lồi, phi tuyến của nó (xem Hình 7.1). Nhưng so với thực tiễn huấn luyện mạng sâu hằng ngày, xấp xỉ Laplace là một bước tiến lớn, từ một xấp xỉ *bậc không* (một ước lượng điểm) lên một xấp xỉ *bậc hai* (một độ đo xác suất Gauss). Nó mở ra một lối vào dễ dàng thế giới Bayes cho người thực hành học sâu: chỉ cần lấy mô hình đã huấn luyện, tính một độ cong, thế là xong.
+
+Cũng cần cẩn thận để không viện đến những lý tưởng phi thực tế, mà nên so sánh với những phương án thay thế thực tế. Phân phối hậu nghiệm thật có thể là mục tiêu lý thuyết của mọi phân tích Bayes, nhưng hoàn toàn không tính được. Mọi phương pháp Bayes thực sự dùng được đều là những phép xấp xỉ, với bản chất khác nhau. Chẳng hạn, nếu một tổ hợp (ensemble) gồm $S \ll P$ mẫu $[\theta_s]_{s=1}^S$ được rút từ phân phối hậu nghiệm và dùng để xây dựng một hiệp phương sai hậu nghiệm $\hat{\Psi}^{-1} = \frac{1}{S}\sum_{s=1}^{S}(\theta_s - \theta_*)(\theta_s - \theta_*)^\top$ trên các tham số $\theta$, thì ma trận $\hat{\Psi}$ đó sẽ có hạng tối đa là $S$. Nếu đối tượng này được dùng như một đại diện cho "độ bất định hậu nghiệm", có thể sẽ đánh giá quá cao các khoảng tin cậy một cách nghiêm trọng. Một xấp xỉ Laplace có thể bỏ sót các khía cạnh phi cục bộ trong hình học của phân phối hậu nghiệm, nhưng nó có thể xây dựng một ma trận hiệp phương sai xấp xỉ có hạng đầy đủ.
+
+### 3.2 Phải chăng cách này quá tốn kém?
+
+<em>Khoan đã, cách này cần một ma trận Hesse trên không gian tham số? Đó là một ma trận cỡ $P \times P$, nên chỉ riêng việc lưu trữ nó đã tốn thêm bộ nhớ $\mathcal{O}(P^2)$. À, rồi còn phải tính </em>nghịch đảo<em> của nó nữa!? Việc đó sẽ tốn chi phí tính toán $\mathcal{O}(P^3)$, đúng không?</em> Chỗ sai của những suy nghĩ như vậy là chúng dùng những phát biểu cho trường hợp xấu nhất về những đối tượng hoàn toàn nằm trong tầm kiểm soát của người dùng.
+
+Tốt hơn nên xem độ cong $\Psi$ như một *toán tử tuyến tính* (linear operator), một hàm ánh xạ vector thành vector. Một hàm như vậy không nhất thiết đòi hỏi phải tạo tường minh một ma trận trong bộ nhớ. Chương [8](/vi/blog/linearized-laplace-approximations) và Chương [10](/vi/blog/analytic-low-cost-functionality-from-laplace) sẽ giới thiệu một số lựa chọn khả dĩ cho toán tử này, trải trên một dải chi phí tính toán và bộ nhớ. Các lựa chọn đó gồm xấp xỉ Gauss–Newton tổng quát (generalized Gauss–Newton, GGN) ([Chương 8, Mục 3](/vi/blog/linearized-laplace-approximations)), độ cong xấp xỉ phân tích Kronecker (Kronecker-factored approximate curvature, K-FAC), và các xấp xỉ đường chéo của ma trận Hesse ([Chương 8, Mục 4](/vi/blog/linearized-laplace-approximations)). Thật ra, [Chương 10, Mục 1](/vi/blog/analytic-low-cost-functionality-from-laplace) sẽ cho thấy ngay cả lựa chọn tầm thường $\Psi = \alpha I$ với một $\alpha \in \mathbb{R}_+$ tùy ý (tức là chỉ thay ước lượng điểm bằng một độ đo Gauss tùy ý) cũng đã khắc phục được một số bệnh lý cụ thể, không tầm thường của học sâu không Bayes.
+
+Tương tự, đại số tuyến tính số cung cấp một bộ công cụ phong phú gồm các phương pháp lặp, thưa, phác thảo (sketched), v.v. để giải các hệ phương trình tuyến tính dạng $\Psi x = b$ theo $x$ mà thậm chí không cần tạo tường minh một ước lượng của ma trận nghịch đảo $\Psi^{-1}$ ([Chương 8, Mục 4.1](/vi/blog/linearized-laplace-approximations)). Và có những phiên bản xác suất của các phương pháp này có thể theo dõi và ước lượng một phần sai số trong kết quả của chúng. Do đó, chi phí bộ nhớ và tính toán của xấp xỉ Laplace có thể được người dùng kiểm soát hoàn toàn, mở ra một phổ rộng các thuật toán với chất lượng và chi phí khác nhau.
+
+Mặt trái là việc xây dựng xấp xỉ Laplace, cũng như huấn luyện mạng sâu, không phải là một thao tác "bật là chạy", mà đòi hỏi sự cẩn thận và chuyên môn. Nhưng các công cụ phần mềm mới xuất hiện ngày càng đóng gói những lựa chọn này, và cung cấp các lớp trừu tượng cho phép xây dựng xấp xỉ Laplace chỉ với vài dòng mã.
+
+## 4. Mọi phép xấp xỉ đều sai
+
+Bất chấp mọi lập luận ủng hộ, xấp xỉ Laplace vẫn chỉ là xấp xỉ. Bản chất cục bộ của nó (việc nó chỉ dùng các đại lượng vi phân được đánh giá tại một điểm duy nhất trong không gian tham số) vừa là điểm mạnh chính, vừa là điểm yếu chính. Như Hình 7.1 cho thấy, phân phối hậu nghiệm Gauss do xấp xỉ Laplace tạo ra có thể không nắm bắt được hình học của phân phối hậu nghiệm, ngay cả trong vùng không gian tham số được giới hạn bởi một hoặc hai độ lệch chuẩn của phân phối Gauss đó. Và khi các thủ tục số phức tạp được dùng để thao tác trên toán tử độ cong $\Psi$, chính sai số của chúng cũng có thể làm suy giảm nghiêm trọng chất lượng của phép xấp xỉ.
+
+Do đó, tốt nhất nên xem xấp xỉ Laplace như một công cụ quan trọng để dùng đầu tiên. Ít nhất các biến thể cơ bản nhất của nó có thể được xây dựng trên hầu như mọi kiến trúc sâu, thường với chi phí thêm tối thiểu cả về cài đặt lẫn tính toán. Nó có thể là một công cụ chẩn đoán mạnh, làm sáng tỏ sự tương tác giữa dữ liệu và kiến trúc; và cung cấp những chức năng có cấu trúc, kiểm soát được cho các yêu cầu thường ngày như định lượng độ bất định, thích nghi mô hình, học liên tục, v.v. Nhưng bất cứ khi nào rủi ro cao, chẳng hạn trong các ứng dụng đòi hỏi an toàn cao, hoặc khi độ bất định được dùng để rút ra các kết luận khoa học, cần có thêm các biện pháp bảo vệ. Trong những bối cảnh như vậy, xấp xỉ Laplace có thể được kết hợp với một số khuôn khổ khác được trình bày trong cuốn sách này, để cho ra một ước lượng độ bất định vững chắc hơn và được hiệu chuẩn tốt hơn.
+
+> **Điểm cần ghi nhớ:**
+>
+> Xấp xỉ Laplace là một phép xấp xỉ bậc hai cho logarit phân phối hậu nghiệm gắn với một mô hình sâu, được hiểu như một phân phối hậu nghiệm Gauss trên không gian tham số, hoặc một phân phối hậu nghiệm quá trình Gauss trên các đầu ra dự đoán (logit) của mô hình. Những phép xấp xỉ như vậy được xây dựng bằng cách trước hết huấn luyện một ước lượng điểm cho các tham số theo cách "thông thường", rồi tính toán tử độ cong (hoặc hàm nhân) sau huấn luyện. Do bản chất này, xấp xỉ Laplace mang tính *cục bộ* và *vi phân*. Một mặt, đây là điểm yếu, vì nó không nắm bắt được cấu trúc *toàn cục*, *phi tuyến* trong phân phối hậu nghiệm. Mặt khác, đây là điểm mạnh, vì nó cho phép dùng vi phân tự động mạnh mẽ và đại số tuyến tính xác suất không cần ma trận tường minh (matrix-free), đồng thời cung cấp những mô tả lý thuyết về học sâu bằng ngôn ngữ của hình học vi phân. Các chương tiếp theo sẽ trình bày chi tiết hơn về những khía cạnh này.
+
+[^1]: Lưu ý rằng ở đây tính lồi chỉ được giả định cho hàm mất mát và số hạng chính quy hóa. Hàm mất mát đầy đủ $\mathcal{L}_\Omega(\theta)$ nói chung không lồi, vì mạng $f$ là một hàm phi tuyến của các tham số $\theta$.

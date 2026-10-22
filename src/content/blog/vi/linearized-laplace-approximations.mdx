@@ -1,0 +1,558 @@
+---
+title: "Xấp xỉ Laplace tuyến tính hóa"
+description: "Tuyến tính hóa một mạng biến phân phối hậu nghiệm Laplace của nó thành một quá trình Gauss: tiên nghiệm NTK, độ cong GGN và Fisher, các xấp xỉ mở rộng được và phân phối dự đoán."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - gaussian processes
+  - neural tangent kernel
+  - fisher information
+series: bayesian-deep-learning
+seriesOrder: 11
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl08Pipeline from '../../../components/diagrams/Bdl08Pipeline.astro';
+import Bdl08LinVsNonlin from '../../../components/diagrams/Bdl08LinVsNonlin.astro';
+import Bdl08LastLayerRegression from '../../../components/diagrams/Bdl08LastLayerRegression.astro';
+import Bdl08IrisLaplace from '../../../components/diagrams/Bdl08IrisLaplace.astro';
+
+Chương trước đã trình bày một phép xấp xỉ Gauss nhẹ về mặt tính toán $\mathcal{N}(\theta; \theta_*, \Psi(\theta_*)^{-1})$ cho phân phối hậu nghiệm (posterior) thực $p(\theta \mid \mathcal{D})$ trên không gian tham số $\mathbb{R}^P$. Mục tiêu cuối cùng là dùng độ đo Gauss này để *ra quyết định* dựa trên đầu ra của mô hình: các dự đoán của nó đi vào những hàm rủi ro và hàm lợi ích mà các tác vụ phía sau tối ưu hóa ([Chương 10](/vi/blog/analytic-low-cost-functionality-from-laplace)). Để làm điều đó, bước đầu tiên là định lượng **độ bất định dự đoán** (predictive uncertainty) của mạng trên không gian đầu ra $\mathbb{R}^C$ bằng cách biến mạng thành một quá trình Gauss (Gaussian process, GP). Hình 8.1 phác họa trước toàn bộ quy trình, từ ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP) $\theta_*$ đến phân phối dự đoán.
+
+## 1. Tuyến tính hóa
+
+Biến một mạng nơ-ron bất kỳ (khả vi) có tham số $\theta \in \mathbb{R}^P$ thành một quá trình Gauss đòi hỏi hai thành phần: tuyến tính hóa trong không gian tham số và xấp xỉ Laplace (Laplace approximation) đã được giới thiệu trước đó.
+
+Trước hết, định nghĩa **mạng tuyến tính hóa** (linearized network) $f^{\theta_0} \colon \mathbb{R}^D \times \mathbb{R}^P \to \mathbb{R}^C$ là khai triển Taylor bậc nhất của mạng $f$ quanh tham số $\theta_0 \in \mathbb{R}^P$:
+
+$$
+f^{\theta_0}(x, \theta) := f(x, \theta_0) + J_\theta f(x, \theta_0)(\theta - \theta_0), \tag{8.1}
+$$
+
+trong đó $J_\theta f(x, \theta_0) \in \mathbb{R}^{C \times P}$ là **ma trận Jacobi của mạng** (network Jacobian) tính tại $(x, \theta_0)$.[^1] Tương tự Phương trình 7.1, định nghĩa rủi ro thực nghiệm có chính quy hóa (regularized empirical risk) của mạng tuyến tính hóa $f^{\theta_0}$ với tham số $\theta$ là
+
+$$
+\mathcal{L}_\Omega^{\theta_0}(\theta) := \sum_{n=1}^{N} \ell\left(f^{\theta_0}(x_n, \theta), y_n\right) + \Omega(\theta). \tag{8.2}
+$$
+
+Trừ khi được nói rõ khác đi (chẳng hạn trong phần thảo luận chỉ về tiên nghiệm ở Mục 2), điểm tuyến tính hóa được cố định tại một điểm cực tiểu của rủi ro thực nghiệm có chính quy hóa *ban đầu* $\mathcal{L}_\Omega(\theta)$:
+
+$$
+\theta_* :\in \mathop{\mathrm{arg\,min}}\limits_{\theta \in \mathbb{R}^P} \mathcal{L}_\Omega(\theta), \tag{8.3}
+$$
+
+tức là $\theta_0 \equiv \theta_*$. Bản thân phép tuyến tính hóa chỉ đòi hỏi $f$ khả vi tại $\theta_0$. Xấp xỉ Laplace đòi hỏi nhiều hơn: $\theta_*$ phải là một điểm cực tiểu địa phương của $\mathcal{L}_\Omega$ với gradient bằng không, và ma trận độ chính xác (precision) thu được phải xác định dương sau khi cộng thêm độ cong của tiên nghiệm. Lưu ý rằng $f^{\theta_*}$ có cùng giá trị và cùng ma trận Jacobi theo tham số với $f$ tại $\theta_*$, nên $\nabla_\theta \mathcal{L}_\Omega^{\theta_*}(\theta_*) = \nabla_\theta \mathcal{L}_\Omega(\theta_*) = 0$ và $\theta_*$ cũng là một điểm dừng của $\mathcal{L}_\Omega^{\theta_*}$. Vì $f^{\theta_*}$ là hàm affine theo $\theta$, tính lồi của $\ell(\cdot, y)$ theo $z$ làm cho mỗi số hạng mất mát lồi theo $\theta$; với một $\Omega$ lồi chặt, rủi ro $\mathcal{L}_\Omega^{\theta_*}$ khi đó lồi chặt theo $\theta$, do đó $\theta_*$ là điểm cực tiểu duy nhất của nó.
+
+Theo [Chương 7, Mục 1](/vi/blog/laplace-introduction), xấp xỉ Laplace dùng rủi ro thực nghiệm có chính quy hóa của mạng tuyến tính hóa cho độ đo Gauss trong không gian tham số $\mathcal{N}(\theta; \theta_*, \Psi(\theta_*)^{-1})$ với
+
+$$
+[\Psi(\theta)]_{ij} = \left[\nabla_\theta \nabla_\theta^\top \mathcal{L}_\Omega^{\theta_*}(\theta)\right]_{ij} = \frac{\partial^2 \mathcal{L}_\Omega^{\theta_*}(\theta)}{\partial \theta_i \partial \theta_j}. \tag{8.4}
+$$
+
+Độ cong $\Psi$ của rủi ro thực nghiệm có chính quy hóa của mạng tuyến tính hóa khác với ma trận Hesse (Hessian) trong Phương trình 7.5 đối với những mạng không affine từng khúc theo tham số (trừ tại các giá trị tham số không tổng quát, nơi mọi phần dư huấn luyện đều triệt tiêu). Điểm khác biệt là $\Psi(\theta_*)$, theo định nghĩa ở Phương trình 8.4, bỏ đi độ cong theo tham số của mạng (và các đạo hàm bậc cao hơn) và chỉ giữ lại độ cong của *hàm mất mát* theo các đầu ra của mô hình. Ưu điểm của lựa chọn mô hình hóa này được tóm tắt ở Mục 1.1.
+
+<Figure caption="Hình 8.1: Quy trình Laplace tuyến tính hóa. Mạng tuyến tính hóa f^θ* và hiệp phương sai tham số Σ = Ψ(θ*)⁻¹ cùng nhau xác định quá trình Gauss trên logit, quá trình này sinh ra một phân phối dự đoán. (Vẽ lại.)">
+  <Bdl08Pipeline />
+</Figure>
+
+Một tính chất quan trọng của các độ đo Gauss là chúng đóng dưới các phép biến đổi affine, được phát biểu chính thức dưới đây.
+
+**Mệnh đề 8.1** (Tính đóng affine của phân phối Gauss). *Cho* $X \sim \mathcal{N}(\mu, \Sigma)$ *với* $\mu \in \mathbb{R}^N$ *và* $\Sigma \succ 0$. *Với mọi* $A \in \mathbb{R}^{M \times N}$ *có hạng hàng đầy đủ và* $b \in \mathbb{R}^M$,
+
+$$
+Y := AX + b \;\sim\; \mathcal{N}\left(A\mu + b,\ A\Sigma A^\top\right). \tag{8.5}
+$$
+
+*Nếu* $\operatorname{rank}(A) < M$ *thì* $A\Sigma A^\top \succeq 0$ *và* $Y$ *không có mật độ Lebesgue trên* $\mathbb{R}^M$.
+
+*Chứng minh.* Trước hết xét trường hợp $A \in \mathbb{R}^{N \times N}$ khả nghịch. Với mọi tập Borel $E \subseteq \mathbb{R}^N$, biến cố $\{Y \in E\}$ trùng với $\{X \in A^{-1}(E - b)\}$, nên phép đổi biến $x = A^{-1}(y - b)$, có định thức Jacobi với giá trị tuyệt đối $|\det A^{-1}|$, cho
+
+$$
+p_Y(y) = p_X\left(A^{-1}(y - b)\right) |\det A^{-1}|. \tag{8.6}
+$$
+
+Đặt $d := y - (A\mu + b)$ thì $A^{-1}(y - b) - \mu = A^{-1} d$, nên
+
+$$
+\left(A^{-1}(y - b) - \mu\right)^\top \Sigma^{-1} \left(A^{-1}(y - b) - \mu\right) = d^\top (A\Sigma A^\top)^{-1} d, \tag{8.7}
+$$
+
+và $|\Sigma|^{-1/2} |\det A^{-1}| = |A\Sigma A^\top|^{-1/2}$ do $|A\Sigma A^\top| = |A|^2 |\Sigma|$. Thay mật độ Gauss của $X$ vào thì được
+
+$$
+p_Y(y) = (2\pi)^{-N/2} |A\Sigma A^\top|^{-1/2} \exp\left(-\frac{1}{2} d^\top (A\Sigma A^\top)^{-1} d\right), \tag{8.8}
+$$
+
+nên $Y \sim \mathcal{N}(A\mu + b, A\Sigma A^\top)$.
+
+Với trường hợp hạng hàng đầy đủ $A \in \mathbb{R}^{M \times N}$, $M \le N$, chọn $K \in \mathbb{R}^{(N-M) \times N}$ sao cho $T := \begin{bmatrix} A \\ K \end{bmatrix} \in \mathbb{R}^{N \times N}$ khả nghịch, và đặt $Y := AX + b$, $Z := KX$, $U := \begin{bmatrix} Y \\ Z \end{bmatrix} = TX + \begin{bmatrix} b \\ 0 \end{bmatrix}$. Theo trường hợp khả nghịch, $U$ có phân phối Gauss với kỳ vọng $\begin{bmatrix} A\mu + b \\ K\mu \end{bmatrix}$ và hiệp phương sai
+
+$$
+S := T\Sigma T^\top = \begin{bmatrix} S_{11} & S_{12} \\ S_{21} & S_{22} \end{bmatrix} = \begin{bmatrix} A\Sigma A^\top & A\Sigma K^\top \\ K\Sigma A^\top & K\Sigma K^\top \end{bmatrix}, \qquad S_{11} = A\Sigma A^\top \succ 0. \tag{8.9}
+$$
+
+Gọi $C := S_{22} - S_{21} S_{11}^{-1} S_{12}$ là phần bù Schur (Schur complement) (xác định dương) và $B := S_{21} S_{11}^{-1}$. Với $\Delta y := y - (A\mu + b)$ và $\Delta z := z - K\mu$, đẳng thức nghịch đảo khối tách dạng toàn phương thành
+
+$$
+\begin{bmatrix} \Delta y \\ \Delta z \end{bmatrix}^\top S^{-1} \begin{bmatrix} \Delta y \\ \Delta z \end{bmatrix} = \Delta y^\top S_{11}^{-1} \Delta y + (\Delta z - B\Delta y)^\top C^{-1} (\Delta z - B\Delta y), \tag{8.10}
+$$
+
+và $|S| = |S_{11}||C|$. Lấy biên $U$ theo $z$ với
+
+$$
+\int_{\mathbb{R}^{N-M}} \exp\left(-\frac{1}{2} (\Delta z - B\Delta y)^\top C^{-1} (\Delta z - B\Delta y)\right) \mathrm{d}z = (2\pi)^{(N-M)/2} |C|^{1/2} \tag{8.11}
+$$
+
+còn lại
+
+$$
+p_Y(y) = (2\pi)^{-M/2} |S_{11}|^{-1/2} \exp\left(-\frac{1}{2} \Delta y^\top S_{11}^{-1} \Delta y\right), \tag{8.12}
+$$
+
+tức là $Y \sim \mathcal{N}(A\mu + b, A\Sigma A^\top)$. Chỉ $S_{11} = A\Sigma A^\top$ còn lại, nên kết quả không phụ thuộc vào cách chọn $K$.
+
+Cuối cùng, nếu $\operatorname{rank}(A) < M$ thì $\operatorname{rank}(A\Sigma A^\top) = \operatorname{rank}(A) < M$ vì $\Sigma \succ 0$, nên $A\Sigma A^\top$ suy biến và $Y$ có giá nằm trong không gian con affine thực sự $A\mathbb{R}^N + b$, do đó không có mật độ Lebesgue trên $\mathbb{R}^M$. $\square$
+
+Như vậy, mạng tuyến tính hóa $f^{\theta_*}$ đẩy phân phối hậu nghiệm của tham số tới, qua ánh xạ affine của Phương trình 8.1, thành một phân phối Gauss trong không gian đầu ra (không gian logit trong bài toán phân loại). Theo biến đầu ra của mạng $z \in \mathbb{R}^C$ (các logit, mà hàm mất mát $\ell(z, y)$ nhận làm đối số thứ nhất), độ đo này là
+
+$$
+\mathcal{N}\left(z; f(x_*, \theta_*), J_\theta f(x_*, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x_*, \theta_*)^\top\right). \tag{8.13}
+$$
+
+Kết quả này đã trang bị cho mạng $f$ một độ đo xác suất trong không gian đầu ra của nó (hoặc không gian logit trong phân loại) với mọi đầu vào $x_*$. Một **quá trình Gauss** là một cấu trúc còn mạnh hơn, có khả năng mô hình hóa một độ đo Gauss trên bất kỳ *tập hữu hạn đầu vào* nào chứ không chỉ một đầu vào đơn lẻ. Mạng tuyến tính hóa $f^{\theta_*}$, đi kèm xấp xỉ Laplace trong không gian tham số, xác định một quá trình Gauss $\mathcal{GP}(f(\cdot, \theta_*), k)$ với hàm nhân (kernel) Mercer sau:
+
+$$
+k(x, x') = \operatorname{cov}\left(f^{\theta_*}(x, \theta), f^{\theta_*}(x', \theta)\right) \tag{8.14}
+$$
+
+$$
+\phantom{k(x, x')} = \operatorname{cov}\left(J_\theta f(x, \theta_*)(\theta - \theta_*), J_\theta f(x', \theta_*)(\theta - \theta_*)\right) \tag{8.15}
+$$
+
+$$
+\phantom{k(x, x')} = J_\theta f(x, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x', \theta_*)^\top. \tag{8.16}
+$$
+
+### 1.1 Ưu điểm của việc dùng mạng tuyến tính hóa
+
+Xấp xỉ Laplace được thực hiện theo $\mathcal{L}_\Omega^{\theta_*}$ (với $\theta_* = \arg\min_{\theta \in \mathbb{R}^P} \mathcal{L}_\Omega(\theta)$) thay vì theo rủi ro thực nghiệm có chính quy hóa của $f$ vì nhiều lý do.
+
+Thứ nhất, ma trận Hesse của rủi ro thực nghiệm có chính quy hóa của $f$ (Phương trình 7.5) không được bảo đảm là xác định dương, điều này loại trừ việc diễn giải nó như nghịch đảo của ma trận hiệp phương sai của phân phối hậu nghiệm Gauss xấp xỉ trên các tham số $\theta$.[^2] Trong tối ưu hóa bậc hai, việc thiếu tính xác định dương cũng ngăn cản việc dùng nghịch đảo ma trận Hesse làm bộ tiền điều kiện (preconditioner). Ngược lại, ma trận Hesse của rủi ro thực nghiệm có chính quy hóa của $f^{\theta_*}$, với một số hạng chính quy hóa lồi mạnh, *được bảo đảm* là xác định dương.
+
+Thứ hai, ma trận Hesse của rủi ro thực nghiệm có chính quy hóa của $f^{\theta_*}$ rẻ hơn đáng kể khi sử dụng so với ma trận Hesse tương ứng của $f$, cho phép xấp xỉ Laplace mở rộng tới các kiến trúc học sâu (xem Mục 3).
+
+Như vậy mô hình tuyến tính hóa có hai công dụng. Thứ nhất, nó xác định độ cong $\Psi$ và do đó xác định phép xấp xỉ Gauss cho phân phối hậu nghiệm trong không gian tham số. Thứ hai, nó xác định ảnh đẩy tới (pushforward) dự đoán trong Phương trình 8.13. Các công trình trước đây về xấp xỉ Laplace cho mạng nơ-ron *lấy mẫu* $M$ cấu hình tham số $\{\theta_s\}_{s=1}^M$ từ phân phối Gauss trong không gian tham số và tính các đại lượng *dự đoán* từ các dự đoán phi tuyến $\{f(x, \theta_s)\}_{s=1}^M$. Cách làm này đánh mất phân phối Gauss chính xác trong không gian đầu ra mà phép tuyến tính hóa cung cấp và không cho một GP hậu nghiệm nào. Lawrence chỉ ra bằng thực nghiệm rằng cách tiếp cận này dễ dẫn đến chưa khớp (underfitting): phân phối dự đoán trở nên *quá bất định* ngay cả trên các điểm dữ liệu trong phân phối. Immer và cộng sự xác định nguyên nhân cốt lõi của sự suy giảm hiệu năng là sự không khớp giữa mô hình trong đó suy luận Bayes xấp xỉ được thực hiện (mạng tuyến tính hóa $f^{\theta_*}$) và mô hình được dùng để dự đoán (mạng phi tuyến $f$). Hình 8.2 minh họa hiện tượng chưa khớp này và các mẫu có mật độ thấp dưới phân phối hậu nghiệm thực. Xem thêm Immer và cộng sự (Hình 3). Khi dùng mạng tuyến tính hóa để dự đoán chứ không chỉ để tính độ cong, phép xấp xỉ giữ được tính nhất quán nội tại.
+
+> **Điểm cần ghi nhớ**
+>
+> Xấp xỉ Laplace tuyến tính hóa biến mọi mạng nơ-ron khả vi thành một *quá trình Gauss* bằng cách (i) tuyến tính hóa mạng trong không gian tham số tại $\theta_*$ và (ii) đặt một phân phối hậu nghiệm Gauss $\mathcal{N}(\theta_*, \Psi(\theta_*)^{-1})$ lên các tham số. Hàm nhân Mercer sinh ra có dạng
+>
+> $$
+> k(x, x') = J_\theta f(x, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x', \theta_*)^\top,
+> $$
+>
+> trong đó $\Psi$ nắm bắt ảnh hưởng của tập dữ liệu lên *độ cong trong không gian tham số*, và ma trận Jacobi $J_\theta f(\cdot, \theta_*)$ đẩy độ cong này tới thành *độ bất định trong không gian hàm*.
+
+<Figure caption="Hình 8.2: Cùng một phân phối hậu nghiệm Laplace đầy đủ dưới hai quy tắc dự đoán, trên một ví dụ hồi quy một chiều lấy từ mã nguồn đi kèm công trình của Immer và cộng sự. Cả hai ô dùng cùng một phân phối hậu nghiệm xấp xỉ trong không gian tham số và cùng mười mẫu tham số. Chúng chỉ khác nhau ở cách mỗi mẫu tham số trở thành một mẫu trong không gian hàm, mà tài liệu về GP gọi là đường mẫu (sample path). Ô (a) đưa từng mẫu qua mạng tuyến tính hóa f^θ*, mô hình nhất quán với xấp xỉ Laplace trong không gian tham số. Ô (b) đưa các mẫu qua mạng phi tuyến ban đầu f. Các đường liền là kỳ vọng dự đoán; các đường nét đứt là khoảng tin cậy Bayes 95% theo từng điểm. Xấp xỉ Laplace tuyến tính hóa ở ô (a) cho một GP; do đó các đại lượng trong không gian đầu ra có dạng đóng. Xấp xỉ Laplace (phi tuyến) ở ô (b) cho kỳ vọng và hiệp phương sai đầu ra không tính được chính xác, và chúng được xấp xỉ bằng hai triệu mẫu Monte Carlo. Sơ đồ phi tuyến bất định hơn nhiều trên các đầu vào huấn luyện và kỳ vọng của nó chưa khớp nghiêm trọng. Xấp xỉ Laplace tuyến tính hóa cho độ bất định trong không gian hàm nhất quán. (Bản tái hiện mang tính sơ đồ: được tính lại cho trang này với một mạng tanh một lớp ẩn gồm 50 đơn vị, khớp trên dữ liệu tổng hợp có cùng bố cục, một phân phối hậu nghiệm Laplace GGN đầy đủ với độ chính xác tiên nghiệm bằng 1 và 20 000 mẫu Monte Carlo cho ô (b); từng đường cong cụ thể khác với hình trong sách.)">
+  <Bdl08LinVsNonlin />
+</Figure>
+
+## 2. Tiên nghiệm
+
+Quá trình Gauss được xác định bởi ma trận hiệp phương sai *hậu nghiệm* trong không gian tham số $\Psi^{-1}$ gắn với tập dữ liệu $\mathcal{D}$, vì $\Psi$ là ma trận Hesse của rủi ro thực nghiệm có chính quy hóa của mô hình tuyến tính hóa trên $\mathcal{D}$. Trường hợp mạng nơ-ron $f \colon \mathbb{R}^D \times \mathbb{R}^P \to \mathbb{R}^C$ chưa tiếp xúc với bất kỳ tập dữ liệu $\mathcal{D}$ nào đáng được xem xét kỹ. Trong trường hợp này, hành vi của mô hình được quyết định bởi kiến trúc của nó và bởi tiên nghiệm (prior) $p(\theta)$ trên các tham số.
+
+Với một tiên nghiệm tham số không Gauss $p(\theta)$, xấp xỉ Laplace của tiên nghiệm đặt tâm tại một điểm cực đại địa phương $\theta_0$ của $p(\theta)$, tương tự Phương trình 7.4c. Ma trận độ chính xác của nó là ma trận Hesse của logarit âm của tiên nghiệm,
+
+$$
+\Psi = -\nabla_\theta \nabla_\theta \log p(\theta_0). \tag{8.17}
+$$
+
+Cho cách xây dựng dưới đây, lấy một tiên nghiệm Gauss đặt tâm tại điểm tuyến tính hóa,
+
+$$
+p(\theta) = \mathcal{N}(\theta; \theta_0, I), \tag{8.18}
+$$
+
+trong đó $\theta_0$ có thể là bất kỳ giá trị khởi tạo nào được chọn. Mode của tiên nghiệm là $\theta_0$, nên phép tuyến tính hóa và xấp xỉ Laplace của tiên nghiệm có cùng tâm, và ma trận độ chính xác ở trên bằng $\Psi = I$. Đẩy tiên nghiệm này qua mạng tuyến tính hóa cho hàm nhân $k \colon \mathbb{R}^D \times \mathbb{R}^D \to \mathbb{R}^{C \times C}$,
+
+$$
+k(x, x') = J_\theta f(x, \theta_0) \left(J_\theta f(x', \theta_0)\right)^\top. \tag{8.19}
+$$
+
+Hàm nhân này đến từ cùng một phép đẩy tới như hàm nhân GP hậu nghiệm trong Phương trình 8.16. So với hàm nhân đó, cặp phụ thuộc dữ liệu $(\theta_*, \Psi(\theta_*))$ được thay bằng cặp không phụ thuộc tập dữ liệu $(\theta_0, I)$. Hàm nhân này được gọi là **hàm nhân tiếp tuyến nơ-ron** (Neural Tangent Kernel, NTK).[^3] Nó khác với hàm nhân của quá trình Gauss của mạng nơ-ron (neural network Gaussian process, NNGP): hàm nhân NNGP là hiệp phương sai của các đầu ra mạng ngẫu nhiên $f(x, \theta)$ và $f(x', \theta)$ dưới một phân phối khởi tạo ngẫu nhiên, còn NTK là hiệp phương sai của các đầu ra của mạng tuyến tính hóa $f^{\theta_0}(x, \theta)$ và $f^{\theta_0}(x', \theta)$ dưới tiên nghiệm $\mathcal{N}(\theta; \theta_0, I)$. Khi độ rộng mạng được cho tiến tới vô hạn theo một cách cụ thể, cả hai hàm nhân đều hội tụ. Ở những nơi các giới hạn này tồn tại, chúng là hai hàm nhân tất định khác nhau.
+
+NTK quyết định quỹ đạo trong không gian hàm của $f$ khi huấn luyện bằng dòng gradient (gradient flow) toàn lô trên hàm mất mát thực nghiệm trung bình, thông qua phương trình vi phân thường (Ordinary Differential Equation, ODE)
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} f_t(x) = -\frac{1}{N} \sum_{n=1}^{N} k_t(x, x_n)\, \nabla_z \ell(z, y_n)\big|_{z = f_t(x_n)}, \tag{8.20}
+$$
+
+trong đó $t$ là biến thời gian của dòng gradient và $k_t$ là NTK của $f_t$. Jacot và cộng sự chỉ ra rằng trong giới hạn độ rộng vô hạn của các mạng nơ-ron kết nối đầy đủ với cách khởi tạo gọi là khởi tạo NTK, NTK không đổi trong suốt quá trình huấn luyện, và sự hội tụ của quá trình tối ưu hóa liên quan đến tính xác định dương của NTK. Tuy nhiên, NTK của các mạng nơ-ron thông thường có độ rộng hữu hạn không phải là hằng và phải được tính lại tại mỗi điểm đánh giá.
+
+Về mặt mô hình hóa, việc đặt một tiên nghiệm Gauss đẳng hướng lên các tham số hiếm khi có cơ sở vững chắc. Tuy nhiên, khuôn khổ xấp xỉ Laplace tương thích với các tiên nghiệm trong không gian hàm có thể diễn giải được. Cinquin và cộng sự định nghĩa các tiên nghiệm Laplace bằng một quá trình Gauss tiên nghiệm. Cụ thể, logarit âm của tiên nghiệm, sai khác một hằng số cộng, bằng bình phương chuẩn trong không gian Hilbert hàm nhân tái sinh (Reproducing Kernel Hilbert Space, RKHS) của hiệu giữa mạng tuyến tính hóa $f^{\theta_0}$ và kỳ vọng $\mu$ của quá trình Gauss tiên nghiệm. Logarit âm của tiên nghiệm này cũng được dùng làm số hạng chính quy hóa trong quá trình huấn luyện. Vì việc đặc tả tiên nghiệm Gauss trong không gian hàm chỉ đòi hỏi hiểu biết về hành vi của hàm chứ *không* đòi hỏi hiểu biết về cấu trúc của không gian tham số, khuôn khổ của Cinquin và cộng sự cho phép các chuyên gia lĩnh vực mã hóa trực tiếp hành vi hàm vào bài toán suy luận Bayes.
+
+> **Điểm cần ghi nhớ**
+>
+> Khi không có dữ liệu và với một tiên nghiệm Gauss $\mathcal{N}(\theta; \theta_0, I)$ đặt tâm tại $\theta_0$, độ cong trong không gian tham số là ma trận đơn vị, $\Psi = I$, và hàm nhân GP suy ra từ mạng nơ-ron rút gọn thành hàm nhân tiếp tuyến nơ-ron (NTK):
+>
+> $$
+> k(x, x') = J_\theta f(x, \theta_0) J_\theta f(x', \theta_0)^\top.
+> $$
+
+## 3. Ma trận Fisher
+
+Mục 1 đã lướt qua ma trận độ cong định nghĩa trong Phương trình 8.4. Ma trận này và các thành phần của nó cho xấp xỉ Laplace một cách diễn giải theo hình học thông tin, đủ để dành riêng một chương ([Chương 9](/vi/blog/differential-geometric-perspective-on-laplace)).
+
+Xét rủi ro thực nghiệm có chính quy hóa của mạng tuyến tính hóa $f^{\theta_0}$ (Phương trình 8.1 và 8.2). Dưới giả định của Phương trình 7.2 áp dụng cho mạng tuyến tính hóa, số hạng
+
+$$
+\mathcal{L}^{\theta_0}(\theta) = \sum_{n=1}^{N} \ell\left(f^{\theta_0}(x_n, \theta), y_n\right) \tag{8.21}
+$$
+
+bằng, sai khác một hằng số cộng, logarit âm của hàm hợp lý của tập dữ liệu dưới mô hình, $-\log p(Y \mid X, \theta)$, còn số hạng $\Omega(\theta)$ bằng logarit âm của tiên nghiệm, $-\log p(\theta)$, cũng sai khác một hằng số cộng.
+
+Viết tường minh ma trận Hesse của $\mathcal{L}^{\theta_0}$ tại $\theta_0$ cho
+
+$$
+G(\theta_0) = \nabla_\theta \nabla_\theta^\top \mathcal{L}^{\theta_0}(\theta_0) = \sum_{n=1}^{N} \left(J_\theta f(x_n, \theta_0)\right)^\top \left(\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f^{\theta_0}(x_n, \theta_0)}\right) J_\theta f(x_n, \theta_0), \tag{8.22}
+$$
+
+được gọi là **ma trận Gauss–Newton tổng quát** (Generalized Gauss-Newton matrix, GGN). Mục này chỉ ra rằng ma trận này tương đương với ma trận thông tin Fisher (Fisher Information Matrix) đối với một họ hàm mất mát, và ma trận thông tin Fisher là một metric Riemann tự nhiên (thường suy biến) cho các đa tạp thống kê được tham số hóa bởi mô hình ([Chương 9, Mục 2](/vi/blog/differential-geometric-perspective-on-laplace)).
+
+Xét đa tạp thống kê (statistical manifold)
+
+$$
+\mathcal{M} = \left\{p(x, y \mid \theta) : \theta \in \mathbb{R}^P\right\} \tag{8.23}
+$$
+
+với cấu trúc độc lập có điều kiện $p(x, y \mid \theta) = p(y \mid x, \theta) \cdot p(x)$, mà việc nghiên cứu sâu được để lại cho [Chương 9](/vi/blog/differential-geometric-perspective-on-laplace). Phân phối $p(y \mid x, \theta)$ biểu diễn hàm hợp lý được tham số hóa bởi một mạng nơ-ron và $p(x)$ là phân phối đầu vào thực. Một khái niệm tự nhiên về độ tách biệt giữa các phân phối xác suất trên đa tạp này là **độ phân kỳ Kullback–Leibler** (Kullback-Leibler divergence, KL):
+
+$$
+D_{\mathrm{KL}}\left(p(x, y \mid \theta_1) \,\|\, p(x, y \mid \theta_2)\right) := \mathbb{E}_{p(x, y \mid \theta_1)}\left[\log \frac{p(x, y \mid \theta_1)}{p(x, y \mid \theta_2)}\right]. \tag{8.24}
+$$
+
+Độ phân kỳ KL không phải là một metric hợp lệ vì nó không đối xứng. Tuy nhiên, với các tham số $\theta_1$, $\theta_2$ và $\Delta\theta = \theta_1 - \theta_2$, khai triển Taylor bậc hai của độ phân kỳ KL quanh $\theta_1$ là
+
+$$
+D_{\mathrm{KL}}\left(p(x, y \mid \theta_1) \,\|\, p(x, y \mid \theta_2)\right) = \frac{1}{2} \Delta\theta^\top F(\theta_1) \Delta\theta + \mathcal{O}\left(\|\Delta\theta\|^3\right). \tag{8.25}
+$$
+
+Cả số hạng bậc không lẫn số hạng bậc nhất đều triệt tiêu (số hạng thứ nhất vì $D_{\mathrm{KL}}(p \,\|\, p) = 0$, số hạng thứ hai vì kỳ vọng của hàm điểm (score) bằng không, Phương trình 8.27), để lại số hạng Fisher bậc hai làm đóng góp chính. Tại mỗi tham số $\theta$, dạng song tuyến tính $g_\theta(u, v) := u^\top F(\theta) v$ trên các vector tiếp tuyến $u, v$ là một metric Riemann hợp lệ trên đa tạp $\mathcal{M}$ (sai khác vấn đề khả định danh của tham số; xem [Chương 9](/vi/blog/differential-geometric-perspective-on-laplace)). Ma trận
+
+$$
+F(\theta) = \mathbb{E}_{p(x, y \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(x, y \mid \theta)\right] \tag{8.26}
+$$
+
+được gọi là **ma trận thông tin Fisher** (Fisher Information Matrix, FIM) của biến ngẫu nhiên $(\mathrm{X}, \mathrm{Y})$ có phân phối $p(x, y \mid \theta)$.
+
+Lấy đạo hàm điều kiện chuẩn hóa $\int p(x, y \mid \theta) \, \mathrm{d}x \, \mathrm{d}y = 1$ dưới dấu tích phân và dùng $\nabla_\theta p = p \nabla_\theta \log p$ cho hàm điểm có kỳ vọng bằng không,
+
+$$
+\mathbb{E}_{p(x, y \mid \theta)}\left[\nabla_\theta \log p(x, y \mid \theta)\right] = 0. \tag{8.27}
+$$
+
+Lấy đạo hàm thêm một lần nữa cho hai dạng tương đương của thông tin Fisher,
+
+$$
+F(\theta) = \mathbb{E}_{p(x, y \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(x, y \mid \theta)\right] = \mathbb{E}_{p(x, y \mid \theta)}\left[\nabla_\theta \log p(x, y \mid \theta) \left(\nabla_\theta \log p(x, y \mid \theta)\right)^\top\right]. \tag{8.28}
+$$
+
+FIM của các biến ngẫu nhiên độc lập có tính cộng. Cụ thể, với $N$ biến ngẫu nhiên độc lập cùng phân phối (i.i.d.) $\{(\mathrm{X}_n, \mathrm{Y}_n)\}_{n=1}^N$, FIM bằng $N$ lần FIM của một biến ngẫu nhiên đơn lẻ $(\mathrm{X}, \mathrm{Y})$:
+
+$$
+\mathbb{E}_{p(\{(x_n, y_n)\}_{n=1}^N \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p\left(\{(x_n, y_n)\}_{n=1}^N \mid \theta\right)\right] \tag{8.29}
+$$
+
+$$
+= \sum_{n=1}^{N} \mathbb{E}_{p(x_n, y_n \mid \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(x_n, y_n \mid \theta)\right] \tag{8.30}
+$$
+
+$$
+= N F(\theta). \tag{8.31}
+$$
+
+Từ đây trở đi, ký hiệu $F(\theta)$ chỉ FIM của một biến ngẫu nhiên đơn lẻ $(\mathrm{X}, \mathrm{Y})$ có phân phối $p(x, y \mid \theta)$.
+
+Dùng Phương trình 8.25, tác dụng của FIM trong tối ưu hóa bậc hai trở nên rõ ràng. Cụ thể, xét hàm mục tiêu
+
+$$
+\mathop{\mathrm{arg\,min}}\limits_{\Delta\theta \in \mathbb{R}^P} \mathcal{L}(\theta + \Delta\theta) \qquad \text{s.t.} \qquad D_{\mathrm{KL}}\left(p(x, y \mid \theta) \,\|\, p(x, y \mid \theta + \Delta\theta)\right) \le c \tag{8.32}
+$$
+
+với một hằng số $c \in \mathbb{R}_{>0}$ nào đó. Trực giác đằng sau hàm mục tiêu này là cực tiểu hóa rủi ro thực nghiệm không chính quy hóa của mô hình trong khi giới hạn mức thay đổi của hàm hợp lý do mô hình sinh ra, bất kể độ cong của mặt hàm mất mát. Để tìm một điểm cực tiểu xấp xỉ của hàm mục tiêu trong Phương trình 8.32, lấy xấp xỉ bậc hai của ràng buộc trong Phương trình 8.25 và tuyến tính hóa rủi ro thực nghiệm quanh tham số hiện tại $\theta$:
+
+$$
+\mathcal{L}(\theta + \Delta\theta) = \mathcal{L}(\theta) + \Delta\theta^\top \nabla_\theta \mathcal{L}(\theta) + \mathcal{O}\left(\|\Delta\theta\|^2\right). \tag{8.33}
+$$
+
+Thay rủi ro thực nghiệm đã tuyến tính hóa và ràng buộc bậc hai vào, hàm mục tiêu trở thành
+
+$$
+\mathop{\mathrm{arg\,min}}\limits_{\Delta\theta \in \mathbb{R}^P} \Delta\theta^\top \nabla_\theta \mathcal{L}(\theta) \qquad \text{s.t.} \qquad \frac{1}{2} \Delta\theta^\top F(\theta) \Delta\theta \le c. \tag{8.34}
+$$
+
+Đây là một quy hoạch tuyến tính lồi với ràng buộc bậc hai. Khi $F(\theta)$ xác định dương và $\nabla_\theta \mathcal{L}(\theta) \neq 0$, điểm tối ưu nằm trên biên của ellipsoid ràng buộc và có thể tìm ở dạng đóng bằng phương pháp Lagrange, cho
+
+$$
+\Delta\theta^* = -\frac{1}{\lambda^*} F(\theta)^{-1} \nabla_\theta \mathcal{L}(\theta), \qquad \lambda^* = \sqrt{\frac{\left(\nabla_\theta \mathcal{L}(\theta)\right)^\top F(\theta)^{-1} \nabla_\theta \mathcal{L}(\theta)}{2c}}. \tag{8.35}
+$$
+
+Cụ thể, hướng cập nhật tối ưu $\Delta\theta^*$ được cho bởi cái gọi là **gradient tự nhiên** (natural gradient) $F(\theta)^{-1} \nabla_\theta \mathcal{L}(\theta)$, với độ lớn là một hàm của hằng số $c$. Các phương pháp gradient tự nhiên được phát triển chi tiết ở Chương 15.
+
+Trong thực hành, phân phối chưa biết của đầu vào $p(x)$ được thay bằng phân phối thực nghiệm theo tập huấn luyện $\mathcal{D}$:
+
+$$
+p(x) \approx p_{\mathcal{D}}(x) = \frac{1}{N} \sum_{n=1}^{N} \delta(x - x_n). \tag{8.36}
+$$
+
+Xấp xỉ FIM tương ứng trở thành
+
+$$
+\tilde{F}(\theta) = \frac{1}{N} \sum_{n=1}^{N} \mathbb{E}_{p(y \mid x_n, \theta)}\left[-\nabla_\theta \nabla_\theta^\top \log p(y \mid x_n, \theta)\right]. \tag{8.37}
+$$
+
+Quy tắc dây chuyền theo đầu ra của mô hình $z = f(x_n, \theta)$ cho
+
+$$
+\tilde{F}(\theta_0) = \frac{1}{N} \sum_{n=1}^{N} \left(J_\theta f(x_n, \theta_0)\right)^\top \mathbb{E}_{p(y \mid x_n, \theta_0)}\left[-\nabla_z \nabla_z^\top \log p(y \mid z)\big|_{z = f(x_n, \theta_0)}\right] J_\theta f(x_n, \theta_0). \tag{8.38}
+$$
+
+Ở đây số hạng bậc hai riêng của mạng triệt tiêu dưới phép lấy kỳ vọng nhờ hàm điểm theo $z$ có kỳ vọng bằng không (Phương trình 8.27 áp dụng cho $p(y \mid z)$), và đó là lý do mạng tuyến tính hóa và mạng phi tuyến có cùng $\tilde{F}(\theta_0)$. Kỳ vọng theo các đầu ra của mô hình cho mỗi đầu vào có thể tốn kém để tính. Một cách giảm chi phí là xấp xỉ Monte Carlo:
+
+$$
+\mathbb{E}_{p(y \mid x_n, \theta)}\left[-\nabla_z \nabla_z^\top \log p(y \mid z)\big|_{z = f(x_n, \theta)}\right] \approx -\frac{1}{M} \sum_{s=1}^{M} \nabla_z \nabla_z^\top \log p(y_s \mid z)\big|_{z = f(x_n, \theta)}, \tag{8.39}
+$$
+
+với $y_s \sim p(y \mid x_n, \theta)$. Với $M$ nhỏ, cách này cho một xấp xỉ khá thô nhưng rẻ. Một cách khác là trước hết viết lại $\tilde{F}(\theta)$ thành
+
+$$
+\tilde{F}(\theta) = \frac{1}{N} \sum_{n=1}^{N} \mathbb{E}_{p(y \mid x_n, \theta)}\left[\nabla_\theta \log p(y \mid x_n, \theta) \left(\nabla_\theta \log p(y \mid x_n, \theta)\right)^\top\right] \tag{8.40}
+$$
+
+(Phương trình 8.28, áp dụng cho $p(y \mid x_n, \theta)$), rồi thay vào các nhãn thực thay vì xấp xỉ kỳ vọng:
+
+$$
+\hat{F}(\theta) = \frac{1}{N} \sum_{n=1}^{N} \nabla_\theta \log p(y_n \mid x_n, \theta) \left(\nabla_\theta \log p(y_n \mid x_n, \theta)\right)^\top, \tag{8.41}
+$$
+
+được gọi là **ma trận thông tin Fisher thực nghiệm** (Empirical Fisher Information Matrix, EFIM). Dù phép thay thế này có vẻ tự nhiên, Kunstner và cộng sự chỉ ra rằng nó gây hại cho tối ưu hóa, nơi nhãn dự đoán và nhãn thực có thể khác nhau đáng kể, đặc biệt ở đầu quá trình huấn luyện. Tuy nhiên, xấp xỉ Laplace dùng một ước lượng MAP, và nếu ước lượng này tổng quát hóa tốt thì nó xấp xỉ tốt phân phối nhãn thực.
+
+Với một họ rộng các hàm hợp lý, *không* cần xấp xỉ ma trận Fisher $\tilde{F}(\theta)$ bằng Monte Carlo. Điều này giúp liên hệ FIM với GGN dưới một số giả định. Đồng nhất $\ell(z, y_n) = -\log p(y_n \mid z)$ và $f(x_n, \theta_0) = f^{\theta_0}(x_n, \theta_0)$ nhờ Phương trình 8.1, trong trường hợp ma trận Hesse của hàm mất mát logarit âm của hàm hợp lý $\ell$ không phụ thuộc vào nhãn $y$, GGN bằng FIM (sai khác một hệ số tỉ lệ hằng):
+
+$$
+G(\theta_0) = N \tilde{F}(\theta_0). \tag{8.42}
+$$
+
+Thực ra, sự khác biệt về hệ số tỉ lệ có một cách diễn giải tự nhiên. Ở trên đã chỉ ra rằng $F(\theta)$ là FIM của biến ngẫu nhiên $(\mathrm{X}, \mathrm{Y})$ có phân phối $p(x, y \mid \theta)$ và rằng FIM có tính cộng đối với các biến ngẫu nhiên độc lập. Do đó, dưới giả định này, GGN bằng FIM ứng với $N$ quan sát i.i.d. $\{(x_n, y_n)\}_{n=1}^N$ có phân phối $p(x, y \mid \theta)$ (và *không phải* $p(x, y)$).
+
+Yêu cầu ma trận Hesse của hàm mất mát không phụ thuộc vào nhãn có thể trông tùy tiện. Tuy nhiên, tính chất này được thỏa mãn bởi một họ rộng các hàm hợp lý, gọi là **họ mũ** (exponential families).
+
+**Định nghĩa 8.1.** *Một phân phối xác suất có hàm mật độ xác suất (probability density function, PDF) dạng*
+
+$$
+p(y \mid w) = h(y) \exp\left(\phi(y)^\top w - \log Z(w)\right) \tag{8.43}
+$$
+
+*được gọi là một* **họ mũ** *các độ đo xác suất. Hàm* $\phi \colon \mathcal{Y} \to \mathbb{R}^d$ *là vector các* **thống kê đủ** *(sufficient statistics). Các tham số* $w \in \mathbb{R}^d$ *là các* **tham số tự nhiên** *(natural parameters) của* $p(y \mid w)$. *Hằng số chuẩn hóa* $Z(w) \colon \mathbb{R}^d \to \mathbb{R}$ *là* **hàm phân hoạch** *(partition function). Hàm* $h(y) \colon \mathcal{Y} \to \mathbb{R}_{>0}$ *là* **độ đo cơ sở** *(base measure).*
+
+Trước hết, xét một số sự kiện về các cách tham số hóa đơn giản.
+
+**Mệnh đề 8.2.** *Với một phân phối xác suất* $p(y \mid w)$, $-\nabla_w \nabla_w^\top \log p(y \mid w)$ *không phụ thuộc vào* $y$ *khi và chỉ khi* $p(y \mid w)$ *là một họ mũ với tham số tự nhiên* $w$.
+
+Các cách tham số hóa qua mạng nơ-ron tinh tế hơn. Mệnh đề sau cho một điều kiện cần và đủ cho Phương trình 8.42.
+
+**Mệnh đề 8.3.** *Với một họ mũ* $p(y \mid x, \theta)$ *có các tham số tự nhiên* $w$ *cho dưới dạng một hàm của* $x$ *và* $\theta$, $w(x, \theta) = (g \circ f)(x, \theta)$ *với một hàm* $g \colon \mathbb{R}^C \to \mathbb{R}^d$ *nào đó, ma trận Hesse của* $-\log p(y \mid x, \theta)$ *theo* $f(x, \theta)$ *không phụ thuộc vào* $y$ *khi và chỉ khi* $\nabla_z \nabla_z^\top g(z)\big|_{z = f(x, \theta)} \cdot \phi(y)$ *là hằng theo* $y$, *trong đó* $\nabla_z \nabla_z^\top g(z)\big|_{z = f(x, \theta)} \in \mathbb{R}^{C \times C \times d}$ *là một tensor bậc ba, và tích* $\cdot$ *co chỉ số thứ ba (*$d$ *chiều) của nó với* $\phi(y)$, *cho một ma trận* $C \times C$. *Một trường hợp đặc biệt của phát biểu là khi* $g$ *là hàm affine.*
+
+Phát biểu trên về các cách tham số hóa bằng mạng nơ-ron bao gồm những hàm mất mát phổ biến nhất trong phân loại và hồi quy. Trong phân loại, hàm mất mát entropy chéo (cross-entropy) là logarit âm của hàm hợp lý của một phân phối phân loại (categorical distribution) được tham số hóa bởi mạng nơ-ron. Các logit là tham số tự nhiên của phân phối phân loại, nên với hàm liên kết đồng nhất $g = \mathrm{Id}$, hàm mất mát entropy chéo thỏa mãn Mệnh đề 8.3 trong trường hợp đặc biệt affine. Tương tự, hàm mất mát $L_2$ cho hồi quy thỏa mãn Mệnh đề 8.3 với $g = \mathrm{Id}$.
+
+Cần lưu ý một điều: riêng GGN/FIM thường suy biến; do đó nó không phải là một ma trận độ chính xác hợp lệ cho xấp xỉ Laplace. Xét một cặp đầu vào – nhãn đơn lẻ $(x_n, y_n)$, số hạng
+
+$$
+\left(J_\theta f(x_n, \theta_0)\right)^\top \left(\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f^{\theta_0}(x_n, \theta_0)}\right) J_\theta f(x_n, \theta_0) \tag{8.44}
+$$
+
+là một ma trận *nửa xác định dương* (positive semidefinite, PSD), vì ma trận Hesse của hàm mất mát $\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f^{\theta_0}(x_n, \theta_0)}$ nửa xác định dương. Với entropy chéo softmax, ma trận Hesse này là $\operatorname{diag}(p) - pp^\top$, vốn thiếu hạng vì softmax bất biến với phép tịnh tiến. Thông thường GGN, tức tổng của các ma trận này trên tập dữ liệu huấn luyện, vẫn thiếu hạng. Tuy nhiên, cộng ma trận Hesse của số hạng chính quy hóa lồi mạnh $\Omega(\theta_0)$ vào GGN cho ma trận *xác định dương*
+
+$$
+\Psi(\theta_0) = \nabla_\theta \nabla_\theta^\top \mathcal{L}_\Omega^{\theta_0}(\theta_0) = \nabla_\theta \nabla_\theta^\top \mathcal{L}^{\theta_0}(\theta_0) + \nabla_\theta \nabla_\theta^\top \Omega(\theta_0), \tag{8.45}
+$$
+
+chính là ma trận Hesse của rủi ro thực nghiệm có chính quy hóa của mô hình tuyến tính hóa, $\mathcal{L}_\Omega^{\theta_0}(\theta_0)$. Điều này biện minh cho việc dùng ma trận này làm ma trận độ chính xác trong không gian tham số trong xấp xỉ Laplace (Phương trình 7.4c).
+
+Khi đã có độ cong $\Psi$, NTK của Mục 2 và hàm nhân GP hậu nghiệm của Phương trình 8.16 có thể được đặt trong cùng một khung. Cả hai đều là ma trận Gram của ma trận Jacobi $J_\theta f M^{-1} J_\theta f^\top$ trong một metric $M$ trên không gian tham số; chúng khác nhau ở điểm khai triển ($\theta_0$ cho NTK, $\theta_*$ cho hàm nhân hậu nghiệm) và ở metric $M$. Tiền điều kiện hóa dòng gradient của Phương trình 8.20 bằng $M$ nhân vận tốc tham số với $M^{-1}$, chèn $M^{-1}$ vào giữa hai ma trận Jacobi và thay hàm nhân $k_t$ của nó bằng $J_\theta f(x, \theta_t) M^{-1} J_\theta f(x_n, \theta_t)^\top$, giữ nguyên điểm khai triển và chỉ thay đổi metric. Hạ gradient (gradient descent) thông thường dùng metric Euclid $M = I$ và thu lại NTK, tức ảnh đẩy tới của tiên nghiệm đẳng hướng. Hạ gradient tự nhiên có chính quy hóa dùng $M = \Psi(\theta_t)$, tức độ cong GGN/Fisher cộng độ chính xác tiên nghiệm (Phương trình 8.45) tại các tham số hiện tại. Hàm nhân thu được $J_\theta f(\cdot, \theta_t) \Psi(\theta_t)^{-1} J_\theta f(\cdot, \theta_t)^\top$ ở đây được gọi là **NTK gradient tự nhiên** (natural-gradient NTK). Vì $\Psi(\theta_t)$ xác định dương tại mọi $\theta_t$, NTK gradient tự nhiên chi phối động lực học trong suốt quá trình huấn luyện, kể cả ở nơi gradient khác không và không tồn tại phân phối hậu nghiệm Laplace nào. Nó chỉ trùng với hàm nhân GP hậu nghiệm $J_\theta f \Psi^{-1} J_\theta f^\top$ tại một mode hậu nghiệm $\theta_*$, đúng như xấp xỉ Laplace đòi hỏi. Như vậy metric trên không gian tham số quyết định cả độ bất định dự đoán, thông qua phân phối Gauss được đẩy tới, lẫn hình học của quá trình tối ưu hóa, thông qua phép hạ mà hàm đi theo.
+
+> **Điểm cần ghi nhớ**
+>
+> Với các hàm mất mát thông dụng (họ mũ với hàm liên kết *affine*; ví dụ mất mát bình phương, entropy chéo), độ cong của mô hình tuyến tính hóa thỏa mãn
+>
+> $$
+> G(\theta_0) = N \tilde{F}(\theta_0),
+> $$
+>
+> đồng nhất GGN với ma trận thông tin Fisher (FIM) trên $N$ mẫu i.i.d., và gắn kết góc nhìn Riemann với góc nhìn hình học thông tin.
+>
+> Ma trận thông tin Fisher là metric Riemann mô tả hành vi cục bộ của độ phân kỳ KL:
+>
+> $$
+> D_{\mathrm{KL}}\left(p(x, y \mid \theta_1) \,\|\, p(x, y \mid \theta_2)\right) = \frac{1}{2} \Delta\theta^\top F(\theta_1) \Delta\theta + \mathcal{O}\left(\|\Delta\theta\|^3\right).
+> $$
+>
+> Trong thực hành, người ta dùng phân phối đầu vào thực nghiệm để lập FIM. Ma trận $G$ nửa xác định dương và thường suy biến; cộng thêm một số hạng chính quy hóa lồi mạnh làm cho
+>
+> $$
+> \Psi(\theta_0) = G(\theta_0) + \nabla_\theta \nabla_\theta^\top \Omega(\theta_0) \succ 0,
+> $$
+>
+> và đây là ma trận độ chính xác khả nghịch mà xấp xỉ Laplace sử dụng.
+>
+> Metric $M$ trong dạng $J_\theta f M^{-1} J_\theta f^\top$ quyết định hàm nhân thu được: $M = I$ cho NTK (hạ gradient thông thường) và $M = \Psi$ cho NTK gradient tự nhiên (hạ gradient tự nhiên), hàm nhân này trở thành hàm nhân GP hậu nghiệm tại một mode.
+
+## 4. Các xấp xỉ độ cong mở rộng được
+
+GGN của mạng tuyến tính hóa (xem Phương trình 8.22)
+
+$$
+G(\theta) = \sum_{n=1}^{N} \left(J_\theta f(x_n, \theta)\right)^\top \underbrace{\nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = f(x_n, \theta)}}_{=: H_n \succeq 0} J_\theta f(x_n, \theta) \in \mathbb{R}^{P \times P} \tag{8.46}
+$$
+
+nói chung là ma trận dày và *quá* lớn để lập ra đối với các mạng nơ-ron hiện đại. Điều này dẫn đến các ma trận thay thế có cấu trúc, (i) rẻ để lưu trữ và nghịch đảo, nhưng (ii) vẫn giữ được các tương quan tham số có ý nghĩa. Bảng 8.1 so sánh ba ma trận thay thế cho độ cong được phát triển dưới đây: xấp xỉ đường chéo, xấp xỉ hạng thấp và độ cong xấp xỉ phân tích Kronecker (Kronecker-Factored Approximate Curvature, KFAC). Các biến thể mở rộng được của những xấp xỉ độ cong này được phát triển thêm ở Chương 40, và suy luận lớp cuối được trình bày ở Chương 39.
+
+| Xấp xỉ | Lưu trữ | Tích hiệp phương sai – vector | Nghịch đảo | Tương quan | Điểm mù |
+| --- | --- | --- | --- | --- | --- |
+| Đường chéo | $\mathcal{O}(P)$ | Phép chia từng phần tử | Từng phần tử | Không có tương quan giữa các tham số | Bỏ sót các hướng liên kết |
+| Hạng thấp | $\mathcal{O}(kP)$ | Tích với $Q_{1:k}$ | Woodbury | Không gian riêng trội của $G$ | Bỏ sót các hướng rộng có độ cong thấp |
+| KFAC | $\sum_i \mathcal{O}(d_{i-1}^2 + d_i^2)$ | Các đẳng thức Kronecker | Hệ riêng của các thừa số | Kronecker trong từng lớp | Bỏ qua liên kết giữa các lớp |
+
+*Bảng 8.1: Các xấp xỉ độ cong mở rộng được thông dụng cho Laplace tuyến tính hóa. Ở đây $d_{i-1}$ và $d_i$ là số chiều đầu vào và số chiều tiền kích hoạt của lớp $i$.*
+
+Một mốc so sánh đơn giản là đường chéo $\operatorname{diag} G(\theta)$, rất dễ lưu trữ và nghịch đảo, dù việc tính nó hiệu quả đòi hỏi cẩn thận. Tuy nhiên, nó mã hóa một giả định độc lập giữa *mọi tham số*, phá hủy các tương quan trong từng lớp thường rất quan trọng mà $G(\theta)$ mang theo. Điều này thường làm giảm giá trị sử dụng của các ước lượng độ bất định ở các bước sau.
+
+### 4.1 Xấp xỉ GGN hạng thấp
+
+Một phương án vừa mở rộng được vừa giàu sức biểu diễn là xấp xỉ *hạng thấp* của $G(\theta)$. Vì $G(\theta)$ đối xứng với mọi $\theta \in \mathbb{R}^P$, nó có một phân rã trị riêng với các trị riêng thực, dạng
+
+$$
+G(\theta) = Q(\theta) \Lambda(\theta) Q(\theta)^\top, \tag{8.47}
+$$
+
+trong đó $Q(\theta) \in \mathbb{R}^{P \times P}$ là một ma trận trực giao (tức một ma trận có các cột/hàng trực *chuẩn*) và $\Lambda(\theta) \in \mathbb{R}^{P \times P}$ là một ma trận đường chéo.
+
+Với $q_{:,i}$ là cột thứ $i$ của $Q(\theta)$ và $\lambda_i$ là phần tử đường chéo thứ $i$ của $\Lambda(\theta)$, có $G(\theta) q_{:,i} = \lambda_i q_{:,i}$. Theo quy ước, $\lambda_1 \ge \lambda_2 \ge \dots \ge \lambda_P$. Từ đây trở đi, sự phụ thuộc của $Q$ và các thừa số của nó vào $\theta$ được bỏ đi cho gọn.
+
+Mục tiêu tiếp theo là một xấp xỉ hạng thấp *tốt* $\tilde{G}_k$ của $G$, vì điều này làm giảm kích thước của các đối tượng cần xử lý. Vì $G \succeq 0$, các trị riêng của nó không âm, nên $k$ trị riêng lớn nhất về mặt đại số trùng với $k$ trị riêng lớn nhất về độ lớn. Định lý Eckart–Young–Mirsky khẳng định rằng hàm mục tiêu
+
+$$
+\mathop{\mathrm{arg\,min}}\limits_{G' \in \mathbb{R}^{P \times P} : \operatorname{rank}(G') \le k} \|G - G'\| \tag{8.48}
+$$
+
+đạt cực tiểu tại $\tilde{G}_k := Q_{1:k} \Lambda_{1:k} Q_{1:k}^\top$, trong đó $Q_{1:k} \in \mathbb{R}^{P \times k}$ là $k$ cột đầu tiên của $Q$ và $\Lambda_{1:k} \in \mathbb{R}^{k \times k}$ chứa $k$ trị riêng đầu tiên của $G$. Kết quả này đúng cho cả chuẩn phổ $\|\cdot\|_2$ lẫn chuẩn Frobenius $\|\cdot\|_F$. Do đó, có thể thu được một xấp xỉ hạng thấp *tối ưu* $\tilde{G}_k$ của $G$ theo nghĩa trên bằng cách tính $k$ trị riêng và vector riêng đầu tiên của $G$. Lưu trữ xấp xỉ hạng thấp này cần $(P + 1)k$ giá trị thay vì $P^2$.
+
+Cách ngây thơ nhất để tính $\tilde{G}_k$ là trước hết tính phân rã trị riêng $G = Q\Lambda Q^\top$ rồi cắt nó xuống $k$ cặp trị riêng – vector riêng đầu tiên. Tuy nhiên, chiến lược này không giải quyết được việc không thể lưu trữ toàn bộ phân rã trị riêng với $P(P + 1)$ giá trị. Thay vào đó, người ta dùng các sơ đồ hiệu quả *không cần lập ma trận* (matrix-free) như phương pháp gradient liên hợp tiền điều kiện khối tối ưu cục bộ (Locally Optimal Block Preconditioned Conjugate Gradient, LOBPCG) hoặc phép lặp Lanczos để thu được phân rã hạng thấp. Đáng chú ý, các thuật toán này chỉ cần *tích ma trận – vector* $v \mapsto Gv$ với GGN để thu được các cặp riêng trội, điều không đòi hỏi biểu diễn toàn bộ ma trận $G$ trong bộ nhớ.
+
+Biểu diễn hạng thấp đặc biệt tiện lợi vì với các tiên nghiệm đơn giản, như phân phối Gauss đẳng hướng, việc tính ma trận hiệp phương sai xấp xỉ hiệu quả không kém việc làm việc với GGN hạng thấp. Gọi $\Gamma \succ 0$ là ma trận Hesse của logarit âm của tiên nghiệm $\Omega$, tức số hạng độ cong tiên nghiệm $\nabla_\theta \nabla_\theta^\top \Omega$ của ma trận độ chính xác $\Psi = G + \nabla_\theta \nabla_\theta^\top \Omega$ (Phương trình 8.45). Khi đó đẳng thức ma trận Woodbury cho
+
+$$
+\left(\Gamma + \tilde{G}_k\right)^{-1} = \Gamma^{-1} - \Gamma^{-1} Q_{1:k} \left(\Lambda_{1:k}^{-1} + Q_{1:k}^\top \Gamma^{-1} Q_{1:k}\right)^{-1} Q_{1:k}^\top \Gamma^{-1}. \tag{8.49}
+$$
+
+Cụ thể, với phân phối Gauss đẳng hướng, $\Gamma = \tau I$,
+
+$$
+\left(\tau I + Q_{1:k} \Lambda_{1:k} Q_{1:k}^\top\right)^{-1} = \tau^{-1} I + Q_{1:k} \operatorname{diag}\left(-\frac{\lambda_1}{\tau(\lambda_1 + \tau)}, \dots, -\frac{\lambda_k}{\tau(\lambda_k + \tau)}\right) Q_{1:k}^\top. \tag{8.50}
+$$
+
+Nói cách khác: một ma trận đường chéo cộng hạng thấp có nghịch đảo cũng là đường chéo cộng hạng thấp. Nhân với một ma trận như vậy rất hiệu quả và không cần lập một ma trận $P \times P$. Với một vector $v \in \mathbb{R}^P$, trước hết tính $u = Q_{1:k}^\top v \in \mathbb{R}^k$, sau đó nhân từng phần tử của $u$ với các phần tử đường chéo trong $\operatorname{diag}\left(-\frac{\lambda_1}{\tau(\lambda_1 + \tau)}, \dots, -\frac{\lambda_k}{\tau(\lambda_k + \tau)}\right)$, rồi ánh xạ kết quả trở lại $\mathbb{R}^P$ bằng $Q_{1:k}$ và cộng số hạng đường chéo $\tau^{-1} v$.
+
+### 4.2 Độ cong xấp xỉ phân tích Kronecker
+
+Một hướng bổ sung để biểu diễn độ cong xấp xỉ một cách mở rộng được chỉ giả định độc lập *giữa các lớp*, trong khi vẫn giữ các tương quan tham số phong phú *trong từng lớp* thông qua một phép phân tích Kronecker. Ý tưởng này là nền tảng của KFAC, gần đây được dùng rộng rãi như một ma trận thay thế mở rộng được cho độ cong. Mục này giới thiệu KFAC cho các lớp tuyến tính dày và tham chiếu đến Dangel và cộng sự để có một trình bày chi tiết và tổng quát hơn về KFAC.
+
+Xét lớp $i$ với trọng số $W^{(i)} \in \mathbb{R}^{d_i \times d_{i-1}}$, kích hoạt đầu vào $a_n^{(i-1)} \in \mathbb{R}^{d_{i-1}}$ và tiền kích hoạt (pre-activation) $s_n^{(i)} = W^{(i)} a_n^{(i-1)} \in \mathbb{R}^{d_i}$.[^4] Gọi $z_n = f(x_n, \theta) \in \mathbb{R}^C$ là đầu ra của mạng. Gọi $J_{W^{(i)}} s_n^{(i)} \in \mathbb{R}^{d_i \times (d_i d_{i-1})}$ là ma trận Jacobi của $s_n^{(i)}$ theo $\operatorname{vec}(W^{(i)})$, trong đó $\operatorname{vec}$ làm phẳng đối số của nó bằng cách xếp chồng các cột. Với điểm dữ liệu $n$, định nghĩa độ cong trong *không gian đầu ra* $H_n := \nabla_z \nabla_z^\top \ell(z, y_n)\big|_{z = z_n} \succeq 0$, nên $H_n \in \mathbb{R}^{C \times C}$. Viết $H_n = S_n S_n^\top$ với $S_n \in \mathbb{R}^{C \times C}$, khối lớp tương ứng của GGN có thể biểu diễn là
+
+$$
+\begin{aligned}
+G^{(i)} &= \sum_{n=1}^{N} \left(J_{W^{(i)}} s_n^{(i)}\right)^\top \underbrace{\left(J_{s_n^{(i)}} z_n\right)^\top H_n \left(J_{s_n^{(i)}} z_n\right)}_{=:\, \hat{H}_n^{(i)} \succeq 0} J_{W^{(i)}} s_n^{(i)} \\
+&= \sum_{n=1}^{N} \sum_{c=1}^{C} \left(J_{W^{(i)}} s_n^{(i)}\right)^\top g_{n,c}^{(i)} \left(g_{n,c}^{(i)}\right)^\top J_{W^{(i)}} s_n^{(i)}.
+\end{aligned} \tag{8.51}
+$$
+
+với $g_{n,c}^{(i)} := (J_{s_n^{(i)}} z_n)^\top [S_n]_{:,c} \in \mathbb{R}^{d_i}$, trong đó $J_{s_n^{(i)}} z_n$ là ma trận Jacobi của đầu ra mạng $z_n$ theo tiền kích hoạt $s_n^{(i)}$ của lớp này.[^5] Như vậy, tổng theo $c$ chạy trên thừa số độ cong của đầu ra mạng, còn $g_{n,c}^{(i)}$ nằm trong không gian tiền kích hoạt của lớp.
+
+Với một lớp tuyến tính, ma trận Jacobi của đầu ra theo tham số có dạng $J_{W^{(i)}} s_n^{(i)} = (a_n^{(i-1)})^\top \otimes I_{d_i}$, trong đó $\otimes$ ký hiệu tích Kronecker. Với các tính chất Kronecker $(A \otimes B)^\top = A^\top \otimes B^\top$ và $(A \otimes B)(C \otimes D) = (AC) \otimes (BD)$ cho các ma trận $A, B, C, D$ có kích thước tương thích, điều này cho
+
+$$
+G^{(i)} = \sum_{n=1}^{N} \sum_{c=1}^{C} \underbrace{\left(a_n^{(i-1)} (a_n^{(i-1)})^\top\right)}_{\text{input factor}} \otimes \underbrace{\left(g_{n,c}^{(i)} (g_{n,c}^{(i)})^\top\right)}_{\text{backpropagated factor}} \in \mathbb{R}^{(d_{i-1} d_i) \times (d_{i-1} d_i)}. \tag{8.52}
+$$
+
+Khi đó xấp xỉ KFAC đưa tích Kronecker ra ngoài tổng:
+
+$$
+\begin{aligned}
+&\sum_{n=1}^{N} \sum_{c=1}^{C} \left(a_n^{(i-1)} (a_n^{(i-1)})^\top\right) \otimes \left(g_{n,c}^{(i)} (g_{n,c}^{(i)})^\top\right) \\
+&\approx \underbrace{\left(\sum_{n=1}^{N} a_n^{(i-1)} (a_n^{(i-1)})^\top\right)}_{=:\, A^{(i)}} \otimes \underbrace{\left(\frac{1}{N} \sum_{n=1}^{N} \sum_{c=1}^{C} g_{n,c}^{(i)} (g_{n,c}^{(i)})^\top\right)}_{=:\, B^{(i)}}.
+\end{aligned} \tag{8.53}
+$$
+
+Như vậy, khối lớp được xấp xỉ bởi
+
+$$
+G^{(i)} \approx A^{(i)} \otimes B^{(i)} =: \tilde{G}^{(i)}, \qquad A^{(i)} \in \mathbb{R}^{d_{i-1} \times d_{i-1}}, \quad B^{(i)} \in \mathbb{R}^{d_i \times d_i}. \tag{8.54}
+$$
+
+Xếp chồng các lớp và *bỏ qua liên kết giữa các lớp* cho một độ cong đường chéo khối với các khối Kronecker $A^{(i)} \otimes B^{(i)}$.
+
+Dạng Kronecker lưu trữ hiệu quả. Trong khi GGN dày $G^{(i)}$ của một lớp tuyến tính đơn lẻ có $(d_{i-1} d_i)^2$ phần tử, phép phân tích Kronecker chỉ cần lưu $A^{(i)}$ và $B^{(i)}$, tức tổng cộng $d_{i-1}^2 + d_i^2$ giá trị. Xấp xỉ đường chéo khối theo lớp khi đó tránh được việc lưu các khối giữa các lớp. Cũng có thể tính các tích hiệp phương sai – vector hiệu quả mà không cần lập một ma trận dày $P \times P$, bằng cách khai thác các phân rã trị riêng đã lưu sẵn của các thừa số Kronecker và các đẳng thức Kronecker chuẩn. Tính chất này phức tạp hơn để chứng minh so với trường hợp xấp xỉ hạng thấp; xem Dangel và cộng sự để biết thêm chi tiết.
+
+> **Điểm cần ghi nhớ**
+>
+> KFAC giả định độc lập *giữa* các lớp nhưng giữ các tương quan phong phú *trong từng lớp* thông qua phép phân tích Kronecker khối độ cong của mỗi lớp: $G^{(i)} \approx A^{(i)} \otimes B^{(i)}$. Nó giàu sức biểu diễn hơn nhiều so với các cấu trúc độ cong đường chéo và bổ sung cho các xấp xỉ hạng thấp (thường với chi phí thấp hơn). Lưu trữ các thừa số Kronecker rẻ. Với độ chính xác tiên nghiệm đẳng hướng, các tích hiệp phương sai – vector có thể được hiện thực hiệu quả một cách đáng kể. Xem Dangel và cộng sự về chi tiết hiện thực và các mở rộng.
+
+## 5. Phân phối dự đoán
+
+Phương trình 8.13 cho một phân phối Gauss trong không gian đầu ra ứng với đầu vào $x_*$. Trong hồi quy, phân phối này được gọi là **phân phối dự đoán** (predictive distribution): kỳ vọng của nó mã hóa dự đoán trung bình dưới phân phối hậu nghiệm trong không gian tham số và mô hình tuyến tính hóa, còn cấu trúc hiệp phương sai của nó định lượng độ bất định trong dự đoán, kể cả tương quan giữa các đầu ra. Hình 8.3 trình bày một ví dụ hồi quy một chiều của xấp xỉ Laplace tuyến tính hóa.
+
+<Figure caption="Hình 8.3: Một ví dụ hồi quy một chiều với các đầu vào phân bố không đều và nhiễu quan sát phụ thuộc đầu vào. Mô hình là một mạng nơ-ron có lớp cuối Bayes, nên phép tuyến tính hóa là chính xác và GP tuyến tính hóa cho đúng phân phối dự đoán hậu nghiệm chính xác. Vùng tô bóng là khoảng GP ẩn 95% theo từng điểm, còn các đường nét đứt cộng thêm phương sai quan sát phụ thuộc đầu vào. (Bản tái hiện mang tính sơ đồ: được tính lại cho trang này với các đặc trưng hàm cơ sở xuyên tâm cố định, một mức nhiễu phụ thuộc đầu vào đã biết và dữ liệu tổng hợp có cùng bố cục; thanh sai số biểu diễn một độ lệch chuẩn của nhiễu.)">
+  <Bdl08LastLayerRegression />
+</Figure>
+
+Tuy nhiên, trong phân loại, điều cần có là một phân phối bậc hai (một phân phối trên các phân phối) trên các phân phối *phân loại* của một tập nhãn rời rạc. Để làm điều đó, cần ánh xạ độ đo Gauss trong không gian logit ở Phương trình 8.13 qua một hàm kích hoạt lên đơn hình xác suất $(C - 1)$ chiều:
+
+$$
+\mathrm{h} \colon \mathbb{R}^D \xrightarrow{\ \mathrm{f}\ } \mathcal{G}\left(\mathbb{R}^C\right) \xrightarrow{\ \varphi_*\ } \mathcal{P}\left(\Delta^{C-1}\right) \tag{8.55}
+$$
+
+trong đó $\mathrm{f}$ là ánh xạ từ một đầu vào $x_*$ tới phân phối Gauss trong không gian logit do mạng đã xấp xỉ Laplace cho, $\mathcal{G}(\mathbb{R}^C)$ là tập các độ đo Gauss trên không gian logit $\mathbb{R}^C$, $\mathcal{P}(\Delta^{C-1})$ là tập các độ đo xác suất trên đơn hình, và $\varphi_*$ đẩy các độ đo xác suất Gauss tới qua hàm kích hoạt. Chữ $\mathrm{f}$ đứng là mạng cùng với phân phối hậu nghiệm tham số được đẩy qua nó: ảnh đẩy tới affine của phân phối hậu nghiệm Laplace $\mathcal{N}(\theta; \theta_*, \Psi(\theta_*)^{-1})$ dọc theo mạng tuyến tính hóa, cho $\mathrm{f}(x_*) = \mathcal{N}(f(x_*, \theta_*), J_\theta f(x_*, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x_*, \theta_*)^\top) \in \mathcal{G}(\mathbb{R}^C)$ như trong Phương trình 8.13. Chữ nghiêng $f(x_*, \theta_*) \in \mathbb{R}^C$ thay vào ước lượng điểm $\theta_*$ và trả về một vector logit duy nhất; chữ đứng $\mathrm{f}(x_*)$ trả về toàn bộ phân phối Gauss trong không gian logit, có kỳ vọng đúng bằng vector chữ nghiêng đó. Mọi tham số trong giá của phân phối hậu nghiệm Laplace đều được tính đến thay vì cố định một tham số duy nhất, nên $\mathrm{f}$ chỉ nhận đầu vào. Nói cách khác, $\mathrm{h}$ là hợp của mạng nơ-ron đã xấp xỉ Laplace xuất ra các phân phối Gauss trong không gian logit, $\mathrm{f}$, với ánh xạ đẩy tới qua hàm kích hoạt, ánh xạ này cho một phân phối trên các vector xác suất.
+
+Trong hầu hết các trường hợp, hàm kích hoạt này là softmax, định nghĩa là $\operatorname{softmax} \colon \mathbb{R}^C \to \Delta^{C-1}$,
+
+$$
+\operatorname{softmax}_c(z) = \frac{\exp(z_c)}{\sum_{c'=1}^{C} \exp(z_{c'})}. \tag{8.56}
+$$
+
+Trong trường hợp này, không tồn tại biểu thức dạng đóng cho $\mathrm{h}(x_*) \in \mathcal{P}(\Delta^{C-1})$ với đầu vào $x_*$. Hơn nữa, $\mathbb{E}_{P \sim \mathrm{h}(x_*)}[P]$, được gọi là phân phối dự đoán hậu nghiệm (posterior predictive), cũng không tính được chính xác. Tuy nhiên, lấy mẫu từ $\mathrm{h}(x_*)$ rất hiệu quả, vì chỉ cần lấy mẫu từ phân phối Gauss trong không gian logit $\mathrm{f}(x_*)$ và đẩy các mẫu logit này qua hàm kích hoạt. Do đó, trong thực hành, người ta dùng tích phân Monte Carlo, tức là rút $M$ mẫu từ $\mathrm{h}(x_*)$ và tính trung bình thực nghiệm của chúng. Tương tự, có thể xấp xỉ các đại lượng dẫn xuất khác, như entropy kỳ vọng $\mathbb{E}_{P \sim \mathrm{h}(x_*)}[\mathrm{H}(P)]$, bằng lấy mẫu Monte Carlo. Các đại lượng dẫn xuất như vậy thường được dùng trong lĩnh vực tách bạch độ bất định (uncertainty disentanglement), nơi các đại lượng khác nhau nắm bắt các nguồn độ bất định khác nhau. Các ước lượng độ bất định này được áp dụng cho phân loại có chọn lọc ở Chương 44.
+
+Vấn đề chính của các sơ đồ trên là yêu cầu lấy mẫu: sai số của tích phân Monte Carlo giảm theo nghịch đảo căn bậc hai của số mẫu $M$, nghĩa là để giảm sai số ba bậc độ lớn cần một triệu mẫu. Phép lấy tích phân softmax – entropy chéo tiêu chuẩn không thể tránh chi phí lấy mẫu này mà không chịu sai số xấp xỉ đáng kể. Tuy nhiên, một số hàm kích hoạt đầu ra cho phép phân phối dự đoán hậu nghiệm ở *dạng đóng*. Với một đầu ra đơn lẻ, tích phân của hàm liên kết normCDF (probit) theo một phân phối Gauss là chính xác, và hàm sigmoid logistic có một xấp xỉ probit cổ điển. Mucsányi và cộng sự chỉ ra rằng hàm sigmoid từng phần tử chuẩn hóa và hàm normCDF cho các phân phối dự đoán dạng đóng có bảo đảm xấp xỉ mạnh và tương thích một cách tự nhiên với các hàm mục tiêu huấn luyện hiệu quả hơn hàm mục tiêu softmax – entropy chéo tiêu chuẩn. Hơn nữa, các đại lượng dẫn xuất như entropy kỳ vọng cũng có thể thu được ở dạng đóng bằng cách khớp mô-men của các phân phối ảnh đẩy tới Gauss với các phân phối Dirichlet. Việc thay đổi hàm mục tiêu huấn luyện không gây tốn kém gì: các mô hình huấn luyện theo cách này được hiệu chuẩn tốt hơn, đồng thời cho phân phối dự đoán hậu nghiệm và các đại lượng dẫn xuất khác mà không cần lấy mẫu. Do đó, xấp xỉ Laplace trong phân loại có thể được xây dựng hoàn toàn không cần lấy mẫu, với các bảo đảm lý thuyết. Hình 8.4 so sánh các phân phối dự đoán MAP, softmax Monte Carlo và probit không cần lấy mẫu trên một ví dụ hai chiều, cùng với entropy dự đoán.
+
+<Figure caption="Hình 8.4: Phân loại nhị phân hai chiều với xấp xỉ Laplace cho lớp cuối của một mạng có đặc trưng cố định trên bộ dữ liệu Iris. Các đầu vào là độ rộng đài hoa và độ rộng cánh hoa đo được. Màu trắng biểu thị Iris versicolor và màu đen biểu thị Iris virginica. Hình tròn là điểm huấn luyện, tam giác là điểm kiểm định và hình vuông là điểm kiểm tra. Độ chính xác tiên nghiệm được chọn trên tập kiểm định theo điểm log. Các ô (a)–(c) cho xác suất của lớp màu đen đối với bộ dự đoán MAP, phân phối dự đoán hậu nghiệm softmax ước lượng bằng lấy mẫu Monte Carlo và xấp xỉ probit không cần lấy mẫu. Ô (d) cho entropy dự đoán tính từ phân phối dự đoán Monte Carlo. Trên các điểm kiểm tra giữ lại, điểm log và điểm Brier của MAP là 0.433 và 0.122, trong khi phân phối dự đoán GP Monte Carlo cho 0.345 và 0.107, còn phân phối dự đoán probit cho 0.347 và 0.108, gần như không phân biệt được. (Bản tái hiện mang tính sơ đồ: được tính lại cho trang này trên các số đo Iris thực với 60 đặc trưng tanh ngẫu nhiên cố định, một phép chia ngẫu nhiên 30/10/10 cho mỗi lớp và độ chính xác tiên nghiệm chọn từ một lưới theo điểm log trên tập kiểm định; ký hiệu rỗng là versicolor, ký hiệu đặc là virginica, và vùng tô màu nhấn càng đậm nghĩa là xác suất virginica càng cao ở (a)–(c) và entropy càng cao ở (d). Các điểm số nêu trên là của sách và không được tái tạo bởi bản vẽ lại này.)">
+  <Bdl08IrisLaplace />
+</Figure>
+
+> **Điểm cần ghi nhớ**
+>
+> Trong hồi quy, đầu ra của Laplace tuyến tính hóa tại đầu vào $x_*$ là *Gauss* (Phương trình 8.13); kỳ vọng của nó là $f(x_*, \theta_*)$ với hiệp phương sai $J_\theta f(x_*, \theta_*) \Psi(\theta_*)^{-1} J_\theta f(x_*, \theta_*)^\top$.
+>
+> Trong phân loại với softmax, đẩy phân phối Gauss trong không gian logit này qua hàm kích hoạt cho một phân phối trên đơn hình mà phân phối dự đoán hậu nghiệm $\mathbb{E}_{P \sim \mathrm{h}(x_*)}[P]$ *không có dạng đóng*, nên thường dùng Monte Carlo với sai số $\mathcal{O}(M^{-1/2})$.
+>
+> Thay softmax bằng hàm kích hoạt đầu ra sigmoid từng phần tử chuẩn hóa hoặc normCDF làm cho phân phối dự đoán hậu nghiệm (và các đại lượng dẫn xuất như entropy kỳ vọng thông qua khớp mô-men Dirichlet) có *dạng đóng* với bảo đảm xấp xỉ, thường cải thiện độ hiệu chuẩn và làm cho phân loại Laplace *không cần lấy mẫu*.
+
+[^1]: Lưu ý rằng mạng này chỉ tuyến tính theo các tham số $\theta$ nhưng vẫn phi tuyến theo các đầu vào $x$.
+
+[^2]: Cụ thể, bước chuyển từ Phương trình 7.4b sang Phương trình 7.4c không có cơ sở khi $\Psi(\theta_*)$ không xác định dương.
+
+[^3]: Với một mạng có độ rộng hữu hạn, hàm nhân này đôi khi được gọi là NTK *thực nghiệm* tại $\theta_0$, còn tên NTK được dành cho các mạng trong giới hạn độ rộng vô hạn.
+
+[^4]: Các số hạng độ chệch (bias) được bỏ qua cho gọn.
+
+[^5]: Với hàm mất mát bình phương, $H_n = I$; với entropy chéo, $H_n = \operatorname{diag}(\operatorname{softmax}(z)) - \operatorname{softmax}(z) \operatorname{softmax}(z)^\top$ là ma trận Hesse của softmax.
