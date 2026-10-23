@@ -1,0 +1,422 @@
+---
+title: "Giới thiệu về các phương pháp hàm nhân"
+description: "Hàm nhân như ánh xạ đặc trưng và thước đo độ tương tự, thủ thuật hàm nhân, RKHS và định lý biểu diễn, hồi quy quá trình Gauss và giới hạn của hàm nhân cố định."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - kernel methods
+  - gaussian processes
+  - rkhs
+series: bayesian-deep-learning
+seriesOrder: 29
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl23KernelTrick from '../../../components/diagrams/Bdl23KernelTrick.astro';
+
+Các phương pháp hàm nhân (kernel methods) là một trong những hiện thực hóa sớm nhất và tinh tế nhất của học Bayes trong không gian hàm. Trước khi có mạng sâu, chúng đã cung cấp một cách biểu diễn các tiên nghiệm (prior) phi tham số linh hoạt trong khi vẫn giữ được suy luận Bayes chính xác, dựa trên những công trình ban đầu nối các ý tưởng Bayes với mạng nơ-ron. Ngày nay chúng giữ một vai trò kép: (i) là các mô hình xác suất độc lập như quá trình Gauss (Gaussian process, GP) và (ii) là các giới hạn giải tích hoặc các khối cấu thành của kiến trúc sâu: thật vậy, trong giới hạn độ rộng vô hạn (infinite-width limit), mạng nơ-ron hội tụ về các GP có hàm nhân (kernel) được xác định bởi kiến trúc mạng. Từ góc nhìn của **học sâu Bayes** (Bayesian deep learning), hàm nhân là công cụ nguyên thủy để đặt tiên nghiệm lên hàm thay vì lên tham số.
+
+Trong khi Phần I–IV đã xây dựng các lược đồ suy luận (lấy mẫu, biến phân, tổ hợp mô hình), Phần V tìm hiểu cách làm cho *chính các tiên nghiệm trên hàm* trở nên giàu khả năng biểu diễn, sâu và học được. Chương này cung cấp các kiến thức nền tảng được dùng xuyên suốt Phần V và nêu động lực cho các mở rộng sâu ở các chương sau.
+
+Chương bắt đầu với các hàm nhân và cách chúng mã hóa thiên hướng quy nạp (inductive bias) (Mục 2), sau đó giới thiệu *thủ thuật hàm nhân* (kernel trick), góc nhìn RKHS và định lý biểu diễn (Representer theorem) (Mục 3). Trên các nền tảng đó, chương trình bày quá trình Gauss như các phân phối trên hàm và suy ra các công thức hồi quy chuẩn (Mục 4). Tiếp theo, chương thảo luận các hạn chế chính của hàm nhân và GP tiêu chuẩn, gồm tính cứng nhắc của biểu diễn và khả năng mở rộng, và nêu động lực cho các phương án sâu, thích nghi (Mục 5). Phần này chuẩn bị cho các chương tiếp theo về quá trình Gauss sâu ([Chương 25](/vi/blog/deep-gaussian-processes)), học hàm nhân sâu ([Chương 24](/vi/blog/deep-kernel-learning)) và học tiên nghiệm trên hàm bằng siêu học ([Chương 27](/vi/blog/meta-learning-deep-kernel-gaussian-processes)).
+
+## 1. Hàm nhân như ánh xạ đặc trưng
+
+Cốt lõi của các phương pháp hàm nhân là một trực giác hình học mạnh mẽ: các mẫu hình phức tạp trong dữ liệu thô thường dễ hiểu hơn sau khi biến đổi dữ liệu sang một không gian biểu diễn khác. Một *hàm nhân* hình thức hóa ý tưởng này bằng cách định nghĩa ngầm một phép biến đổi từ không gian đầu vào sang một không gian đặc trưng, nơi các quan hệ trong dữ liệu trở nên dễ xử lý hơn.
+
+### 1.1 Từ không gian đầu vào đến không gian đặc trưng
+
+Xét một tập dữ liệu gồm các đối tượng $\{x_1, \dots, x_n\}$ nằm trong một *không gian đầu vào* (input space) $\mathcal{X}$. Không gian đầu vào biểu diễn dạng nguyên gốc, quan sát được của dữ liệu, chẳng hạn giá trị điểm ảnh thô của một bức ảnh, tọa độ trong không gian Euclid, hay thậm chí các cấu trúc phi số như chuỗi hoặc đồ thị.
+
+Một *ánh xạ đặc trưng* (feature map) $\phi : \mathcal{X} \to \mathcal{F}$ là một hàm biến mỗi đầu vào $x$ thành một vector $\phi(x)$ trong một *không gian đặc trưng* (feature space) $\mathcal{F}$. Không gian đặc trưng thường là một không gian vector (thường là một không gian Hilbert) được trang bị một tích trong (inner product) $\langle \cdot, \cdot \rangle_{\mathcal{F}}$, cho phép đo góc, khoảng cách và thực hiện các phép toán hình học.
+
+Việc chọn ánh xạ đặc trưng $\phi$ quyết định những khía cạnh nào của dữ liệu được nhấn mạnh. Bằng cách ánh xạ dữ liệu vào một không gian đặc trưng được chọn cẩn thận, có thể:
+
+- Làm cho các mẫu hình phi tuyến trong $\mathcal{X}$ trở thành tuyến tính trong $\mathcal{F}$
+- Mã hóa tri thức chuyên ngành về các đặc điểm liên quan của dữ liệu
+- Thay đổi số chiều để có các biểu diễn khác nhau (tăng số chiều để có cấu trúc phong phú hơn, hoặc giảm số chiều bằng lựa chọn đặc trưng)
+- Định nghĩa các khái niệm độ tương tự có ý nghĩa mà khó diễn đạt trong không gian ban đầu
+
+**Thuật toán 26** Hồi quy láng giềng gần nhất dùng hàm nhân
+
+```text
+Input: kernel k on X, minimum number of neighbors n ∈ N+, data {(x_i, y_i)}_{i=1}^P ⊂ X × R, new input
+       x_* ∈ X
+Output: predicted label y of x_*
+S = {(x_i, y_i)}_{i=1}^P
+S_n = ∅
+while |S_n| < n do
+    S' ← { argmin_{(x,y)∈S} sqrt( k(x_*, x_*) − 2 k(x_*, x) + k(x, x) ) }
+    S_n ← S_n ∪ S'
+    S ← S \ S'
+return y = (1/|S_n|) Σ_{(x_i,y_i)∈S_n} y_i
+```
+
+### 1.2 Hàm nhân như tích trong trong không gian đặc trưng
+
+Một *hàm nhân* $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ tính tích trong giữa các biểu diễn đặc trưng mà không cần xây dựng tường minh các biểu diễn đó. Cụ thể, với hai đầu vào bất kỳ $x, x' \in \mathcal{X}$:
+
+$$
+k(x, x') = \langle \phi(x), \phi(x') \rangle_{\mathcal{F}} \tag{23.1}
+$$
+
+Nghĩa là mọi hàm nhân đều là một tích vô hướng trong một không gian đã biến đổi (có thể có số chiều vô hạn). Điều này cũng đúng theo chiều ngược lại: mọi ánh xạ đặc trưng đều xác định một hàm nhân. Phương trình này còn cho thấy bản chất kép của hàm nhân: nó vừa là một thước đo độ tương tự trong không gian đầu vào, vừa là một tích trong trong không gian đặc trưng. Giá trị hàm nhân $k(x, x')$ định lượng mức độ cùng hướng của các biểu diễn đặc trưng $\phi(x)$ và $\phi(x')$ trong $\mathcal{F}$.
+
+**Diễn giải hình học.** Trong không gian đặc trưng $\mathcal{F}$, tích trong $\langle \phi(x), \phi(x') \rangle_{\mathcal{F}}$ nắm bắt:
+
+- **Độ lớn và hướng:** Giá trị dương lớn cho thấy $\phi(x)$ và $\phi(x')$ chỉ theo các hướng tương tự và có chuẩn lớn
+- **Độ tương tự:** Tích trong đạt cực đại khi hai vector song song
+- **Tính trực giao:** Khi $k(x, x') = 0$, các biểu diễn đặc trưng trực giao với nhau, cho thấy sự khác biệt hoàn toàn trong không gian đặc trưng
+
+Cần lưu ý rằng tích trong trộn lẫn độ lớn và hướng: một giá trị lớn của $k(x, x')$ có thể phản ánh hoặc sự cùng hướng mạnh, hoặc các chuẩn $\|\phi(x)\|, \|\phi(x')\|$ lớn. Để diễn giải tích trong thuần túy như độ tương tự về hướng, có thể chuẩn hóa theo các chuẩn, thu được độ tương tự cosin (cosine similarity) $k(x, x')/\sqrt{k(x, x)\, k(x', x')}$. Một cách khác là dùng metric mà hàm nhân cảm sinh trong không gian đặc trưng:
+
+$$
+d_k(x, x') = \|\phi(x) - \phi(x')\|_{\mathcal{F}} = \sqrt{k(x, x) + k(x', x') - 2\, k(x, x')}, \tag{23.2}
+$$
+
+metric này cho một khoảng cách đúng nghĩa, tách biệt độ lớn khỏi hướng. Ánh xạ đặc trưng có thể nắm bắt các quan hệ phi tuyến phức tạp, và khoảng cách này không nhất thiết tương ứng với khoảng cách đơn giản trong không gian đầu vào.
+
+Metric này lập tức dẫn tới các thuật toán hàm nhân hóa đơn giản. Ví dụ, Thuật toán 26 trình bày hồi quy láng giềng gần nhất dùng hàm nhân (kernel nearest neighbor regression), tìm các điểm huấn luyện gần một điểm truy vấn nhất chỉ bằng các phép tính giá trị hàm nhân và lấy trung bình nhãn của chúng.
+
+### 1.3 Ví dụ: ánh xạ đặc trưng bậc hai
+
+Để làm rõ các ý tưởng này, xét một phép biến đổi phi tuyến đơn giản trong hai chiều.
+
+**Ví dụ 23.1** (Ánh xạ đặc trưng bậc hai). *Cho* $\mathcal{X} = \mathbb{R}^2$ *là không gian đầu vào hai chiều. Định nghĩa ánh xạ đặc trưng bậc hai* $\phi : \mathbb{R}^2 \to \mathbb{R}^3$ *bởi:*
+
+$$
+\phi\begin{pmatrix} x_1 \\ x_2 \end{pmatrix} = \begin{pmatrix} x_1^2 \\ x_2^2 \\ \sqrt{2}\, x_1 x_2 \end{pmatrix} \tag{23.3}
+$$
+
+*Ánh xạ này biến mỗi điểm* $x = (x_1, x_2)^\top$ *thành một vector ba chiều có các thành phần là các đơn thức bậc hai của các tọa độ đầu vào. Không gian đặc trưng* $\mathcal{F} = \mathbb{R}^3$ *được trang bị tích trong Euclid chuẩn.*
+
+**Tính độ tương tự qua tích trong.** *Xét hai điểm đầu vào:*
+
+$$
+x = \begin{pmatrix} 5.9 \\ 3.0 \end{pmatrix}, \qquad y = \begin{pmatrix} 6.9 \\ 3.1 \end{pmatrix}
+$$
+
+*Các biểu diễn đặc trưng của chúng là:*
+
+$$
+\phi(x) = \begin{pmatrix} 5.9^2 \\ 3.0^2 \\ \sqrt{2} \cdot 5.9 \cdot 3.0 \end{pmatrix} = \begin{pmatrix} 34.81 \\ 9.00 \\ 25.03 \end{pmatrix}
+$$
+
+$$
+\phi(y) = \begin{pmatrix} 6.9^2 \\ 3.1^2 \\ \sqrt{2} \cdot 6.9 \cdot 3.1 \end{pmatrix} = \begin{pmatrix} 47.61 \\ 9.61 \\ 30.25 \end{pmatrix}
+$$
+
+*Tích trong trong không gian đặc trưng là:*
+
+$$
+\begin{aligned}
+\langle \phi(x), \phi(y) \rangle_{\mathcal{F}} &= 34.81 \times 47.61 + 9.00 \times 9.61 + 25.03 \times 30.25 \\
+&= 1657.30 + 86.49 + 757.16 \\
+&= 2500.95
+\end{aligned}
+$$
+
+*Giá trị này định lượng độ tương tự giữa* $x$ *và* $y$ *trong không gian đặc trưng bậc hai. Giá trị dương lớn cho thấy độ tương tự mạnh dưới phép biến đổi phi tuyến cụ thể này.*
+
+**Vì sao dùng ánh xạ đặc trưng?** Ánh xạ đặc trưng bậc hai cho phép các thuật toán hoạt động thông qua tích trong (như các bộ phân loại tuyến tính hoặc hồi quy) nắm bắt các biên quyết định bậc hai trong không gian đầu vào. Điều xuất hiện như một mẫu hình phi tuyến trong $\mathbb{R}^2$ trở thành một mẫu hình tuyến tính trong $\mathbb{R}^3$.
+
+### 1.4 Thách thức tính toán
+
+Mặc dù ánh xạ đặc trưng cung cấp một cách có cơ sở để định nghĩa độ tương tự, chúng lại đặt ra một vấn đề tính toán: không gian đặc trưng $\mathcal{F}$ có thể có số chiều rất cao, thậm chí vô hạn. Việc tính tường minh $\phi(x)$ có thể tốn kém hoặc không thể thực hiện.
+
+Chẳng hạn, một ánh xạ đặc trưng đa thức bậc $q$ trong $d$ chiều có không gian đặc trưng với số chiều:
+
+$$
+\dim(\mathcal{F}) = \binom{d + q}{q}
+$$
+
+số chiều này tăng nhanh theo cả $d$ và $q$. Với $d = 100$ và $q = 3$, con số này vượt quá 176 000 chiều. Việc tính và lưu trữ tường minh $\phi(x)$ cho từng điểm dữ liệu trở nên đắt đỏ đến mức không chấp nhận được. Đáng chú ý hơn nữa, một số hàm nhân, như hàm nhân Gauss dạng hàm cơ sở bán kính (Gaussian radial basis function kernel, RBF kernel), tương ứng với các không gian đặc trưng có số chiều vô hạn, khiến việc tính đặc trưng tường minh là không thể về nguyên tắc.
+
+Nhận xét này dẫn tới ý tưởng trung tâm của các phương pháp hàm nhân, được tìm hiểu ở Mục 3: ***nếu một thuật toán có thể được biểu diễn hoàn toàn bằng các tích trong $\langle \phi(x), \phi(x') \rangle_{\mathcal{F}}$, thì không bao giờ cần tính tường minh $\phi(x)$. Thay vào đó, hàm nhân $k(x, x')$ được tính trực tiếp trong không gian đầu vào, bỏ qua hoàn toàn không gian đặc trưng mà vẫn đạt cùng một kết quả***.
+
+**Nhận xét 23.1.** *Hàm nhân* $k(x, x')$ *đóng vai trò một biểu diễn ngầm của một ánh xạ đặc trưng* $\phi$ *có thể rất phức tạp. Biểu diễn ngầm này là điều làm cho các phương pháp hàm nhân vừa khả thi về tính toán vừa tinh tế về lý thuyết: có thể làm việc trong các không gian giàu cấu trúc, nhiều chiều mà không bao giờ phải xây dựng chúng một cách tường minh.*
+
+## 2. Hàm nhân
+
+Một *hàm nhân* cung cấp một cách có cơ sở để đo mức độ cùng hướng giữa các điểm dữ liệu trong một không gian đặc trưng, có thể hiểu một cách không hình thức là độ tương tự giữa các điểm dữ liệu. Về mặt hình thức, một hàm nhân là một hàm đối xứng $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ thỏa mãn một số tính chất toán học nhất định, cụ thể là tính đối xứng và tính nửa xác định dương của các ma trận hàm nhân (hay ma trận Gram (Gram matrix)) tương ứng. Với mọi $N \in \mathbb{N}$ và các điểm $\{x_i\}_{i=1}^N$, ma trận Gram $K \in \mathbb{R}^{N \times N}$ với $K_{ij} = k(x_i, x_j)$ phải nửa xác định dương.
+
+### 2.1 Hàm nhân nửa xác định dương
+
+**Định nghĩa 23.1** (Hàm nhân nửa xác định dương). *Một hàm* $k(\cdot, \cdot) : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ *là một hàm nhân* nửa xác định dương *(positive semi-definite, psd) nếu nó đối xứng, tức là* $k(x, x') = k(x', x)$ *với mọi* $x, x' \in \mathcal{X}$*, và với mọi tập hữu hạn các điểm* $\{x_1, \dots, x_N\} \subset \mathcal{X}$ *và mọi* $\boldsymbol{\alpha} \in \mathbb{R}^N$*,*
+
+$$
+\sum_{i=1}^{N} \sum_{j=1}^{N} \alpha_i \alpha_j k(x_i, x_j) = \boldsymbol{\alpha}^\top K \boldsymbol{\alpha} \geq 0, \tag{23.4}
+$$
+
+*trong đó* $K \in \mathbb{R}^{N \times N}$ *là ma trận Gram với các phần tử* $K_{ij} = k(x_i, x_j)$*. Một hàm nhân được gọi là* xác định dương chặt *(strictly positive definite) nếu bất đẳng thức là chặt với mọi* $\boldsymbol{\alpha} \neq \mathbf{0}$ *mỗi khi các điểm* $x_1, \dots, x_N$ *phân biệt.*
+
+Trong tài liệu, các hàm nhân psd thường được gọi đơn giản là "hàm nhân xác định dương". Tính nửa xác định dương của $K$ bảo đảm rằng hàm nhân tương ứng với một tích trong trong một không gian đặc trưng nào đó (có thể có số chiều vô hạn), cho phép lập luận hình học về độ tương tự, một mối liên hệ được tìm hiểu chi tiết ở Mục 3. Hầu hết các hàm nhân thông dụng (chẳng hạn hàm nhân mũ bình phương (squared exponential)) thực ra là xác định dương chặt, nhưng điều kiện psd là đủ cho lý thuyết được xây dựng ở đây.
+
+**Các ví dụ thông dụng**
+
+- **Hàm nhân tuyến tính:** $k(x, x') = x^\top x'$; khi được dùng trong hồi quy GP, nó tương đương với hồi quy tuyến tính Bayes với một tiên nghiệm Gauss.
+- **Hàm nhân đa thức:** $k(x, x') = (x^\top x' + c)^d$ với $c \geq 0$, $d \in \mathbb{N}$.
+- **Hàm nhân mũ bình phương (Gauss/RBF):**
+
+  $$
+  k(x, x') = \exp\left(-\frac{\|x - x'\|^2}{2\ell^2}\right),
+  $$
+
+  trong đó tham số thang độ dài (length-scale) $\ell > 0$ điều khiển độ trơn ($\ell$ càng lớn thì hàm càng trơn).
+- **Hàm nhân Matérn:** Một họ hàm nhân được tham số hóa bởi độ trơn $\nu > 0$:
+
+  $$
+  k_\nu(x, x') = \frac{2^{1-\nu}}{\Gamma(\nu)} \left(\sqrt{2\nu}\,\frac{r}{\ell}\right)^{\nu} K_\nu\left(\sqrt{2\nu}\,\frac{r}{\ell}\right)
+  $$
+
+  trong đó $r = \|x - x'\|$, $\ell > 0$ là thang độ dài, và $K_\nu$ là hàm Bessel biến dạng loại hai (modified Bessel function of the second kind). Các trường hợp đặc biệt thông dụng gồm Matérn-1/2, Matérn-3/2 và Matérn-5/2.
+- **Hàm nhân Laplace (Laplacian kernel):**
+
+  $$
+  k(x, x') = \exp(-\gamma \|x - x'\|_1),
+  $$
+
+  trong đó $\|x - x'\|_1$ là khoảng cách Manhattan (hay chuẩn L1) giữa hai vector (cũng có thể dùng chuẩn L2) và $\gamma$ là một tham số điều chỉnh, điều khiển độ rộng hay "độ trải" của hàm nhân. Một $\gamma$ nhỏ cho một hàm nhân rộng, trơn, trong khi một $\gamma$ lớn tạo ra một hàm nhân nhọn hơn, cục bộ hơn.
+- **Hàm nhân chỉ thị (indicator kernel):**
+
+  $$
+  k(x, x') = \mathbf{1}(x = x'),
+  $$
+
+  trong đó $\mathbf{1}(\cdot)$ là hàm chỉ thị.
+- **Hàm nhân arc-cos (arc-cos kernel):** Được dùng trong các giới hạn GP của mạng nơ-ron ([Chương 26](/vi/blog/deep-kernel-processes-and-machines)):
+
+  $$
+  k(x, x') = \sigma_b^2 + \frac{\sigma_w^2}{\pi} \sqrt{k_{11} k_{22}} \left(\sin\theta + (\pi - \theta)\cos\theta\right)
+  $$
+
+  trong đó $\theta = \arccos\left(k_{12}/\sqrt{k_{11} k_{22}}\right)$ với $k_{ij} = x_i^\top x_j / N_0$.
+- **Hàm nhân tuần hoàn (periodic kernel):** $k(x, x') = \exp[-2 \sin^2(\pi \|x - x'\|/p)/\ell^2]$.
+
+### 2.2 Hàm nhân như một thước đo độ tương tự
+
+Sau khi đã định nghĩa một số họ hàm nhân ở trên, tiểu mục này làm rõ vai trò của giá trị hàm nhân như một khái niệm độ tương tự. Giá trị hàm nhân $k(x, x')$ đo độ tương tự giữa hai đầu vào $x$ và $x'$. Ở các mục sau, khi một hàm $f$ được mô hình hóa bằng hàm nhân này, $k(x, x')$ sẽ đóng vai trò hiệp phương sai kỳ vọng giữa các giá trị hàm $f(x)$ và $f(x')$. Giá trị lớn hàm ý rằng các giá trị hàm tại $x$ và $x'$ nhiều khả năng tương tự nhau, còn giá trị nhỏ cho thấy sự độc lập hoặc khác biệt. Do đó, hàm nhân định nghĩa ngầm một khái niệm khoảng cách hoặc tương quan trong không gian đầu vào: khoảng cách hiệu dụng giữa $x$ và $x'$ càng nhỏ thì tương quan giữa chúng càng mạnh.
+
+Các hàm nhân khác nhau tương ứng với các thiên hướng quy nạp khác nhau về cách độ tương tự nên hành xử:
+
+- Hàm nhân RBF (mũ bình phương) tương ứng với các hàm rất trơn, tương quan toàn cục, biến thiên chậm theo khoảng cách giữa các đầu vào.
+- Họ Matérn cho phép điều khiển tường minh độ trơn và độ biến thiên cục bộ thông qua tham số $\nu$, tạo ra các tiên nghiệm trên hàm thô hơn hoặc trơn hơn.
+- Các hàm nhân tuần hoàn áp đặt cấu trúc lặp lại, phù hợp với các mẫu hình chu kỳ hoặc theo mùa.
+
+Như vậy, việc người thực hành chọn hàm nhân tương đương với việc xác định một *tiên nghiệm* trên hành vi của hàm và quyết định những kiểu biến thiên nào được kỳ vọng ở các vùng chưa thấy của không gian đầu vào.
+
+### 2.3 Hợp thành và các phép toán trên hàm nhân
+
+Một đặc điểm mạnh của hàm nhân là chúng có thể được kết hợp để tạo ra các thước đo độ tương tự giàu khả năng biểu diễn hơn mà vẫn bảo toàn tính xác định dương. Tổng, tích và phép nhân với hằng số dương của các hàm nhân đều bảo toàn tính xác định dương.
+
+**Mệnh đề 23.1** (Các phép toán trên hàm nhân). *Nếu* $k_1$ *và* $k_2$ *là các hàm nhân xác định dương, thì các hàm sau cũng vậy:*
+
+1. *Tổng:* $k(x, x') = k_1(x, x') + k_2(x, x')$
+2. *Tích:* $k(x, x') = k_1(x, x') \cdot k_2(x, x')$
+3. *Co giãn:* $k(x, x') = c \cdot k_1(x, x')$ *với* $c > 0$
+
+Các quy tắc hợp thành này cho phép người thực hành xây dựng các hàm nhân phức tạp từ các khối đơn giản, mã hóa tri thức tiên nghiệm có cấu trúc. Ví dụ, tổng của một hàm nhân tuần hoàn và một hàm nhân SE (mũ bình phương) có thể mô hình hóa các hàm có cả thành phần xu hướng lẫn thành phần theo mùa.
+
+### 2.4 Góc nhìn phổ
+
+*Có thể bỏ qua tiểu mục này trong lần đọc đầu.*
+
+Với các hàm nhân dừng (stationary kernel), tức các hàm nhân chỉ phụ thuộc vào hiệu $\tau = x - x'$, thường hữu ích khi mô tả chúng theo thành phần tần số thay vì theo hình dạng trong không gian đầu vào. *Định lý Bochner* (Bochner's theorem) cung cấp mối liên hệ này: một hàm nhân liên tục, bất biến với phép tịnh tiến (shift-invariant) $k(\tau)$ trên $\mathbb{R}^d$ là xác định dương khi và chỉ khi nó là biến đổi Fourier của một độ đo không âm $S(\omega)$:
+
+$$
+k(\tau) = \int_{\mathbb{R}^d} e^{i\omega^\top \tau} S(\omega)\, \mathrm{d}\omega. \tag{23.5}
+$$
+
+Hàm $S(\omega)$ được gọi là *mật độ phổ* (spectral density) của hàm nhân và mô tả mức đóng góp của mỗi tần số $\omega$ vào hiệp phương sai giữa các đầu vào.
+
+Góc nhìn phổ này cho một liên hệ trực quan giữa độ trơn của một hàm nhân và thành phần tần số của nó:
+
+- Các hàm nhân trơn (chẳng hạn RBF) có $S(\omega)$ suy giảm nhanh, tập trung công suất ở tần số thấp và tạo ra các hàm biến thiên chậm.
+- Các hàm nhân thô hơn (chẳng hạn Matérn) có $S(\omega)$ đuôi nặng hơn, phản ánh độ biến thiên tần số cao hơn và độ trơn thấp hơn.
+
+Góc nhìn phổ này là động lực cho các phép xấp xỉ như *đặc trưng Fourier ngẫu nhiên* (random Fourier features), biểu diễn hàm nhân thông qua các tần số được lấy mẫu $\omega \sim S(\omega)$. Nó cũng làm rõ cách các siêu tham số (hyperparameter) của hàm nhân (chẳng hạn thang độ dài) xác định dải tần số hiệu dụng của các hàm được mô hình hóa.
+
+Cuối cùng, một số hàm nhân được gọi là *phổ quát* (universal) hoặc *đặc trưng hóa* (characteristic), nghĩa là chúng có thể xấp xỉ mọi hàm liên tục trên các miền compact, hoặc biểu diễn duy nhất các phân phối xác suất thông qua phép nhúng trung bình (mean embedding) của chúng. Các tính chất này khiến chúng trở thành công cụ mạnh cho cả hồi quy lẫn kiểm định thống kê.
+
+<Figure caption="Hình 23.1: Thủ thuật hàm nhân. Một ánh xạ phi tuyến ϕ(x) biến đổi dữ liệu từ không gian đầu vào (trái) sang một không gian đặc trưng nhiều chiều (phải), nơi các lớp trở nên tách được tuyến tính. Mặc dù không gian đặc trưng có thể có số chiều cao hoặc vô hạn, thủ thuật hàm nhân cho phép tính toán chỉ bằng các giá trị hàm nhân theo từng cặp k(x, x′) = ⟨ϕ(x), ϕ(x′)⟩, mà không cần xây dựng tường minh ϕ(x). (Bản vẽ lại dạng sơ đồ cho trang này.)">
+  <Bdl23KernelTrick />
+</Figure>
+
+## 3. Thủ thuật hàm nhân
+
+Thủ thuật hàm nhân là một kỹ thuật tính toán cho phép thực hiện hiệu quả các phép toán trong các không gian đặc trưng nhiều chiều (thậm chí vô hạn chiều) mà không cần tính tường minh bản thân các đặc trưng. Ý tưởng tinh tế này là nền tảng cho phần lớn thành công của các phương pháp hàm nhân.
+
+### 3.1 Ánh xạ đặc trưng và biểu diễn ngầm
+
+Mọi hàm nhân xác định dương $k(\cdot, \cdot)$ đều tương ứng với một ánh xạ đặc trưng $\phi : \mathcal{X} \to \mathcal{H}$ vào một không gian Hilbert $\mathcal{H}$ nào đó sao cho:
+
+$$
+k(x, x') = \langle \phi(x), \phi(x') \rangle_{\mathcal{H}} \tag{23.6}
+$$
+
+Điểm then chốt là mọi phép tính đều có thể được thực hiện chỉ bằng các giá trị hàm nhân, mà không bao giờ phải tính tường minh $\phi(x)$. Nói cách khác, Phương trình (23.6) cho thấy mọi hàm nhân xác định dương định nghĩa ngầm một ánh xạ $\phi : \mathcal{X} \to \mathcal{H}$ sao cho giá trị hàm nhân đơn giản là tích trong giữa các đặc trưng trong $\mathcal{H}$. Không gian đặc trưng $\mathcal{H}$ có thể có số chiều cực kỳ cao hoặc thậm chí vô hạn, nhưng mọi phép tính chỉ phụ thuộc vào các giá trị hàm nhân theo từng cặp $k(x, x')$.
+
+Nhận xét này có nghĩa là mọi thuật toán có thể biểu diễn bằng các tích vô hướng đều có thể được *hàm nhân hóa* (kernelized) bằng phép thay thế $\langle x, x' \rangle \to k(x, x')$. Chỉ một phép thay thế này biến các phương pháp tuyến tính thành phi tuyến mà vẫn giữ nguyên cấu trúc đại số.
+
+Như minh họa bằng ánh xạ đặc trưng bậc hai trong Ví dụ 23.1, việc tính tường minh $\phi(x)$ cho đầu vào $N_0$ chiều cần $O(N_0^2)$ phép toán, nhưng tính trực tiếp hàm nhân chỉ cần $O(N_0)$ phép toán. Như vậy, thủ thuật hàm nhân đạt được cùng hiệu quả hình học của việc chiếu vào một không gian đặc trưng khác với chỉ một phần nhỏ chi phí tính toán. Với một số hàm nhân như hàm nhân mũ bình phương (SE), không gian đặc trưng tương ứng có số chiều vô hạn, khiến việc tính đặc trưng tường minh là không thể. Tuy vậy, hàm nhân vẫn có thể được tính hiệu quả trong thời gian $O(N_0)$.
+
+### 3.2 Không gian Hilbert hàm nhân tái sinh
+
+Nền tảng toán học của thủ thuật hàm nhân là khái niệm *không gian Hilbert hàm nhân tái sinh* (reproducing kernel Hilbert space, RKHS). Một RKHS cung cấp liên kết giữa các hàm nhân và các không gian tích trong gồm các hàm, bảo đảm rằng phép lấy giá trị tại một điểm bất kỳ có thể được biểu diễn như một tích trong.
+
+**Định nghĩa 23.2** (Không gian Hilbert hàm nhân tái sinh). *Cho* $\mathcal{H}$ *là một không gian Hilbert gồm các hàm* $f : \mathcal{X} \to \mathbb{R}$*. Khi đó* $\mathcal{H}$ *được gọi là một* không gian Hilbert hàm nhân tái sinh *nếu tồn tại một hàm nhân* $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ *thỏa mãn:*
+
+1. *Với mọi* $x \in \mathcal{X}$*, hàm* $k(x, \cdot)$ *thuộc* $\mathcal{H}$*.*
+2. ***(Tính chất tái sinh)*** *Với mọi* $f \in \mathcal{H}$ *và mọi* $x \in \mathcal{X}$*,*
+
+   $$
+   f(x) = \langle f, k(x, \cdot) \rangle_{\mathcal{H}}. \tag{23.7}
+   $$
+
+Tính chất tái sinh (reproducing property) bảo đảm rằng phép lấy giá trị tại từng điểm là một phiếm hàm tuyến tính liên tục trên $\mathcal{H}$, một đặc điểm phân biệt RKHS với các không gian Hilbert hàm tổng quát. Mỗi hàm nhân xác định dương $k(\cdot, \cdot)$ xác định duy nhất một RKHS $\mathcal{H}_k$, và ngược lại, mọi RKHS có một hàm nhân tái sinh duy nhất. Kết quả này được gọi là **định lý Moore-Aronszajn**.
+
+Tính đối ngẫu này thiết lập một tương ứng một-một giữa các hàm nhân và các không gian hàm: việc chọn hàm nhân xác định ngầm lớp các hàm được chấp nhận và độ trơn của chúng. Chẳng hạn, RKHS ứng với hàm nhân SE gồm các hàm khả vi vô hạn lần, trong khi RKHS của hàm nhân Matérn chứa các hàm có độ trơn hữu hạn được điều khiển bởi tham số $\nu$.
+
+### 3.3 Lợi thế tính toán và định lý biểu diễn
+
+Sức mạnh tính toán của thủ thuật hàm nhân trở nên rõ ràng trong các bài toán học có chính quy hóa được định nghĩa trên một không gian Hilbert hàm nhân tái sinh $\mathcal{H}$. Cho một tập huấn luyện $\{(x_i, y_i)\}_{i=1}^P \subset \mathcal{X} \times \mathbb{R}$, xét hàm mục tiêu
+
+$$
+\min_{f \in \mathcal{H}} \sum_{i=1}^{P} \ell(y_i, f(x_i)) + \lambda \|f\|_{\mathcal{H}}^2, \tag{23.8}
+$$
+
+trong đó $\ell(\cdot, \cdot)$ là một hàm mất mát theo từng điểm (chẳng hạn mất mát bình phương, hinge hoặc logistic) và $\lambda > 0$ là một tham số chính quy hóa điều khiển độ phức tạp của mô hình.
+
+**Định lý biểu diễn** phát biểu rằng mọi nghiệm tối ưu của (23.8) đều có thể được biểu diễn như một tổ hợp tuyến tính hữu hạn của các giá trị hàm nhân tại các điểm huấn luyện:
+
+$$
+f^*(x) = \sum_{i=1}^{P} \alpha_i k(x_i, x), \tag{23.9}
+$$
+
+với các hệ số $\alpha = [\alpha_1, \dots, \alpha_P]^\top \in \mathbb{R}^P$ nào đó. Kết quả này hàm ý rằng mặc dù $\mathcal{H}$ có thể có số chiều vô hạn, bài toán tối ưu hóa quy về một bài toán trên các hệ số $\alpha$, chỉ liên quan đến ma trận hàm nhân (ma trận Gram) $K$ với các phần tử $K_{ij} = k(x_i, x_j)$. Do đó các dự đoán chỉ cần các giá trị hàm nhân $k(x_i, x)$ thay vì các phép tính đặc trưng tường minh, tạo nền tảng cho tính hiệu quả của các phương pháp hàm nhân.
+
+## 4. Quá trình Gauss
+
+Sau khi đã giới thiệu hàm nhân như các thước đo độ tương tự và như các tích trong trong không gian đặc trưng, bước tiếp theo là dùng chúng làm *hàm hiệp phương sai* (covariance function) định nghĩa các phân phối trên hàm. Một quá trình Gauss có thể được xem là phiên bản xác suất của một máy hàm nhân (kernel machine): trong khi một hàm nhân xác định các đầu vào liên hệ với nhau như thế nào, một GP diễn giải điều này thành một phát biểu về cách các giá trị hàm đồng biến thiên trên không gian đầu vào. Theo nghĩa này, GP biến hình học do hàm nhân cảm sinh thành một mô hình Bayes đầy đủ cho việc học hàm. Các phương pháp hàm nhân theo trường phái tần suất (frequentist) và GP có liên hệ chặt chẽ và có chung nền tảng toán học.
+
+GP mở rộng khái niệm phân phối Gauss từ các vector hữu hạn chiều sang các hàm (xem hàm như các vector dài vô hạn chứa giá trị của hàm tại mọi đầu vào).
+
+**Định nghĩa 23.3** (Quá trình Gauss). *Cho* $f : \mathcal{X} \to \mathbb{R}$ *là một hàm nhận giá trị thực xác định trên một không gian đầu vào* $\mathcal{X}$*. Khi đó* $f$ *được gọi là một quá trình Gauss, ký hiệu*
+
+$$
+f \sim \mathcal{GP}(m(\cdot), k(\cdot, \cdot)),
+$$
+
+*nếu với mọi tập hữu hạn các đầu vào* $\mathbf{x} = [x_1, \dots, x_P]^\top$*, vector ngẫu nhiên gồm các giá trị hàm*
+
+$$
+\mathbf{f} = [f(x_1), \dots, f(x_P)]^\top
+$$
+
+*tuân theo một phân phối chuẩn nhiều chiều*
+
+$$
+\mathbf{f} \sim \mathcal{N}\big(\boldsymbol{\mu}, K_{\mathbf{x}\mathbf{x}}\big),
+$$
+
+*với trung bình* $\boldsymbol{\mu}_i = m(x_i)$ *và hiệp phương sai* $[K_{\mathbf{x}\mathbf{x}}]_{ij} = k(x_i, x_j)$*.*
+
+Hàm trung bình $m(x) = \mathbb{E}[f(x)]$ mô tả giá trị kỳ vọng của quá trình tại $x$, còn hàm nhân hay hàm hiệp phương sai $k(x, x') = \mathrm{Cov}[f(x), f(x')]$ mã hóa cách các giá trị hàm đồng biến thiên giữa các đầu vào. Trong thực hành, người ta thường giả định $m(x) = 0$. Điều này hợp lý khi dữ liệu đã được đặt tâm hoặc khi không có tri thức tiên nghiệm cụ thể nào về hành vi trung bình của hàm; hàm trung bình luôn có thể được hấp thụ vào mô hình bằng cách trừ một ước lượng tiên nghiệm của xu hướng khỏi các quan sát trước khi khớp GP.
+
+**Ma trận hàm nhân.** Với các đầu vào $\mathbf{x} = [x_1, \dots, x_P]$, ma trận hàm nhân là
+
+$$
+K_{\mathbf{x}\mathbf{x}} = \begin{bmatrix}
+k(x_1, x_1) & k(x_1, x_2) & \cdots & k(x_1, x_P) \\
+k(x_2, x_1) & k(x_2, x_2) & \cdots & k(x_2, x_P) \\
+\vdots & \vdots & \ddots & \vdots \\
+k(x_P, x_1) & k(x_P, x_2) & \cdots & k(x_P, x_P)
+\end{bmatrix}.
+$$
+
+Như đã thiết lập trong Định nghĩa 23.1, hàm nhân phải đối xứng và nửa xác định dương, điều này bảo đảm $K_{\mathbf{x}\mathbf{x}}$ là một ma trận hiệp phương sai hợp lệ.
+
+**Nhận xét 23.2.** *Hàm nhân trong một GP vừa định nghĩa cấu trúc hiệp phương sai của quá trình, vừa xác định thước đo độ tương tự cho phép nội suy. Mối liên hệ giữa góc nhìn xác suất và góc nhìn hình học này là nền tảng của lập luận với GP.*
+
+### 4.1 Suy luận hậu nghiệm
+
+Cho dữ liệu huấn luyện $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^P$, giả định rằng các quan sát là các giá trị có nhiễu của một hàm ẩn (latent function) $f$ nằm bên dưới:
+
+$$
+y_i = f(x_i) + \varepsilon_i, \qquad \varepsilon_i \sim \mathcal{N}(0, \sigma^2),
+$$
+
+trong đó $\sigma^2$ là phương sai nhiễu.
+
+Gọi $\mathbf{y} = [y_1, \dots, y_P]^\top$ là các giá trị đích quan sát được, và xét một đầu vào mới $x_*$ với giá trị ẩn $f_* = f(x_*)$. Phân phối tiên nghiệm đồng thời của các đầu ra huấn luyện và kiểm tra là
+
+$$
+\begin{bmatrix} \mathbf{y} \\ f_* \end{bmatrix} \sim \mathcal{N}\left( \begin{bmatrix} \mathbf{0} \\ 0 \end{bmatrix}, \begin{bmatrix} K_{\mathbf{x}\mathbf{x}} + \sigma^2 I & K_{\mathbf{x}x_*} \\ K_{x_*\mathbf{x}} & K_{x_*x_*} \end{bmatrix} \right),
+$$
+
+trong đó $K_{\mathbf{x}x_*} = [k(x_1, x_*), \dots, k(x_P, x_*)]^\top$. Số hạng nhiễu $\sigma^2 I$ chỉ được cộng vào $K_{\mathbf{x}\mathbf{x}}$ vì các giá trị đích huấn luyện $\mathbf{y}$ là các quan sát có nhiễu, trong khi $f_*$ ký hiệu giá trị hàm ẩn (không nhiễu) tại $x_*$.
+
+Lấy điều kiện theo dữ liệu quan sát được cho phân phối hậu nghiệm (posterior):
+
+$$
+p(f_* | \mathbf{x}, \mathbf{y}, x_*) = \mathcal{N}\big(\mu_*, \sigma_*^2\big),
+$$
+
+với
+
+$$
+\mu_* = K_{x_*\mathbf{x}} [K_{\mathbf{x}\mathbf{x}} + \sigma^2 I]^{-1} \mathbf{y}, \qquad \sigma_*^2 = k(x_*, x_*) - K_{x_*\mathbf{x}} [K_{\mathbf{x}\mathbf{x}} + \sigma^2 I]^{-1} K_{\mathbf{x}x_*}.
+$$
+
+**Diễn giải.** Trung bình hậu nghiệm $\mu_*$ cho kỳ vọng dự đoán của $f(x_*)$, còn phương sai $\sigma_*^2$ định lượng độ bất định. Gần các điểm dữ liệu đã quan sát, $\sigma_*^2$ có xu hướng nhỏ, trong khi nó tăng lên ở các vùng xa dữ liệu huấn luyện. Tính chất này làm cho GP đặc biệt hữu ích cho hồi quy có nhận biết độ bất định, tối ưu hóa Bayes (Bayesian optimization) và học chủ động (active learning) (xem Chương 53).
+
+## 5. Các hạn chế
+
+Mặc dù tinh tế, GP tiêu chuẩn gặp một số thách thức cơ bản, là động lực cho các mở rộng sâu được tìm hiểu ở các Chương [25](/vi/blog/deep-gaussian-processes)–[27](/vi/blog/meta-learning-deep-kernel-gaussian-processes). Các hạn chế này liên quan đến cả *năng lực biểu diễn* lẫn *khả năng mở rộng tính toán* của chúng.
+
+### 5.1 Biểu diễn cố định và khả năng biểu diễn
+
+Các phương pháp hàm nhân tiêu chuẩn hoạt động trực tiếp trên các đặc trưng đầu vào thô, định nghĩa độ tương tự qua các metric cố định như khoảng cách Euclid. Tuy nhiên, giả định này thường không đứng vững trong các miền dữ liệu hiện đại nhiều chiều hoặc có cấu trúc.
+
+*Đặc trưng thô thiếu thông tin.* Trong các miền như ảnh, văn bản hoặc đồ thị, các tọa độ đầu vào thô thiếu nội dung ngữ nghĩa và không mã hóa cấu trúc quan hệ hay cấu trúc hợp thành cần thiết cho khả năng tổng quát hóa. Do đó, các hàm nhân định nghĩa trên những đặc trưng như vậy không nắm bắt được các tính bất biến (invariance) hoặc các phụ thuộc có ý nghĩa nằm bên dưới dữ liệu.
+
+*Đầu vào nhiều chiều.* Khi số chiều của không gian đầu vào tăng, các khoảng cách theo cặp có xu hướng tập trung, khiến các hàm nhân dừng thông dụng như RBF gần như là hằng số. Hiệu ứng "tập trung khoảng cách" (distance concentration) này làm giảm khả năng phân biệt của các thước đo độ tương tự dựa trên hàm nhân, khiến chúng kém hiệu quả trong việc nắm bắt hình học cục bộ hoặc biến thiên chi tiết bên trong đa tạp dữ liệu (data manifold).
+
+*Khả năng thích nghi hạn chế.* Một khi dạng hàm và các siêu tham số của một hàm nhân đã cố định, thiên hướng quy nạp của nó trở nên tĩnh. Hệ quả là các hàm nhân tiêu chuẩn không thể học các khái niệm độ tương tự phụ thuộc vào tác vụ hoặc dữ liệu, khiến chúng không thích nghi được với các mẫu hình phức tạp, có cấu trúc. Sự thiếu linh hoạt này hạn chế căn bản khả năng biểu diễn của chúng trong các bối cảnh học biểu diễn hiện đại, nơi việc trích xuất đặc trưng thích nghi, dựa trên dữ liệu là thiết yếu.
+
+### 5.2 Khả năng mở rộng tính toán
+
+Trong hầu hết các ứng dụng thực tế, suy luận quá trình Gauss chính xác có chi phí tính toán cao: việc tính và nghịch đảo ma trận hàm nhân $P \times P$ có độ phức tạp $O(P^3)$, điều này giới hạn GP tiêu chuẩn ở các tập dữ liệu vài nghìn điểm.
+
+Để GP xử lý được các tập dữ liệu lớn và các hàm hợp lý (likelihood) phức tạp, các lược đồ suy luận xấp xỉ (approximate inference) được sử dụng:
+
+- **Suy luận biến phân (variational inference):** đưa vào một phân phối hậu nghiệm xấp xỉ có thể được tối ưu hóa hiệu quả và hỗ trợ các hàm hợp lý không Gauss (chẳng hạn phân loại hoặc mô hình đếm).
+- **Các phương pháp thưa và phương pháp điểm cảm sinh (inducing points):** tóm tắt tập dữ liệu bằng một tập nhỏ các đầu vào đại diện, giảm độ phức tạp xuống $O(P_i^3 + P_i^2 P)$ với $P_i \ll P$.
+
+Các ý tưởng này là trung tâm của các mô hình hàm nhân sâu được thảo luận sau. Mỗi lớp hoặc thành phần GP dùng các phép xấp xỉ như vậy để duy trì khả năng mở rộng. Các phương pháp GP có khả năng mở rộng được trình bày sâu ở Chương 38, và các suy dẫn chi tiết của mô hình hàm nhân sâu xuất hiện ở các Chương [24](/vi/blog/deep-kernel-learning) và [27](/vi/blog/meta-learning-deep-kernel-gaussian-processes).
+
+### 5.3 Hướng đi tiếp theo: quá trình Gauss sâu và thích nghi
+
+Các chương tiếp theo tìm hiểu cách vượt qua những hạn chế này bằng cách làm cho *chính hàm nhân trở nên học được, có phân cấp và thích nghi theo dữ liệu*. Sự tiến triển này song song với bước chuyển từ mô hình tuyến tính sang mạng sâu trong học máy tiêu chuẩn.
+
+- **[Chương 25](/vi/blog/deep-gaussian-processes) (Quá trình Gauss sâu):** Giới thiệu các phép hợp thành có phân cấp của GP, trong đó đầu ra của một GP là đầu vào của một GP khác. Các GP sâu này nắm bắt nhiều mức trừu tượng và tính không dừng, lấp khoảng trống về khả năng biểu diễn của các hàm nhân nông.
+- **[Chương 24](/vi/blog/deep-kernel-learning) (Học hàm nhân sâu):** Kết hợp sức mạnh biểu diễn của mạng nơ-ron sâu với khả năng định lượng độ bất định của GP. Ở đây hàm nhân được học từ dữ liệu thông qua một bộ trích xuất đặc trưng là mạng nơ-ron, cho các mô hình có khả năng mở rộng và huấn luyện được đầu-cuối.
+- **[Chương 27](/vi/blog/meta-learning-deep-kernel-gaussian-processes) (Siêu học và tiên nghiệm trên hàm):** Tổng quát hóa khái niệm xa hơn bằng cách học các tiên nghiệm trên hàm qua nhiều tác vụ, cho phép thích nghi với ít mẫu và chuyển giao. Các mô hình này gắn kết các nguyên lý Bayes của GP với tính linh hoạt của siêu học (meta-learning).
+
+Cùng nhau, các phát triển này vạch ra tiến trình từ các phương pháp hàm nhân cổ điển đến *học sâu Bayes trong không gian hàm* hiện đại. Mỗi chương tiếp theo xây dựng trực tiếp trên các nền tảng xác suất được thiết lập ở đây, biến GP từ các cấu trúc lý thuyết tinh tế thành các công cụ học biểu diễn có khả năng mở rộng.
+
+> **Liên hệ với học sâu Bayes (BDL)**
+>
+> **Các phương pháp hàm nhân liên hệ với học sâu Bayes như thế nào.**
+> Các phương pháp hàm nhân là một trong những cách tiếp cận sớm nhất đối với học Bayes trong không gian hàm. Một *hàm nhân* định nghĩa một cấu trúc hiệp phương sai trên các hàm, xác định các giá trị tại những đầu vào khác nhau được kỳ vọng đồng biến thiên như thế nào. Trong quá trình Gauss, hiệp phương sai này được kết hợp với một tiên nghiệm Gauss để tạo ra các phân phối dự đoán đầy đủ, nắm bắt cả dự đoán lẫn độ bất định của chúng.
+>
+> Từ góc nhìn của học sâu, các phương pháp hàm nhân cung cấp *giới hạn Bayes của mạng nơ-ron*: khi độ rộng của một mạng tiến tới vô hạn, các đầu ra của nó hội tụ về một GP có hàm nhân được xác định bởi kiến trúc mạng (chẳng hạn quá trình Gauss của mạng nơ-ron (NNGP) hoặc hàm nhân tiếp tuyến nơ-ron (NTK)). Như vậy, mọi mạng sâu đều định nghĩa ngầm một hàm nhân, và việc huấn luyện mạng tương ứng với việc học hình học của hàm nhân đó.
+>
+> *Học sâu Bayes* hiện đại xây dựng trên mối liên hệ này:
+>
+> - **Học biểu diễn:** Học hàm nhân sâu thay hàm nhân cố định trên đầu vào bằng một hàm nhân được tính từ một biểu diễn sâu đã học.
+> - **Tiên nghiệm có phân cấp trên hàm:** Quá trình Gauss sâu xếp chồng nhiều GP để mô hình hóa các ánh xạ phức tạp, không dừng.
+> - **Hiệu chuẩn độ bất định:** Bản chất xác suất của GP cung cấp các ước lượng độ bất định có cơ sở vững chắc, một tính chất được mở rộng trong các mô hình BDL.
+>
+> Do đó, hiểu về hàm nhân giúp làm rõ các nền tảng mà các mô hình Bayes sâu được xây dựng trên đó: chúng mô tả *hàm được tin là sẽ hành xử như thế nào* trước khi thấy dữ liệu, và các niềm tin này thay đổi như thế nào khi mô hình trở nên sâu hơn.
