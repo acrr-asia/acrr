@@ -1,0 +1,113 @@
+---
+title: "Ensembles: Introduction and Connections with Approximate Bayesian Inference"
+description: "How deep ensembles are built, how they relate to the Bayesian model average and approximate inference, and when their cost is justified."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - deep ensembles
+  - bayesian model averaging
+  - approximate inference
+series: bayesian-deep-learning
+seriesOrder: 24
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl19BmaApproximations from '../../components/diagrams/Bdl19BmaApproximations.astro';
+import Bdl19RegressionHmc from '../../components/diagrams/Bdl19RegressionHmc.astro';
+import Bdl19HmcAgreement from '../../components/diagrams/Bdl19HmcAgreement.astro';
+
+Deep ensembles train the same neural-network architecture several times from different random initializations and combine the resulting predictive distributions. Their appeal lies in their simplicity, straightforward parallelization, competitive predictive performance and broad applicability.
+
+Deep ensembles were initially presented as a non-Bayesian alternative to approximate Bayesian inference methods such as variational inference (VI; [Chapter 12](/blog/introduction-to-variational-inference)). Subsequent conceptual and empirical work has shown that, in several studied settings and under realistic computational budgets, their predictive distributions can be closer to a high-fidelity Bayesian reference than those of standard single-basin approximations. This does not make a standard deep ensemble an exact posterior approximation: its members are independently optimized solutions with equal weights, rather than posterior draws or basins weighted by posterior mass.
+
+This chapter introduces the deep-ensemble procedure ([Section 1](#1-deep-ensembling-procedure)), examines its connection with Bayesian model averaging ([Section 2](#2-deep-ensembles-as-approximate-bayesian-inference)), discusses ensemble-based developments ([Section 3](#3-developments-of-deep-ensembles)) and considers the method under fixed computational budgets ([Section 4](#4-are-deep-ensembles-necessary)).
+
+## 1. Deep ensembling procedure
+
+Let $w$ denote the network parameters, let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^{N}$ denote the training data and let $J$ denote the number of ensemble members. Deep ensembling proceeds as follows:
+
+1. For each $j = 1, \ldots, J$, initialize the network independently and use stochastic gradient descent (SGD), or another optimizer, to obtain a local solution $w_j$. When the training objective is, up to an additive or multiplicative constant, the negative log-posterior $-\log p(w \mid \mathcal{D})$, these local solutions can be interpreted as local maximum a posteriori (MAP) estimates.
+2. Form the equally weighted ensemble predictive distribution
+
+   $$
+   \widehat{p}_{\mathrm{DE}}(y \mid x, \mathcal{D}) := \frac{1}{J} \sum_{j=1}^{J} p(y \mid x, w_j). \tag{19.1}
+   $$
+
+The original formulation trains probabilistic neural networks using proper scoring rules and optionally uses adversarially perturbed examples to encourage locally smoother predictive distributions. For Gaussian-likelihood regression, member $j$ commonly predicts
+
+$$
+p(y \mid x, w_j) = \mathcal{N}\big(y \mid \mu_j(x), \sigma_j^2(x)\big). \tag{19.2}
+$$
+
+Although the resulting equal mixture is generally not itself Gaussian, its first two moments are
+
+$$
+\begin{aligned}
+\bar{\mu}(x) &= \frac{1}{J} \sum_{j=1}^{J} \mu_j(x), \\
+v_{\mathrm{DE}}(x) &= \frac{1}{J} \sum_{j=1}^{J} \sigma_j^2(x) + \frac{1}{J} \sum_{j=1}^{J} \big(\mu_j(x) - \bar{\mu}(x)\big)^2 \\
+&= \frac{1}{J} \sum_{j=1}^{J} \big(\sigma_j^2(x) + \mu_j^2(x)\big) - \bar{\mu}(x)^2.
+\end{aligned} \tag{19.3}
+$$
+
+The first contribution to $v_{\mathrm{DE}}(x)$ averages the per-model aleatoric variance, while the second measures between-model disagreement.
+
+The procedure is simple but computationally expensive: training, storing and evaluating $J$ full models generally costs approximately $J$ times as much as using one model. Because the training runs are independent, they can be distributed across devices, which reduces wall-clock time when sufficient parallel hardware is available but does not remove the total computation or storage cost.
+
+## 2. Deep ensembles as approximate Bayesian inference
+
+The Bayesian posterior predictive distribution, or Bayesian model average (BMA), is
+
+$$
+p(y \mid x, \mathcal{D}) = \int p(y \mid x, w)\, p(w \mid \mathcal{D})\, \mathrm{d}w. \tag{19.4}
+$$
+
+There are two useful perspectives on the relationship between deep ensembles and approximate Bayesian inference. First, an average of the form in Equation (19.1) is an ordinary Monte Carlo estimator of Equation (19.4) only when the $w_j$ are samples from $p(w \mid \mathcal{D})$. Deep-ensemble members are instead local solutions obtained by optimization from different initializations, so their empirical distribution need not match the posterior in its locations, relative mass assigned to different basins or within-basin spread.
+
+The second perspective asks how a small number of evaluations of $p(y \mid x, w)$ should be allocated under a fixed computational budget. If predictive distributions vary less within a basin than across functionally distinct basins, representing several basins may capture more of the predictive variation relevant to Equation (19.4) than allocating all evaluations to one basin. This is a heuristic for finite-budget approximation, not a claim that independently optimized modes are superior to well-mixed exact posterior samples. Figures 19.1 and 19.2 illustrate this distinction.
+
+<Figure caption="Figure 19.1: Conceptual illustration of finite approximations to the BMA p(y | x, 𝒟) = ∫ p(y | x, w) p(w | 𝒟) dw. Top: a multimodal parameter posterior together with three forms of approximation. The large circular markers represent deep-ensemble point estimates; the compact group of small markers around one mode represents a unimodal VI approximation; and the small markers distributed around several modes represent MultiSWAG, a mixture of local Gaussian approximations. Dashed vertical lines indicate the corresponding parameter-space evaluation locations. Middle: the predictive distribution p(y | x, w) as a function of w for one test input x; in this illustration, predictions change less within a mode than between modes. Bottom: the discrepancy between the BMA and a finite approximation as a function of the location of one additional evaluation, given that one mode is already represented. Under the assumptions illustrated here, representing a previously unexplored basin reduces the discrepancy more than adding another evaluation within an already represented basin. Figure adapted from Wilson and Izmailov. Schematic reproduction: the curves are qualitative shapes traced from the original figure.">
+  <Bdl19BmaApproximations />
+</Figure>
+
+<Figure caption="Figure 19.2: Approximating a high-fidelity HMC reference predictive distribution on a one-dimensional regression task. (a) Reference predictive distribution obtained by combining 10 long HMC chains. (b) Deep-ensemble predictive distribution using 50 independently trained networks. (c) Predictive distribution from factorized variational inference. In panels (b) and (c), the narrow upper strip reports the input-wise Wasserstein discrepancy from the HMC reference, while the lower plot shows the corresponding predictive distribution. (d) Average Wasserstein distance from the HMC reference as a function of the number of predictive components or samples. On this example, the multi-basin deep ensemble approaches the HMC reference more closely than the single-basin VI approximation, which is overconfident between data clusters. Figure adapted from Wilson and Izmailov. Schematic reproduction: the data, predictive bands and discrepancy curves are synthetic and only reproduce the qualitative behavior of the original panels.">
+  <Bdl19RegressionHmc />
+</Figure>
+
+This comparison also appears in image classification. Using full-batch Hamiltonian Monte Carlo (HMC) as a high-fidelity reference, Izmailov et al. found that deep ensembles were substantially closer to the HMC predictive distribution than mean-field VI and standard SGD, and were competitive with several stochastic-gradient MCMC methods (Figure 19.3).
+
+<Figure caption="Figure 19.3: Agreement with a high-fidelity HMC reference on image classification. The upper panel reports agreement on clean CIFAR-10, while the lower panel reports agreement on CIFAR-10-C averaged across corruption types and intensities. The bars compare standard SGD, mean-field VI (labeled “VI” in the plot), stochastic-gradient Langevin dynamics (SGLD), deep ensembles, stochastic-gradient HMC with a cyclical learning-rate schedule (SGHMC-CLR) and an HMC reference. For the HMC reference, one HMC chain is compared with the ensemble of two other chains. Higher agreement indicates greater similarity of the top-one predictions. Deep ensembles are substantially closer to HMC than VI and are competitive with SGLD, while SGHMC-CLR is closer to HMC in both panels. All methods use ResNet-20-FRN trained on CIFAR-10. Figure adapted from Izmailov et al. Redrawn; the bar heights are approximate values read off the original figure.">
+  <Bdl19HmcAgreement />
+</Figure>
+
+These results support a qualified revision of the usual description of deep ensembles. Rather than being dismissed as wholly unrelated to Bayesian inference, they can provide a useful finite-budget approximation to Bayesian predictive marginalization and, in some settings, a closer approximation to a high-fidelity Bayesian reference than several traditional single-basin methods. Their empirical success also motivates methods that combine coverage of multiple basins with explicit within-basin marginalization, as discussed in [Section 3](#3-developments-of-deep-ensembles).
+
+The Bayesian interpretation should not be read literally, however. Standard deep ensembles assign equal weight to independently trained members rather than weighting basins by posterior probability or evidence. They do not sample from $p(w \mid \mathcal{D})$ and ordinarily represent between-member variation without explicitly representing uncertainty within each basin. It is therefore more accurate to describe Equation (19.1) as an equally weighted finite predictive mixture that may approximate the BMA than as a posterior-weighted model average.
+
+It is also useful to distinguish Bayesian model averaging from model combination. As discussed by Minka, BMA represents uncertainty among hypotheses in a specified probabilistic model using posterior weights, whereas model combination may be used to construct a richer predictive family. The members of a deep ensemble use the same neural-network architecture, but their predictive mixture may nevertheless represent distributions that no single member represents. This distinction is another reason not to identify a standard deep ensemble directly with the exact BMA. The same caution applies to MC Dropout: its stochastic mask distribution defines an approximation rather than posterior sampling, so properties of the exact posterior cannot be assumed automatically.
+
+Several works analyze different aspects of deep ensembles as approximate Bayesian inference.
+
+A central lesson is that practical Bayesian inference in deep learning is almost always approximate, so comparisons should state both the target distribution and the computational budget. Exact posterior draws, when available and representative of the posterior, are valid Monte Carlo inputs to the BMA in Equation (19.4). The practical question is how efficiently a method obtains evaluations that represent the predictive variation relevant to that integral. Deep ensembles can outperform less expensive single-basin approximations at fixed computational budgets, but this empirical observation should not be interpreted as a claim that deep ensembles are superior to well-mixed exact posterior sampling.
+
+## 3. Developments of deep ensembles
+
+A single Laplace or mean-field variational approximation ([Chapter 13](/blog/gaussian-mean-field-variational-inference)) usually represents uncertainty within one local basin. Deep ensembles instead represent several basins using one optimized point in each. These complementary properties motivate mixture approximations that perform explicit marginalization within several basins.
+
+Stochastic Weight Averaging–Gaussian (SWAG) fits a local low-rank-plus-diagonal Gaussian approximation using an SGD trajectory. MultiSWAG repeats this construction in several independently discovered basins and combines the resulting Gaussian components into a mixture approximation.
+
+The approximate-inference competition reported by Wilson et al. received 337 submissions from 12 teams, and the highest-ranked methods all used multimodal ensemble constructions. The winning team used a uniformly weighted mixture of diagonal-Gaussian approximations, each fitted with improved Variational Online-Newton (iVON). One of the shared second-place teams replaced the standard optimization trajectories in MultiSWAG with stochastic-gradient Langevin dynamics (SGLD), while another used a computationally efficient sequential anchored-ensemble construction guided by MCMC.
+
+## 4. Are deep ensembles necessary?
+
+Deep ensembles perform well in an absolute sense, but training, storing and evaluating $J$ full models is expensive. SWAG generally uses one main training trajectory followed by a posterior-collection phase, although drawing $J$ predictive samples still requires $J$ model evaluations. Deep kernel learning (Chapter 24) requires one forward pass through its feature extractor for each test input, followed by GP prediction in the learned feature space. A standard deep ensemble instead requires approximately $J$ independent training runs and $J$ forward passes at prediction time.
+
+Several alternatives reduce the cost of obtaining diverse predictions, including BatchEnsemble, snapshot ensembles, fast geometric ensembling, rank-1 Bayesian neural networks and anchored ensembles. These methods make different trade-offs between diversity, memory, training cost and fidelity to a Bayesian predictive distribution.
+
+Any fair comparison should control for computational budget and for the property being evaluated. Retraining and averaging $J$ copies of one network may outperform one training run of that network, but a single larger model may use the same computation more effectively when predictive accuracy is the only objective.
+
+Predictive accuracy is not the only relevant objective, however. Deep-ensemble disagreement provides an operational measure of epistemic uncertainty that can support tasks such as exploration in Bayesian optimization. Simply increasing the size of a deterministic model does not, by itself, provide such uncertainty. An explicit uncertainty mechanism is required, such as an ensemble, a variational posterior ([Chapter 13](/blog/gaussian-mean-field-variational-inference)), a GP head (Chapter 24) or a Laplace approximation. Comparisons between ensembles and single models should therefore distinguish predictive accuracy from the quality and computational cost of uncertainty estimation.
+
+## 5. Summary
+
+Deep ensembles form an equally weighted predictive mixture from independently trained neural networks. They are not posterior samples or posterior-mass-weighted basin averages, but they can provide an effective finite-budget approximation to Bayesian predictive marginalization when their members represent functionally distinct solutions. Their combination of simplicity, parallelizability, predictive performance and useful disagreement estimates explains their practical success, while their linear training, storage and prediction costs motivate more efficient and more explicitly Bayesian multi-basin approximations.

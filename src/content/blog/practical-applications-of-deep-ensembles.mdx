@@ -1,0 +1,355 @@
+---
+title: "Practical Applications of Deep Ensembles"
+description: "Deep ensembles in practice: mixture-of-experts language models, RLHF reward models, model-based RL, weather forecasting, medicine, driving and patents."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - deep ensembles
+  - mixture of experts
+  - reinforcement learning
+series: bayesian-deep-learning
+seriesOrder: 26
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl21MixtureOfExperts from '../../components/diagrams/Bdl21MixtureOfExperts.astro';
+
+Deep ensembles are related to Bayesian model averaging: under certain conditions an ensemble of independently trained networks can approximate the posterior predictive distribution and thus capture epistemic uncertainty, while also demonstrating robust performance across classification, regression, and calibration benchmarks. By training multiple neural networks independently and aggregating their predictions, deep ensembles approximate Bayesian model averaging, a long-standing principle for capturing epistemic uncertainty and improving generalization. Unlike many explicitly Bayesian neural network approaches, they achieve these benefits without requiring complex posterior inference ([Chapter 2](/blog/stochastic-gradient-mcmc)) or specialized training procedures ([Chapter 15](/blog/natural-gradient-variational-inference)), making them both conceptually simple and computationally tractable. This chapter examines how these properties translate to applied settings, highlighting concrete examples where deep ensembles enhance model reliability, interpretability, and decision-making under uncertainty. It also discusses how their strengths and limitations inform the design of scalable, uncertainty-aware systems.
+
+## 1. Introduction
+
+Deep ensembles have emerged as one of the most widely used techniques for uncertainty quantification in modern deep learning practice. The core idea is deceptively simple: independently train multiple neural networks with different random initializations and stochastic training paths, then aggregate their predictions at test time, typically via averaging. This approach is strongly motivated by the Bayesian paradigm, which advocates for posterior distributions instead of point estimates.
+
+This simplicity, combined with strong empirical performance, has made deep ensembles an appealing off-the-shelf tool for practitioners. They routinely deliver improved predictive accuracy and well-calibrated uncertainty estimates across a variety of domains, including computer vision, natural language processing, and forecasting tasks. Several Bayesian deep learning libraries readily provide support for deep ensembles (Chapter 47).
+
+Deep ensembles have been used in practical applications in a variety of settings. This section explores a non exhaustive list of practical applications of deep ensembles. Specifically, it covers applications in LLMs, weather forecasting, healthcare and reinforcement learning. Some of these applications (like in LLMs) can be surprising to the reader. Others, such as healthcare seem more intuitive given the high stakes sometimes involved in medical decisions. Given the high computational cost of deep ensembles, this must be offset by significant performance gains to justify their usage. In general, several common themes can be discerned making deep ensembles useful in practice:
+
+- Scarcity of data, here deep ensembles can be used to provide meaningful uncertainty estimates that can be used to obtain informative data in an online fashion. Ensembles can also be used to learn well-performing models that avoid overfitting.
+- Large data diversity, here ensembles can be used to create specialized deep neural networks for subdivisions of the data. At test time the ensemble members can be recombined in various ways, often by first identifying the data point subdivision and applying the corresponding specialized ensemble member.
+- Very high cost of predictive mistakes. Ensembles can provide well calibrated uncertainty estimates that can be used to avoid costly mistakes made by deep learning algorithms. Ensembles also tend to perform well for the task of selective classification, where the model can abstain from making a prediction when it is not confident enough.
+
+<Figure caption="Figure 21.1: Mixture of Experts Layer. Each input vector is assigned to 2 of the 8 experts by a router. The layer's output is the weighted sum of the outputs of the two selected experts. In Mixtral, an expert is a standard feedforward block as in a vanilla transformer architecture. Image and description from Jiang et al. Redrawn as a schematic reproduction.">
+  <Bdl21MixtureOfExperts />
+</Figure>
+
+Ensembles have also been proposed and evaluated without explicit reference to Bayesian inference. This relaxes the Bayesian formalism and, as will be seen, allows for practical methods, related to but separate from strict theory. Also, practical applications often introduce strict computational or other requirements. Thus, researchers might sometimes benefit from taking the above themes into account, when developing new ensembling methods.
+
+## 2. Applications to large language models
+
+The discussion starts with practical applications of deep ensembles for Large Language Models (LLMs). At the time of writing of this text Large Language Models are the fastest growing field of deep neural networks. Ensembles are used in variety of sometimes overlooked ways in modern Large Language Models. They underpin several crucial parts of models in production providing significant efficiency gains in inference, easing generalization to new tasks and making finetuning more stable. The next sections explore these different applications in detail.
+
+### 2.1 Mixture-of-experts
+
+A popular variant of deep ensembles widely used in modern LLMs are Mixture of Experts models. In vanilla Deep Ensembles inference is performed on all ensemble members and the results are then averaged. Mixture of Experts models use a learnable router which selects a subset of ensemble members to be activated for every input. Conceptually, MoE implements a form of conditional or dynamic ensembling: the router composes a subset of experts per input, producing routing diversity that differs from static ensemble averaging. The result is a highly expressive model (given the high number of total parameters) that is also fast at inference time (due to the low number of activated parameters). Well know examples of Mixture of Experts models include Mixtral-of-Experts and DeepSeekR1.
+
+A brief overview of the Mixtral Mixture of Experts layer is first reproduced (Figure 21.1). Given an input $x$, a router $G(x)$ and expert layers $E_i(x)$ with $i \in \{0, n-1\}$, the output of the MoE module for a given input $x$ is determined by the weighted sum of the outputs of the expert networks, where the weights are given by the gating network's output:
+
+$$
+\sum_{i=0}^{n-1} G(x)_i \cdot E_i(x). \tag{21.1}
+$$
+
+The crucial observation in this formulation is that, if the gating vector is sparse, one can avoid computing the outputs of experts whose gates are zero. This results in a model that is very flexible while being efficient at test time. The authors implemented the gating module by taking the softmax over the Top-K logits of a linear layer. Notably, more complicated methods have been explored in the literature. Concretely, the authors implement
+
+$$
+G(x) := \operatorname{Softmax}(\operatorname{Top}_K(x \cdot W_g)) \tag{21.2}
+$$
+
+where $(\operatorname{Top}_K(\ell))_i := \ell_i$ if $\ell_i$ is among the $\operatorname{Top}_K$ coordinates of logits $\ell \in \mathbb{R}^n$ and $(\operatorname{Top}_K(\ell))_i := -\infty$ otherwise. One can then modulate the amount of compute used to process each token, by appropriately choosing the value of $K$ the number of experts used per token. In practice, the total number of experts $n$ is kept much larger than the number of active experts $K$. For Mixtral the authors used the SwiGLU architecture as the expert function $E_i(x)$. The number of total experts is $n = 8$ while the number of active experts is $k = 2$. Taking this all together, the output $y$ for an input token $x$ is computed as:
+
+$$
+y = \sum_{i=0}^{n-1} \operatorname{Softmax}(\operatorname{Top}_2(x \cdot W_g))_i \cdot \operatorname{SwiGLU}_i(x). \tag{21.3}
+$$
+
+At training time different experts specialize on different parts of the data distribution resulting in a network that can model complicated data distributions. At test time, only experts relevant to the test sample are activated significantly reducing the computational load. In the context of the Mixtral model (and more generally LLM models), since the experts are applied independently on different input tokens, the Mixture of Experts module is used to replace fully connected layers of the architecture. The following table of results is reproduced.
+
+| Model | Active Params | MMLU | HellaS |
+| --- | :-: | :-: | :-: |
+| LLaMA 2 7B | 7B | 44.4% | 77.1% |
+| LLaMA 2 13B | 13B | 55.6% | 80.7% |
+| LLaMA 1 33B | 33B | 56.8% | 83.7% |
+| LLaMA 2 70B | 70B | 69.9% | 85.4% |
+| Mistral 7B | 7B | 62.5% | 81.0% |
+| Mixtral 8x7B | 13B | 70.6% | 84.4% |
+
+**Table 21.1:** Comparison of Mixtral and LLaMA models on MMLU and HellaSwag benchmarks Jiang et al.
+
+Observe that the Mixtral model is competitive with the LLaMA 2 70B model while using 5× fewer active parameters during inference.
+
+Next, an improved version of the mixture of experts architecture implemnented in the DeepSeekMoE model is described. The crucial innovation is that the DeepSeekMoE uses finer-grained experts and isolates some experts as shared ones. Let $u_t$ denote the FFN input of the $t_{th}$ token. The authors compute the FFN output $h'_t$ as follows:
+
+$$
+h'_t = u_t + \sum_{i=1}^{N_s} \mathrm{FFN}_i^{(s)}(u_t) + \sum_{i=1}^{N_r} g_{i,t} \mathrm{FFN}_i^{(r)}(u_t) \tag{21.4}
+$$
+
+$$
+g_{i,t} = \frac{g'_{i,t}}{\sum_{j=1}^{N_r} g'_{i,t}} \tag{21.5}
+$$
+
+$$
+g'_{i,t} = \begin{cases} s_{i,t}, & s_{i,t} \in \operatorname{Top}_k(\{s_{j,t} | 1 \le j \le N_r\}, K_r) \\ 0, & \text{otherwise} \end{cases} \tag{21.6}
+$$
+
+$$
+s_{i,t} = \operatorname{Sigmoid}(u_t^T e_i) \tag{21.7}
+$$
+
+where $N_s$ and $N_r$ denote the numbers of shared experts and routed experts, respectively; $\mathrm{FFN}_i^{(s)}(\cdot)$ and $\mathrm{FFN}_i^{(r)}(\cdot)$ denote the $i$-th shared expert and the $i$-th routed expert, respectively; $K_r$ denotes the number of activated routed experts; $g_{i,t}$ is the gating value for the $i$-th expert; $s_{i,t}$ is the token-to-expert affinity; $e_i$ is the centroid vector of the $i$-th routed expert; and $\operatorname{Top}_k(\cdot, K)$ denotes the set comprising $K$ highest scores among the affinity scores calculated for the $t$-th token and all routed experts.
+
+Importantly, routing diversity should be distinguished from Bayesian (posterior) or model uncertainty. Routing diversity arises from conditional composition (which experts are activated for a given input) and increases representational flexibility and conditional behavior. Posterior uncertainty, by contrast, refers to uncertainty over model parameters and predictions (epistemic uncertainty) and is typically estimated via Bayesian model averaging or independent deep ensembles. Router activations therefore do not by themselves provide calibrated epistemic uncertainty; when principled uncertainty estimates are required, routing-based models are best combined with ensemble or Bayesian techniques.
+
+Another important innovation is the "Auxiliary-Loss-Free Load Balancing". This is designed to avoid routing collapse while retaining model performance. Specifically the authors introduce a bias term $b_i$ for each expert and add it to the corresponding affinity scores $s_{i,t}$ to determine the top-K routing:
+
+$$
+g'_{i,t} = \begin{cases} s_{i,t}, & s_{i,t} + b_i \in \operatorname{Top}_k(\{s_{j,t} + b_j | 1 \le j \le N_r\}, K_r) \\ 0, & \text{otherwise.} \end{cases} \tag{21.8}
+$$
+
+| Benchmark (Metric) | | DeepSeek-V2 | Qwen2.5 | LLaMA-3.1 | DeepSeek-V3 |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| # Shots | | 72B | 236B | 72B | 671B |
+| # Activated Params | | 21B | 72B | 405B | 37B |
+| # Total Params | | 236B | 72B | 405B | 671B |
+| Pile-test (BPB) | | 0.606 | 0.638 | 0.542 | 0.548 |
+| BBH (EM) | 3-shot | 78.8 | 79.8 | 82.9 | 87.5 |
+| MMLU (EM) | 5-shot | 78.4 | 85.0 | 84.4 | 87.1 |
+| MMLU-Redux (EM) | 5-shot | 75.6 | 83.2 | 81.3 | 86.2 |
+| MMLU-Pro (EM) | 5-shot | 51.4 | 58.3 | 52.8 | 64.4 |
+| DROP (F1) | 3-shot | 80.4 | 80.6 | 86.0 | 89.0 |
+| ARC-Easy (EM) | 25-shot | 97.6 | 98.4 | 98.4 | 98.9 |
+| ARC-Challenge (EM) | 25-shot | 92.2 | 94.5 | 95.3 | 95.3 |
+| HellaSwag (EM) | 10-shot | 87.1 | 84.8 | 89.2 | 88.9 |
+| PIQA (EM) | 0-shot | 83.9 | 82.6 | 85.9 | 84.7 |
+| WinoGrande (EM) | 5-shot | 86.3 | 82.3 | 85.2 | 84.9 |
+| RACE-Middle (EM) | 5-shot | 73.1 | 68.1 | 74.2 | 67.1 |
+| RACE-High (EM) | 5-shot | 52.6 | 50.3 | 56.8 | 51.3 |
+| TriviaQA (EM) | 5-shot | 80.0 | 71.9 | 82.7 | 82.9 |
+| NaturalQuestions (EM) | 5-shot | 38.6 | 33.2 | 41.5 | 40.0 |
+| AGIEval (EM) | 0-shot | 57.5 | 75.8 | 60.6 | 79.6 |
+
+**Table 21.2:** Comparison of English benchmark performance for DeepSeek-V2, Qwen2.5, LLaMA-3.1, and DeepSeek-V3, reproduced from the original paper.
+
+Note that the bias term is only used for routing. The gating value, which will be multiplied with the FFN output, is still derived from the original affinity score $s_{i,t}$. During training, the bias is tuned dynamically.
+
+The authors further propose a "Sequence-Wise Auxiliary Loss". This loss is aimed at preventing extreme imbalance within any single sequence. Concretely the authors implement the following sequence-wise loss:
+
+$$
+\ell_{\mathrm{Bal}} = \alpha \sum_{i=1}^{N_r} f_i P_i, \tag{21.9}
+$$
+
+where the balance factor $\alpha$ is a hyper-parameter, which is assigned a small value, and where
+
+$$
+f_i = \frac{N_r}{K_r T} \sum_{t=1}^{T} \mathbb{1}(\{s_{i,t} \in \operatorname{Top}_k(\{s_{j,t} \mid 1 \le j \le N_r\}, K_r)\}) \tag{21.10}
+$$
+
+and
+
+$$
+P_i = \frac{1}{T} \sum_{t=1}^{T} s'_{i,t}, \quad \text{with} \quad s'_{i,t} = \frac{s_{i,t}}{\sum_{j=1}^{N_r} s_{j,t}}. \tag{21.11}
+$$
+
+Table 21.2 shows that DeepSeek-V3 matches the performance of, or outperforms, the benchmark models while using significantly less activated parameters.
+
+## 3. Applications to reinforcement learning
+
+### 3.1 Reinforcement learning from human feedback
+
+The most known component of RL algorithms that is implemented with ensembles is Reinforcement Learning from Human Feedback (RLHF). RLHF is motivated by the difficulty in creating training signals for RL tasks such as open-ended text generation. To understand the difficulty one can compare with the case of image classification. For the task of image classification one can create a labeling of the data set by first assigning an element of the set of natural numbers $\mathbb{N}$ to each class of the data set, and train the network to predict this number for each labeled instance. For open-ended text it is much more difficult to assign an absolute number to the text quality as text quality has multiple degrees of freedom and includes subjective components. On the opposite, it is much easier to compare two texts and rank one as better than the other. RLHF uses such a ranking by human evaluators to learn a function (the reward function) that assigns consistent rankings to open-ended text. This function is then used to improve a policy given a state.
+
+| | walker | hopper | swimmer | cheetah | ant | reacher | d-pendulum | pendulum |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Ensemble | 5000 | 5000 | 175 | 4500 | −200 | −3 | 7500 | 1250 |
+| No ensemble | 3800 | 3900 | 60 | 3100 | −300 | −4 | 2500 | 1250 |
+
+**Table 21.3:** Final reward of agents trained with RLHF on MuJoCo tasks before and after removing ensembling. Observe that ensembling results in significant improvements in final reward. Christiano et al.
+
+Let $\tau^A = (s, a^A)$ and $\tau^B = (s, a^B)$ be two (state, action) pairs and a reward model parametrized by $\phi$. Human labelers provide pairwise preferences, such as:
+
+$$
+\tau^A \succ \tau^B \quad \text{or} \quad \tau^B \succ \tau^A. \tag{21.12}
+$$
+
+The learned reward function $\hat{r}_\phi$ produces a scalar reward for pair:
+
+$$
+R(\tau) = \hat{r}_\phi(s, a). \tag{21.13}
+$$
+
+The reward model assigns a probability that the question-answer pair $\tau^A$ is preferred over $\tau^B$ using a softmax:
+
+$$
+P[\tau^A \succ \tau^B] = \frac{\exp(R(\tau^A))}{\exp(R(\tau^A)) + \exp(R(\tau^B))}. \tag{21.14}
+$$
+
+Given a data set of human preferences, the reward model is trained to minimize the following cross-entropy loss:
+
+$$
+\ell_\phi = -\sum_{(\tau^A, \tau^B, \mu)} \Big[ \mu \log P[\tau^A \succ \tau^B] + (1 - \mu) \log P[\tau^B \succ \tau^A] \Big], \tag{21.15}
+$$
+
+where $\mu = 1$ (resp. $\mu = 0$) if the human preferred $\tau^A$ (resp. $\tau^B$), and $\mu = 0.5$ if the preference was a tie. The learned reward model is then used in standard reinforcement learning (e.g., PPO) to train a policy $\pi_\theta$:
+
+$$
+\max_\theta \; \mathbb{E}_{q \sim \mathcal{D}, q \sim \pi_\theta(q)} \left[ \hat{r}_\phi(q, a) \right] \tag{21.16}
+$$
+
+where $\mathcal{D}$ is the query distribution.
+
+Labeling huge amounts of data is a significant and expensive bottleneck for training RL models. It is thus crucial to choose labeling examples judiciously. For this reason instead of fitting a single reward model to different preference triplets, the original RLHF paper proposed fitting an ensemble of reward models. These can then be used to estimate a measure of uncertainty about triplets, and choose for labeling only the ones with high uncertainty. Concretely, the algorithm is as follows:
+
+- Fit an ensemble of predictors, each trained on $|D|$ triples sampled from $D$ with replacement. The estimate $r$ is defined by independently normalizing each of these predictors and then averaging the results.
+- A fraction of $1/e$ of the data is held out to be used as a validation set for each predictor. Use $\ell_2$ regularization and adjust the regularization coefficient to keep the validation loss between 1.1 and 1.5 times the training loss. In some domains dropout is also applied for regularization.
+- Instead of applying a softmax directly, assume there is a 10% chance that the human responds uniformly at random. This adjustment is made because human raters have a constant probability of making an error, which does not decay to 0 as the difference in reward difference becomes extreme.
+- Decide how to query preferences based on an approximation to the uncertainty in the reward function estimator: sample a large number of pairs of trajectory segments of length k, use each reward predictor in the ensemble to predict which segment will be preferred from each pair, and then select those trajectories for which the predictions have the highest variance across ensemble members.
+
+Finally, note that RLHF is a crucial component of finetuning modern LLMs to make them more safe and reliable.
+
+### 3.2 Model ensemble in model-based RL
+
+In the literature there exist various other applications of deep ensembles in RL, these introduce ensembles both for model-based and model-free RL methods. More detail is given on Kurutach et al., Yu et al. which are model-based RL methods and use ensembles to capture the world model uncertainty.
+
+Simplified versions of the algorithms are presented below. Yu et al. uses multiple Gaussians with learned means and covariances to model the relationship between future states and rewards. It implements the Model-based Offline Policy Optimization (MOPO) algorithm 23 for model-based RL. Similarly Kurutach et al. uses multiple world models to generate synthetic samples for learning the policy. It implements the Model Ensemble Trust Region Policy Optimization algorithm (ME-TRPO) algorithm 24.
+
+In more detail, MOPO operates in the offline RL regime. The approach begins by training an ensemble of dynamics models (each model, for example, learns a Gaussian distribution over next states (mean and covariance) given current state and action). The ensemble variance thus provides a quantitative measure of model uncertainty. When using the learned models to simulate transitions for policy learning, MOPO subtracts a penalty proportional to this uncertainty from the simulated rewards. This reward-penalized simulated MDP is shown to induce a lower bound on performance in the true environment, thereby guarding against model exploitation and distributional shift. Empirically, MOPO surpasses prior offline RL methods on standard benchmarks. Meanwhile, ME-TRPO targets the standard online model-based RL setup, and likewise employs an ensemble of learned world models to account for areas of high model error. ME-TRPO generates synthetic rollouts from the ensemble, updates the policy via a trust-region method (ensuring stable updates), and uses the ensemble disagreement to filter or penalize untrustworthy model trajectories. By doing so, ME-TRPO reduces real-environment interactions while maintaining policy robustness. Both methods highlight how using ensembles of world-models (and using their predictive variance or disagreement) enables uncertainty-aware policy optimization in model-based RL.
+
+**Algorithm 23** MOPO instantiation with regularized probabilistic dynamics and ensemble uncertainty
+
+```text
+Input: Reward penalty coefficient λ, rollout horizon h, rollout batch size b
+Output: Trained policy π
+// Train ensemble dynamics model
+Train on batch data 𝒟_env an ensemble of N probabilistic dynamics
+  {Tᵢᵇ(s′, r | s, a) = 𝒩(μᵢ(s, a), Σᵢ(s, a))}ᵢ₌₁ᴺ
+Initialize policy π and empty replay buffer 𝒟_model ← ∅
+for epoch = 1, 2, … do
+    // Outer iteration of MBPO
+    for = 1, 2, …, b do
+        Sample state s₁ from 𝒟_env for rollout initialization
+        for j = 1, 2, …, h do
+            Sample action aⱼ ∼ π(sⱼ)
+            Randomly pick dynamics Tᵇ from {Tᵢᵇ}ᵢ₌₁ᴺ and sample (sⱼ₊₁, rⱼ) ∼ Tᵇ(sⱼ, aⱼ)
+            Compute r̃ⱼ = rⱼ − λ max_{i=1,…,N} ‖Σᵢ(sⱼ, aⱼ)‖_F
+            Add (sⱼ, aⱼ, r̃ⱼ, sⱼ₊₁) to 𝒟_model
+    Draw samples from 𝒟_env ∪ 𝒟_model and update π
+```
+
+**Algorithm 24** Model Ensemble Trust Region Policy Optimization (ME-TRPO)
+
+```text
+Input: Number of world models K
+Output: Optimized policy π_θ
+Initialize policy π_θ and world models {f̂_ϕᵢ}ᵢ₌₁ᴷ; set data set 𝒟 ← ∅
+repeat
+    Collect samples from real system f using π_θ and add them to 𝒟
+    Train all models on 𝒟
+    repeat
+        Collect fictitious samples from {f̂_ϕᵢ}ᵢ₌₁ᴷ using π_θ
+        Update π_θ with TRPO on fictitious samples
+        Estimate performances η̂(θ; ϕᵢ) for i = 1, …, K
+    until performances stop improving
+until π_θ performs well in real environment f
+```
+
+While the way in which ensembles are constructed differs significanty, it can be seen that in both cases ensembles of models are used to maintain the world-model uncertainty and regularize the learning process. This in turn significantly improves the sample complexity and final rewards. The reward results with and without ensembles for MOPO and MBPO for various Mujoco environments are also reproduced here. Observe that ensembles improve both MOPO as well as the MBPO baseline.
+
+| Method | halfcheetah-mixed | walker2d-mixed | halfcheetah-jump | ant-angle |
+| --- | :-: | :-: | :-: | :-: |
+| MOPO w/ ens. | 6448.7 ± 115 | 1923.6 ± 752 | 3577.3 ± 461 | 2256.0 ± 288 |
+| MOPO w/o ens. | 6405.8 ± 35 | 1916.4 ± 611 | 4016.6 ± 144 | 2530.9 ± 137 |
+| MBPO w/ ens. | 5598.4 ± 1285 | 1021.8 ± 586 | 2971.4 ± 1262 | 13.6 ± 65 |
+| MBPO w/o ens. | 2247.2 ± 581 | 500.3 ± 34 | −68.7 ± 1936 | −720.1 ± 728 |
+
+**Table 21.4:** Performance comparison of different methods on various tasks MOPO and MBPO reproduced from the original papers. Observe that ensembles improve both MOPO as well as the MBPO baseline.
+
+## 4. Applications to weather forecasting
+
+Another critical application of deep ensembles is in weather models. Ensemble methods provide important uncertainty estimates for weather models which can help in mitigating the effects of extreme weather conditions. Example works include Azizzadenesheli et al., Chen et al., Pathak et al., Weyn et al. It has been long established that ensembles of traditional numerical methods, using different initial conditions, result in improved weather estimates. The key innovation of most deep learning papers is in the speed of computation for each ensemble member. Deep neural networks can significantly speed up the solution of the Partial Differential Equations needed to predict weather patterns. This in turn allows to use significantly larger ensembles than what would have otherwise been possible. For example the speed of FourCastNet enables the creation of rapid and inexpensive large-ensemble forecasts with thousands of ensemble-members for improving probabilistic forecasting, and is orders of magnitude faster than traditional approaches.
+
+## 5. Applications to medical data
+
+There is a large number of works that use ensembles for medical applications. These range from using ensembles for reliable predictions in clinical time series to reliable detection of Alzheimer's disease. More detail is given on Wickstrøm et al. Since this work operates on time-series data, it serves to highlight the diverse settings in which deep ensembles improve test metrics. Here the authors explore the class activation mapping (CAM) method, for explainable deep learning prediction. CAM was originally developed for image data, but has also been shown to be applicable for temporal data such as clinical time series. By using DNNs with a particular processing structure, CAM can assign a score to each time step in an input that indicates how important that time step is for a given prediction. Example cases of time-series data are mortality prediction, detection of infections, and patient treatment trajectory prediction.
+
+Let $w_{c,k}$ denote the weight connecting the $k$th filter in the last convolutional block with the neuron corresponding to class $c$ in the output layer, and $z_{k,t}$ denote the activation at time step $t$ produced by the $k$th filter in the last convolutional block of the FCN. Then, the input to the final softmax function in the output layer can be expressed as:
+
+$$
+g_c = \sum_{k=1}^{K} w_{c,k} \sum_{t=1}^{T} z_{k,t} = \sum_{t=1}^{T} r_{c,t}, \tag{21.17}
+$$
+
+where $K$ is the number of filters in the last convolutional block, $T$ is the length of the time series, and $r_{c,t}$ denotes the relevance score of time step $t$ for class $c$:
+
+$$
+r_{c,t} = \sum_{k=1}^{K} w_{c,k} z_{k,t}. \tag{21.18}
+$$
+
+Removing all negative relevance scores can be achieved by modifying Equation (21.18) as follows:
+
+$$
+r_{c,t} = \max\left(0, \sum_{k=1}^{K} w_{c,k} z_{k,t}\right). \tag{21.19}
+$$
+
+To calculate the ensemble mean and standard deviation of the relevance scores, let each CNN be parametrized by a set of parameters $\{\theta_1, \ldots, \theta_M\}$, where $M$ is the number of models in the ensemble. Then, when considering the positive relevance scores from Equation (21.19), the mean relevance across the ensemble is defined as:
+
+$$
+\mu_r = \frac{1}{M} \sum_{m=1}^{M} r_{\theta_m}, \tag{21.20}
+$$
+
+and the standard deviation across the ensemble is defined as:
+
+$$
+\sigma_r = \sqrt{\frac{1}{M-1} \sum_{m=1}^{M} (r_{\theta_m} - \mu_r)^2}. \tag{21.21}
+$$
+
+In all experiments the authors scale the relevance scores between 0 and 1 using the following equation:
+
+$$
+r_c \leftarrow \frac{r_c - \min(r_c)}{\max(r_c) - \min(r_c)}. \tag{21.22}
+$$
+
+If the standard deviation is above some threshold, the relevance scores are set to zero. This can be formulated as:
+
+$$
+\tilde{\mu}_{r_t} = \begin{cases} \mu_{r_t}, & \text{if } \sigma_{r_t} < \varepsilon, \\ 0, & \text{else,} \end{cases} \tag{21.23}
+$$
+
+where the threshold $\varepsilon$ is chosen to fit the particular data.
+
+This approach results in significant improvement in explainability over the single network. To calculate how accurate a model is at locating relevant time steps, the authors compare the $k$ most relevant time steps for a prediction with the known most relevant time steps. For a given sample $i$, let
+
+$$
+Y_i = \{y_1^{(i)}, \ldots, y_{N_r}^{(i)}\}, \tag{21.24}
+$$
+
+denote the set of relevant points, where $N_r$ is the number of known relevant time steps in the time series, and let $R_i(k)$ denote the $k$ most relevant time steps for the prediction of the model.
+
+Perfect relevance accuracy is achieved when all elements of $Y_i$ are contained in $R_i(k)$. For a given sample $i$, relevance accuracy can be calculated as:
+
+$$
+\mathrm{RelevanceAccuracy}_i(k) = \frac{|R_i(k) \cap Y_i|}{|Y_i|}. \tag{21.25}
+$$
+
+For a given sample $i$, computing the relevance consistency across $M$ models can then be achieved by:
+
+$$
+\mathrm{RelevanceConsistency}_i(k) = \frac{1}{M} \sum_{m,n=1}^{M} \frac{\left|R_i^{(m)}(k) \cap R_i^{(n)}(k)\right|}{k}. \tag{21.26}
+$$
+
+Some results on the EGG200 data set, which consists of EGG time-series that trace the electrical activity recorded during a single heartbeat, are reproduced here. The task is to discriminate between normal heartbeats and those exhibiting signs of myocardial infarction (heart attack). Table 21.5 shows the relevance consistency of 10 single and 10 ensemble models on both data sets.
+
+Observe that ensembles significantly improve the relevance consistency of the relevance scores.
+
+| Top $k$ | Single | Ensemble |
+| :-: | :-: | :-: |
+| $k = 5$ | 0.57 ± 0.15 | 0.82 ± 0.07 |
+| $k = 7$ | 0.60 ± 0.15 | 0.84 ± 0.07 |
+| $k = 10$ | 0.63 ± 0.14 | 0.85 ± 0.06 |
+| $k = 15$ | 0.67 ± 0.13 | 0.88 ± 0.05 |
+
+**Table 21.5:** Performance comparison of Single vs. Ensemble models on ECG200 data set. The numbers indicate the statistical significance at a significance level of 0.01.
+
+## 6. Applications to autonomous driving
+
+Ensemble learning has become an important strategy for improving the reliability, robustness, and uncertainty estimation of autonomous driving systems, particularly for trajectory forecasting in safety-critical environments. By combining the predictions of multiple models, ensembles reduce overconfidence, improve generalization, and provide more accurate representations of the multimodal nature of future vehicle and pedestrian behaviors. Traditional deep ensembles, however, incur substantial computational and memory costs, limiting their deployment in real-time autonomous driving applications. Recent research addresses this challenge through efficient ensemble architectures, such as lightweight transformer ensembles and packed or grouped subnetworks, which retain the predictive diversity and uncertainty calibration of conventional ensembles while significantly reducing computational overhead. These approaches enable autonomous vehicles to generate more reliable long-term trajectory predictions, better quantify uncertainty, and make safer planning and decision-making under complex and ambiguous traffic scenarios.
+
+## 7. Patents on deep ensembles
+
+Patents on deep ensembles demonstrate the growing relevance of ensemble-based deep learning techniques across diverse real-world applications. For example, one patent illustrates how ensemble-based approaches can improve decision-making in autonomous vehicles by incorporating uncertainty estimates alongside object detection outputs, enabling safer and more reliable predictions. Similarly, another patent demonstrates the use of ensemble deep learning models for enhancing digital experiences by combining multiple machine learning estimators with neural networks to generate improved recommendations. Furthermore, a third patent highlights how ensemble machine learning techniques can improve future event detection by combining models with different prediction characteristics to balance accuracy and timeliness. These patents collectively demonstrate the practical relevance of deep ensembles in improving robustness, uncertainty estimation, adaptability, and predictive performance across complex real-world applications.
