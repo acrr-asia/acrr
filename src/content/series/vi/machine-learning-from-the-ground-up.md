@@ -9,10 +9,6 @@ objectives:
   - "Xây dựng hệ thống gợi ý dựa trên nội dung và lọc cộng tác (collaborative filtering), và giảm chiều dữ liệu bằng phân tích giá trị suy biến, phân tích thành phần chính và phân tích biệt thức tuyến tính."
   - "Nhận biết tập lồi, hàm lồi và bài toán tối ưu lồi, suy ra bài toán đối ngẫu Lagrange và điều kiện Karush-Kuhn-Tucker, và áp dụng chúng cho máy vector hỗ trợ lề cứng, lề mềm, hạt nhân và đa lớp."
 plannedEntries:
-  - title: "Các khái niệm cơ bản của học máy"
-  - title: "Xây dựng đặc trưng"
-  - title: "Hồi quy tuyến tính"
-  - title: "Quá khớp và cách tránh"
   - title: "K lân cận"
   - title: "Phân cụm K-means"
   - title: "Bộ phân loại naive Bayes"
