@@ -1,0 +1,147 @@
+---
+title: "MCMC gradient ngẫu nhiên"
+description: "MCMC gradient ngẫu nhiên cho học sâu: SGLD, SG-HMC, lịch kích thước bước chu kỳ và Entropy-MCMC để lấy mẫu từ các cực tiểu cục bộ đa dạng và rộng."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - markov chain monte carlo
+  - stochastic gradients
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 4
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl02CyclicalSchedule from '../../../components/diagrams/Bdl02CyclicalSchedule.astro';
+import Bdl02EntropyMcmc from '../../../components/diagrams/Bdl02EntropyMcmc.astro';
+
+Các mô hình học sâu sử dụng rộng rãi gradient ngẫu nhiên (stochastic gradient), tức là gradient tính trên các lô nhỏ (mini-batch), để giảm yêu cầu bộ nhớ khi huấn luyện mô hình. Với các giả định phù hợp, gradient ngẫu nhiên tính từ từng mẫu riêng lẻ hoặc từ các lô nhỏ có thể thay cho gradient trên toàn bộ dữ liệu (full-batch) mà vẫn giữ được các bảo đảm hội tụ hầu chắc chắn (almost-sure convergence). Chương này giới thiệu các phương pháp MCMC gradient ngẫu nhiên (stochastic gradient MCMC, SG-MCMC), trong đó gradient ngẫu nhiên giúp MCMC trở nên phù hợp với các mô hình học sâu hiện đại.
+
+## 1. Giới thiệu
+
+Các thuật toán Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC) tiêu chuẩn là những bộ lấy mẫu chính xác tiệm cận trong các điều kiện phù hợp; [Chương 1](/vi/blog/introduction-to-sampling) giới thiệu MCMC và Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC). Với các phương pháp dựa trên động lực học Langevin (Langevin dynamics), một lịch kích thước bước (step-size schedule) giảm dần thích hợp bảo đảm sự hội tụ tiệm cận về phân phối mục tiêu. Tuy nhiên, việc dùng toàn bộ tập dữ liệu để tính mỗi lần cập nhật khiến MCMC trên toàn bộ dữ liệu trở nên không khả thi với các mô hình học sâu, vốn thường có hàng chục triệu tham số. Lấy cảm hứng từ hạ gradient ngẫu nhiên (stochastic gradient descent, SGD), MCMC gradient ngẫu nhiên dùng gradient ngẫu nhiên để xấp xỉ các bước cập nhật MCMC trên toàn bộ dữ liệu. Những ý tưởng tương tự cũng đã được chuyển sang các thuật toán Metropolis–Hastings (MH) trên lô nhỏ. Tuy nhiên, MH trên lô nhỏ thường dựa vào những giả định mạnh, chẳng hạn log-hàm hợp lý bị chặn hoặc gradient bị chặn, những điều không được bảo đảm đối với các mô hình học sâu. SG-MCMC giải quyết các vấn đề thực tế này với ít giả định hơn và với yêu cầu bộ nhớ thấp hơn đáng kể, nhờ đó thu hẹp khoảng cách giữa MCMC và mạng nơ-ron Bayes (Bayesian neural network, BNN).
+
+## 2. Các thuật toán SG-MCMC kinh điển
+
+Mục này giới thiệu hai ví dụ cụ thể của các thuật toán SG-MCMC được dùng rộng rãi cho các mô hình học sâu.
+
+### 2.1 Ký hiệu
+
+Gọi $\theta$ là các tham số của một mô hình học sâu, và gọi $\mathcal{S} = \{\theta_s\}_{s=1}^{M}$ là tập mẫu thu được trong quá trình MCMC. Do giới hạn bộ nhớ, chỉ có thể thu thập một số hữu hạn mẫu để mô tả phân phối hậu nghiệm (posterior distribution):
+
+$$
+p(\theta \mid \mathcal{D}) \approx \frac{1}{M} \sum_{s=1}^{M} \delta(\theta - \theta_s), \tag{2.1}
+$$
+
+trong đó $\delta(\cdot)$ là hàm delta Dirac (còn gọi là xung đơn vị). Khi suy luận, tập mẫu được dùng cho phép lấy trung bình mô hình Bayes (Bayesian model averaging, BMA), trong đó xác suất dự đoán của tất cả các mẫu đã thu thập đều đóng góp vào dự đoán cuối cùng:
+
+$$
+\hat{y} = \operatorname*{arg\,max}_{y \in \mathcal{Y}} \mathbb{E}_{\theta \sim p(\theta \mid \mathcal{D})}[p(y \mid x, \theta)] \approx \operatorname*{arg\,max}_{y \in \mathcal{Y}} \frac{1}{M} \sum_{s=1}^{M} p(y \mid x, \theta_s). \tag{2.2}
+$$
+
+Mục tiêu của mỗi thuật toán SG-MCMC là lấy mẫu từ phân phối hậu nghiệm và thu thập một tập mẫu như vậy để dựng lại một phân phối hậu nghiệm xấp xỉ.
+
+### 2.2 Động lực học Langevin gradient ngẫu nhiên
+
+Động lực học Langevin gradient ngẫu nhiên (Stochastic Gradient Langevin Dynamics, SGLD) là thuật toán SG-MCMC nổi tiếng đầu tiên. Hàm năng lượng (energy function) trên toàn bộ dữ liệu là $U(\theta) = -\sum_{(\boldsymbol{x}, \boldsymbol{y}) \in \mathcal{D}} \log p(\boldsymbol{y} \mid \boldsymbol{x}, \theta) - \log p(\theta)$. Ước lượng của nó trên lô nhỏ là
+
+$$
+\widetilde{U}(\theta) = -\frac{|\mathcal{D}|}{|\Xi|} \sum_{(\boldsymbol{x}, \boldsymbol{y}) \in \Xi} \log p(\boldsymbol{y} \mid \boldsymbol{x}, \theta) - \log p(\theta), \tag{2.3}
+$$
+
+trong đó $\Xi \subset \mathcal{D}$ là lô được lấy mẫu. Quá trình lấy mẫu của SGLD tuân theo động lực học Langevin:
+
+$$
+\theta_{t+1} \leftarrow \theta_t - \alpha_t \nabla_{\theta_t} \widetilde{U}(\theta_t) + \sqrt{2\alpha_t}\, \boldsymbol{\epsilon}_t, \qquad \boldsymbol{\epsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}), \tag{2.4}
+$$
+
+trong đó $\alpha_t$ là kích thước bước (step size) tại vòng lặp $t$. Toàn bộ khung SGLD được trình bày trong Thuật toán 8. So với SGD tiêu chuẩn, SGLD thêm một số hạng nhiễu ngẫu nhiên $\sqrt{2\alpha_t}\, \boldsymbol{\epsilon}_t$. Như Welling và Teh đã chỉ ra, SGLD tiến gần tới động lực học Langevin không hiệu chỉnh (unadjusted Langevin dynamics) tiêu chuẩn khi kích thước bước $\alpha_t$ đủ nhỏ, vì nhiễu được bơm vào lấn át nhiễu của gradient ngẫu nhiên. Với các điều kiện chính quy tiêu chuẩn, sự hội tụ được bảo đảm bởi một lịch kích thước bước giảm dần. Mọi lịch kích thước bước thỏa mãn i) $\sum_{t=1}^{\infty} \alpha_t = \infty$ và ii) $\sum_{t=1}^{\infty} \alpha_t^2 < \infty$ đều cho phép bộ lấy mẫu khám phá phân phối mục tiêu trong khi kiểm soát sai số tiệm cận của nó. Đáng chú ý, nhiễu lô nhỏ trong SGD khi không có nhiễu bơm thêm từ bên ngoài có thể tạo ra hành vi tương tự SGLD về mặt định tính, nhưng hội tụ về một phân phối hậu nghiệm xấp xỉ bị chệch.
+
+**Thuật toán 8** Động lực học Langevin gradient ngẫu nhiên (SGLD)
+
+```text
+Inputs : dataset 𝒟, initial sample θ₀ ∈ Θ, step-size schedule {αₜ}ₜ≥₀
+Outputs: collected samples 𝒮 ⊂ Θ
+θ ← θ₀; 𝒮 ← ∅
+for each iteration do
+    Ξ ← a mini-batch sampled from 𝒟
+    Ũ ← −(|𝒟|/|Ξ|) log p(Ξ | θ) − log p(θ)                 // Compute energy
+    θ ← θ − αₜ ∇_θ Ũ + √(2αₜ) ϵ                            // ϵ ∼ 𝒩(0, I)
+    𝒮 ← 𝒮 ∪ {θ}
+```
+
+### 2.3 Monte Carlo Hamilton gradient ngẫu nhiên
+
+Monte Carlo Hamilton trên toàn bộ dữ liệu đã đạt hiệu năng được xem là chuẩn mực (gold standard) trong suy luận Bayes. HMC đưa vào một số hạng động năng được đặc trưng bởi một tập các biến phụ "động lượng" (momentum). Để thích ứng HMC với các mô hình học sâu và giảm yêu cầu bộ nhớ của nó, HMC gradient ngẫu nhiên (stochastic gradient HMC, SG-HMC) loại bỏ nhu cầu tính gradient trên toàn bộ dữ liệu và bỏ bước hiệu chỉnh MH mà HMC trên toàn bộ dữ liệu sử dụng. Cụ thể, SG-HMC ngây thơ (naive) thay năng lượng trên toàn bộ dữ liệu trong hàm Hamilton (Hamiltonian) bằng ước lượng của nó trên lô nhỏ:
+
+$$
+\widetilde{H}(\theta, \boldsymbol{r}) = \widetilde{U}(\theta) + \frac{1}{2} \boldsymbol{r}^\top \boldsymbol{M}^{-1} \boldsymbol{r} = -\frac{|\mathcal{D}|}{|\Xi|} \sum_{(\boldsymbol{x}, \boldsymbol{y}) \in \Xi} \log p(\boldsymbol{y} \mid \boldsymbol{x}, \theta) - \log p(\theta) + \frac{1}{2} \boldsymbol{r}^\top \boldsymbol{M}^{-1} \boldsymbol{r}, \tag{2.5}
+$$
+
+trong đó $\boldsymbol{r}$ là động lượng và $\boldsymbol{M}$ là một ma trận khối lượng (mass matrix) xác định dương. Dù trực quan và đơn giản, SG-HMC ngây thơ không bảo toàn phân phối hậu nghiệm mục tiêu: nhiễu của gradient ngẫu nhiên làm cho phân phối đồng thời mong muốn $\pi(\theta, \boldsymbol{r}) \propto \exp(-H(\theta, \boldsymbol{r}))$, với $H(\theta, \boldsymbol{r}) = U(\theta) + \frac{1}{2} \boldsymbol{r}^\top \boldsymbol{M}^{-1} \boldsymbol{r}$, không còn bất biến. Để giảm nhẹ vấn đề này, Chen và cộng sự đưa vào một số hạng "ma sát" (friction) $C\boldsymbol{M}^{-1}\boldsymbol{r}$. Nếu $\widehat{B}$ ước lượng hệ số nhiễu của gradient ngẫu nhiên và $C \geq \widehat{B}$, động lực học dùng trong thực hành là
+
+$$
+\mathrm{d}\theta = \boldsymbol{M}^{-1} \boldsymbol{r}\, \mathrm{d}t \quad \text{and} \quad \mathrm{d}\boldsymbol{r} = -\nabla_\theta \widetilde{U}(\theta)\, \mathrm{d}t - C\boldsymbol{M}^{-1}\boldsymbol{r}\, \mathrm{d}t + \sqrt{2(C - \widehat{B})}\, \mathrm{d}\boldsymbol{W}_t. \tag{2.6}
+$$
+
+Ở đây, $\boldsymbol{W}_t$ là chuyển động Brown tiêu chuẩn. Các số hạng ma sát và nhiễu bơm vào bù trừ nhiễu của gradient ngẫu nhiên. Động lực học sửa đổi này thường được gọi là động lực học Langevin bậc hai (second-order Langevin dynamics). Toàn bộ khung SG-HMC được trình bày trong Thuật toán 9.
+
+**Thuật toán 9** Monte Carlo Hamilton gradient ngẫu nhiên (SG-HMC)
+
+```text
+Inputs : dataset 𝒟, initial sample θ₀ ∈ Θ, initial momentum r₀, step-size schedule {αₜ}ₜ≥₀, inner steps
+         m, friction coefficient C, noise estimate B̂
+Outputs: collected samples 𝒮 ⊂ Θ
+θ ← θ₀; r ← r₀; 𝒮 ← ∅
+for each iteration do
+    r ∼ 𝒩(0, M)                                              // Optionally resample momentum
+    (θ⁽⁰⁾, r⁽⁰⁾) ← (θ, r)
+    for i = 1 to m do
+        Ξ ← a mini-batch sampled from 𝒟
+        Ũ ← −(|𝒟|/|Ξ|) log p(Ξ | θ⁽ⁱ⁻¹⁾) − log p(θ⁽ⁱ⁻¹⁾)       // Compute energy
+        θ⁽ⁱ⁾ ← θ⁽ⁱ⁻¹⁾ + αₜ M⁻¹ r⁽ⁱ⁻¹⁾
+        r⁽ⁱ⁾ ← r⁽ⁱ⁻¹⁾ − αₜ ∇_θ Ũ − αₜ C M⁻¹ r⁽ⁱ⁻¹⁾ + √(2αₜ(C − B̂)) ϵₜ   // ϵₜ ∼ 𝒩(0, I)
+    (θ, r) ← (θ⁽ᵐ⁾, r⁽ᵐ⁾)                                      // No Metropolis-Hastings step
+    𝒮 ← 𝒮 ∪ {θ}
+```
+
+## 3. Các vấn đề thực tế và những cải tiến gần đây
+
+Các phương pháp SG-MCMC đã được chứng tỏ là hiệu quả trên nhiều mô hình học sâu quy mô nhỏ. Tuy nhiên, việc áp dụng chúng cho học sâu quy mô lớn bị cản trở bởi một số vấn đề thực tế. Mục này bàn về các vấn đề đó và một số nỗ lực được chọn lọc nhằm giải quyết chúng. [Chương 5](/vi/blog/low-precision-sampling) trình bày một góc nhìn bổ sung về lấy mẫu độ chính xác thấp (low-precision sampling) có khả năng mở rộng.
+
+### 3.1 Lấy mẫu từ các cực tiểu cục bộ đa dạng
+
+Mặt hàm mất mát (loss surface), hay cảnh quan năng lượng (energy landscape), của các mô hình học sâu có tính không lồi và đa mode rất cao, khiến các thuật toán lấy mẫu khó di chuyển giữa các mode. Hơn nữa, một mặt hàm mất mát thường chứa nhiều cực tiểu cục bộ mà tất cả đều có thể là những lời giải tốt. Tuy nhiên, các bộ lấy mẫu SG-MCMC truyền thống thường dùng một kích thước bước giảm dần và chỉ hội tụ về một cực tiểu cục bộ, làm giảm khả năng khám phá toàn bộ mặt hàm mất mát của chúng.
+
+Để giảm nhẹ vấn đề này, Zhang và cộng sự đề xuất MCMC gradient ngẫu nhiên chu kỳ (cyclical stochastic gradient MCMC, cSG-MCMC), dùng lịch kích thước bước chu kỳ (cyclical step-size schedule) được minh họa trong Hình 2.1. Lịch bước này được định nghĩa là
+
+$$
+\alpha_t = \frac{\alpha_0}{2} \left[ \cos\left( \frac{\pi \operatorname{mod}(t - 1, \lceil T/K \rceil)}{\lceil T/K \rceil} \right) + 1 \right], \tag{2.7}
+$$
+
+trong đó $\alpha_0$ là kích thước bước ban đầu, $K$ là số chu kỳ và $T$ là tổng số vòng lặp. Lịch bước chu kỳ cho phép bộ lấy mẫu rời khỏi mode hiện tại khi kích thước bước tăng lên. Do đó nó có thể khám phá và mô tả nhiều mode trong khi vẫn giữ được sự hội tụ tiệm cận về phân phối mục tiêu.
+
+### 3.2 Lấy mẫu từ các cực tiểu cục bộ rộng và vững
+
+Sự dịch chuyển phân phối (distribution shift) giữa dữ liệu huấn luyện và dữ liệu kiểm tra tạo ra một thách thức về khả năng tổng quát hóa cho các thuật toán SG-MCMC. Các cực tiểu cục bộ tìm được bằng dữ liệu huấn luyện có thể không còn là cực tiểu cục bộ đối với dữ liệu kiểm tra, nhất là khi chúng sắc nhọn. Để giảm nhẹ vấn đề này, Li và Zhang đưa ra Entropy-MCMC (EMCMC), phương pháp tích hợp các phương pháp tối ưu hóa có nhận biết độ phẳng (flatness-aware optimization) vào khung SG-MCMC. Cụ thể, EMCMC đưa entropy cục bộ (local entropy) vào phân phối hậu nghiệm của các tham số mô hình:
+
+$$
+p(\widetilde{\theta} \mid \mathcal{D}) = p(\theta, \theta_a \mid \mathcal{D}) \propto \exp\left\{ -f(\theta) - \frac{1}{2\eta} \|\theta - \theta_a\|^2 \right\}, \tag{2.8}
+$$
+
+trong đó $f(\theta) = U(\theta)$ là năng lượng log-hậu nghiệm âm, $\eta > 0$ là một hằng số liên kết (coupling constant), và $\theta_a$ là một vector tham số phụ khám phá cục bộ vùng lân cận của $\theta$. Phân phối hậu nghiệm này sinh ra một năng lượng mở rộng có gradient là
+
+$$
+\nabla_{\widetilde{\theta}} U(\widetilde{\theta}) = \begin{bmatrix} \nabla_\theta U(\widetilde{\theta}) \\ \nabla_{\theta_a} U(\widetilde{\theta}) \end{bmatrix} = \begin{bmatrix} \nabla_\theta f(\theta) + \frac{1}{\eta}(\theta - \theta_a) \\ \frac{1}{\eta}(\theta_a - \theta) \end{bmatrix}. \tag{2.9}
+$$
+
+<Figure caption="Hình 2.1: So sánh lịch kích thước bước chu kỳ và lịch kích thước bước giảm dần. Phỏng theo với sự cho phép của Ruqi Zhang. Được vẽ lại như một bản tái hiện dạng sơ đồ: các đường chu kỳ tuân theo Phương trình (2.7) với α₀ = 0.1, K = 4 và T = 200, còn lịch kích thước bước giảm dần được vẽ với một quy luật giảm dạng đa thức giả định.">
+  <Bdl02CyclicalSchedule />
+</Figure>
+
+Dạng này cho một cách diễn giải rõ ràng về quá trình lấy mẫu của EMCMC: i) $\theta$ tìm đến các vùng năng lượng thấp của cảnh quan năng lượng, và ii) $\theta_a$ đóng vai trò một "lực hiệu chỉnh hướng" kéo $\theta$ ra khỏi các cực tiểu sắc nhọn. Hình 2.2 minh họa quá trình này. EMCMC diễn đạt việc lấy mẫu có nhận biết độ phẳng thành một quá trình MCMC tiêu chuẩn trên một hàm năng lượng mở rộng mà không cần thêm bước hiệu chỉnh nào. Phương pháp này cũng có các bảo đảm hội tụ và có thể hội tụ nhanh hơn các phương pháp nhận biết độ phẳng trước đó.
+
+<Figure caption="Hình 2.2: Động lực học lấy mẫu của Entropy-MCMC, cho thấy biến dẫn hướng θₐ kéo θ về phía các vùng phẳng trong cảnh quan năng lượng. Phỏng theo Li và Zhang với sự cho phép của Bolian Li. Được vẽ lại như một bản tái hiện dạng sơ đồ trên một cảnh quan năng lượng minh họa.">
+  <Bdl02EntropyMcmc />
+</Figure>

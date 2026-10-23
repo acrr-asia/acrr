@@ -1671,3 +1671,1052 @@ svg('BdlSingularFreeEnergy', 680, 290, 'Free energy of a regular and a singular 
     'For the regular model, with K equal to a squared plus b squared over 2, F grows like the natural logarithm of n, as the Bayesian information criterion predicts for two parameters. '
     'For the singular model, with K equal to the square of a times b over 2, F grows much more slowly, like one half of the natural logarithm of n minus a log log n correction.',
     b)
+
+# ==================== Bayesian Deep Learning: book chapters ====================
+
+# ---------- 01-introduction-to-sampling ----------
+
+# ---------- Chapter 1 (introduction-to-sampling): Figures 1.1 to 1.3 ----------
+import random as bdl01_random
+
+def bdl01_xticks(P, ticks, labels):
+    o = ''
+    for v, l in zip(ticks, labels):
+        o += text(P.X(v), P.y0 + P.h + 16, l, 'middle', 'small')
+    return o
+
+def bdl01_frame(P, xticks, xlabels, yticks, ylabels, xlabel, ylabel):
+    o = ''
+    for v, l in zip(yticks, ylabels):
+        o += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid')
+        o += text(P.x0 - 6, P.Y(v) + 4, l, 'end', 'small')
+    o += bdl01_xticks(P, xticks, xlabels)
+    o += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 34, xlabel, 'middle', 'small')
+    o += text(P.x0, P.y0 - 10, ylabel, 'start', 'small')
+    return o
+
+# Figure 1.1: rejection sampling from Beta(2,2) with a uniform proposal (exact formulas).
+beta22 = lambda y: 6 * y * (1 - y)
+beta33 = lambda y: 30 * y * y * (1 - y) ** 2
+xt = [0, 0.25, 0.5, 0.75, 1]
+xl = ['0', '0.25', '0.5', '0.75', '1']
+L = Plot(50, 34, 240, 200, (0, 1), (0, 1.9))
+b = bdl01_frame(L, xt, xl, [0, 0.5, 1.0, 1.5], ['0.0', '0.5', '1.0', '1.5'], var('y'), var('f') + '(' + var('y') + ')')
+b += line([(L.X(0), L.Y(1.5)), (L.X(1), L.Y(1.5))], 'mut', ' stroke-dasharray="1.5 3"')
+b += line([(L.X(0), L.Y(1.0)), (L.X(1), L.Y(1.0))], 'ln', ' stroke-dasharray="6 4"')
+b += L.curve(beta22)
+b += text(L.X(0.98), L.Y(1.5) - 8, var('c') + var('q') + '(' + var('y') + ')', 'end', 'small')
+b += text(L.X(0.98), L.Y(1.0) - 8, var('q') + '(' + var('y') + ')', 'end')
+b += text(L.X(0.5), L.Y(1.5) + 22, var('π') + '(' + var('y') + ')', 'middle')
+R = Plot(380, 34, 240, 200, (0, 1), (0, 1.1))
+b += bdl01_frame(R, xt, xl, [0, 0.5, 1.0], ['0.0', '0.5', '1.0'], var('y'), var('k') + '(' + var('y') + ')')
+b += R.curve(lambda y: beta22(y) / 1.5)
+b += R.curve(lambda y: beta33(y) / (15 / 8), cls='mut', extra=' stroke-dasharray="6 4"')
+b += text(R.X(0.42), R.Y(0.45), 'Beta(2,2)', 'start')
+b += text(R.X(0.42), R.Y(0.2), 'Beta(3,3)', 'start', 'small')
+b += line([(R.X(0.3), R.Y(0.45) - 5), (R.X(0.39), R.Y(0.45) - 5)], 'acc')
+b += line([(R.X(0.3), R.Y(0.2) - 4), (R.X(0.39), R.Y(0.2) - 4)], 'mut', ' stroke-dasharray="6 4"')
+svg('Bdl01RejectionBeta', 640, 280,
+    'Rejection sampling from a Beta(2,2) target with a uniform proposal',
+    'Left panel: the Beta(2,2) density 6y(1 minus y) rises from 0 at y equals 0 to 1.5 at y equals 0.5 and falls back to 0 at y equals 1. The uniform proposal q(y) equals 1 lies below the peak, so q alone does not dominate the target, while the envelope c q(y) equals 1.5 touches the peak and lies above the density everywhere. Right panel: the acceptance probability k(y), which is 4y(1 minus y) for the Beta(2,2) target and 16 y squared (1 minus y) squared for a Beta(3,3) target with c equals 15/8. Both reach 1 at y equals 0.5; the Beta(3,3) curve is lower everywhere else.',
+    b)
+
+# Figures 1.2 and 1.3: random-walk Metropolis on N(0,1), lambda = 0.9 and 0.01, 5000 iterations.
+def bdl01_rwm(lam, n, seed):
+    rng = bdl01_random.Random(seed)
+    x, out = 0.0, []
+    for _ in range(n):
+        y = x + lam * rng.gauss(0, 1)
+        if rng.random() < min(1.0, __import__('math').exp(-0.5 * (y * y - x * x))):
+            x = y
+        out.append(x)
+    return out
+
+def bdl01_acf(xs, kmax):
+    n = len(xs); m = sum(xs) / n
+    d = [v - m for v in xs]
+    c0 = sum(v * v for v in d) / n
+    return [sum(d[i] * d[i + k] for i in range(n - k)) / n / c0 for k in range(kmax + 1)]
+
+N = 5000
+chainA = bdl01_rwm(0.9, N, 11)
+chainB = bdl01_rwm(0.01, N, 12)
+
+def bdl01_ticks(lo, hi, step):
+    import math as _m
+    t = _m.ceil(lo / step) * step
+    out = []
+    while t <= hi + 1e-12:
+        out.append(round(t, 10)); t += step
+    return out
+
+def bdl01_fmt(v, step):
+    dec = max(0, -int(__import__('math').floor(__import__('math').log10(step) + 1e-9)))
+    v = round(v, dec) + 0.0
+    if v == 0: v = 0.0
+    s = f'{v:.{dec}f}'
+    return s.replace('-', '−') if v < 0 else s
+
+# Figure 1.2: trace plots.
+b = ''
+A = Plot(56, 30, 240, 200, (0, N), (-4.2, 4.2))
+yt = [-3, -1.5, 0, 1.5, 3]
+b += bdl01_frame(A, [0, 1000, 2000, 3000, 4000, 5000], ['0', '1000', '2000', '3000', '4000', '5000'], yt, [bdl01_fmt(v, 0.5) for v in yt], 'Index', var('x'))
+d = ''.join(f'M{A.X(i):.1f},{A.Y(v):.1f}h0' for i, v in enumerate(chainA) if i % 2 == 0)
+b += f'  <path class="ln" d="{d}" stroke-width="2.2" stroke-linecap="round" />\n'
+lo, hi = min(chainB), max(chainB)
+pad = 0.08 * (hi - lo)
+B = Plot(384, 30, 240, 200, (0, N), (lo - pad, hi + pad))
+span = hi - lo
+step = 0.1 if span < 0.6 else 0.2 if span < 1.2 else 0.5
+ytB = bdl01_ticks(lo - pad, hi + pad, step)
+b += bdl01_frame(B, [0, 1000, 2000, 3000, 4000, 5000], ['0', '1000', '2000', '3000', '4000', '5000'], ytB, [bdl01_fmt(v, step) for v in ytB], 'Index', var('x'))
+b += line([(B.X(i), B.Y(v)) for i, v in enumerate(chainB) if i % 2 == 0], 'acc')
+svg('Bdl01TracePlots', 640, 270,
+    'Trace plots of random-walk Metropolis chains for a standard normal target',
+    f'Left (every second iteration drawn): with step size 0.9 the 5000 states scatter densely between about minus 3 and 3 around 0 with no visible trend, a well-mixed chain. Right: with step size 0.01 the chain started at 0 drifts slowly as a smooth random walk, covering only the range from about minus {-lo:.2f} to {hi:.2f} in 5000 iterations, a poorly mixing chain.',
+    b)
+
+# Figure 1.3: autocorrelation functions with approximate 95 percent bands.
+K = 36
+acfA, acfB = bdl01_acf(chainA, K), bdl01_acf(chainB, K)
+band = 1.96 / N ** 0.5
+b = ''
+for P, acf in ((Plot(56, 30, 240, 200, (-1.5, K + 1.5), (-0.08, 1.05)), acfA),
+               (Plot(384, 30, 240, 200, (-1.5, K + 1.5), (-0.08, 1.05)), acfB)):
+    b += bdl01_frame(P, [0, 5, 10, 15, 20, 25, 30, 35], ['0', '5', '10', '15', '20', '25', '30', '35'],
+                     [0, 0.2, 0.4, 0.6, 0.8, 1.0], ['0.0', '0.2', '0.4', '0.6', '0.8', '1.0'], 'Lag', 'ACF')
+    b += text(P.x0 + P.w / 2, P.y0 - 10, 'Series ' + var('x'), 'middle')
+    b += line([(P.x0, P.Y(0)), (P.x0 + P.w, P.Y(0))], 'mut')
+    for s in (band, -band):
+        b += line([(P.x0, P.Y(s)), (P.x0 + P.w, P.Y(s))], 'mut', ' stroke-dasharray="3 3"')
+    for k, r in enumerate(acf):
+        b += line([(P.X(k), P.Y(0)), (P.X(k), P.Y(r))], 'acc', ' stroke-width="1.5"')
+lagA = next((k for k, r in enumerate(acfA) if r < band), K)
+svg('Bdl01AcfPlots', 640, 270,
+    'Autocorrelation functions of the two random-walk Metropolis chains',
+    f'Bars give the sample autocorrelation at lags 0 to {K}; dashed lines mark plus and minus 1.96 over the square root of 5000. Left, step size 0.9: the autocorrelation falls from 1 at lag 0 to {acfA[1]:.2f} at lag 1 and decays geometrically, entering the band at about lag {lagA}. Right, step size 0.01: the autocorrelation stays close to 1 (about {acfB[K]:.2f} at lag {K}) at every lag shown.',
+    b)
+
+# ---------- 02-stochastic-gradient-mcmc ----------
+
+# ===================== Chapter 2: Stochastic Gradient MCMC =====================
+
+def bdl02_contours(f, x0, y0, w, h, levels, nx=110, ny=90):
+    # Marching squares on f(u, v), u, v in [0, 1] (v upwards); returns one path string per level.
+    X = lambda u: x0 + u * w
+    Y = lambda v: y0 + h - v * h
+    grid = [[f(i / nx, j / ny) for i in range(nx + 1)] for j in range(ny + 1)]
+    out = []
+    for lev in levels:
+        segs = []
+        for j in range(ny):
+            for i in range(nx):
+                c = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+                vals = [grid[b][a] for a, b in c]
+                pts = []
+                for k in range(4):
+                    (a1, b1), (a2, b2) = c[k], c[(k + 1) % 4]
+                    v1, v2 = vals[k], vals[(k + 1) % 4]
+                    if (v1 < lev) != (v2 < lev):
+                        t = (lev - v1) / (v2 - v1)
+                        pts.append((X((a1 + t * (a2 - a1)) / nx), Y((b1 + t * (b2 - b1)) / ny)))
+                if len(pts) == 2:
+                    segs.append(pts)
+                elif len(pts) == 4:
+                    segs.append(pts[:2]); segs.append(pts[2:])
+        d = ' '.join(f'M{p[0][0]:.1f},{p[0][1]:.1f} L{p[1][0]:.1f},{p[1][1]:.1f}' for p in segs)
+        out.append(d)
+    return out
+
+def bdl02_sub(t):
+    return f'<tspan class="sub" dy="4">{t}</tspan><tspan dy="-4"> </tspan>'
+
+# ---------- Figure 2.1: cyclical and decaying step-size schedules ----------
+P = Plot(70, 56, 530, 210, (0, 200), (0, 0.1))
+b = P.axes([0, 25, 50, 75, 100, 125, 150, 175, 200], [0, 0.02, 0.04, 0.06, 0.08, 0.1], 'Epochs', 'Step size')
+for c in range(4):
+    t0 = 50 * c
+    cyc = lambda t, t0=t0: 0.05 * (math.cos(math.pi * (t - t0) / 50) + 1)
+    pe = [(P.X(t0 + i * 25 / 60), P.Y(cyc(t0 + i * 25 / 60))) for i in range(61)]
+    ps = [(P.X(t0 + 25 + i * 25 / 60), P.Y(cyc(t0 + 25 + i * 25 / 60))) for i in range(61)]
+    b += line(pe, 'ln', ' stroke-dasharray="6 4"')
+    b += line(ps, 'thick')
+decay = lambda t: 0.1 * (1 + t) ** -0.55
+b += P.curve(decay, n=400, cls='acc')
+ly = 24
+b += line([(80, ly), (114, ly)], 'ln', ' stroke-dasharray="6 4"')
+b += text(120, ly + 4, 'Exploration stage', 'start', 'small')
+b += line([(260, ly), (294, ly)], 'thick')
+b += text(300, ly + 4, 'Sampling stage', 'start', 'small')
+b += line([(420, ly), (454, ly)], 'acc')
+b += text(460, ly + 4, 'Decaying step size', 'start', 'small')
+svg('Bdl02CyclicalSchedule', 640, 310, 'Cyclical and decaying step-size schedules over 200 epochs',
+    'Four cosine cycles of 50 epochs each start at a step size of 0.1 and fall to 0. The first half of each cycle, where the step size is above 0.05, is drawn dashed and labeled exploration stage; the second half is drawn solid and labeled sampling stage. A decaying schedule drops quickly from 0.1 to about 0.02 by epoch 25 and then slowly to about 0.005 by epoch 200.',
+    b)
+
+# ---------- Figure 2.2: Entropy-MCMC sampling dynamics ----------
+FX, FY, FW, FH = 20, 20, 470, 360
+def bdl02_f(u, v):
+    sharp = -2.2 * math.exp(-((u - 0.86) ** 2 / (2 * 0.075 ** 2) + (v - 0.04) ** 2 / (2 * 0.05 ** 2)))
+    flat = -1.1 * math.exp(-((u - 0.82) ** 2 / (2 * 0.24 ** 2) + (v - 1.0) ** 2 / (2 * 0.22 ** 2)))
+    return -0.9 * u + sharp + flat
+levels = [-0.25, -0.4, -0.55, -0.7, -0.85, -1.0, -1.15, -1.35, -1.6, -1.9, -2.2, -2.5]
+b = '  <defs><clipPath id="bdl02-ent-clip"><rect x="%d" y="%d" width="%d" height="%d" /></clipPath></defs>\n' % (FX, FY, FW, FH)
+b += '  <g clip-path="url(#bdl02-ent-clip)">\n'
+for d in bdl02_contours(bdl02_f, FX, FY, FW, FH, levels):
+    if d:
+        b += f'  <path class="mut" d="{d}" />\n'
+b += '  </g>\n'
+b += f'  <rect class="ln" x="{FX}" y="{FY}" width="{FW}" height="{FH}" />\n'
+U = lambda u: FX + u * FW
+V = lambda v: FY + FH - v * FH
+def bdl02_theta(x, y):
+    return f'  <circle class="thick" cx="{x:.1f}" cy="{y:.1f}" r="9" />\n'
+def bdl02_aux(x, y):
+    return f'  <circle class="thick" cx="{x:.1f}" cy="{y:.1f}" r="9" stroke-dasharray="10 5" />\n'
+dash = ' stroke-dasharray="5 4"'
+# left particle
+t1, a1 = (U(0.13), V(0.23)), (U(0.067), V(0.70))
+gf, gc, gu = (U(0.50), V(0.25)), (U(0.11), V(0.385)), (U(0.477), V(0.385))
+b += line([a1, gc], 'mut', dash)
+b += line([gc, gu], 'mut', dash)
+b += line([gu, gf], 'mut', dash)
+b += arrow([t1, gf])
+b += arrow([t1, gc])
+b += arrow([t1, gu])
+b += bdl02_theta(*t1)
+b += bdl02_aux(*a1)
+b += text(gc[0] - 2, gc[1] - 26, '(1/' + var('η') + ')(' + var('θ') + ' − ' + var('θ') + bdl02_sub('a') + ')', 'start')
+b += text(gu[0] - 6, gu[1] - 12, '∇' + var('U') + '(' + var('θ') + ')', 'start')
+b += text(gu[0] - 6, gu[1] + 24, 'flatness-aware gradient direction', 'start', 'small')
+b += text(gf[0] - 20, gf[1] + 30, '∇' + var('f') + '(' + var('θ') + ')', 'start')
+b += text(gf[0] - 20, gf[1] + 48, 'original gradient direction', 'start', 'small')
+# right particle
+t2, a2 = (U(0.75), V(0.50)), (U(0.616), V(0.70))
+e1, e2, e3 = (U(0.70), V(0.585)), (U(0.75), V(0.70)), (U(0.795), V(0.66))
+b += line([gu, t2], 'mut', dash)
+b += line([a2, e1], 'mut', dash)
+b += line([e1, e2], 'mut', dash)
+b += line([e2, e3], 'mut', dash)
+b += arrow([t2, e1])
+b += arrow([t2, e2])
+b += arrow([t2, e3])
+b += bdl02_theta(*t2)
+b += bdl02_aux(*a2)
+# legend
+b += f'  <rect class="box" x="{FX+FW-110}" y="{FY+10}" width="98" height="64" rx="4" />\n'
+b += bdl02_theta(FX + FW - 88, FY + 30)
+b += text(FX + FW - 66, FY + 35, var('θ'))
+b += bdl02_aux(FX + FW - 88, FY + 56)
+b += text(FX + FW - 66, FY + 61, var('θ') + bdl02_sub('a'))
+svg('Bdl02EntropyMcmc', 510, 400, 'Entropy-MCMC sampling dynamics on an energy landscape',
+    'Contour lines show an energy landscape with a sharp, narrow minimum at the bottom right and a wide, flat basin at the top right. On the left, the parameter theta has an original gradient direction, gradient of f, pointing to the right; the coupling term one over eta times theta minus theta a points up toward the auxiliary variable theta a; their sum, the flatness-aware gradient direction, gradient of U, points up and to the right, away from the sharp minimum. A dashed path leads to a second position of theta, where the arrows again point upward toward the flat region and the nearby theta a.',
+    b)
+
+# ---------- 03-simulation-based-inference ----------
+
+# ---------- 03-simulation-based-inference (full-text chapter 3) ----------
+import numpy as _bdl03_np
+
+def bdl03_sub(t):
+    return f'<tspan class="sub" dy="3">{t}</tspan><tspan dy="-3"></tspan>'
+
+def bdl03_ell(cx, cy, rx, ry, rot=0, cls='region', extra=''):
+    return (f'  <ellipse class="{cls}" cx="{cx:.1f}" cy="{cy:.1f}" rx="{rx:.1f}" ry="{ry:.1f}"'
+            f' transform="rotate({rot} {cx:.1f} {cy:.1f})"{extra} />\n')
+
+def bdl03_blob(cx, cy, rx, ry, rot=0, levels=3):
+    o = ''
+    for k in range(levels):
+        f = 1 - k / levels
+        o += bdl03_ell(cx, cy, rx * f, ry * f, rot)
+    return o
+
+def bdl03_curve(x0, y0, cx, cy, x1, y1, cls='ln'):
+    return f'  <path class="{cls}" d="M{x0:.1f},{y0:.1f} Q{cx:.1f},{cy:.1f} {x1:.1f},{y1:.1f}" marker-end="ARROW" />\n'
+
+def bdl03_vtext(x, y, t, cls='small'):
+    return f'  <text class="{cls}" x="{x:.1f}" y="{y:.1f}" text-anchor="middle" transform="rotate(-90 {x:.1f} {y:.1f})">{t}</text>\n'
+
+def bdl03_dot(x, y, r=1.6, extra=''):
+    return f'  <circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{r}"{extra} />\n'
+
+def bdl03_net(x0, y0, h, cols=2, gap=48, n=4, w=26):
+    # columns of rounded units joined by all-to-all connections
+    o = ''
+    cell = (h - 8) / n
+    centers = []
+    for c in range(cols):
+        x = x0 + c * gap
+        o += f'  <rect class="ln" x="{x:.1f}" y="{y0:.1f}" width="{w}" height="{h}" rx="7" />\n'
+        cs = []
+        for i in range(n):
+            yy = y0 + 4 + i * cell
+            o += f'  <rect class="box" x="{x+3:.1f}" y="{yy+2:.1f}" width="{w-6}" height="{cell-4:.1f}" rx="5" />\n'
+            cs.append((x, x + w, yy + cell / 2))
+        centers.append(cs)
+    for c in range(cols - 1):
+        for a in centers[c]:
+            for b_ in centers[c + 1]:
+                o += line([(a[1], a[2]), (b_[0], b_[2])], 'mut', ' stroke-width="0.8"')
+    return o, centers
+
+# ---- Figure 3.1: Bayesian inference and simulation-based inference ----
+rng = _bdl03_np.random.default_rng(3)
+b = ''
+b += text(8, 22, 'a')
+b += text(165, 22, 'Bayesian inference', 'middle')
+b += text(62, 52, 'parameter', 'middle', 'small') + text(62, 66, 'space', 'middle', 'small')
+b += text(268, 52, 'observation', 'middle', 'small') + text(268, 66, 'space', 'middle', 'small')
+b += bdl03_blob(62, 150, 44, 54, -20)
+b += bdl03_dot(80, 98, 3)
+b += text(88, 96, var('θ'), 'start')
+b += bdl03_curve(92, 92, 165, 50, 222, 100)
+b += text(165, 62, 'simulation', 'middle', 'small')
+b += text(250, 100, var('p') + '(' + var('x') + ' | ' + var('θ') + ')', 'middle', 'small')
+for k, cls in ((0, 'mut'), (1, 'ln')):
+    pts = []
+    for i in range(70):
+        x = 212 + i * 1.4
+        y = 152 + (14 if k else 10) * math.sin(i * (0.55 + 0.1 * k)) * (0.6 + 0.4 * rng.uniform()) + 6 * rng.normal()
+        pts.append((x, y))
+    b += line(pts, cls, ' stroke-width="1.1"')
+b += text(250, 206, var('x') + bdl03_sub('o'), 'middle', 'small')
+b += bdl03_curve(222, 214, 165, 262, 95, 214)
+b += text(165, 248, 'inference', 'middle', 'small')
+b += text(62, 228, var('p') + '(' + var('θ') + ' | ' + var('x') + bdl03_sub('o') + ')', 'middle', 'small')
+# panel b
+b += text(330, 22, 'b')
+b += text(520, 22, 'Simulation-based inference', 'middle')
+heads = [(375, ['prior']), (470, ['simulated', 'data']), (570, ['density', 'estimator']), (662, ['posterior', 'estimate'])]
+for x, ls in heads:
+    for j, s_ in enumerate(ls):
+        b += text(x, 52 + 14 * j, s_, 'middle', 'small')
+b += bdl03_blob(375, 150, 34, 34, 0)
+b += arrow([(414, 150), (430, 150)])
+th = rng.uniform(-1, 1, 160)
+for t_ in th:
+    px = 470 + 36 * t_ + 2 * rng.normal()
+    py = 186 - 62 * t_ ** 2 - abs(8 * rng.normal()) * (0.4 + t_ ** 2)
+    b += bdl03_dot(px, py, 1.4)
+b += line([(436, 172), (436, 200), (452, 200)], 'mut')
+b += text(432, 184, var('x'), 'end', 'small') + text(458, 214, var('θ'), 'start', 'small')
+b += arrow([(512, 150), (528, 150)])
+nb, _ = bdl03_net(534, 112, 76, cols=2, gap=46, n=4, w=26)
+b += nb
+b += arrow([(612, 150), (628, 150)])
+b += bdl03_blob(662, 132, 15, 22, 25)
+b += bdl03_blob(662, 184, 12, 7, 0)
+b += text(375, 236, var('θ') + ' ∼ ' + var('p') + '(' + var('θ') + ')', 'middle', 'small')
+b += text(470, 236, var('x') + ' ∼ ' + var('p') + '(' + var('x') + ' | ' + var('θ') + ')', 'middle', 'small')
+b += text(570, 236, '𝔼[−log ' + var('q') + bdl03_sub('φ') + '(' + var('θ') + ' | ' + var('x') + ')]', 'middle', 'small')
+b += text(664, 236, var('q') + bdl03_sub('φ') + '(' + var('θ') + ' | ' + var('x') + bdl03_sub('o') + ')', 'middle', 'small')
+svg('Bdl03SbiOverview', 700, 250, 'Bayesian inference and simulation-based inference',
+    'Panel a: a shaded posterior region in parameter space on the left and two noisy simulated traces in observation space on the right. A curved arrow labelled simulation goes from a parameter theta to the data distribution p of x given theta, and a curved arrow labelled inference goes back from the observation x o to the posterior p of theta given x o. Panel b: four stages from left to right joined by arrows: a prior drawn as concentric shaded discs, theta drawn from p of theta; a U-shaped cloud of simulated points, x drawn from p of x given theta; a neural network density estimator trained with the expected negative log q phi of theta given x; and a posterior estimate with two shaded blobs, q phi of theta given x o.',
+    b)
+
+# ---- Figure 3.2: Bayesian inference as supervised learning (assumed toy simulator) ----
+def bdl03_f(t):
+    return 16 * (t / 25) * _bdl03_np.exp(1 - t / 25)
+def bdl03_sd(t):
+    return 0.4 + 0.03 * t
+def bdl03_post(xo, ts):
+    p = _bdl03_np.exp(-0.5 * ((xo - bdl03_f(ts)) / bdl03_sd(ts)) ** 2) / bdl03_sd(ts)
+    return p / p.max()
+
+rng = _bdl03_np.random.default_rng(32)
+P = Plot(62, 40, 230, 130, (0, 90), (0, 25))
+b = text(177, 22, 'Simulated dataset', 'middle')
+b += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+for v in (0, 25):
+    b += text(P.x0 - 6, P.Y(v) + 4, f'{v}', 'end', 'small')
+for v in (0, 90):
+    b += text(P.X(v), P.y0 + P.h + 16, f'{v}', 'middle', 'small')
+b += bdl03_vtext(P.x0 - 34, P.Y(12.5), var('x'))
+xo = 13
+for t_ in rng.uniform(0, 90, 320):
+    xv = bdl03_f(t_) + bdl03_sd(t_) * rng.normal()
+    if 0 <= xv <= 25:
+        b += bdl03_dot(P.X(t_), P.Y(xv), 1.5)
+b += line([(P.x0, P.Y(xo)), (P.x0 + P.w, P.Y(xo))], 'ln')
+b += text(P.x0 + 6, P.Y(xo) - 6, var('x') + bdl03_sub('o'), 'start', 'small')
+Q = Plot(62, 215, 230, 55, (0, 90), (0, 1.05))
+ts = _bdl03_np.linspace(0, 90, 721)
+pp = bdl03_post(xo, ts)
+b += line([(Q.X(t_), Q.Y(v)) for t_, v in zip(ts, pp)], 'acc', ' stroke-width="1.6"')
+b += line([(Q.x0, Q.y0), (Q.x0, Q.y0 + Q.h), (Q.x0 + Q.w, Q.y0 + Q.h)])
+b += text(Q.X(0), Q.y0 + Q.h + 16, '0', 'middle', 'small') + text(Q.X(90), Q.y0 + Q.h + 16, '90', 'middle', 'small')
+b += text(Q.X(45), Q.y0 + Q.h + 16, var('θ'), 'middle', 'small')
+b += bdl03_vtext(Q.x0 - 34, Q.y0 + Q.h / 2 - 4, 'posterior')
+b += bdl03_vtext(Q.x0 - 20, Q.y0 + Q.h / 2 - 4, var('p') + '(' + var('θ') + ' | ' + var('x') + bdl03_sub('o') + ')')
+# right: amortized inference
+b += text(520, 22, 'Amortized inference with NPE', 'middle')
+b += text(616, 52, 'posterior ' + var('q') + bdl03_sub('ψ') + '(' + var('θ') + ' | ' + var('x') + bdl03_sub('o') + ')', 'middle', 'small')
+b += f'  <rect class="ln" x="428" y="70" width="104" height="204" rx="14" />\n'
+nb, _ = bdl03_net(444, 92, 160, cols=3, gap=26, n=5, w=20)
+b += nb
+for k, xv in enumerate((13, 15, 16)):
+    y = 105 + 70 * k
+    b += text(366, y + 4, var('x') + bdl03_sub('o') + ' = ' + str(xv), 'middle', 'small')
+    b += arrow([(398, y), (426, y)])
+    b += arrow([(534, y), (562, y)])
+    R = Plot(568, y - 30, 100, 36, (0, 90), (0, 1.05))
+    pk = bdl03_post(xv, ts)
+    b += line([(R.X(t_), R.Y(v)) for t_, v in zip(ts, pk)], 'acc', ' stroke-width="1.4"')
+    b += line([(R.x0, R.y0 + R.h), (R.x0 + R.w, R.y0 + R.h)])
+b += text(568, 266, '0', 'middle', 'small') + text(618, 266, var('θ'), 'middle', 'small') + text(668, 266, '90', 'middle', 'small')
+svg('Bdl03NpeSupervised', 690, 290, 'Framing Bayesian inference as a supervised learning problem',
+    'Left, top: a scatter of 320 simulated pairs with theta from 0 to 90 on the horizontal axis and x from 0 to 25 on the vertical axis; x rises steeply to a maximum of about 16 near theta equal to 25 and then falls slowly, with a spread that grows with theta. A horizontal line marks the observation x o equal to 13. Left, bottom: the posterior for x o equal to 13, the horizontal cut through the joint distribution, with a narrow peak near theta equal to 10 and a wider peak near theta equal to 50. Right: three observations, x o equal to 13, 15 and 16, enter a single trained neural network, which returns a posterior for each: two separated peaks for 13, two closer peaks for 15 and one broad peak near theta equal to 25 for 16.',
+    b)
+
+# ---- Figure 3.3: normalizing flow transforming a Gaussian into a V-shaped target ----
+rng = _bdl03_np.random.default_rng(7)
+n = 650
+def bdl03_panel(x0, pts, title=None):
+    o = f'  <rect class="box" x="{x0}" y="46" width="104" height="104" rx="2" />\n'
+    for (u, v) in pts:
+        if -3 <= u <= 3 and -3 <= v <= 3:
+            o += bdl03_dot(x0 + 52 + u * 17, 98 - v * 17, 1.1, ' fill-opacity="0.45"')
+    if title:
+        o += text(x0 + 52, 34, title, 'middle', 'small')
+    return o
+z = rng.normal(size=(n, 2))
+tgt1 = rng.normal(size=n) * 1.05
+target = list(zip(tgt1, 1.25 * _bdl03_np.abs(tgt1) - 1.6 + 0.22 * rng.normal(size=n)))
+base = list(zip(0.5 * z[:, 0], 0.5 * z[:, 1]))
+y1 = 1.1 * z[:, 0]
+t1 = list(zip(y1, -0.45 * y1 + 0.2 * z[:, 1]))
+t2 = list(zip(y1, -0.45 * y1 + 0.2 * z[:, 1] + 1.4 * _bdl03_np.maximum(y1, 0) * (0.6 + 0.5 * _bdl03_np.abs(z[:, 1]))))
+fin = list(zip(y1, 1.25 * _bdl03_np.abs(y1) - 1.6 + 0.26 * z[:, 1]))
+b = bdl03_panel(8, target, 'Target density')
+b += bdl03_panel(150, base, var('𝒩') + '(0, 1)')
+b += bdl03_panel(292, t1)
+b += bdl03_panel(434, t2)
+b += bdl03_panel(578, fin, var('q') + bdl03_sub('ψ') + '(' + var('θ') + ')')
+b += arrow([(256, 98), (290, 98)]) + text(273, 88, var('T') + bdl03_sub('1'), 'middle', 'small')
+b += arrow([(398, 98), (432, 98)]) + text(415, 88, var('T') + bdl03_sub('2'), 'middle', 'small')
+b += line([(540, 98), (552, 98)]) + text(558, 102, '…', 'middle', 'small') + arrow([(564, 98), (576, 98)])
+svg('Bdl03NormalizingFlow', 690, 160, 'A normalizing flow transforms a Gaussian into a V-shaped density',
+    'Five square panels of samples. First, the target density, a V shape with two arms rising from a lowest point in the middle. Then a round standard Gaussian blob labelled N of 0 and 1, which a transformation T1 stretches into a thin tilted bar, which a transformation T2 bends so that one end turns upward, and after further transformations the result, labelled q psi of theta, is a V shape that matches the target.',
+    b)
+
+# ---- Figure 3.4: Gaussian, mixture and flow approximations of a two-moons posterior ----
+def bdl03_moon(cx, cy, r, a0, a1, jitter=0.0, rng=None):
+    pts = []
+    for i in range(41):
+        a = math.radians(a0 + (a1 - a0) * i / 40)
+        rr = r + jitter * (math.sin(0.45 * i) + 0.4 * math.sin(1.3 * i + 1))
+        pts.append((cx + rr * math.cos(a), cy - rr * math.sin(a)))
+    return line(pts, 'thick', ' stroke-width="6" stroke-linecap="round" stroke-opacity="0.8"')
+rng = _bdl03_np.random.default_rng(4)
+b = ''
+titles = ['Ground truth', 'Gaussian', 'Mixture of Gaussians', 'Normalizing flow']
+for k, tt in enumerate(titles):
+    x0 = 16 + 158 * k
+    b += text(x0 + 70, 22, tt, 'middle', 'small')
+    b += line([(x0, 34), (x0, 174), (x0 + 140, 174)])
+    if k == 0:
+        b += bdl03_moon(x0 + 92, 64, 13, -110, 100)
+        b += bdl03_moon(x0 + 40, 136, 13, 70, 280)
+    elif k == 1:
+        for s_, cls in ((1.0, 'mut'), (0.7, 'ln'), (0.4, 'ln')):
+            b += bdl03_ell(x0 + 68, 100, 68 * s_, 24 * s_, -48, cls)
+    elif k == 2:
+        for cx, cy in ((x0 + 90, 64), (x0 + 42, 138)):
+            for s_, cls in ((1.0, 'mut'), (0.62, 'ln'), (0.3, 'ln')):
+                b += bdl03_ell(cx, cy, 11 * s_, 8 * s_, -30, cls)
+    else:
+        b += bdl03_moon(x0 + 92, 64, 13, -105, 95, 0.6)
+        b += bdl03_moon(x0 + 40, 136, 13, 75, 275, 0.6)
+# shade bar
+for j in range(3):
+    for _ in range(3 - j):
+        b += f'  <rect class="region" x="652" y="{40 + 44 * j}" width="12" height="44" />\n'
+b += f'  <rect class="mut" x="652" y="40" width="12" height="132" />\n'
+b += bdl03_vtext(680, 106, 'posterior probability')
+svg('Bdl03PosteriorFamilies', 690, 186, 'Expressiveness of different generative models for a two-moons posterior',
+    'Four panels. Ground truth: two small crescent-shaped regions, one in the upper right opening to the left and one in the lower left opening to the right, with nothing in between. Gaussian: one large tilted ellipse covering both crescents and the empty space between them. Mixture of Gaussians: two small elliptical blobs at the positions of the crescents, without their crescent shape. Normalizing flow: two crescents close to the ground truth. A grey scale bar on the right indicates posterior probability.',
+    b)
+
+# ---- Figure 3.5: NPE with an embedding network ----
+rng = _bdl03_np.random.default_rng(5)
+b = text(118, 24, 'High-dimensional data', 'middle')
+b += text(392, 24, 'NPE with embedding network', 'middle')
+b += text(618, 24, 'Posterior', 'middle')
+b += text(8, 62, 'Time series')
+pts = []
+for i in range(260):
+    x = 110 + i * 0.6
+    env = math.exp(-((i - 150) / 55) ** 2)
+    pts.append((x, 66 - 22 * env * math.sin(i * 0.9) - 2 * rng.normal() * (0.2 + env)))
+b += line(pts, 'ln', ' stroke-width="1"')
+b += text(8, 140, 'Images')
+for k in range(3):
+    x, y = 150 + 10 * k, 110 + 6 * k
+    b += f'  <rect class="box" x="{x}" y="{y}" width="44" height="44" />\n'
+b += bdl03_ell(192, 154, 9, 13, 15, 'thick')
+b += text(8, 222, 'i.i.d. data')
+b += text(136, 222, var('θ'), 'middle')
+b += arrow([(146, 218), (174, 218)])
+b += f'  <rect class="ln" x="176" y="194" width="46" height="46" rx="10" />\n'
+b += f'  <circle class="ln" cx="199" cy="215" r="13" />\n'
+b += text(199, 220, var('x'), 'middle') + text(217, 238, var('N'), 'end', 'small')
+b += arrow([(246, 140), (282, 140)])
+b += '  <path class="box" d="M290,46 L330,96 L330,190 L290,240 Z" />\n'
+b += f'  <text x="314" y="143" text-anchor="middle" transform="rotate(-90 314 143)">Embedding net</text>\n'
+nb, cs = bdl03_net(368, 88, 104, cols=2, gap=50, n=4, w=28)
+b += nb
+for c in cs[0]:
+    for yy in (96, 120, 156, 180):
+        b += line([(330, yy), (c[0], c[2])], 'mut', ' stroke-width="0.8"')
+b += arrow([(452, 140), (540, 140)])
+b += bdl03_blob(618, 104, 46, 34, -30)
+b += bdl03_blob(618, 196, 24, 14, -10)
+svg('Bdl03EmbeddingNet', 690, 252, 'Neural posterior estimation with an embedding network',
+    'Left, three kinds of high-dimensional simulation output: a time series with an oscillating burst, a stack of images of a handwritten digit, and i.i.d. data drawn as a plate with N repeated observations x generated from one parameter theta. An arrow leads to the embedding net, drawn as a trapezoid that narrows the data, connected to the layers of the inference network. An arrow leads on to a posterior with two shaded blobs, a large one and a small one.',
+    b)
+
+# ---- Figure 3.6: coverage diagnostics ----
+b = text(150, 22, 'Expected coverage (HPD)', 'middle')
+b += text(505, 22, 'Marginal simulation-based calibration (SBC)', 'middle')
+def bdl03_xo(x, y, k):
+    return text(x, y + 4, var('x') + f'<tspan class="sub" dy="3">o</tspan><tspan class="sub" dy="-9">{k}</tspan><tspan dy="6"></tspan>', 'start')
+b += bdl03_xo(8, 74, 1) + arrow([(34, 70), (58, 70)])
+b += bdl03_blob(80, 70, 10, 24, 15)
+b += bdl03_dot(88, 46, 3)
+b += text(96, 42, var('θ') + '<tspan class="sub" dy="-6">*,1</tspan><tspan dy="6"></tspan>', 'start', 'small')
+b += text(80, 116, var('q') + '(' + var('θ') + ' | ' + var('x') + '<tspan class="sub" dy="3">o</tspan><tspan class="sub" dy="-9">1</tspan><tspan dy="6">)</tspan>', 'middle', 'small')
+b += bdl03_xo(8, 170, 2) + arrow([(34, 166), (54, 166)])
+b += bdl03_blob(80, 166, 22, 14, 0)
+b += bdl03_dot(78, 168, 3)
+b += text(80, 198, var('θ') + '<tspan class="sub" dy="-6">*,2</tspan><tspan dy="6"></tspan>', 'middle', 'small')
+b += text(80, 222, var('q') + '(' + var('θ') + ' | ' + var('x') + '<tspan class="sub" dy="3">o</tspan><tspan class="sub" dy="-9">2</tspan><tspan dy="6">)</tspan>', 'middle', 'small')
+b += arrow([(120, 88), (156, 108)]) + arrow([(120, 158), (156, 140)])
+P = Plot(178, 50, 112, 112, (0, 1), (0, 1))
+b += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+b += line([(P.X(0), P.Y(0)), (P.X(1), P.Y(1))], 'ln', ' stroke-dasharray="5 4"')
+b += P.curve(lambda u: u ** 2.4, cls='thick', extra=' stroke-width="2"')
+mx, my = P.X(0.5), P.Y(0.5)
+b += line([(mx + 4, my + 4), (mx + 22, my + 22)], 'ln', ' marker-start="ARROW" marker-end="ARROW"')
+b += bdl03_vtext(P.x0 - 10, P.Y(0.5), 'posterior cov.')
+b += text(P.X(0.5), P.y0 + P.h + 16, 'nominal', 'middle', 'small') + text(P.X(0.5), P.y0 + P.h + 30, 'coverage', 'middle', 'small')
+# SBC side
+def bdl03_marg(x0, y, w, sd, mu, star, cls):
+    pts = []
+    for i in range(61):
+        u = i / 60
+        pts.append((x0 + u * w, y - 18 * math.exp(-0.5 * ((u - mu) / sd) ** 2)))
+    o = line([(x0 - 10, y)] + pts + [(x0 + w + 4, y)], cls, ' stroke-width="1.6"')
+    o += line([(x0 + star * w, y + 2), (x0 + star * w, y - 24)], 'ln', ' stroke-width="1.6"')
+    return o
+b += bdl03_xo(352, 86, 1) + arrow([(378, 82), (392, 82)])
+b += bdl03_marg(408, 72, 40, 0.12, 0.4, 0.55, 'mut') + text(460, 66, var('θ') + bdl03_sub('1'), 'start', 'small')
+b += bdl03_marg(408, 104, 40, 0.15, 0.45, 0.62, 'mut') + text(460, 98, var('θ') + bdl03_sub('2'), 'start', 'small')
+b += text(436, 42, var('θ') + '<tspan class="sub" dy="-6">*</tspan><tspan dy="6"></tspan>', 'middle', 'small')
+b += bdl03_xo(352, 182, 2) + arrow([(378, 178), (392, 178)])
+b += bdl03_marg(408, 168, 40, 0.14, 0.55, 0.6, 'mut') + text(460, 162, var('θ') + bdl03_sub('1'), 'start', 'small')
+b += bdl03_marg(408, 200, 40, 0.08, 0.5, 0.2, 'mut') + text(460, 194, var('θ') + bdl03_sub('2'), 'start', 'small')
+b += line([(408, 232), (424, 232)], 'mut', ' stroke-width="1.6"') + text(430, 236, 'posterior marginals', 'start', 'small')
+b += arrow([(480, 92), (506, 112)]) + arrow([(480, 170), (506, 150)])
+for k, (title, sub_, f) in enumerate((('Calibrated', '1', lambda u: u + 0.03 * math.sin(9 * u)),
+                                      ('Overconfident', '2', lambda u: 0.5 + 0.5 * math.copysign(abs(2 * u - 1) ** 3, 2 * u - 1)))):
+    P = Plot(538 + 84 * k, 76, 70, 86, (0, 1), (0, 1))
+    b += text(P.X(0.5), 44, title, 'middle', 'small')
+    b += text(P.X(0.5), 60, var('θ') + bdl03_sub(sub_), 'middle', 'small')
+    b += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    b += line([(P.X(0), P.Y(0)), (P.X(1), P.Y(1))], 'ln', ' stroke-dasharray="5 4"')
+    b += P.curve(f, cls='thick', extra=' stroke-width="2"')
+    b += text(P.X(0.5), P.y0 + P.h + 16, 'rank ' + var('θ') + bdl03_sub(sub_), 'middle', 'small')
+b += bdl03_vtext(528, 119, 'posterior rank')
+svg('Bdl03CoverageDiagnostics', 700, 250, 'Coverage diagnostics: expected coverage and marginal simulation-based calibration',
+    'Left, expected coverage based on the highest-probability density region: two observations x o 1 and x o 2 each give a posterior q of theta given x o, drawn as a shaded region with the true parameter theta star marked as a dot. Their results feed a plot of posterior coverage against nominal coverage, where the dashed diagonal is the ideal and a solid curve lies below it, with a double arrow marking the gap. Right, marginal simulation-based calibration: for each observation the posterior marginals of theta 1 and theta 2 are drawn as grey curves with the true value as a vertical line. Their ranks feed two plots of posterior rank: for theta 1, labelled calibrated, the curve follows the diagonal; for theta 2, labelled overconfident, the curve is S-shaped, above the diagonal at low ranks and below it at high ranks.',
+    b)
+
+# ---------- 04-sequential-monte-carlo-samplers ----------
+# ===================== Chapter 4: Sequential Monte Carlo samplers =====================
+# Data points are read off the book's figures (log-log plots); the redraws are schematic.
+
+def bdl04_pow(e):
+    # "10" with a raised exponent; the exponent uses a real minus sign.
+    e = str(e).replace('-', '−')
+    return f'10<tspan class="sub" dy="-6">{e}</tspan>'
+
+class Bdl04Log:
+    # Plot area with optional log10 axes (lx, ly) given as exponent ranges.
+    def __init__(s, x0, y0, w, h, xr, yr, lx=True, ly=True):
+        s.x0, s.y0, s.w, s.h, s.xr, s.yr, s.lx, s.ly = x0, y0, w, h, xr, yr, lx, ly
+    def X(s, v):
+        v = math.log10(v) if s.lx else v
+        return s.x0 + (v - s.xr[0]) / (s.xr[1] - s.xr[0]) * s.w
+    def Y(s, v):
+        v = math.log10(v) if s.ly else v
+        return s.y0 + s.h - (v - s.yr[0]) / (s.yr[1] - s.yr[0]) * s.h
+    def frame(s):
+        return f'  <rect class="ln" x="{s.x0:.1f}" y="{s.y0:.1f}" width="{s.w:.1f}" height="{s.h:.1f}" />\n'
+
+def bdl04_marker(x, y, kind, cls):
+    r = 3.6
+    if kind == 'circle':
+        return f'  <circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{r}" />\n'
+    if kind == 'square':
+        return f'  <rect class="{cls}" x="{x-r:.1f}" y="{y-r:.1f}" width="{2*r:.1f}" height="{2*r:.1f}" />\n'
+    pts = {
+        'up': [(0, -1.2), (1.1, 0.8), (-1.1, 0.8)],
+        'down': [(0, 1.2), (1.1, -0.8), (-1.1, -0.8)],
+        'left': [(-1.2, 0), (0.8, -1.1), (0.8, 1.1)],
+        'right': [(1.2, 0), (-0.8, -1.1), (-0.8, 1.1)],
+        'diamond': [(0, -1.3), (1.1, 0), (0, 1.3), (-1.1, 0)],
+    }[kind]
+    d = ' '.join(('M' if i == 0 else 'L') + f'{x+px*r:.1f},{y+py*r:.1f}' for i, (px, py) in enumerate(pts)) + ' Z'
+    return f'  <path class="{cls}" d="{d}" />\n'
+
+def bdl04_series(P, data, cls, dash, kind, mcls):
+    pts = [(P.X(a), P.Y(c)) for a, c in data]
+    o = line(pts, cls, f' stroke-dasharray="{dash}"' if dash else '')
+    if kind:
+        for x, y in pts:
+            o += bdl04_marker(x, y, kind, mcls)
+    return o
+
+def bdl04_ylabel(x, y, t):
+    return f'  <text class="small" x="{x:.1f}" y="{y:.1f}" text-anchor="middle" transform="rotate(-90 {x:.1f} {y:.1f})">{t}</text>\n'
+
+# ---------- Figures 4.1 and 4.2: cost against MSE for SMC and MLSMC ----------
+def bdl04_cost_panel(x0, xr, yr, smc, ml, inv, label):
+    P = Bdl04Log(x0, 34, 236, 210, xr, yr)
+    o = ''
+    for e in range(int(math.ceil(xr[0])), int(math.floor(xr[1])) + 1):
+        o += line([(P.X(10 ** e), P.y0), (P.X(10 ** e), P.y0 + P.h)], 'grid')
+        o += text(P.X(10 ** e), P.y0 + P.h + 18, bdl04_pow(e), 'middle', 'small')
+    for e in range(int(math.ceil(yr[0])), int(math.floor(yr[1])) + 1):
+        o += line([(P.x0, P.Y(10 ** e)), (P.x0 + P.w, P.Y(10 ** e))], 'grid')
+        o += text(P.x0 - 6, P.Y(10 ** e) + 4, bdl04_pow(e), 'end', 'small')
+    o += P.frame()
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 40, 'MSE', 'middle', 'small')
+    o += bdl04_ylabel(P.x0 - 40, P.y0 + P.h / 2, 'Cost')
+    o += text(P.x0, P.y0 - 12, label, 'start', 'small')
+    # credible sets: thin curves above and below each estimate
+    for data, f in ((smc, 1.55), (ml, 1.6)):
+        o += line([(P.X(a), P.Y(c * f)) for a, c in data], 'grid')
+        o += line([(P.X(a), P.Y(c / f)) for a, c in data], 'grid')
+    if inv:
+        o += line([(P.X(a), P.Y(1 / a)) for a in inv], 'ln', ' stroke-dasharray="2 3"')
+    o += bdl04_series(P, smc, 'mut', '7 4', 'circle', 'box')
+    o += bdl04_series(P, ml, 'acc', '', 'circle', 'dot')
+    # legend
+    lx, ly = P.x0 + P.w - 92, P.y0 + 10
+    o += f'  <rect class="box" x="{lx-6:.1f}" y="{ly-8:.1f}" width="92" height="{52 if inv else 36}" />\n'
+    o += line([(lx, ly), (lx + 26, ly)], 'mut', ' stroke-dasharray="7 4"') + bdl04_marker(lx + 13, ly, 'circle', 'box')
+    o += text(lx + 32, ly + 4, 'SMC', 'start', 'small')
+    o += line([(lx, ly + 16), (lx + 26, ly + 16)], 'acc') + bdl04_marker(lx + 13, ly + 16, 'circle', 'dot')
+    o += text(lx + 32, ly + 20, 'MLSMC', 'start', 'small')
+    if inv:
+        o += line([(lx, ly + 32), (lx + 26, ly + 32)], 'ln', ' stroke-dasharray="2 3"')
+        o += text(lx + 32, ly + 36, 'MSE<tspan class="sub" dy="-6">−1</tspan>', 'start', 'small')
+    return o
+
+b = bdl04_cost_panel(64, (-5, -2), (2, 6),
+    [(4e-5, 5.7e5), (8e-5, 1.3e5), (5e-4, 2e4), (1.15e-3, 3.2e3), (8e-3, 2e2)],
+    [(4e-5, 3.2e4), (9.5e-5, 1.25e4), (4.3e-4, 6.4e3), (1.1e-3, 2e3), (7.5e-3, 2.5e2)],
+    [4.2e-5, 8e-3], 'Left: ' + var('s') + ' = 3')
+b += bdl04_cost_panel(388, (math.log10(4.5e-5), -2), (2, 6),
+    [(4.5e-5, 4.2e5), (7.2e-5, 1.12e5), (4e-4, 2.8e4), (1.75e-3, 2.7e3), (8e-3, 1.6e2)],
+    [(5e-5, 1.15e5), (8e-5, 3.3e4), (3.8e-4, 1.5e4), (1.95e-3, 1.9e3), (7.5e-3, 1.5e2)],
+    None, 'Right: ' + var('s') + ' = 1.1')
+svg('Bdl04RegressionCost', 640, 300, 'Cost against mean square error for SMC and MLSMC on the TNN regression problem',
+    'Two log-log panels, cost from 100 to 1 million against MSE from about 0.00001 to 0.01. '
+    'Left, smoothness s equal to 3: the MLSMC curve runs close to the MSE to the power minus 1 reference line, '
+    'from a cost of about 250 at an MSE of 0.0075 to about 32,000 at 0.00004, while SMC rises more steeply to about 570,000 at the same MSE, roughly a factor of 10 to 20 above MLSMC. '
+    'Right, s equal to 1.1: both methods rise from about 150 at an MSE of 0.008 to between 100,000 and 400,000 at 0.00005, with MLSMC only moderately below SMC. '
+    'Thin curves above and below each line mark the credible intervals.',
+    b)
+
+b = bdl04_cost_panel(64, (math.log10(3.8e-5), -2), (2, 6.9),
+    [(4.5e-5, 1.3e6), (9e-5, 3.2e5), (4e-4, 5.5e4), (1.3e-3, 1.3e4), (9e-3, 8e2)],
+    [(4e-5, 9e4), (8.2e-5, 4.1e4), (3.1e-4, 1.7e4), (1.1e-3, 4e3), (8.5e-3, 6e2)],
+    [4e-5, 8.5e-3], 'Left: ' + var('s') + ' = 3')
+b += bdl04_cost_panel(388, (math.log10(3.8e-5), math.log10(7.5e-3)), (2, 6.9),
+    [(4.1e-5, 8e5), (5.8e-5, 2.6e5), (2e-4, 6.8e4), (2.3e-3, 6e3), (6.6e-3, 9.5e2)],
+    [(5e-5, 1.8e5), (6.6e-5, 1.05e5), (1.9e-4, 2.4e4), (2.3e-3, 3.1e3), (6.3e-3, 1.05e3)],
+    [5e-5, 6.3e-3], 'Right: ' + var('s') + ' = 1.1')
+svg('Bdl04MnistCost', 640, 300, 'Cost against mean square error for SMC and MLSMC on binary MNIST classification',
+    'Two log-log panels, cost from 100 to about 8 million against MSE from about 0.00004 to 0.01. '
+    'Left, s equal to 3: MLSMC rises from about 600 at an MSE of 0.0085 to about 90,000 at 0.00004, roughly parallel to the MSE to the power minus 1 line and well below SMC, which reaches about 1.3 million. '
+    'Right, s equal to 1.1: MLSMC rises from about 1,000 at an MSE of 0.006 to about 180,000 at 0.00005, and SMC from about 950 to about 800,000; the gap is smaller than on the left. '
+    'Thin curves mark the credible sets.',
+    b)
+
+# ---------- Figure 4.3: variance against the number of processors ----------
+R = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
+MR = [511 * r for r in R]
+P = Bdl04Log(78, 46, 380, 300, (math.log10(1500), 6), (-6, 0))
+b = ''
+for e in (4, 5, 6):
+    b += text(P.X(10 ** e), P.y0 + P.h + 18, bdl04_pow(e), 'middle', 'small')
+for m in MR:
+    b += line([(P.X(m), P.y0), (P.X(m), P.y0 + P.h)], 'grid')
+for e in range(-6, 1):
+    b += line([(P.x0, P.Y(10 ** e)), (P.x0 + P.w, P.Y(10 ** e))], 'grid')
+    b += text(P.x0 - 6, P.Y(10 ** e) + 4, bdl04_pow(e), 'end', 'small')
+for r, m in zip(R, MR):
+    b += text(P.X(m), P.y0 - 8, str(r), 'middle', 'small')
+b += P.frame()
+b += text(P.x0 + P.w / 2, P.y0 - 28, 'Number of processors (' + var('R') + ')', 'middle', 'small')
+b += text(P.x0 + P.w / 2, P.y0 + P.h + 40, 'Total number of particles (' + var('MR') + ')', 'middle', 'small')
+b += bdl04_ylabel(P.x0 - 48, P.y0 + P.h / 2, 'Variance')
+series43 = [
+    ('MH', [0.17, 0.055, 0.026, 0.0135, 0.0095, 0.005, 0.0018, 0.0011, 0.00052], 'ln', '', 'circle', 'arrowhead'),
+    ('MH smMALA', [0.0042, 0.003, 0.0013, 0.00055, 0.00024, 0.00014, 6.8e-5, 4e-5, 1.6e-5], 'mut', '5 3', 'down', 'box'),
+    ('RB-MP-MCMC', [0.00095, 0.00048, 0.00027, 0.00011, 6.3e-5, 2.2e-5, 1.6e-5, 6.2e-6, 2.9e-6], 'ln', '8 3 2 3', 'up', 'box'),
+    ('ARB-MP-MCMC', [0.0008, 0.00031, 0.000155, 9e-5, 4e-5, 2e-5, 1.3e-5, 4.7e-6, 1.7e-6], 'ln', '1.5 3', 'square', 'arrowhead'),
+    ('SMC<tspan class="sub" dy="3">∥</tspan><tspan dy="-3">-PCN</tspan>', [0.0009, 0.00049, 0.00031, 0.00012, 6.2e-5, 2.6e-5, 1.95e-5, 8.8e-6, 3.4e-6], 'acc', '5 3', 'left', 'box'),
+    ('PCN<tspan class="sub" dy="3">∥</tspan>', [0.097, 0.072, 0.046, 0.025, 0.0105, 0.0048, 0.0023, 0.0013, 0.0007], 'mut', '8 3 2 3', 'right', 'arrowhead'),
+    ('MH<tspan class="sub" dy="3">∥</tspan>', [0.17, 0.118, 0.058, 0.026, 0.013, 0.008, 0.0038, 0.0016, 0.0006], 'mut', '1.5 3', 'circle', 'arrowhead'),
+    ('AIS', [0.0079, 0.0025, 0.0018, 0.00105, 0.00046, 0.000135, 7.5e-5, 2.45e-5, 2.2e-5], 'mut', '', 'diamond', 'box'),
+]
+b += line([(P.X(MR[0]), P.Y(0.031)), (P.X(MR[-1]), P.Y(0.031 * 4 / 1024))], 'ln', ' stroke-dasharray="6 4"')
+for name, vals, cls, dash, kind, mcls in series43:
+    b += bdl04_series(P, list(zip(MR, vals)), cls, dash, kind, mcls)
+lx, ly = 482, 60
+b += line([(lx, ly), (lx + 30, ly)], 'ln', ' stroke-dasharray="6 4"')
+b += text(lx + 38, ly + 4, var('R') + '<tspan class="sub" dy="-6">−1</tspan>', 'start', 'small')
+for i, (name, vals, cls, dash, kind, mcls) in enumerate(series43):
+    y = ly + 22 * (i + 1)
+    b += line([(lx, y), (lx + 30, y)], cls, f' stroke-dasharray="{dash}"' if dash else '')
+    b += bdl04_marker(lx + 15, y, kind, mcls)
+    b += text(lx + 38, y + 4, name, 'start', 'small')
+svg('Bdl04AustralianCredit', 640, 400, 'Empirical variance of posterior mean estimates against the number of processors on Australian Credit',
+    'Log-log plot of variance, from 0.000001 to 1, against the total number of particles MR from about 2,000 to 520,000, with the number of processors R from 4 to 1024 on the top axis and M equal to 511. '
+    'All methods decrease roughly in proportion to the reference line R to the power minus 1. '
+    'MH, PCN parallel and MH parallel are highest, falling from about 0.1 to 0.17 at R equal to 4 to about 0.0005 to 0.0007 at R equal to 1024. '
+    'AIS and MH smMALA lie in the middle, from about 0.004 to 0.008 down to about 0.00002. '
+    'SMC parallel pCN, RB-MP-MCMC and ARB-MP-MCMC are lowest and close together, from about 0.0008 to 0.0009 down to about 0.000002 to 0.000003.',
+    b)
+
+# ---------- Figure 4.4: IMDb, accuracy and NLL ----------
+def bdl04_dual_panel(x0, xs, xticks, xlab, xlog, accr, nllr, acct, nllt, series, title, af, nf):
+    P = Bdl04Log(x0, 40, 180, 200, (math.log10(xs[0]), math.log10(xs[1])) if xlog else xs, accr, lx=xlog, ly=False)
+    Q = Bdl04Log(x0, 40, 180, 200, P.xr, nllr, lx=xlog, ly=False)
+    o = ''
+    for v, lab in xticks:
+        o += line([(P.X(v), P.y0), (P.X(v), P.y0 + P.h)], 'grid', ' stroke-dasharray="3 3"')
+        o += text(P.X(v), P.y0 + P.h + 18, lab, 'middle', 'small')
+    for v in acct:
+        o += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid', ' stroke-dasharray="3 3"')
+        o += text(P.x0 - 6, P.Y(v) + 4, format(v, af), 'end', 'small')
+    for v in nllt:
+        o += text(P.x0 + P.w + 6, Q.Y(v) + 4, format(v, nf), 'start', 'small')
+    o += P.frame()
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 38, xlab, 'middle', 'small')
+    o += text(P.x0 + P.w / 2, P.y0 - 14, title, 'middle', 'small')
+    o += bdl04_ylabel(P.x0 - 50, P.y0 + P.h / 2, 'Accuracy (%)')
+    o += bdl04_ylabel(P.x0 + P.w + 64, P.y0 + P.h / 2, 'NLL')
+    for xsv, acc, nll, cls, kind, mcls in series:
+        if acc:
+            o += bdl04_series(P, list(zip(xsv, acc)), cls, '', kind, mcls)
+        if nll:
+            o += bdl04_series(Q, list(zip(xsv, nll)), cls, '6 4', kind, mcls)
+    return o
+
+Rs = [1, 2, 4, 8]
+b = bdl04_dual_panel(62, (0, 3), [(0, '2<tspan class="sub" dy="-6">0</tspan>'), (1, '2<tspan class="sub" dy="-6">1</tspan>'), (2, '2<tspan class="sub" dy="-6">2</tspan>'), (3, '2<tspan class="sub" dy="-6">3</tspan>')],
+    var('R') + ' (processors)', False, (88.594, 88.728), (0.28455, 0.28566), [88.60, 88.62, 88.64, 88.66, 88.68, 88.70, 88.72], [0.2846, 0.2850, 0.2854],
+    [([0, 1, 2, 3], [88.60, 88.67, 88.71, 88.72], [0.2856, 0.2852, 0.2849, 0.2846], 'acc', 'circle', 'dot'),
+     ([0, 1, 2], [88.68, 88.69, 88.69], [0.2854, 0.2854, 0.2854], 'mut', 'square', 'box'),
+     ([0, 1, 2], [88.70, 88.71, 88.70], [0.2854, 0.2853, 0.2854], 'ln', 'up', 'arrowhead')],
+    'Accuracy and NLL against ' + var('R') + ' (budget ≈ τ<tspan class="sub" dy="3">irr</tspan><tspan dy="-3">)</tspan>', '.2f', '.4f')
+ep = [40, 700, 1e4]
+b += bdl04_dual_panel(392, (25, 1.4e4), [(100, bdl04_pow(2)), (1000, bdl04_pow(3)), (1e4, bdl04_pow(4))],
+    'Wall-clock time (epochs)', True, (82.52, 89.08), (0.264, 0.655), [83, 84, 85, 86, 87, 88, 89], [0.3, 0.4, 0.5, 0.6],
+    [(ep, [82.95, 87.25, 88.72], [0.607, 0.318, 0.284], 'acc', 'circle', 'dot'),
+     (ep, [82.78, 87.12, 88.70], [0.633, 0.322, 0.283], 'mut', 'square', 'box'),
+     (ep, [88.30, 88.68, 88.72], [0.293, 0.286, 0.284], 'ln', 'up', 'arrowhead')],
+    'Accuracy and NLL against budget, ' + var('R') + ' = 8', '.0f', '.1f')
+# shared legend under the panels
+ly = 316
+items = [('acc', 'circle', 'dot', 'SMC<tspan class="sub" dy="3">∥</tspan><tspan dy="-3"> (</tspan>' + var('R') + ' = 8 on the right)'),
+         ('mut', 'square', 'box', 'HMC<tspan class="sub" dy="3">∥</tspan><tspan dy="-3"> (</tspan>' + var('R') + ' = 8 on the right)'),
+         ('ln', 'up', 'arrowhead', 'HMC (' + var('R') + ' = 4 on the right)')]
+for i, (cls, kind, mcls, lab) in enumerate(items):
+    x = 40 + 200 * i
+    b += line([(x, ly), (x + 28, ly)], cls) + bdl04_marker(x + 14, ly, kind, mcls)
+    b += text(x + 34, ly + 4, lab, 'start', 'small')
+b += line([(150, ly + 24), (178, ly + 24)], 'ln')
+b += text(184, ly + 28, 'accuracy (left axis)', 'start', 'small')
+b += line([(350, ly + 24), (378, ly + 24)], 'ln', ' stroke-dasharray="6 4"')
+b += text(384, ly + 28, 'NLL (right axis)', 'start', 'small')
+svg('Bdl04ImdbParallel', 640, 356, 'Test accuracy and negative log-likelihood of parallel SMC and HMC on IMDb',
+    'Left panel, at a budget of about 10,000 epochs, against R from 1 to 8 on a log scale: SMC parallel accuracy rises from 88.60 to 88.72 percent and its NLL falls from 0.2856 to 0.2846, '
+    'while HMC parallel and serial HMC stay near 88.68 to 88.71 percent accuracy and an NLL of about 0.2854. '
+    'Right panel, R equal to 8, against a wall-clock budget of 40, 700 and 10,000 epochs on a log scale: SMC parallel and HMC parallel collapse to about 83 percent accuracy with an NLL above 0.6 at 40 epochs, '
+    'reach about 87 percent and an NLL of 0.32 at 700 epochs, and converge to 88.7 percent and 0.28 at 10,000 epochs, where serial HMC, which stays near 88.3 to 88.7 percent throughout, also ends.',
+    b)
+
+# ---------- 05-low-precision-sampling ----------
+# ---------- Bdl05: Figure 5.1, low-precision SGLD histograms ----------
+# Histogram densities (bin width 0.25) from a simulation of the setup described in the text:
+# standard Gaussian target, 8-bit fixed point with 3 fractional bits, stochastic rounding,
+# 4000 chains of 12/alpha steps, samples from the second half of each run.
+BDL05_HIST = {'naive-0.001': (-6.5625, [0.0001, 0.0, 0.0002, 0.0002, 0.0005, 0.0006, 0.001, 0.0016, 0.0034, 0.0053, 0.0071, 0.0143, 0.0196, 0.0285, 0.0394, 0.052, 0.0727, 0.0919, 0.1119, 0.1413, 0.1728, 0.1935, 0.2245, 0.2389, 0.2478, 0.268, 0.2635, 0.2635, 0.2518, 0.2265, 0.1983, 0.1779, 0.1495, 0.1303, 0.1018, 0.0824, 0.0646, 0.0434, 0.0338, 0.0265, 0.0174, 0.0106, 0.0085, 0.0048, 0.0037, 0.0018, 0.0006, 0.0007, 0.0002, 0.0004, 0.0001, 0.0001, 0.0001]), 'vc-0.001': (-4.8125, [0.0001, 0.0, 0.0001, 0.0002, 0.0003, 0.0014, 0.0016, 0.005, 0.0096, 0.0169, 0.0393, 0.0613, 0.095, 0.142, 0.1961, 0.2508, 0.3111, 0.3632, 0.3875, 0.4015, 0.3783, 0.3391, 0.2887, 0.2313, 0.1701, 0.1213, 0.0789, 0.0512, 0.0296, 0.0155, 0.0074, 0.0033, 0.0024, 0.0002]), 'f-0.001': (-4.5625, [0.0001, 0.0001, 0.0002, 0.0004, 0.0008, 0.0023, 0.0059, 0.0106, 0.0215, 0.0366, 0.0602, 0.0971, 0.141, 0.1936, 0.2643, 0.3195, 0.3645, 0.4011, 0.3964, 0.3685, 0.3322, 0.2785, 0.2279, 0.1731, 0.1185, 0.0768, 0.0451, 0.0311, 0.0165, 0.009, 0.0038, 0.0015, 0.0008, 0.0005, 0.0001]), 'naive-0.0001': (-8.0625, [0.0022, 0.0021, 0.0029, 0.0049, 0.0055, 0.0065, 0.008, 0.0099, 0.0121, 0.0155, 0.0173, 0.0212, 0.0258, 0.0314, 0.0366, 0.0415, 0.0462, 0.0565, 0.063, 0.0728, 0.0767, 0.0875, 0.0991, 0.1113, 0.1167, 0.1201, 0.1268, 0.1336, 0.144, 0.1456, 0.1529, 0.1525, 0.1508, 0.1525, 0.1439, 0.15, 0.1314, 0.1394, 0.1229, 0.1208, 0.1105, 0.1034, 0.0907, 0.0869, 0.0788, 0.07, 0.0581, 0.053, 0.0528, 0.0407, 0.0348, 0.0271, 0.0246, 0.0205, 0.0163, 0.0145, 0.0114, 0.0075, 0.0066, 0.0064, 0.0048, 0.0041, 0.0022, 0.0023, 0.0016]), 'vc-0.0001': (-4.0625, [0.0002, 0.0002, 0.0012, 0.0033, 0.0048, 0.0111, 0.0214, 0.0361, 0.062, 0.0975, 0.1455, 0.2005, 0.2511, 0.3136, 0.3631, 0.3932, 0.3979, 0.3664, 0.3338, 0.2918, 0.2269, 0.1718, 0.1189, 0.0779, 0.0514, 0.0279, 0.0155, 0.0097, 0.0029, 0.0019, 0.0004, 0.0002]), 'f-0.0001': (-4.0625, [0.0002, 0.001, 0.0014, 0.0033, 0.0073, 0.0103, 0.021, 0.0382, 0.0576, 0.0963, 0.1378, 0.2008, 0.2567, 0.3237, 0.3659, 0.3921, 0.3998, 0.3819, 0.3357, 0.2834, 0.2227, 0.1645, 0.1194, 0.0755, 0.0476, 0.0281, 0.0135, 0.0071, 0.0039, 0.0019, 0.0006, 0.0006, 0.0001, 0.0001])}
+def bdl05_panel(ox, oy, key, label, xr, xticks):
+    P = Plot(ox, oy, 150, 118, xr, (0, 0.42))
+    o = P.axes(xticks, [0, 0.1, 0.2, 0.3, 0.4], '', '')
+    o += f'  <text class="small" x="{ox-34}" y="{oy+59}" text-anchor="middle" transform="rotate(-90 {ox-34} {oy+59})">Density</text>\n'
+    x0, dens = BDL05_HIST[key]
+    w = 0.25
+    d = ''
+    for i, v in enumerate(dens):
+        a, b = x0 + i*w, x0 + (i+1)*w
+        if b <= xr[0] or a >= xr[1] or v <= 0:
+            continue
+        a, b = max(a, xr[0]), min(b, xr[1])
+        d += f'M{P.X(a):.1f},{P.Y(0):.1f} V{P.Y(min(v, 0.42)):.1f} H{P.X(b):.1f} V{P.Y(0):.1f} Z '
+    o += f'  <path class="band" d="{d.strip()}" />\n'
+    o += f'  <path class="mut" d="{d.strip()}" stroke-width="0.6" />\n'
+    o += P.curve(lambda t: math.exp(-t*t/2)/math.sqrt(2*math.pi), n=160)
+    lx = ox + 8
+    o += line([(lx, oy-30), (lx+14, oy-30)], 'acc')
+    o += text(lx+20, oy-26, 'True', 'start', 'small')
+    o += f'  <rect class="band" x="{lx}" y="{oy-17}" width="14" height="9" />\n'
+    o += f'  <rect class="mut" x="{lx}" y="{oy-17}" width="14" height="9" />\n'
+    o += text(lx+20, oy-9, label, 'start', 'small')
+    return o
+
+b = ''
+for row, (alpha, akey, cap) in enumerate(((0.001, '0.001', '(a) Low-precision SGLD with ' + var('α') + ' = 0.001'),
+                                          (0.0001, '0.0001', '(b) Low-precision SGLD with ' + var('α') + ' = 0.0001'))):
+    oy = 44 + row*218
+    for col, (kind, lab) in enumerate((('naive', 'Naive SGLDLP-L'), ('vc', 'VC SGLDLP-L'), ('f', 'SGLDLP-F'))):
+        ox = 62 + col*205
+        if kind == 'naive' and row == 1:
+            xr, xt = (-7.5, 7.5), [-6, -4, -2, 0, 2, 4, 6]
+        else:
+            xr, xt = (-5.5, 5.5), [-4, -2, 0, 2, 4]
+        b += bdl05_panel(ox, oy, f'{kind}-{akey}', lab, xr, xt)
+    b += text(330, oy + 118 + 40, cap, 'middle')
+svg('Bdl05LowPrecisionSgld', 660, 440, 'Histograms of low-precision SGLD samples on a standard Gaussian for two stepsizes',
+    'Six panels in two rows. Each panel shows a histogram of samples against the standard Gaussian density, drawn as a line. Top row, stepsize 0.001: naive SGLD with low-precision gradient accumulators gives a histogram that is too wide, with a peak of about 0.27 instead of 0.40, while the variance-corrected version and SGLD with full-precision gradient accumulators match the Gaussian. Bottom row, stepsize 0.0001: the naive histogram is wider still, spreading from about minus 7 to 7 with a peak of about 0.15, while the other two still match the Gaussian.',
+    b)
+
+# ---------- 06-discrete-sampling ----------
+
+# ===================== Chapter 6: Discrete sampling =====================
+
+def bdl06_contours(f, x0, y0, x1, y1, levels, step=4.0):
+    # Marching squares on f(px, py) over the pixel rectangle; returns one path string per level.
+    nx = int((x1 - x0) / step); ny = int((y1 - y0) / step)
+    xs = [x0 + i * (x1 - x0) / nx for i in range(nx + 1)]
+    ys = [y0 + j * (y1 - y0) / ny for j in range(ny + 1)]
+    grid = [[f(x, y) for x in xs] for y in ys]
+    out = []
+    for lev in levels:
+        segs = []
+        for j in range(ny):
+            for i in range(nx):
+                c = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+                vals = [grid[b][a] for a, b in c]
+                pts = []
+                for k in range(4):
+                    (a1, b1), (a2, b2) = c[k], c[(k + 1) % 4]
+                    v1, v2 = vals[k], vals[(k + 1) % 4]
+                    if (v1 < lev) != (v2 < lev):
+                        t = (lev - v1) / (v2 - v1)
+                        pts.append((xs[a1] + t * (xs[a2] - xs[a1]), ys[b1] + t * (ys[b2] - ys[b1])))
+                if len(pts) == 2:
+                    segs.append(pts)
+                elif len(pts) == 4:
+                    segs.append(pts[:2]); segs.append(pts[2:])
+        out.append(' '.join(f'M{p[0][0]:.1f},{p[0][1]:.1f} L{p[1][0]:.1f},{p[1][1]:.1f}' for p in segs))
+    return out
+
+def bdl06_sub(t, cls='sub'):
+    return f'<tspan class="{cls}" dy="4">{t}</tspan><tspan dy="-4"> </tspan>'
+
+def bdl06_hatch(x, y, s, gap=6):
+    o = ''
+    for c in range(gap, 2 * s, gap):
+        p0 = (x + max(0, c - s), y + min(c, s))
+        p1 = (x + min(c, s), y + max(0, c - s))
+        o += line([p0, p1], 'mut')
+    return o
+
+def bdl06_bits(x, y, bits, hatched=(), s=26, h=32):
+    o = ''
+    for k, v in enumerate(bits):
+        cx = x + k * s
+        if k in hatched:
+            o += f'  <rect class="region" x="{cx}" y="{y}" width="{s}" height="{h}" />\n'
+            o += bdl06_hatch(cx, y + (h - s) / 2, s)
+        o += f'  <rect class="ln" x="{cx}" y="{y}" width="{s}" height="{h}" />\n'
+        o += text(cx + s / 2, y + h / 2 + 5, str(v), 'middle')
+    return o
+
+def bdl06_star(cx, cy, r=9):
+    pts = []
+    for k in range(10):
+        a = -math.pi / 2 + k * math.pi / 5
+        rr = r if k % 2 == 0 else r * 0.45
+        pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
+    return '  <path class="dot" d="' + ' '.join(('M' if i == 0 else 'L') + f'{x:.1f},{y:.1f}' for i, (x, y) in enumerate(pts)) + ' Z" />\n'
+
+# ---------- Figure 6.1: gradient-informed proposal on a discrete grid ----------
+G0, GS = 60, 86   # grid origin (index 0) and spacing in pixels
+gx = lambda i: G0 + i * GS
+def bdl06_landscape(px, py):
+    i = (px - G0) / GS; j = (py - G0) / GS
+    du, dv = i - 3.4, j - 1.3
+    a, bq = 0.94 * du + 0.34 * dv, -0.34 * du + 0.94 * dv
+    main = math.exp(-(a * a / (2 * 1.05 ** 2) + bq * bq / (2 * 0.72 ** 2)))
+    side = 0.62 * math.exp(-((i - 0.75) ** 2 / (2 * 0.5 ** 2) + (j - 2.95) ** 2 / (2 * 0.6 ** 2)))
+    bridge = 0.35 * math.exp(-((i - 1.9) ** 2 / (2 * 0.9 ** 2) + (j - 2.6) ** 2 / (2 * 0.45 ** 2)))
+    return main + side + bridge
+X0, Y0, X1, Y1 = 14, 14, 466, 466
+b = '  <defs><clipPath id="bdl06-gwg-clip"><rect x="%d" y="%d" width="%d" height="%d" /></clipPath></defs>\n' % (X0, Y0, X1 - X0, Y1 - Y0)
+b += '  <g clip-path="url(#bdl06-gwg-clip)">\n'
+solid = [0.3, 0.42, 0.54, 0.66, 0.78, 0.9]
+dashed = [0.05, 0.11, 0.19]
+for d in bdl06_contours(bdl06_landscape, X0, Y0, X1, Y1, solid):
+    b += f'  <path class="mut" d="{d}" />\n'
+for d in bdl06_contours(bdl06_landscape, X0, Y0, X1, Y1, dashed):
+    b += f'  <path class="mut" d="{d}" stroke-dasharray="5 4" />\n'
+b += '  </g>\n'
+cur = (2, 2)
+nbrs = [(1, 2), (3, 2), (2, 3), (2, 1)]
+for i in range(5):
+    for j in range(5):
+        if (i, j) == cur or (i, j) in nbrs:
+            continue
+        b += f'  <circle class="box" cx="{gx(i)}" cy="{gx(j)}" r="4" />\n'
+cx, cy = gx(2), gx(2)
+# proposal arrows: thickness indicates proposal weight
+b += arrow([(cx - 12, cy), (gx(1) + 14, cy)], 'mut')
+b += arrow([(cx, cy + 12), (cx, gx(3) - 14)], 'mut')
+b += line([(cx + 12, cy), (gx(3) - 16, cy)], 'thick', ' stroke-dasharray="8 5"')
+b += arrow([(gx(3) - 18, cy), (gx(3) - 14, cy)], 'thick')
+b += line([(cx, cy - 12), (cx, gx(1) + 18)], 'thick', ' stroke-dasharray="8 5"')
+b += arrow([(cx, gx(1) + 20), (cx, gx(1) + 14)], 'thick')
+for (i, j) in nbrs[:3]:
+    b += f'  <circle class="box" cx="{gx(i)}" cy="{gx(j)}" r="8" />\n'
+b += f'  <circle class="box" cx="{gx(2)}" cy="{gx(1)}" r="8" />\n'
+b += bdl06_star(gx(2), gx(1))
+b += arrow([(cx + 4, cy - 4), (cx + 70, cy - 76)], 'thick')
+b += f'  <rect class="box" x="{cx - 10}" y="{cy - 10}" width="20" height="20" />\n'
+b += text(cx - 16, cy + 36, var('x'), 'end')
+b += text(gx(2) + 18, gx(1) - 18, var('x') + '′', 'start')
+b += text(cx + 74, cy - 70, '∇' + var('U') + '(' + var('x') + ')', 'start')
+b += text(gx(1) - 26, gx(0) + 52, var('H') + '(' + var('x') + ')', 'start')
+svg('Bdl06GradientInformed', 480, 480, 'Gradient-informed proposal over the Hamming-one neighborhood of a discrete state',
+    'A five by five grid of discrete states lies over the contour lines of a smooth function with a large mode at the upper right and a smaller mode at the lower left. The current state x, drawn as a square in the middle, has four neighbors that differ in one coordinate, forming H(x). The gradient of U at x points up and to the right, toward the large mode. Proposal arrows from x to its neighbors are thick toward the right and upper neighbors and thin toward the left and lower ones. The upper neighbor, marked with a star, is the proposed state x prime.',
+    b)
+
+# ---------- Figure 6.2: Gibbs-With-Gradient versus Discrete Langevin Proposal ----------
+b = ''
+def bdl06_row(y, title, xp_bits, hatched, mid, mid_label):
+    o = text(14, y - 44, title, 'start')
+    o += text(26, y - 10, var('x'), 'start')
+    o += bdl06_bits(20, y, [0, 1, 0, 1, 0, 0])
+    o += mid
+    o += text(250, y - 22, mid_label, 'middle')
+    o += text(346, y - 10, var('x') + '′', 'start')
+    o += bdl06_bits(340, y, xp_bits, hatched)
+    o += arrow([(498, y + 16), (522, y + 16)])
+    o += f'  <rect class="box" x="524" y="{y - 6}" width="104" height="44" rx="6" />\n'
+    o += text(576, y + 12, 'Metropolis–', 'middle', 'small')
+    o += text(576, y + 28, 'Hastings', 'middle', 'small')
+    return o
+y1 = 70
+sel = ''
+for k in range(6):
+    yy = y1 - 2 + k * 7.2
+    if k == 3:
+        sel += line([(196, yy), (226, yy)], 'thick')
+        sel += f'  <circle class="dot" cx="229" cy="{yy:.1f}" r="3.5" />\n'
+        sel += arrow([(240, yy), (334, yy)])
+    else:
+        sel += line([(196, yy), (214, yy)], 'ln')
+        sel += f'  <circle class="box" cx="217" cy="{yy:.1f}" r="2.6" />\n'
+b += bdl06_row(y1, 'Gibbs-With-Gradient', [0, 1, 1, 1, 0, 0], (2,), sel, var('q') + '(' + var('i') + ' | ' + var('x') + ')')
+b += line([(14, 132), (626, 132)], 'grid')
+y2 = 196
+bars = arrow([(178, y2 + 16), (190, y2 + 16)])
+probs = [0.3, 0.85, 0.35, 0.8, 0.45, 0.25]
+for k, p in enumerate(probs):
+    bx = 194 + k * 18
+    hh = 40
+    fill = hh * p
+    bars += f'  <rect class="dot" x="{bx}" y="{y2 - 4 + hh - fill:.1f}" width="12" height="{fill:.1f}" />\n'
+    bars += f'  <rect class="ln" x="{bx}" y="{y2 - 4}" width="12" height="{hh}" />\n'
+bars += arrow([(306, y2 + 16), (334, y2 + 16)])
+b += bdl06_row(y2, 'Discrete Langevin Proposal', [1, 1, 0, 0, 1, 0], (0, 3, 4), bars,
+               '&#123;' + var('q') + bdl06_sub(var('i')) + '&#125;' + '<tspan class="sub" dy="-10">' + var('d') + '</tspan><tspan class="sub" dy="14">' + var('i') + '=1</tspan>')
+b += arrow([(178, y1 + 16), (190, y1 + 16)])
+svg('Bdl06GwgVsDlp', 640, 250, 'Gibbs-With-Gradient compared with the Discrete Langevin Proposal',
+    'Top row: Gibbs-With-Gradient takes the binary state x equal to 0 1 0 1 0 0, selects one coordinate with the distribution q of i given x, and proposes x prime equal to 0 1 1 1 0 0, in which only the third bit, shaded, has changed; x prime then goes to a Metropolis-Hastings step. Bottom row: the Discrete Langevin Proposal builds one distribution q i per coordinate, drawn as six bars, and proposes x prime equal to 1 1 0 0 1 0, in which the first, fourth and fifth bits, shaded, have changed in parallel; x prime then goes to a Metropolis-Hastings step.',
+    b)
+
+# ---------- Figure 6.3: proposal scale, balancing and cyclical scheduling ----------
+b = ''
+def bdl06_marker(kind, x, y, filled=False):
+    cls = 'dot' if filled else 'box'
+    r = 5.5 if filled else 3.6
+    if kind == 'o':
+        return f'  <circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{r}" />\n'
+    if kind == 's':
+        return f'  <rect class="{cls}" x="{x - r:.1f}" y="{y - r:.1f}" width="{2 * r:.1f}" height="{2 * r:.1f}" />\n'
+    return f'  <path class="{cls}" d="M{x:.1f},{y - r * 1.15:.1f} L{x + r:.1f},{y + r * 0.75:.1f} L{x - r:.1f},{y + r * 0.75:.1f} Z" />\n'
+def bdl06_frame(P, xt, yt, xl=None, yl=None):
+    o = ''
+    for v, lab in yt:
+        o += line([(P.x0 - 4, P.Y(v)), (P.x0, P.Y(v))])
+        o += text(P.x0 - 7, P.Y(v) + 4, lab, 'end', 'small')
+    for v, lab in xt:
+        o += line([(P.X(v), P.y0 + P.h), (P.X(v), P.y0 + P.h + 4)])
+        if lab:
+            o += text(P.X(v), P.y0 + P.h + 17, lab, 'middle', 'small')
+    o += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    return o
+# panel (a)
+PA = Plot(56, 48, 236, 222, (0.5, 1.0), (0, 1.08))
+b += text(10, 24, '(a)', 'start')
+b += bdl06_frame(PA, [(0.5, '0.5'), (0.6, '0.6'), (0.7, '0.7'), (0.8, '0.8'), (0.9, '0.9'), (1.0, '1.0')], [(0, '0'), (1, '1')])
+b += text(PA.x0 + PA.w / 2, PA.y0 + PA.h + 38, var('β'), 'middle')
+b += f'  <text class="small" x="18" y="{PA.y0 + PA.h / 2:.1f}" text-anchor="middle" transform="rotate(-90 18 {PA.y0 + PA.h / 2:.1f})">Normalized illustrative efficiency</text>\n'
+curves = [(0.52, 0.11, '', 'o', 'σ = 0.1'), (0.70, 0.12, ' stroke-dasharray="9 5"', 's', 'σ = 1'), (0.94, 0.125, ' stroke-dasharray="2 4"', 't', 'σ = 2')]
+for mu, sd, dash, mk, lab in curves:
+    f = lambda x, mu=mu, sd=sd: math.exp(-(x - mu) ** 2 / (2 * sd * sd))
+    b += PA.curve(f, n=200, cls='ln', extra=dash)
+    for k in range(8):
+        xv = 0.5 + k * 0.5 / 7
+        b += bdl06_marker(mk, PA.X(xv), PA.Y(f(xv)))
+    b += bdl06_marker(mk, PA.X(mu), PA.Y(1), True)
+lx = 100
+for mu, sd, dash, mk, lab in curves:
+    b += line([(lx, 22), (lx + 30, 22)], 'ln', dash)
+    b += bdl06_marker(mk, lx + 15, 22)
+    b += text(lx + 36, 26, var('σ') + lab[1:], 'start', 'small')
+    lx += 80
+# panel (b)
+b += text(340, 24, '(b)', 'start')
+PS = Plot(404, 40, 220, 100, (0, 39), (0.1, 2.0))
+PB = Plot(404, 168, 220, 100, (0, 39), (0.5, 1.0))
+sig = lambda k: 0.1 + 0.95 * (math.cos(math.pi * (k % 20) / 20) + 1)
+bet = lambda k: 0.5 + 0.25 * (math.cos(math.pi * (k % 20) / 20) + 1)
+xt = [(0, '0'), (10, '10'), (20, '20'), (30, '30'), (39, '39')]
+b += bdl06_frame(PS, [(v, None) for v, _ in xt], [(0.1, '0.1'), (1.0, '1.0'), (2.0, '2.0')])
+b += bdl06_frame(PB, xt, [(0.5, '0.50'), (0.75, '0.75'), (1.0, '1.00')])
+for Pp, fn, dash, mk in ((PS, sig, '', 'o'), (PB, bet, ' stroke-dasharray="7 4"', 's')):
+    for c0 in (0, 20):
+        pts = [(Pp.X(c0 + i * 19 / 120), Pp.Y(fn(c0 + i * 19 / 120))) for i in range(121)]
+        b += line(pts, 'ln', dash)
+    b += line([(Pp.X(19), Pp.Y(fn(19))), (Pp.X(20), Pp.Y(fn(20)))], 'ln', dash)
+    for k in range(0, 40, 4):
+        b += bdl06_marker(mk, Pp.X(k), Pp.Y(fn(k)))
+    b += line([(Pp.X(19.5), Pp.y0), (Pp.X(19.5), Pp.y0 + Pp.h)], 'mut', ' stroke-dasharray="2 3"')
+b += f'  <text x="356" y="{PS.y0 + PS.h / 2 + 4:.1f}" text-anchor="middle">{var("σ")}{bdl06_sub(var("k"))}</text>\n'
+b += f'  <text x="356" y="{PB.y0 + PB.h / 2 + 4:.1f}" text-anchor="middle">{var("β")}{bdl06_sub(var("k"))}</text>\n'
+b += text(PB.x0 + PB.w / 2, PB.y0 + PB.h + 38, 'Sampling iteration ' + var('k'), 'middle', 'small')
+svg('Bdl06ScaleSchedules', 640, 320, 'Balancing exponent against proposal scale, and coupled cyclical schedules',
+    'Panel a: three bell-shaped curves of normalized illustrative efficiency against the balancing exponent beta from 0.5 to 1. The curve for sigma equal to 0.1 peaks near beta equal to 0.52, the curve for sigma equal to 1 near 0.7, and the curve for sigma equal to 2 near 0.94. Panel b: over 40 sampling iterations in two cycles of 20, the step size sigma k falls along a cosine from 2.0 to about 0.1 and jumps back to 2.0 at iteration 20, while the balancing exponent beta k falls in the same way from 1.00 to about 0.50.',
+    b)

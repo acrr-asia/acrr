@@ -373,3 +373,20 @@ from the measurement sense *độ chụm*. In prose, "et al." is written *và c�
 | classifier, gradient descent, benchmark, validation set | bộ phân loại, hạ gradient, bộ dữ liệu chuẩn (benchmark), tập kiểm định |
 | random seed, mini-batch, forward pass | hạt giống ngẫu nhiên (random seed), lô nhỏ (mini-batch), lượt truyền xuôi |
 | prior-fitted network, singular learning theory | mạng khớp sẵn tiên nghiệm (prior-fitted network, PFN), lý thuyết học kỳ dị |
+| Monte Carlo estimator, unbiased, consistent, canonical rate | ước lượng Monte Carlo, không chệch, vững (consistent), tốc độ chuẩn tắc (canonical rate) |
+| rejection sampling, importance sampling, importance weight, self-normalized | lấy mẫu loại bỏ (rejection sampling), lấy mẫu quan trọng (importance sampling; not *lấy mẫu theo trọng số quan trọng*), trọng số quan trọng, tự chuẩn hóa (self-normalized) |
+| proposal distribution / density, target distribution, acceptance rate | phân phối / mật độ đề xuất (proposal distribution / density), phân phối mục tiêu, tỉ lệ chấp nhận (acceptance rate) |
+| transition kernel, Markov kernel, base kernel | nhân chuyển (transition kernel), nhân Markov (Markov kernel), nhân cơ sở; never *hạt nhân*; a GP or kernel-method kernel stays *hàm nhân* |
+| mixing, ergodicity, invariance, irreducible, aperiodic, warm-up | trộn (mixing), tính ergodic (ergodicity), tính bất biến (invariance), tối giản (irreducible), không tuần hoàn (aperiodic), giai đoạn khởi động (warm-up, as for burn-in) |
+| random-walk Metropolis, Metropolis-adjusted Langevin algorithm, Gibbs sampler | Metropolis bước ngẫu nhiên (random-walk Metropolis, RWM), thuật toán Langevin hiệu chỉnh Metropolis (MALA), bộ lấy mẫu Gibbs |
+| step size, step-size schedule, cyclical | kích thước bước (step size; an integrator's time step $\Delta t$ stays *bước thời gian*), lịch kích thước bước, chu kỳ (cyclical: SG-MCMC chu kỳ, lịch chu kỳ; *tuần hoàn* only for periodic / aperiodic) |
+| momentum, mass matrix, friction, overdamped / underdamped Langevin | động lượng (momentum), ma trận khối lượng (mass matrix), ma sát (friction), Langevin quá tắt dần / dưới tắt dần (overdamped / underdamped) |
+| local, global, locally / globally balanced proposal | cục bộ (not *địa phương*), toàn cục, phân phối đề xuất cân bằng cục bộ / toàn cục |
+| sequential Monte Carlo, particle, resampling, mutation, particle filter, SMC sampler | Monte Carlo tuần tự (sequential Monte Carlo, SMC), hạt (particle), tái lấy mẫu (resampling; not *lấy mẫu lại*), đột biến (mutation), bộ lọc hạt (particle filter), bộ lấy mẫu SMC |
+| tempering, annealing, annealed importance sampling | điều chỉnh nhiệt độ (tempering), ủ nhiệt (annealing), lấy mẫu quan trọng có ủ nhiệt (annealed importance sampling, AIS) |
+| credible set / interval | tập khả tín / khoảng khả tín (credible set / interval) |
+| energy, energy landscape, energy-based model, partition function | năng lượng, cảnh quan năng lượng, mô hình dựa trên năng lượng (energy-based model), hàm phân hoạch (partition function) |
+| simulation-based inference, simulator, neural posterior / likelihood / ratio estimation | suy luận dựa trên mô phỏng (SBI), bộ mô phỏng, ước lượng hậu nghiệm / hàm hợp lý / tỉ số bằng mạng nơ-ron (NPE / NLE / NRE) |
+| normalizing flow, embedding network, summary statistic, amortized, coverage diagnostics, misspecification | luồng chuẩn hóa (normalizing flow), mạng nhúng (embedding network), thống kê tóm tắt, khấu hao (amortized), chẩn đoán độ phủ, đặc tả sai (misspecification) |
+| multilevel Monte Carlo, telescoping sum, coupling, trace-class | Monte Carlo đa mức (MLMC), tổng lồng (telescoping sum), phép ghép cặp (coupling), lớp vết (trace-class) |
+| low precision, quantization gap, stochastic / deterministic rounding, fixed point, gradient accumulator | độ chính xác thấp (low precision; numeric sense), khoảng cách lượng tử (quantization gap), làm tròn ngẫu nhiên / tất định, dấu phẩy tĩnh (fixed point), bộ tích lũy gradient |

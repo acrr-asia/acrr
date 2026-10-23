@@ -1,0 +1,457 @@
+---
+title: "Sequential Monte Carlo Samplers"
+description: "Sequential Monte Carlo samplers for Bayesian neural networks: tempering, multilevel SMC with trace-class priors and scalable parallel SMC."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - sequential monte carlo
+  - multilevel monte carlo
+  - parallel computing
+series: bayesian-deep-learning
+seriesOrder: 6
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl04RegressionCost from '../../components/diagrams/Bdl04RegressionCost.astro';
+import Bdl04MnistCost from '../../components/diagrams/Bdl04MnistCost.astro';
+import Bdl04AustralianCredit from '../../components/diagrams/Bdl04AustralianCredit.astro';
+import Bdl04ImdbParallel from '../../components/diagrams/Bdl04ImdbParallel.astro';
+
+This chapter develops sequential Monte Carlo (SMC) samplers as a population-based approach to inference in Bayesian deep learning. Building on the sequential Monte Carlo methods of [Chapter 1](/blog/introduction-to-sampling), it focuses on the two extensions that make them practical for neural network posteriors: multilevel SMC and scalable parallel SMC.
+
+## 1. Motivation
+
+[Chapter 1](/blog/introduction-to-sampling) introduced SMC as a particle filter: a latent state evolving in time, tracked by a population of particles over a sequence of growing spaces. This chapter applies the same population-based approximation to a static target: a Bayesian posterior on a fixed parameter space. Without any dynamics to generate them, the intermediate distributions are now constructed by design, and the resulting methods are known as SMC samplers.
+
+It is useful to place the neighboring methods relative to this sampler. Tempering is the mechanism inside the sampler that builds the intermediate distributions, annealing the likelihood from the prior to the posterior (data-tempering is a common alternative). Annealed importance sampling (AIS) is the reduced case in which resampling is omitted, so it is best viewed as a simplified SMC sampler rather than a distinct method. The chapter's two main contributions are developments of the SMC sampler, along two different axes: multilevel SMC (MLSMC) improves statistical efficiency by combining a hierarchy of coarse-to-fine approximations in a telescoping estimator, while parallel SMC improves scalability by running many samplers concurrently and weighting them by their normalizing-constant estimates, avoiding the heavy communication of island particle methods.
+
+These methods matter for Bayesian deep learning because neural network posteriors are high-dimensional, multi-modal with many symmetric modes, and costly to evaluate, the regime where importance sampling degenerates and single-chain MCMC mixes slowly. An SMC sampler anneals an entire population towards the posterior, provides an unbiased estimate of the model evidence, and parallelizes naturally. The remainder of the chapter develops the two extensions that make this practical at scale: MLSMC with trace-class neural network priors, and scalable parallel SMC.
+
+## 2. Introduction
+
+Monte Carlo based Bayesian algorithms of the type described in [Chapter 1](/blog/introduction-to-sampling) typically require generating many samples from a target distribution which at best can be evaluated up to a normalizing constant. This can be expensive and cumbersome in high-dimensions, and so methods to improve complexity are paramount. As discussed in [Chapter 1](/blog/introduction-to-sampling), the best computational complexity achievable by a Monte Carlo algorithm in general is $\text{cost} \propto 1/\text{MSE}$, i.e. achieving a mean square error (MSE) of $\mathcal{O}(\varepsilon^2)$ for $\varepsilon > 0$ will asymptotically require $\mathcal{O}(\varepsilon^{-2})$ samples. This is hence referred to as the *canonical rate*, as it holds for any intractable integral for which i.i.d. unbiased samples of the integrand can be generated.
+
+The sequential Monte Carlo (SMC) sampler was developed at the turn of the millennium, and is well suited to this high-dimensional regime. Forcing the (successive) importance distributions to be close provides a *generic mechanism* to overcome the "curse-of-dimensionality", i.e. complexity *constant* scaling like $e^P$ for dimension $P$. Under suitable high-dimensional stability assumptions, SMC samplers can avoid the exponential degradation of direct importance sampling and may achieve polynomial cost scaling in dimension. The SMC sampler also handles bad initialization or multi-modality on par with other population methods, and facilitates adaptive tuning of the Markov kernel, with comparable efficiency to MCMC approaches like the No-U-Turn Sampler (NUTS). These benefits are not shared by the particle filter, which does not use MCMC methodology. It also delivers an *unbiased* estimator of the normalizing constant, or model evidence, which can be useful in practice.
+
+The simplest method for improving complexity is parallelization. Standard i.i.d. Monte Carlo simulation is "embarrassingly parallel", as the samples can all be simulated *independently* on different machines. If the cost of each simulation dominates the $\mathcal{O}(\varepsilon^{-2})$ communication and summation operations, which should both have extremely small scalar constants which are often invisible to the algorithm ($<10^{-9}$ smaller than likelihood computations), then the constant and hence final time complexity can be reduced significantly in practice, even down to effectively $\mathcal{O}(1)$ when the merge is invisible. Monte Carlo methods for Bayesian simulation do not typically deliver i.i.d. samples, and so they are not a priori parallel. SMC samplers admit a certain degree of parallelism in their raw form, and it will be shown that they can also be provably "embarrassingly" parallelized beyond this.
+
+If the underlying problem being simulated from additionally requires a discrete approximation of a function then the complexity compounds. For example, suppose that achieving a $\text{bias}^2$ of $\mathcal{O}(\varepsilon^2)$ demands a cost of $\mathcal{O}(\varepsilon^{-\xi})$. Then the MSE complexity compounds as $\mathcal{O}(\varepsilon^{-2-\xi})$. To overcome this issue, one remedy to reduce the computational cost is through a modified Monte Carlo estimator which is known as multilevel Monte Carlo (MLMC). MLMC introduces a hierarchy of intermediate convergent discretization levels and constructs an estimator as a telescopic sum of a coarse and cheap estimator with many samples and successive increment estimators with increasing cost and decreasing sample size, ultimately improving the complexity to $\mathcal{O}(\varepsilon^{-(2\wedge\xi)})$ instead of the product form, which can translate to huge scaling gains for small target MSE.
+
+MLMC methodology in the Bayesian context was first developed for Markov chain Monte Carlo (MCMC) and sequential Monte Carlo (SMC) samplers. This chapter considers a multilevel sequential Monte Carlo (MLSMC) sampler based on the application of a function-space version of the latter algorithm to a strongly convergent class of neural network models known as *trace-class neural networks* (TNN). These are Bayesian feedforward neural networks (BNN) which impose a *width decay* on the weights instead of a standard $L^2$ width decay prior. This simple and natural idea eliminates exchangeability and non-identifiability of the weights and delivers strong convergence with a tunable smoothness parameter. The limiting Gaussian measures are defined in function spaces with similar properties to Sobolev spaces. The resulting method was originally developed in Chada et al., where the authors were able to demonstrate the canonical complexity is achievable. Function evaluations will be used as the fundamental unit of computational cost, which is also a convenient proxy for wall-clock time which is agnostic to particulars of the implementation or hardware.
+
+The organization of this chapter is as follows. First, Section 3 introduces the SMC sampler. Section 4 presents the MLSMC sampler method for TNN. Section 5 presents the parallel SMC method.
+
+## 3. SMC sampler
+
+Suppose that the aim is to simulate from a target distribution
+
+$$
+\pi(\theta) := p(\theta \mid \mathcal{D}) \propto p(Y \mid X, \theta)\, p(\theta)\,. \tag{4.1}
+$$
+
+One option is to use an MCMC kernel $\mathcal{M}$ such that $p\mathcal{M} = p$ to simulate $\theta^{(k)} \sim \mathcal{M}(\theta^{(k-1)}, \cdot)$, but this method produces correlated local samples and is prone to getting stuck in a given basin of attraction. If that basin of attraction is in the set of desired indistinguishable basins then it may not particularly matter in practice. Gradient-based MCMC methods such as HMC can reduce random-walk behavior, but they can still mix poorly across isolated posterior modes or permutation-symmetric basins.
+
+Population methods such as importance sampling (IS) are able to mitigate this issue, but they suffer from their own difficulties. In particular, in its raw form, IS suffers from a curse of dimensionality in both parameter and data, and as such it is not suitable for high dimensional problems and big data. The SMC sampler bypasses this problem by
+
+- (i) interpolating between an easy-to-sample-from initial distribution $p_0$ and the target distribution of interest $p$ with several intermediate distributions $p_t$ such that $p_T = p$, and
+- (ii) interleaving sequential importance sampling (SIS) with resampling and mutation by a sequence of appropriate MCMC kernels $\mathcal{M}_t$ such that $p_t\mathcal{M}_t = p_t$.
+
+In the Bayesian context, typically the prior $p$ is a suitable initial distribution. The sequence of intermediate targets can be built to gradually introduce the data, for example either from growing subsets of the data or with a tempering schedule $0 = \lambda_0 < \lambda_1 < \cdots < \lambda_T = 1$:
+
+$$
+p_t(\theta) \propto p(Y \mid X, \theta)^{\lambda_t}\, p(\theta)\,.
+$$
+
+**Algorithm 10** SMC sampler (c = communication here)
+
+```text
+Inputs : number of particles M, sequence of distributions π_t, MCMC kernels M_t
+Outputs: particle system {θ_t^i}_{i=1}^M and normalizing constant estimate Z_T^M
+initialize θ_0^i ∼ π_0 for i = 1, ..., M; set Z_0^M ← 1
+for t = 1 to T (in serial) do
+    // (Optional) adapt annealing parameter
+    select λ_t such that ESS = αM
+    // (c) Update estimate of normalizing constant
+    Z_t^M ← Z_{t-1}^M · (1/M) Σ_{k=1}^M p(Y | θ_{t-1}^k, X)^(λ_t − λ_{t-1})
+    for i = 1 to M (in parallel) do
+        define w_t^i ∝ p(Y | θ_{t-1}^i, X)^(λ_t − λ_{t-1})
+        // (c) Selection step
+        sample ancestor index I_t^i ∼ {w_t^1, ..., w_t^M}
+        // Mutation step
+        sample θ_t^i ∼ M_t(θ_{t-1}^(I_t^i), ·)
+```
+
+Three quantities are tracked along this path. The normalizing constant at temperature $\lambda_t$ is
+
+$$
+Z_t = \int p(Y \mid X, \theta)^{\lambda_t}\, p(\theta)\, d\theta,
+$$
+
+which at $\lambda_T = 1$ equals the model evidence $p(Y \mid X)$. Algorithm 10 maintains an unbiased estimate $Z_t^M$ at each step, with $Z_T^M$ returned as the estimate of the evidence. Successive targets are linked by the incremental importance weight that reweights particle $i$ from $\pi_{t-1}$ towards $\pi_t$,
+
+$$
+w_t^i \propto p(Y \mid X, \theta_{t-1}^i)^{\lambda_t - \lambda_{t-1}}, \qquad \tilde{w}_t^i = \frac{w_t^i}{\sum_{k=1}^M w_t^k}.
+$$
+
+How evenly these weights are spread is measured by the effective sample size (ESS),
+
+$$
+\text{ESS} = \frac{1}{\sum_{i=1}^M (\tilde{w}_t^i)^2} \in [1, M].
+$$
+
+Values near $M$ indicate balanced weights, whereas small values mean a few particles dominate. The ESS drives the algorithm in two ways: a low value motivates resampling, and in the adaptive variant the next temperature is chosen to preserve a target $\text{ESS} = \alpha M$. Data-tempering and likelihood-tempering construction schemes for the intermediate targets can also be mixed and matched. Section 4 considers another option. See Algorithm 10 for the version with tempering for Bayesian inference. The steps which require communication during execution are denoted with (c). It is noteworthy that if the resampling step is skipped then the algorithm is called annealed importance sampling (AIS) and was introduced by Neal. The normalizing constant then only needs to be computed once at the end. This version of the algorithm is convenient because it is embarrassingly parallel: communication is only required at resampling times. However, the purpose of resampling is to prevent degeneracy and improve stability, and this benefit often outweighs the added variance.
+
+## 4. MLSMC for TNN
+
+This section builds up the MLSMC for TNN method. First the MLMC method is introduced, followed by the TNN. Then the MLSMC sampler is presented, with theoretical justification and numerical results validating and extending the theory.
+
+### 4.1 MLMC method
+
+This section begins with a short review of MLMC. MLMC is useful when accurate simulations are expensive but coarse approximations are cheap. Rather than estimating the finest-level expectation directly, one estimates a coarse expectation plus a sequence of corrections. If consecutive levels are strongly coupled, the correction variances decay rapidly, so fewer samples are needed at expensive fine levels. Assume that a probability density $p$ is given, on a state-space $\mathsf{U}$. It is of interest to compute expectations of $p$-integrable functions, $\varphi : \mathsf{U} \to \mathbb{R}$; $p(\varphi) := \int_{\mathsf{U}} \varphi(u)p(u)du$. Now, assume that $p$ needs to be approximated by a density $p_l$ on a state-space $\mathsf{U}_l \subseteq \mathsf{U}$ such that:
+
+1. $\lim_{l\to\infty} p_l(\varphi) = p(\varphi)$, for any integrable $\varphi : \mathsf{U} \to \mathbb{R}$.
+2. The cost of computing with $p_l$ is increasing in $l$.
+
+Let $L \in \{1, 2, \dots\}$ be given; the telescoping sum identity is
+
+$$
+p_L(\varphi) = p_0(\varphi) + \sum_{l=1}^{L} [p_l - p_{l-1}](\varphi), \tag{4.2}
+$$
+
+with $[p_l - p_{l-1}](\varphi) = p_l(\varphi) - p_{l-1}(\varphi)$. The idea behind MLMC is to exploit this identity to reduce the complexity of the approximation. This is achieved by constructing *couplings* of $(p_l, p_{l-1})$, $l \in \{1, \dots, L\}$: joint densities $\check{p}_l$, on $\mathsf{U}_l \times \mathsf{U}_{l-1}$ such that $\int_{\mathsf{U}_l} \check{p}_l(u_l, u_{l-1})du_l = p_{l-1}(u_{l-1})$ and $\int_{\mathsf{U}_{l-1}} \check{p}_l(u_l, u_{l-1})du_{l-1} = p_l(u_l)$.
+
+The MLMC estimator can be constructed in the following way.
+
+1. Sample $U_0^1, \dots, U_0^{M_0}$ i.i.d. from $p_0$, with $M_0 \in \mathbb{N}$ given.
+2. For $l \in \{1, \dots, L\}$ independently of all other random variables, sample $(U_l^1, \tilde{U}_{l-1}^1), \dots, (U_l^{M_l}, \tilde{U}_{l-1}^{M_l})$ i.i.d. from $\check{p}_l$, with $M_l \in \mathbb{N}$ given.
+
+Then, the approximation is
+
+$$
+p_L^{ML}(\varphi) := \frac{1}{M_0}\sum_{i=1}^{M_0} \varphi(U_0^i) + \sum_{l=1}^{L} \frac{1}{M_l} \sum_{i=1}^{M_l} \{\varphi(U_l^i) - \varphi(\tilde{U}_{l-1}^i)\}. \tag{4.3}
+$$
+
+Using i.i.d. samples $U_L^1, \dots, U_L^M$ from $p_L$ to approximate $p_L(\varphi)$, one has
+
+$$
+p_L^{IID}(\varphi) := \frac{1}{M} \sum_{i=1}^{M} \varphi(U_L^i). \tag{4.4}
+$$
+
+Both estimators are unbiased, so one has the general decomposition of an unbiased estimator $\hat{p}$
+
+$$
+\mathbb{E}[(p_L^{\mathsf{ML}}(\varphi) - p(\varphi))^2] = \underbrace{\mathbb{V}\mathrm{ar}[p_L^{ML}(\varphi)]}_{\text{variance}} + \underbrace{[p_L - p](\varphi)^2}_{\text{bias}^2}, \tag{4.5}
+$$
+
+with $\mathbb{V}\mathrm{ar}$ representing the variance operator. The bias is equal for both, and to optimize the complexity this should match the variance. The variance of (4.3) is
+
+$$
+\mathbb{V}\mathrm{ar}[p_L^{\mathsf{ML}}(\varphi)] = \frac{\mathbb{V}\mathrm{ar}[\varphi(U_0^1)]}{M_0} + \sum_{l=1}^{L} \frac{\mathbb{V}\mathrm{ar}[\varphi(U_l^1) - \varphi(U_{l-1}^1)]}{M_l}, \tag{4.6}
+$$
+
+whereas for (4.4)
+
+$$
+\mathbb{V}\mathrm{ar}[p_L^{\mathsf{IID}}(\varphi)] = \frac{\mathbb{V}\mathrm{ar}[\varphi(U_L^1)]}{M}.
+$$
+
+Now, if the couplings $\check{p}_l$ are constructed so that $\mathbb{V}\mathrm{ar}[\varphi(U_l^1) - \varphi(U_{l-1}^1)]$ falls sufficiently quickly with $l$ then it can be possible to achieve an MSE (as in (4.5)) for the estimator (4.3) which is of the same order as (4.4) except for a cost that is lower. This is characterized in the following result.
+
+**Theorem 4.1** (Giles). *Suppose that there exists constants* $(\alpha, \beta, \gamma) \in \mathbb{R}_+^3$ *with* $\alpha \geq \frac{\min(\beta, \gamma)}{2}$ *such that*
+
+- (i) $|p_l(\varphi) - p(\varphi)| = \mathcal{O}(2^{-\alpha l})$.
+- (ii) $\mathbb{V}\mathrm{ar}[\varphi(U_l^1) - \varphi(U_{l-1}^1)] = \mathcal{O}(2^{-\beta l})$.
+- (iii) $C_l = \mathcal{O}(2^{\gamma l})$.
+
+*Then for any* $\varepsilon < 1$ *and* $L := \lceil \log(1/\varepsilon) \rceil$, *there exists* $(M_1, \dots, M_L) \in \mathbb{N}^L$ *such that*
+
+$$
+\text{MSE} = \mathbb{E}[(p_L^{ML}(\varphi) - p(\varphi))^2] = \mathcal{O}(\varepsilon^2), \tag{4.7}
+$$
+
+*and*
+
+$$
+\text{Cost(MLMC)} := \sum_{l=0}^{L} M_l C_l = \begin{cases} \mathcal{O}(\varepsilon^{-2}), & \text{if } \beta > \gamma, \\ \mathcal{O}(\varepsilon^{-2}(\log \varepsilon)^2), & \text{if } \beta = \gamma, \\ \mathcal{O}(\varepsilon^{-2-\frac{(\gamma-\beta)}{\alpha}}), & \text{if } \beta < \gamma, \end{cases} \tag{4.8}
+$$
+
+*where* $C_l$ *is the cost for one sample of* $\varphi(U_l^i) - \varphi(U_{l-1}^i)$.
+
+Asymptotically the cost in (4.8) is smaller than that of using the estimator (4.4). It is simple to see that the corresponding optimal complexity of the single level estimator (4.4) is given by the product of $\mathcal{O}(\varepsilon^{-2})$ samples at a per sample complexity of $\mathcal{O}(\varepsilon^{-\gamma/\alpha})$, i.e. $\mathcal{O}(\varepsilon^{-2-\gamma/\alpha})$, which is larger than the MLMC complexity for $\beta > 0$. The case of $\beta > \gamma$ is referred to as the canonical rate of convergence, i.e. $\mathcal{O}(\varepsilon^{-2})$, in other words this is the best rate that one can obtain.
+
+### 4.2 Trace class neural networks
+
+First, the problem is set up. Suppose the data are $\mathcal{D} = ((x_1, y_1), \dots, (x_N, y_N))$, $N \in \mathbb{N}$, where, for $i \in \{1, \dots, N\}$, $x_i \in \mathsf{X}$ and $y_i \in \mathsf{Y}$. The objective is to infer a predictive model $f : \mathsf{X} \to \mathsf{Y}$ based on the data. One way to do this is with a parametric model of the form $f : \mathsf{X} \times \Theta \to \mathsf{Y}$, with $\Theta \subseteq \mathbb{R}^P$. It is assumed that $x_{1:N}$ are deterministic, i.e. the discriminative vs. generative view of supervised learning.
+
+**Regression.** If $\mathsf{Y} = \mathbb{R}^C$, then it is assumed that for $i \in \{1, \dots, N\}$
+
+$$
+y_i = f(x_i, \theta) + \epsilon_i\,, \qquad \epsilon_i \overset{\text{ind}}{\sim} \mathcal{N}_C(0, \Sigma_i), \tag{4.9}
+$$
+
+where ind denotes independence across the indices $i \in \{1, \dots, N\}$ and $\mathcal{N}_C(\mu, \Sigma)$ denotes the $C$-dimensional Gaussian distribution with mean $\mu$ and covariance matrix $\Sigma$. The likelihood function in this case is
+
+$$
+p(Y|\theta, X) = \prod_{i=1}^{N} \phi_C(y_i; f(x_i, \theta), \Sigma_i), \tag{4.10}
+$$
+
+where $\phi_C(y; \mu, \Sigma)$ is the $C$-dimensional Gaussian density of mean $\mu$, covariance $\Sigma$ evaluated at $y$ given.
+
+**Classification.** If $\mathsf{Y} = \{1, \dots, C\}$ for some $C \in \mathbb{N}$, for convenience of the present exposition, define $f : \mathsf{X} \times \Theta \to \mathbb{R}^C$, with $f(x, \theta) = (f_1(x, \theta), \dots, f_C(x, \theta))$, and then separately the *softmax* function as
+
+$$
+S_k(x_i, \theta) := \frac{\exp\{f_k(x_i, \theta)\}}{\sum_{j=1}^{C} \exp\{f_j(x_i, \theta)\}}\,, \qquad k \in \mathsf{Y}. \tag{4.11}
+$$
+
+Assume that $y_i \sim S(x_i, \theta)$, independently for $i \in \{1, \dots, N\}$, where $S(x, \theta) = (S_1(x, \theta), \dots, S_C(x, \theta))$ denotes a categorical distribution on $C$ outcomes, given input $x$. In this case, the likelihood is
+
+$$
+p(Y|\theta, X) = \prod_{i=1}^{N} \prod_{k=1}^{C} S_k(x_i, \theta)^{\mathbb{I}[y_i = k]}\,. \tag{4.12}
+$$
+
+The predictive $S$ is Lipschitz, so conclusions about $f$ translate immediately. This part concludes by stating the key advantages of TNNs: one is able to have a stable infinite limit related to the width, as well as high-dimensional scalability, because one does not need to define the covariance operator structure.
+
+#### Bayesian neural networks
+
+Define the element-wise activation function as $\sigma$. Let $\mathsf{X} = \mathbb{R}^D$ and $\mathsf{Y} = \mathbb{R}^C$. The DNN can be defined in the following way. Let $D \in \mathbb{N}$, $(D_0, \dots, D_L) \in \mathbb{N}^{L+1}$ be given, with the constraint that $D_0 = D$ for the input layer and $D_L = C$ for the output layer. Now for weights $A_d \in \mathbb{R}^{D_{L'} \times D_{L'-1}}$ and biases $b_d \in \mathbb{R}^{D_d}$, $d \in \{1, \dots, L\}$ also given, write $\theta := ((A_1, b_1), \dots, (A_L, b_L))$ and so $\theta \in \Theta = \bigotimes_{L'=1}^{L} \{\mathbb{R}^{D_d \times D_{d-1}} \times \mathbb{R}^{D_d}\}$. Now set
+
+$$
+\begin{aligned}
+g_0(x, \theta) &:= A_1 x + b_1, \\
+g_{L'}(x, \theta) &:= A_{L'}\sigma(g_{L'-1}(x)) + b_{L'}\,, \qquad L' \in \{1, \dots L-1\}, \\
+f(x, \theta) &:= A_L \sigma(g_{L-1}(x)) + b_L,
+\end{aligned} \tag{4.13}
+$$
+
+where $f(x, \theta)$ is the output of the final layer of the DNN. The BNN is given by placing a prior $p$ on $\Theta$.
+
+#### TNN
+
+This section now introduces the trace class neural network (TNN) priors, which were first proposed in Sell and Singh, and differ from standard BNN priors in two fundamental ways. The first is that the prior on the weights and biases depends on the rows and columns, as opposed to standard isotropic weight decay. This is referred to as *width-decay* and it eliminates exchangeability and the associated non-identifiability. The second thing is that nested approximations of the well-defined TNN function-space converge strongly to a non-Gaussian process in the limit of infinite width. This stands in contrast to standard isotropic priors, under which the appropriately rescaled network converges weakly to a Gaussian process, so that the infinite-width limit is a kernel method and the compositional structure of the prior is lost. This will be made precise below.
+
+These priors were introduced to mimic Gaussian measure priors $p \sim \mathcal{N}(0, \mathcal{C})$ for inverse problems over function-space, where a common way to simulate Gaussian random fields is to use the Karhunen-Loève expansion
+
+$$
+f_{\mathsf{KL}} = \sum_{j \in \mathbb{Z}^+} \sqrt{\lambda_j}\, \iota_j \Phi_j, \qquad \iota_j \sim \mathcal{N}(0, 1), \tag{4.14}
+$$
+
+where $(\lambda_j, \Phi_j)_{j \in \mathbb{Z}^+}$ are the associated eigenbasis of the covariance operator $\mathcal{C}$, and $\{\iota_j\}_{j \in \mathbb{Z}^+}$ is Gaussian white noise. For a detailed description of the derivation of (4.14) and its application to stochastic numerical problems, the reader is referred to Lord et al. An issue that can arise with using (4.14) is that these priors do not scale well with input dimension, which is the initial motivation for TNN priors, where the variances of the weights and biases are summarized in a trace-class diagonal covariance operator $\mathcal{C}$. See Theorem 1 of Sell and Singh. More precisely, the TNN prior is given by
+
+$$
+A_{ij,d} \sim \mathcal{N}(0, (ij)^{-s}), \quad b_{i,d} \sim \mathcal{N}(0, i^{-s})\,. \tag{4.15}
+$$
+
+The tuning parameter $s$ controls how much information one believes concentrates on the first nodes, and as such also controls the smoothness, expressiveness, and flexibility of the prior in terms of the functions it can represent. In the case of $s > 1$, the prior is referred to as trace-class, which is the motivation for the name trace-class neural network prior.
+
+A convenient property of these priors is strong convergence, which is made precise with the following proposition. The proof is given in Chada et al. This is the key result that enables application of the MLSMC algorithm to TNN. The advantage of TNN is that it allows one not to prespecify the covariance operator structure in the prior, and it is also capable of having an infinite-width limit.
+
+**Proposition 4.1.** *Assume that for all* $z \in \mathbb{R}$, $|\sigma(z)| \leq |z|$. *Then for* $s > 1/2$, *the prior predictive output is square summable for the prior defined as in (4.15). Furthermore, let* $x \in \mathsf{X}$, *and consider the TNN* $f_l(x, \theta_l)$ *truncated at* $D_l = 2^l$ *width, for* $l \in \mathbb{N}$, *with the limit denoted* $f(x, \theta) = \lim_{l\to\infty} f_l(x, \theta_l)$, *as described above. Then there is a* $K(x) > 0$ *such that*
+
+$$
+\mathbb{E}\left[|f_l(x, \theta_l) - f(x, \theta)|^2\right] \leq K 2^{-(2s-1)l}\,. \tag{4.16}
+$$
+
+#### Multilevel TNN
+
+Consider now the question of choosing the dimension of $\theta$, in particular $D_{L'}$ for $L' \in \{1, \dots, L-1\}$ (since $D_0$ and $D_L$ are fixed to the input and output dimensions). For simplicity, here $L$ is assumed fixed and the NN width is the same for all layers other than the input or the output, i.e. $D_{L'} = D_{L''}$ for $L', L'' \in \{1, \dots, L-1\}$, but dependent upon some resolution parameter $l \in \mathbb{N}$. One can now re-define $D_l = 2^l$, noting that $D_0 = D$ and $D_L = C$, so those variables are no longer needed. Denote the corresponding vector of parameters by $\theta_l := \big((A_1^l, b_1^l), \dots, (A_D^l, b_D^l)\big) \in \Theta_l \subset \Theta$. The limiting infinite width NN output function $f(x, \theta)$ (4.13) approximated at finite resolution $l$ is denoted by $f_l(x, \theta_l)$, the likelihood by $p_l(Y|\theta_l, X)$, and the posterior distribution by
+
+$$
+\pi_l(\theta_l) := p_l(\theta_l|\mathcal{D}) \propto p_l(Y|\theta_l, X)\, p_l(\theta_l) =: \kappa_l(\theta_l)\,. \tag{4.17}
+$$
+
+This posterior (and the corresponding $f_l(x, \theta_l)$) is viewed as a finite approximation of the posterior associated to the non-parametric limiting DNN as $l \to \infty$, assuming it exists.
+
+### 4.3 MLSMC TNN method
+
+This section begins by firstly presenting the algorithm for approximating functional expectations, with respect to the posterior $\pi$, such as the posterior predictive $\mathbb{E}_\pi[f(x, \theta)]$, as well as some mathematical results which justify their implementation. The form of the results are such that they extend trivially to objective functions $\varphi \circ f$, for Lipschitz $\varphi$, which includes most conventional performance metrics, such as negative log likelihood and accuracy. The results will be presented first for the posterior predictive, and then extended as a corollary. Noting that $\mathbb{E}_\pi[f(x, \theta)] = \mathbb{E}_{\pi_L}[f_L(x, \theta_L)] + (\mathbb{E}_\pi[f(x, \theta)] - \mathbb{E}_{\pi_L}[f_L(x, \theta_L)])$, the main objective is to exploit the MLMC machinery for the following telescopic identity:
+
+$$
+\mathbb{E}_{\pi_L}[f_L(x, \theta_L)] = \sum_{l=1}^{L} \left\{ \mathbb{E}_{\pi_l}[f_l(x, \theta_l)] - \mathbb{E}_{\pi_{l-1}}[f_{l-1}(x, \theta_{l-1})] \right\} + \mathbb{E}_{\pi_0}[f_0(x, \theta_0)]\,. \tag{4.18}
+$$
+
+It will be shown that the optimal computational cost for achieving a MSE equal to $(\mathbb{E}_\pi[f(x, \theta)] - \mathbb{E}_{\pi_L}[f_L(x, \theta_L)])^2$ by approximating the individual summands on the R.H.S. independently is lower than directly approximating $\mathbb{E}_{\pi_L}[f_L(x, \theta_L)]$.
+
+#### Algorithm
+
+The approach constructed here follows that in Beskos et al. and in order to directly apply some of its results, additional notation is introduced. Throughout this exposition $(x, L) \in \mathsf{X} \times \mathbb{N}$ are fixed and given. Define the spaces constructively as $\Theta_l = \Theta_{l-1} \times \Delta_l$, for $l \in \{1, \dots, L\}$, and $\Delta_0 = \Theta_0$; the significance of these spaces will be made clear below. Set $\theta_0 = \delta_0 \in \Theta_0$ and for $l \in \{1, \dots, L\}$
+
+$$
+\theta_l = (\theta_{l-1}, \delta_l) = (\delta_0, \dots, \delta_l) \in \Theta_l. \tag{4.19}
+$$
+
+The quantities $(\delta_1, \dots, \delta_l)$ will be used to denote the increase in dimension between $\theta_{l-1}$ and $\theta_l$ say, which is pivotal to the algorithm presented below. Let $q_l(\cdot|\theta_{l-1})$ be a positive probability density on $\Delta_l$ and $q_0(\theta_0)$ a positive probability density on $\Theta_0$. Set $G_0(\theta_0) = \kappa_0(\theta_0)/q_0(\theta_0)$ and define weights as
+
+$$
+G_l(\theta_l) = \frac{\kappa_l(\theta_l)}{\kappa_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1})}\,. \tag{4.20}
+$$
+
+Let $(\mathcal{K}_l)_{l \in \{1, \dots, L-1\}}$ be a sequence of $(\pi_l)_{l \in \{1, \dots, L-1\}}$-invariant Markov kernels and define for $l \in \{1, \dots, L-1\}$
+
+$$
+\mathcal{M}_l(\theta_l, d\theta'_{l+1}) = \mathcal{K}_l(\theta_l, d\theta'_l)\, q_{l+1}(\delta_{l+1}|\theta'_l)\, d\delta_{l+1}, \tag{4.21}
+$$
+
+where $\theta'_{l+1} = (\theta'_l, \delta_{l+1})$ and $d\delta_l$ is the appropriate dimensional Lebesgue measure. This kernel is invoked in Step 4 of Algorithm 11.
+
+Set $\eta_0(\theta_0) = q_0(\theta_0)$ and for $l \in \{1, \dots, L\}$
+
+$$
+\eta_l(\theta_l) = \pi_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1}). \tag{4.22}
+$$
+
+The algorithm to be presented will provide a sample-based approximation of these probability densities and in particular, associated expectations. In the subsequent exposition, given $(\theta_l^1, \dots, \theta_l^M) \in \Theta_l^M$, the so-called $M$-empirical measure will be denoted $\eta_l^M$. In other words, there will be access to $M \in \mathbb{N}$ samples $(\theta_l^1, \dots, \theta_l^M) \in \Theta_l^M$ so that
+
+$$
+\eta_l^M(\varphi_l) := \frac{1}{M} \sum_{i=1}^{M} \varphi_l(\theta_l^i) \to \eta_l(\varphi_l) \quad \text{a.s.} \tag{4.23}
+$$
+
+**Algorithm 11** Multilevel Sequential Monte Carlo Sampler for TNN
+
+```text
+Inputs : highest resolution L ∈ ℕ; number of samples per level (M_0, ..., M_L) ∈ ℕ^(L+1), with
+         +∞ > M_0 ≥ M_1 ≥ ··· ≥ M_L ≥ 1
+Outputs: particles (θ_1^1, ..., θ_1^(M_1), ..., θ_L^1, ..., θ_L^(M_L)), from which (4.27) is constructed
+// Initialization
+for i = 1 to M_0 do
+    independently sample θ_0^i ∼ q_0(θ_0)dθ_0
+l ← 0
+// Iteration across levels
+while l < L do
+    for i = 1 to M_(l+1) do
+        sample θ_(l+1)^i | θ_l^1, ..., θ_l^(M_l) independently using
+
+            Σ_{j=1}^{M_l} [ G_l(θ_l^j) / Σ_{s=1}^{M_l} G_l(θ_l^s) ] M_l(θ_l^j, dθ_(l+1))
+
+    l ← l + 1
+```
+
+Recalling (4.18), the increments will be approximated as follows
+
+$$
+\frac{\eta_l^{M_l}(G_l f_l)}{\eta_l^{M_l}(G_l)} - \eta_l^{M_l}(f_{l-1}). \tag{4.24}
+$$
+
+Note that $\eta_l^{M_l}(f_{l-1})$ will converge in probability (as $M_l \to \infty$) to $\pi_{l-1}(f_{l-1})$. Then $\eta_l^{M_l}(G_l)$ will converge to
+
+$$
+\int_{\Theta_l} \pi_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1}) \frac{\kappa_l(\theta_l)}{\kappa_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1})}\, d\theta_l = \frac{1}{Z_{l-1}} \int_{\Theta_l} \kappa_l(\theta_l)\, d\theta_l = \frac{Z_l}{Z_{l-1}}\,, \tag{4.25}
+$$
+
+and $\eta_l^{M_l}(G_l f_l)$ converges to
+
+$$
+\int_{\Theta_l} \pi_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1}) \frac{\kappa_l(\theta_l)}{\kappa_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1})} f_l(x, \theta_l)\, d\theta_l = \frac{1}{Z_{l-1}} \int_{\Theta_l} \kappa_l(\theta_l) f_l(x, \theta_l)\, d\theta_l\,. \tag{4.26}
+$$
+
+Consequently, one can use the following approximation of $\pi_L(f_L)$:
+
+$$
+\widehat{\pi}_L(f_L) = \sum_{l=1}^{L} \left\{ \frac{\eta_l^{M_l}(G_l f_l)}{\eta_l^{M_l}(G_l)} - \eta_l^{M_l}(f_{l-1}) \right\} + \frac{\eta_0^{M_0}(G_0 f_0)}{\eta_0^{M_0}(G_0)}. \tag{4.27}
+$$
+
+Ordinarily $q_l$ is chosen so that for each $\theta_l \in \Theta_l$
+
+$$
+p_l(\theta_l) = p_{l-1}(\theta_{l-1})\, q_l(\delta_l|\theta_{l-1}). \tag{4.28}
+$$
+
+This means that
+
+$$
+G_l(\theta_l) = \frac{p_l(Y|\theta_l, X)}{p_{l-1}(Y|\theta_{l-1}, X)}. \tag{4.29}
+$$
+
+The main result is given in Chada et al.
+
+**Proposition 4.2.** *Under suitable assumptions, an analog of Theorem 4.1 applies to MLSMC with rates determined by (4.16) for costs* $C_l \propto 2^{2l}$, *i.e. the effective* $2\alpha = \beta = 2s - 1$ *and* $\gamma = 2$. *Hence* $L, \{M_1, \dots, M_L\}$ *can be chosen appropriately to achieve MSE of* $\mathcal{O}(\varepsilon^2)$ *for the canonical complexity* $\mathcal{O}(\varepsilon^{-2})$.
+
+### 4.4 Numerical experiments
+
+#### Regression problem
+
+The first numerical experiment will be based on a well-specified Bayesian regression problem, as given in (4.9), i.e. the data is generated from the model. Let $\Sigma_i^2 = 0.01^2 I$, $\sigma(z) = \tanh(z)$, $D = 10$, $D_l = 2^l$, and $N = 200$. The inputs are simulated as $x_i \sim \mathcal{N}(2, 0.5)$. A high-resolution parameter $l = 9$ is used for the ground truth. SMC and MLSMC samplers are compared, using 100 replications to compute MSE. The complexity rate $\xi$ such that $\text{cost} \propto \text{MSE}^{-\xi}$ is reported for different values of $\beta = 2s - 1$. Recall that $C_l = \mathcal{O}(2^{2l})$ so one expects to attain the canonical rate of convergence $\xi = 1$ when $s > 1.5 \to \beta > 2$. The numerical experiment is conducted with levels $L \in \{3, 4, \dots, 7\}$ and smoothness parameters $s \in \{3, 1.1\}$, delivering canonical and sub-canonical convergence behavior. The results are presented in Figure 4.1, including credible sets around the MSE values, given by the thin blue and red curves. Further details on implementation of the MLSMC sampler in general can be found in Beskos et al.
+
+The MLSMC sampler shows computational benefits, where for a given MSE the cost associated with attaining that order of MSE is smaller than the SMC sampler. One can see that (i) the rates are different, with MLSMC approximately achieving the canonical 1/MSE for $s = 3$ and (ii) the difference in cost for the lowest MSE is approximately a factor of 10 for $s = 3$, so the asymptotic benefit is achievable at a finite resolution, and (iii) that benefit is smaller in the sub-canonical case $s = 1.1$.
+
+<Figure caption="Figure 4.1: Regression problem: error vs cost plots for SMC and MLSMC using TNN priors. Left: s = 3. Right: s = 1.1. Credible intervals are provided by thin curves. (Schematic reproduction: the points are read off the book's plot, which is printed in grey; the credible sets that the text calls thin blue and red curves are drawn here as thin grey lines bracketing the dashed SMC curve and the solid MLSMC curve.)">
+  <Bdl04RegressionCost />
+</Figure>
+
+#### Binary MNIST classification
+
+As a second proof of concept, a simplified binary MNIST classification task is considered, using $D = 100$ principal components (PCs) of the original $28 \times 28$ image data set, with $N = 400$. The results are similar to the regression case, and are presented in Figure 4.2.
+
+<Figure caption="Figure 4.2: MNIST Classification problem: error vs cost plots for SMC and MLSMC, using TNN priors. Left: s = 3. Right: s = 1.1. Credible sets are provided in the thin curves. (Schematic reproduction: the points are read off the book's plot, which is printed in grey; the credible sets that the text calls thin blue and red curves are drawn here as thin grey lines bracketing the dashed SMC curve and the solid MLSMC curve.)">
+  <Bdl04MnistCost />
+</Figure>
+
+## 5. Parallel SMC
+
+For this section, a fixed and finite network architecture $f$ of the standard form, as introduced in Section 4.2, is assumed. This gives rise to a computable target distribution (up to a normalizing constant) $\pi = \kappa/Z$.
+
+SMC is inherently parallel, as the MCMC moves for each particle can be executed concurrently. This is where the likelihood computations happen, which are the most expensive and dominant contributors to the computational complexity. One must take care that sufficient memory per core is available or else this approach will hit the "memory wall". The resampling stage requires communication between all particles, which could also be a bottleneck depending on the communication bandwidth, but this may not be an issue for single-instruction-multiple-data (SIMD)-type architectures as found on a single multi-core CPU or GPU. This is the most common approach for exploiting parallelism in SMC, as it is very simple to implement and can sometimes deliver strong parallel scaling.
+
+**Algorithm 12** SMC∥ sampler
+
+```text
+Inputs : number of parallel runs R; number of particles M
+Outputs: particle systems {θ^(i,r)}_{i=1}^M and normalizing constants Z^(M,r) for r = 1, ..., R
+for r = 1 to R do
+    run Algorithm 10
+    output {θ^(i,r)}_{i=1}^M and Z^(M,r)
+```
+
+Beyond this inter-SMC parallelism, the combination of parallel SMCs has recently been considered in Vergé et al., Whiteley et al. The recommended approach typically involves communication between *all samples*, which improves stability but hinders scalability for large models which need to be distributed across many SIMD nodes, which may either be disconnected or have slower between-node inter-connect. The island particle model separates the total number of samples $M$ into $R \leq R_{\max}$ SMC islands with $M/R$ samples each. Without between-SMC interaction, naive (equal-weight) averaging results in an asymptotic bias penalty $(R/M)^2$. However, *assigning appropriate weights to each SMC eliminates this penalty*. The resulting scalable parallel SMC sampler is denoted by $\text{SMC}_\parallel$.
+
+Algorithm 12 displays the $\text{SMC}_\parallel$ method, and the consistent (in $R$, for finite $M$ suitably large) $\text{SMC}_\parallel$ ratio estimator is defined as
+
+$$
+\hat{\varphi}_{\text{SMC}_\parallel} = \sum_{r=1}^{R} \omega_r \pi^{M,r}(\varphi)\,, \quad \omega_r = \frac{Z^{M,r}}{\sum_{s=1}^{R} Z^{M,s}}\,. \tag{4.30}
+$$
+
+*This estimator is consistent, which is not the case for a naive* unweighted *average*. See Proposition 4.3 and the discussion above.
+
+### 5.1 Parallel MCMC
+
+MCMC can also exploit parallel resources: one can retain a single sample from each of $M$ parallel chains, each run for $b$ warm-up epochs, achieving $\text{MSE} = O(e^{-b} + 1/M)$, which is indistinguishable from the single-chain result for $b \gg \log M$, at a parallel cost equivalent to SMC when the integrated autocorrelation time matches the total number of mutation epochs. However, unlike SMC, the resulting estimator is not consistent for finite $b$, which can potentially spoil convergence.
+
+### 5.2 Theoretical result
+
+The convergence result is made rigorous in the following proposition. Suitable assumptions and proof are provided in Liang et al.
+
+**Proposition 4.3.** *For suitable* $\varphi, m, M, T$, *there exists a* $K > 0$, *which depends on* $\varphi, m, T$, *such that for any* $R \in \mathbb{N}$,
+
+$$
+\mathbb{E}[(\hat{\varphi}_{SMC_\parallel} - \pi(\varphi))^2] \leq \frac{K}{MR}\,. \tag{4.31}
+$$
+
+### 5.3 Numerical experiments
+
+As above, wall-clock time complexity will be measured in terms of function evaluations, as an implementation and hardware agnostic proxy. A likelihood evaluation will be referred to as an *epoch*, in analogy with stochastic gradient descent (SGD) based optimization methods like Adam. However, note that the time to compute an epoch of mini-batches depends heavily on the size of the problem and the details of the hardware and implementation. If all data fits on a single computational unit (either a node or a core), then a serial epoch of mini-batch likelihood computations will typically require much longer wall-clock time in comparison to a single likelihood evaluation. In contrast, if only a single mini-batch fits on a node, and interconnect is slow, then even data parallel may be slower than serial mini-batches. It is also worth noting that mini-batch gradients can deliver comparable gain to full gradient steps far from convergence, which can significantly accelerate progress as measured by epochs.
+
+<Figure caption="Figure 4.3: Empirical variance of posterior mean estimates for Bayesian logistic regression on Australian Credit (m = 690, d = 15), for SMC∥-pCN, various MCMC∥ methods, and AIS. SMC∥-pCN and the MCMC∥ baselines are compared at matched total sample size MR, with M = 511 particles per process; AIS is equivalent to M = 1 particle per process. SMC∥-pCN uses pCN mutations with 30 mutation steps per tempering stage and adaptive tempering that keeps the effective sample size above M/2. Curves are averaged over 25 repetitions; vertical bars show ±3 standard errors. Both axes are log-scaled. (Schematic reproduction: the points are read off the book's plot; the ±3 standard-error bars are not redrawn because the bars of the eight methods overlap at the same abscissae and cannot be attributed to individual methods.)">
+  <Bdl04AustralianCredit />
+</Figure>
+
+#### Proof of concept
+
+First, logistic regression on the Australian Credit data is considered, illustrating comparable results to state-of-the-art (SOTA) parallel MC algorithms and the $1/R$ convergence guaranteed by Proposition 4.3. The data set has $d = 15$ covariates and $m = 690$ data and Bayesian logistic regression is used. The method $\text{SMC}_\parallel$-pCN (preconditioned Crank–Nicolson, pCN) is compared with annealed importance sampling, various $\text{MCMC}_\parallel$ methods, and recent synchronous-parallel MCMC. Figure 4.3 shows the empirical variance for posterior mean estimates of the proposed methods with respect to the number of samples and number of parallel processes, consistent with the $1/R$ convergence result of Proposition 4.3. $\text{SMC}_\parallel$-pCN attains the lowest empirical variance among the baselines shown in Figure 4.3 that do not require communication scaling with $R$. The $\text{MCMC}_\parallel$ data in Figure 4.3 is reproduced directly from Schwedes and Calderhead. SMC and AIS incur a per-sample overhead in cost ($\sum_t m_t$, where $m_t$ are the mutations at tempering step $t$), but this is offset by intra-parallelism ($\sum_t m_t / M \ll 1$).
+
+#### IMDb data set
+
+A large problem in semantic classification of natural language is now considered, using the IMDb data set of 50,000 movie reviews, split evenly into training and test sets.
+
+**Architecture.** Each review is mapped to a fixed feature vector by SBERT embeddings from the model `all-mpnet-base-v2`<sup>1</sup>, whose weights are *frozen* throughout: they are used only to produce the 768 dimensional [CLS] embedding and are never sampled. On top of these embeddings are placed (i) one hidden layer with 128 neurons, (ii) ReLU activation, (iii) a final linear layer, and (iv) a softmax output. Inference is over *all* weights and biases of this network, of dimension $P = 98690$, and not merely the final classifier head. The whole train (25000 data) and test data set (25000 data) are considered.
+
+**Sampling setup.** The likelihood is the softmax (categorical cross-entropy) likelihood over the whole training set of 25000 reviews, and inference uses an adaptive likelihood-tempering SMC sampler with HMC mutations of length $T$. The method $\text{SMC}_\parallel$ is compared against two baselines that share the same prior, likelihood, and frozen embeddings: $\text{HMC}_\parallel$, which averages over $MR$ independent HMC chains of length $T$, and a single serial HMC run of length $MRT$; in every method the HMC step size is adapted to a common acceptance-rate target, so the comparison is made at matched cost.
+
+<Figure caption="Figure 4.4: IMDb sentiment classification, with the full posterior over all P = 98690 network weights, using SMC∥ with M = 32 particles for each of R SMC runs, HMC mutations, and adaptive tempering that keeps the effective sample size above M/2. Left: test accuracy and negative log-likelihood (NLL) against the number of parallel runs R at a budget of about τᵢᵣᵣ = 10⁴ epochs, alongside a serial HMC baseline given MRτᵢᵣᵣ epochs and HMC∥ with MR chains with τᵢᵣᵣ epochs each. Right: converged values (R = 8) showing the catastrophic failure (collapsed accuracy and inflated NLL) once the budget drops below τᵢᵣᵣ. The R- and budget-axes are log-scaled; all curves are averaged over 5 realizations. (Schematic reproduction: the points are read off the book's plot.)">
+  <Bdl04ImdbParallel />
+</Figure>
+
+**Experiment.** Denote by $m$ the number of evaluations of $\kappa$ per mutation step, referred to as *epochs*, and by $T$ the number of tempering-and-mutation steps. The product $mT$ (or $\sum_{t=1}^{T} m_t$ for an adaptive schedule) is the total simulation cost, called the *irreducible serial time* $\tau_{\text{irr}}$: the serial simulation the sampler needs in order to mix, which cannot be removed by adding more parallel runs. In practice $\tau_{\text{irr}}$ is read off empirically as the budget at which accuracy and NLL plateau, here $\tau_{\text{irr}} \approx 10^4$ epochs. When $m$ and/or $T$ are too small, so that the budget falls well short of $\tau_{\text{irr}}$, the sampler has not mixed and the method *catastrophically fails*: test accuracy collapses and NLL inflates. Figure 4.4 summarizes this behavior. The left panel shows performance as a function of $R$ at $\tau_{\text{irr}}$, where $\text{SMC}_\parallel$ improves steadily with $R$ and matches the far more expensive serial HMC baseline; the right panel fixes $R = 8$ and reduces the budget below $\tau_{\text{irr}}$, exposing the catastrophic failure of $\text{SMC}_\parallel$ and $\text{HMC}_\parallel$ once the budget falls short of the irreducible time.
+
+---
+
+<sup>1</sup> [https://huggingface.co/sentence-transformers/all-mpnet-base-v2](https://huggingface.co/sentence-transformers/all-mpnet-base-v2)
