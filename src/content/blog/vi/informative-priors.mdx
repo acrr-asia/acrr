@@ -1,0 +1,129 @@
+---
+title: "Tiên nghiệm có thông tin"
+description: "Một khung xây dựng tiên nghiệm có thông tin dựa trên dữ liệu cho tham số mạng nơ-ron, với các dạng nhận biết độ bất định và nhận biết nhóm dựng từ dữ liệu ngữ cảnh."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - uncertainty quantification
+  - group robustness
+series: bayesian-deep-learning
+seriesOrder: 37
+---
+
+Chương này giới thiệu một khung để xây dựng các phân phối tiên nghiệm (prior) có thông tin, dựa trên dữ liệu, trên các tham số của mạng nơ-ron. Đặc tả những tiên nghiệm có ý nghĩa cho các mô hình mạng nơ-ron vốn dĩ khó, vì hiếm khi thấy rõ cách ánh xạ một cấu hình tham số cụ thể tới một hành vi hàm mong muốn, chẳng hạn được hiệu chuẩn tốt, có độ bất định dự đoán cao dưới dịch chuyển ngữ nghĩa (semantic shift; chẳng hạn trên các đầu vào thuộc những lớp không có mặt trong dữ liệu huấn luyện), có log hàm hợp lý âm của dự đoán (predictive negative log-likelihood) thấp, hoặc vững trước các dịch chuyển phân phối (distribution shift) khác.
+
+Khung này dùng thông tin đặc thù của bài toán và dữ liệu phụ trợ để gán mật độ tiên nghiệm cao cho những giá trị tham số tạo ra các tính chất hàm mong muốn đó. Hai dạng cụ thể của khung được thảo luận:
+
+1. **Tiên nghiệm nhận biết độ bất định** (uncertainty-aware prior), được thiết kế để cải thiện việc định lượng độ bất định (uncertainty quantification) bằng cách ưu tiên các mô hình có entropy dự đoán cao trên những đầu vào khác biệt một cách có ý nghĩa so với phân phối huấn luyện (Mục 2);
+2. **Tiên nghiệm nhận biết nhóm** (group-aware prior), được thiết kế để cải thiện tính vững theo nhóm (group robustness) bằng cách ưu tiên các mô hình tổng quát hóa tốt cho những nhóm con dữ liệu ít được đại diện trong dữ liệu huấn luyện (Mục 3).
+
+## 1. Một họ tiên nghiệm có thông tin dựa trên dữ liệu
+
+Mục này bắt đầu bằng việc hình thức hóa cấu trúc mô hình. Gọi $\theta \in \Theta$ là một giá trị hiện thực (realization) của vector tham số mạng nơ-ron, và gọi $p(y \mid x, \theta; f)$ là mô hình quan sát do mạng $f$ tạo ra. Với bài toán phân loại, $f$ có thể cho ra các logit tham số hóa một phân phối phân loại (categorical distribution); với bài toán hồi quy, chẳng hạn, nó có thể tham số hóa trung bình của một mô hình quan sát Gauss. Phân hoạch $\theta = (\theta_h, \theta_L)$ thành các tham số lớp cuối $\theta_L$ và các tham số $\theta_h$ của mọi lớp phía trước (bộ trích xuất đặc trưng, feature extractor). Khi đó ánh xạ của mạng là $f(\cdot\,; \theta) := h(\cdot\,; \theta_h)\theta_L$, trong đó $h(\cdot\,; \theta_h)$ là đầu ra sau kích hoạt của lớp áp chót. Giả định có sẵn các tham số bộ trích xuất đặc trưng đã huấn luyện trước $\theta_h^*$ và dữ liệu ngữ cảnh (context data) mã hóa thông tin hữu ích về tác vụ hạ nguồn.
+
+Khung này được xây dựng trên một *bài toán suy luận ngữ cảnh* (context inference problem). Nó dùng một lô đầu vào ngữ cảnh $x_\mathrm{c} = \{x_1, \dots, x_M\}$ và các nhãn tương ứng $y_\mathrm{c} = \{y_1, \dots, y_M\}$, được rút từ một phân phối đồng thời $p_{X_\mathrm{c}, Y_\mathrm{c}}$. Các chữ in hoa $X_\mathrm{c}$ và $Y_\mathrm{c}$ ký hiệu biến ngẫu nhiên, còn $x_\mathrm{c}$ và $y_\mathrm{c}$ ký hiệu các giá trị hiện thực của chúng. Sau đó đưa vào một biến ngẫu nhiên Bernoulli $\check{Z} \in \{0, 1\}$, chỉ báo $\theta$ có tạo ra một mô hình có tính chất mong muốn hay không; chẳng hạn, $\check{Z} = 1$ có thể chỉ báo độ bất định cao trên $x_\mathrm{c}$ hoặc độ chính xác cao trên các điểm đánh giá có một thuộc tính nhóm xác định.
+
+Quan hệ này được biểu diễn qua mô hình quan sát ngữ cảnh (context observation model) $\check{p}(\check{z} \mid \theta; f, p_{X_\mathrm{c}, Y_\mathrm{c}})$, tức hàm khối xác suất của giá trị hiện thực $\check{z}$ có điều kiện theo $\theta$. Các đại lượng sau dấu chấm phẩy là những thành phần cố định dùng để xây dựng mô hình, không phải các biến điều kiện ngẫu nhiên bổ sung. Cho một tiên nghiệm cơ sở (base prior) $p(\theta)$, tiên nghiệm có thông tin dựa trên dữ liệu là phân phối hậu nghiệm (posterior) trên $\theta$ có điều kiện theo kết cục mong muốn $\check{z} = 1$. Để ký hiệu gọn, các đối số cố định như $f$ được lược bỏ khi không gây nhầm lẫn. Theo định lý Bayes,
+
+$$
+p(\theta \mid \check{z} = 1; p_{X_\mathrm{c}, Y_\mathrm{c}}) = \frac{\check{p}(\check{z} = 1 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}})\, p(\theta)}{\check{p}(\check{z} = 1; p_{X_\mathrm{c}, Y_\mathrm{c}})}. \tag{30.1}
+$$
+
+Phân phối có điều kiện này sau đó được dùng làm tiên nghiệm trong một bài toán suy luận tiếp theo cho các tham số mạng nơ-ron, chẳng hạn trong ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP) hoặc trong suy luận Bayes xấp xỉ như suy luận biến phân trường trung bình (mean-field variational inference) ([Chương 13](/vi/blog/gaussian-mean-field-variational-inference)).
+
+Để đặc tả mô hình quan sát ngữ cảnh, $\check{Z} = 1$ được diễn giải là đạt được tính chất mong muốn (chẳng hạn độ bất định đáng tin cậy). Xác suất của kết cục này được gắn với một hàm chi phí (cost function) không âm $c$:
+
+$$
+\begin{aligned}
+\check{p}(\check{z} = 1 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}}) &:= \exp\!\left(-\mathbb{E}_{p_{X_\mathrm{c}, Y_\mathrm{c}}}[c(X_\mathrm{c}, Y_\mathrm{c}, \theta)]\right), \\
+\check{p}(\check{z} = 0 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}}) &:= 1 - \check{p}(\check{z} = 1 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}}).
+\end{aligned} \tag{30.2}
+$$
+
+Vì $c$ không âm, hai đại lượng này xác định một hàm khối xác suất Bernoulli hợp lệ. Các Phương trình (30.1) và (30.2) cho thấy tính hữu ích của tiên nghiệm thu được phụ thuộc vào hàm chi phí, phân phối ngữ cảnh và tiên nghiệm cơ sở. Do đó, thách thức mô hình hóa chính là chọn $c$ và $p_{X_\mathrm{c}, Y_\mathrm{c}}$ sao cho mô hình quan sát ngữ cảnh nắm bắt tính chất hàm mong muốn một cách trung thực nhất có thể.
+
+## 2. Tiên nghiệm dựa trên dữ liệu nhận biết độ bất định
+
+Theo Rudner và cộng sự, mục này cụ thể hóa khung trên để xây dựng một tiên nghiệm nhận biết độ bất định cho việc tinh chỉnh (finetuning) các bộ phân loại đã huấn luyện trước.
+
+**Tiên nghiệm cơ sở.** Các tiên nghiệm cơ sở được đặc tả riêng cho từng lớp. Với các tham số bộ trích xuất đặc trưng $\theta_h$, dùng một tiên nghiệm Gauss có tâm tại các tham số đã huấn luyện trước: $p(\theta_h) = \mathcal{N}(\theta_h \mid \theta_h^*, \tau_h^{-1}\mathbf{I})$. Điều này khuyến khích lời giải ở gần biểu diễn đã huấn luyện trước. Với các tham số lớp cuối, dùng một tiên nghiệm Gauss tiêu chuẩn có trung bình bằng không: $p(\theta_L) = \mathcal{N}(\theta_L \mid \mathbf{0}, \tau_L^{-1}\mathbf{I})$.
+
+**Hàm chi phí và phân phối ngữ cảnh.** Trong cách xây dựng cho bài toán phân loại này, $f(x_\mathrm{c}; \theta)$ ký hiệu các logit được đánh giá trên $M$ đầu vào ngữ cảnh. Với mỗi tọa độ đầu ra $k$, $[f(x_\mathrm{c}; \theta)]_k \in \mathbb{R}^M$ gom các logit tương ứng trên toàn bộ lô ngữ cảnh. Chi phí được định nghĩa bằng một bình phương khoảng cách Mahalanobis (Mahalanobis distance) giữa các logit này và một trung bình mục tiêu:
+
+$$
+c(x_\mathrm{c}, y_\mathrm{c}, \theta) := \tau_\mathrm{c} \sum_{k=1}^{K} D_{\mathcal{M}}^2\big([f(x_\mathrm{c}; \theta)]_k, m(x_\mathrm{c}, y_\mathrm{c})_k, C(x_\mathrm{c})\big), \tag{30.3}
+$$
+
+trong đó $\tau_\mathrm{c} > 0$ là một tham số co giãn chi phí, khác với các độ chính xác (precision) của tiên nghiệm cơ sở $\tau_h$ và $\tau_L$, và $K$ là số chiều đầu ra. Bình phương khoảng cách Mahalanobis trong Phương trình (30.3) là
+
+$$
+D_{\mathcal{M}}^2(\mathbf{a}, \mathbf{b}, \mathbf{C}) := (\mathbf{a} - \mathbf{b})^\top \mathbf{C}^{-1} (\mathbf{a} - \mathbf{b}). \tag{30.4}
+$$
+
+Để khuyến khích độ bất định cao trên các đầu vào ngữ cảnh, đặt $m(x_\mathrm{c}, y_\mathrm{c})_k := [y_\mathrm{c}]_k$ và chọn phân phối nhãn ngữ cảnh là một khối lượng điểm (point mass) tại không, $p(y_\mathrm{c} \mid x_\mathrm{c}) := \delta_{\mathbf{0}}(y_\mathrm{c})$. Điều này làm cho trung bình mục tiêu bằng không hầu chắc chắn dưới phân phối nhãn ngữ cảnh.
+
+Hàm hiệp phương sai được định nghĩa bởi
+
+$$
+C(\cdot) := s_1 h(\cdot\,; \theta_h^*) h(\cdot\,; \theta_h^*)^\top + s_2 \mathbf{I}, \tag{30.5}
+$$
+
+trong đó $s_1 > 0$ và $s_2 > 0$ là các tham số co giãn cố định. Dạng trong Phương trình (30.5) phản ánh cấu trúc của các biểu diễn của mô hình đã huấn luyện trước.
+
+Cuối cùng, $p(x_\mathrm{c})$ được lấy là một phân phối thực nghiệm trên những đầu vào khác biệt một cách có ý nghĩa so với tập huấn luyện, chẳng hạn các đầu vào ngoài phân phối (out-of-distribution, OOD). Theo các Phương trình (30.2) và (30.3), chi phí thấp (và do đó giá trị cao của $\check{p}(\check{z} = 1 \mid \theta)$) đạt được khi các logit gần mục tiêu bằng không theo metric Mahalanobis của Phương trình (30.4). Với một bộ phân loại softmax, các logit gần không tạo ra một phân phối dự đoán gần đều, nên tiên nghiệm thu được ưu tiên độ bất định dự đoán cao trên các đầu vào ngữ cảnh ngoài phân phối đã chỉ định.
+
+## 3. Tiên nghiệm dựa trên dữ liệu nhận biết nhóm
+
+Theo Rudner và cộng sự, một tiên nghiệm nhận biết nhóm hữu ích được đặc tả bằng cách chọn (i) một phân phối ngữ cảnh $p_{X_\mathrm{c}, Y_\mathrm{c}}$ mà việc quan sát $\check{z} = 1$ dưới nó mang thông tin và (ii) một hàm chi phí $c$ đóng vai trò đại diện (proxy) cho tính vững theo nhóm dưới phân phối đó.
+
+Cả hai lựa chọn nói chung đều khó. Chẳng hạn, có thể học một mô hình sinh được thiết kế riêng cho phân phối ngữ cảnh hoặc xây dựng một hàm chi phí phức tạp hơn. Ở đây, một phân phối ngữ cảnh cố định, được chỉ định trước và một hàm chi phí đơn giản được dùng để minh họa khung.
+
+**Phân phối ngữ cảnh.** Giả định có sẵn một tập dữ liệu kiểm định nhỏ $\mathcal{D}_\mathrm{val}$ chứa thông tin về nhóm. Phân phối ngữ cảnh được tạo ra bằng cách tăng trọng số cho các nhóm hiếm trong tập dữ liệu này:
+
+$$
+\begin{aligned}
+p_{X_\mathrm{c}, Y_\mathrm{c}} &= \sum_{g \in \mathcal{G}} \alpha_g p_g, \qquad \alpha_g = \frac{\widetilde{\alpha}_g}{\sum_{g' \in \mathcal{G}} \widetilde{\alpha}_{g'}}, \\
+\widetilde{\alpha}_g &= \left(\frac{|\mathcal{D}_\mathrm{val}|}{|\mathcal{D}_\mathrm{val}^g|}\right)^{\gamma}.
+\end{aligned} \tag{30.6}
+$$
+
+Ở đây $p_g$ là phân phối thực nghiệm của các mẫu kiểm định trong nhóm $g$, $|\mathcal{D}_\mathrm{val}^g|$ là số mẫu như vậy, và $\gamma \geq 1$ điều khiển cường độ tăng trọng số. Cách xây dựng này không đòi hỏi tần suất các nhóm trong tập kiểm định khớp với tần suất các nhóm trong tập huấn luyện; nó chủ ý định nghĩa một phân phối ngữ cảnh được tái trọng số. Như Phương trình (30.6) cho thấy, tăng $\gamma$ làm tăng mức nhấn mạnh tương đối vào các nhóm hiếm hơn.
+
+**Hàm chi phí.** Một chi phí đóng vai trò đại diện cho tính vững theo nhóm được định nghĩa, lấy cảm hứng từ cực tiểu hóa nhận biết độ nhọn (sharpness-aware minimization, SAM). Hàm mất mát của tác vụ $\ell(\cdot)$ (thường là entropy chéo (cross-entropy) cho phân loại hoặc sai số bình phương trung bình cho hồi quy) được đánh giá tại một phép nhiễu (perturbation) tham số xấu nhất theo xấp xỉ bậc một:
+
+$$
+c(x_\mathrm{c}, y_\mathrm{c}, \theta) := \ell\big(y_\mathrm{c}, f(x_\mathrm{c}; \theta + \rho\, \epsilon(\theta, x_\mathrm{c}, y_\mathrm{c}))\big), \tag{30.7}
+$$
+
+trong đó $\rho > 0$ là độ lớn của phép nhiễu. Với gradient của hàm mất mát khác không, hướng của phép nhiễu là
+
+$$
+\epsilon(\theta, x_\mathrm{c}, y_\mathrm{c}) := \perp\!\left(\frac{\nabla_\theta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \theta))}{\lVert \nabla_\theta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \theta)) \rVert_2}\right), \tag{30.8}
+$$
+
+trong đó $\perp(u)$ ký hiệu toán tử `stop_gradient`: giá trị truyền xuôi của nó là $u$ nhưng đạo hàm bằng không. Khi gradient của hàm mất mát triệt tiêu, đặt $\epsilon(\theta, x_\mathrm{c}, y_\mathrm{c}) = \mathbf{0}$. Gradient được chuẩn hóa là hướng có chuẩn $\ell_2$ bằng một làm cực đại mức tăng bậc một của hàm mất mát; toán tử dừng gradient (stop-gradient) coi hướng này là cố định khi lấy đạo hàm $c$.
+
+Hàm mất mát thấp nói chung gắn với khả năng tổng quát hóa tốt, nhưng tập kiểm định nhỏ chỉ chứa ít mẫu từ các nhóm hiếm, khiến việc tổng quát hóa cho các nhóm đó trở nên khó. Phân phối ngữ cảnh bù lại sự mất cân bằng này bằng cách tăng trọng số cho các mẫu thuộc nhóm hiếm, còn hàm mất mát bị nhiễu ưu tiên những cấu hình tham số vẫn có mất mát thấp dưới một phép nhiễu xấu nhất cục bộ. Những cấu hình như vậy được kỳ vọng tổng quát hóa tốt hơn cho dữ liệu ngữ cảnh thuộc nhóm hiếm đã được tăng trọng số.
+
+Toán tử dừng gradient thay đổi đạo hàm dùng trong tối ưu hóa mà không thay đổi giá trị truyền xuôi của phép nhiễu. Để làm rõ điều này, gọi $\widetilde{\epsilon}(\theta, x_\mathrm{c}, y_\mathrm{c})$ là cùng gradient được chuẩn hóa như trong Phương trình (30.8) nhưng không có dừng gradient, và gọi $\theta_t$ là giá trị lặp hiện tại của tham số. Dùng gradient dạng vector cột, giữ cố định $x_\mathrm{c}$ và $y_\mathrm{c}$, viết $J_{\widetilde{\epsilon}}(\theta_t)$ cho ma trận Jacobi (Jacobian) của $\widetilde{\epsilon}$ theo $\theta$ tại $\theta_t$, và dùng $\vartheta$ làm vector tham số câm, quy tắc dây chuyền cho
+
+$$
+\begin{aligned}
+&\nabla_\theta \ell\big(y_\mathrm{c}, f(x_\mathrm{c}; \theta + \rho\, \widetilde{\epsilon}(\theta, x_\mathrm{c}, y_\mathrm{c}))\big)\big|_{\theta = \theta_t} \\
+&\quad = \big(\mathbf{I} + \rho J_{\widetilde{\epsilon}}(\theta_t)\big)^\top \nabla_\vartheta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \vartheta))\big|_{\vartheta = \theta_t + \rho\, \widetilde{\epsilon}(\theta_t, x_\mathrm{c}, y_\mathrm{c})}.
+\end{aligned} \tag{30.9}
+$$
+
+Với dừng gradient, vi phân tự động (automatic differentiation) bỏ qua đóng góp của ma trận Jacobi trong Phương trình (30.9) và trả về
+
+$$
+g_\mathrm{sg}(\theta_t) := \nabla_\vartheta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \vartheta))\big|_{\vartheta = \theta_t + \rho\, \epsilon(\theta_t, x_\mathrm{c}, y_\mathrm{c})}. \tag{30.10}
+$$
+
+Như vậy, giá trị truyền xuôi trong Phương trình (30.7) vẫn xác định chi phí được dùng trong mô hình quan sát ngữ cảnh, nhưng $g_\mathrm{sg}$ là một gradient thay thế (surrogate gradient) kiểu SAM chứ không phải gradient chính xác của chi phí vô hướng truyền xuôi đó. Nếu không có thêm các điều kiện khả tích, trường vector thay thế này không nhất thiết là gradient của một thế vô hướng thay thế nào đó được định nghĩa trên toàn cục.
+
+## 4. Tóm tắt
+
+Khung trong chương này xây dựng các tiên nghiệm có thông tin bằng cách lấy điều kiện một tiên nghiệm cơ sở theo biến cố mô hình được tạo ra có một tính chất hàm mong muốn. Cách xây dựng nhận biết độ bất định kết hợp các đầu vào ngữ cảnh ngoài phân phối với một chi phí Mahalanobis ưu tiên các dự đoán gần đều, còn cách xây dựng nhận biết nhóm kết hợp một phân phối kiểm định trong đó các nhóm hiếm được tăng trọng số với một hàm mất mát bị nhiễu kiểu SAM. Trong cả hai trường hợp, chất lượng của tiên nghiệm phụ thuộc vào mức độ trung thực mà phân phối ngữ cảnh và chi phí mã hóa tính chất mong muốn; phát triển những lớp rộng hơn các mô hình quan sát ngữ cảnh được đặc tả tốt vẫn là một hướng nghiên cứu còn mở.
