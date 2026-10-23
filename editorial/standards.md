@@ -1,10 +1,12 @@
 # ACRR Editorial Standards Manual
 
-Version 1.0, adopted 13 October 2026. Owner: the Editorial Director role (Section 3). Changes follow Section 12.
+Version 2.0, adopted 24 October 2026 (first edition 13 October 2026). Owner: the chief editor (Section 3). Changes follow Section 12.
 
-This manual is the editorial policy of ACRR (Advanced Computing & Robotics Research, https://acrr.asia). It defines who decides what, how a piece of writing moves from draft to publication, the house style, the rules for evidence and sources, the requirements for each kind of page, and the measurable conditions a piece must meet before it is published. It applies to every reader-facing word on the site: articles, series overviews, insights, Learning entries and the static pages.
+This manual implements the governing editorial strategy, [`strategy.md`](strategy.md) (value before volume, the nine publication gates, the chief editor's live-site review, the editorial queue). Where the two differ, the strategy states the intent and this manual is corrected. The order in which the strategy is being put into effect, and what is not yet in effect, is in [`strategy-adoption-plan.md`](strategy-adoption-plan.md).
 
-The machine-readable half of this manual lives beside it: [`eos.config.json`](eos.config.json) (publication profile, thresholds, rule severities, required review stages and score minimums) and [`glossary.json`](glossary.json) (house terms and phrases to avoid). The deterministic checks are run by `plugins/editorial-os/scripts/eos.mjs`; the judgment stages by the skills and agents of the `editorial-os` plugin. Where this manual and those files disagree, this manual states the intent and the files are corrected.
+This manual is the editorial policy of ACRR (Advanced Computing & Robotics Research, https://acrr.asia). It defines what is worth publishing, who decides what, how a piece moves from idea to accepted live page, the house style, the rules for evidence and sources, the requirements for each kind of page, and the measurable conditions a piece must meet before it is published. It applies to every reader-facing word on the site: articles, series overviews, insights, Learning entries and the static pages.
+
+The machine-readable half of this manual lives beside it: [`eos.config.json`](eos.config.json) (publication profile, thresholds, rule severities, required review stages, score minimums and the editorial queue settings), [`glossary.json`](glossary.json) (house terms and phrases to avoid) and the editorial queue in `queue/` (Section 4.3). The deterministic checks are run by `plugins/editorial-os/scripts/eos.mjs`; the judgment stages by the skills and agents of the `editorial-os` plugin. Where this manual and those files disagree, this manual states the intent and the files are corrected.
 
 Contents
 
@@ -13,7 +15,7 @@ Contents
 3. Editorial roles
 4. The editorial workflow
 5. Policy A: language and style
-6. Policy B: structure and argument
+6. Policy B: structure, argument and visual communication
 7. Policy C: research integrity and technical accuracy
 8. Policy D: website-wide consistency and page requirements
 9. Policy E: publication readiness (critical conditions, rubric, acceptance criteria)
@@ -46,7 +48,9 @@ Working rules for everyone who edits ACRR content, human or AI:
 
 ### 2.1 Identity
 
-ACRR is an independent research and technical publication on computing, control, robotics and the engineering methods that connect them. It explains established methods carefully, states assumptions and limits, and keeps established results, interpretations and open questions apart. It is at an early stage and is run as an independent publication: it does not claim a staffed laboratory, active funded projects, collaborators, citations or readership figures, and no page may imply them (Section 7.5).
+ACRR is an independent technical publication on advanced computing, AI, robotics, control systems and scientific methods. It explains established methods carefully, states assumptions and limits, and keeps established results, interpretations and open questions apart. Its strategy (strategy 1) provides for four pillars: technical publishing, technology and science reporting, insights and analysis, and learning paths and reference resources. The reporting pillar has no published content yet, and no page may suggest that it has. ACRR is run as an independent publication: it does not claim a staffed laboratory, active funded projects, collaborators, citations or readership figures, and no page may imply them (Section 7.5).
+
+The operating principle is reader value, technical credibility and lasting usefulness, not publication volume (Section 2.4).
 
 The site publishes four kinds of content, each with a distinct job:
 
@@ -59,7 +63,7 @@ The site publishes four kinds of content, each with a distinct job:
 
 ### 2.2 Audience
 
-The default reader is an engineering or computer-science student from the second year of a degree upwards, a practising engineer moving into an adjacent field, or a researcher who wants a careful reference. The reader knows calculus and basic linear algebra and can read Python. Every series states its prerequisites beyond that, and every article states what it builds on. Writing for this reader means:
+The primary readers are engineers, researchers, graduate students and advanced technical learners: practising engineers moving into an adjacent field, researchers who want a careful reference, and students from the later years of a degree upwards. The default reader knows calculus and basic linear algebra and can read Python. Every series states its prerequisites beyond that, and every article states what it builds on. Writing for this reader means:
 
 - define every term the reader cannot be expected to know, once, at first use;
 - show the reasoning, not only the result; derive what can be derived in reasonable space and cite what cannot;
@@ -79,13 +83,52 @@ The voice avoids the habits that make text read as generic or machine-generated 
 - restating the same point in the introduction, the body, a "key takeaways" list and the conclusion;
 - false balance and hedging stacked on hedging ("may potentially possibly").
 
+### 2.4 Value before volume
+
+Every piece must pass two separate tests before it enters production, and again when it is audited (strategy 2):
+
+- **Test A, worth the reader's time.** It delivers a specific intellectual or practical benefit that is not adequately available from existing ACRR pages or from a more authoritative source.
+- **Test B, ACRR is the right publisher.** ACRR has a reason to publish this version: a better explanation, stronger evidence, a useful synthesis, original reporting, reproducibility, a Vietnam-specific perspective, or a connection between research and engineering practice.
+
+An accurate piece can fail both. A topic label ("introduction to robotics") is not a value proposition.
+
+**Reader-value contract.** Before drafting, the author states, and the managing editor approves: the *reader* (who specifically needs it), the *reader's problem* (question, decision, misconception or task), the *expected outcome*, the *distinctive contribution* beyond existing ACRR pages and readily available sources, the *evidence* that supports it, and the *limitations* (what it will not establish). The contract lives in the item's queue entry (`contract`), not in the content file. If it cannot be completed clearly, the idea does not enter production. For a piece published before this edition, a reviewer may write a *reconstructed* contract from the text; it is labeled as reconstructed and never presented as the author's original intent.
+
+**Value category.** Every piece has one primary category (queue `valueCategory`):
+
+| Category | Required reader benefit |
+|---|---|
+| Conceptual understanding | Explains a difficult concept or resolves a common misconception |
+| Practical implementation | Enables the reader to implement, test or troubleshoot something |
+| Technical decision | Helps compare alternatives using explicit criteria |
+| Research synthesis | Organizes and critically evaluates evidence from multiple sources |
+| Original reporting | Provides verified information, access, observations or perspectives unavailable from routine summaries |
+| Reference value | Provides a reliable resource that readers can revisit |
+| Critical analysis | Examines a claim, method, system or trend and reaches a reasoned conclusion |
+
+**Format.** Every page also has a format that tells the reader what kind of page it is (queue `format`): tutorial, explainer, comparison, research review, reporting, analysis, reference or sponsored. The format is recorded in the queue now and shown on the site once the metadata migration of the adoption plan (Phase 6) is in place.
+
+**Reject, merge, rewrite, reclassify, retire, keep.** The chief editor may reject a proposal or an article that is technically correct but lacks reader value, repeats existing content or imposes unnecessary reading effort, and may require a published item to be rewritten, merged, reclassified or retired. Retiring or merging a published page keeps its useful content (moved first), leaves a redirect where readers or external links may depend on the URL, and is never done only because traffic is low. Until San decides otherwise, every retirement and merge of a published page needs San's explicit confirmation.
+
 ## 3. Editorial roles
 
-The nine roles below are responsibilities, not people. In ACRR's AI-assisted workflow each role is a stage carried out by a skill or a dedicated agent of the `editorial-os` plugin (`plugins/editorial-os/agents/`), and a human may take any role. One rule is absolute: **the reviewer of a stage is never the author of the text under review in that pass.** An agent that wrote or revised a piece does not perform its fact-check, technical review or QA.
+The strategy (strategy 3) defines five responsibilities. They may be combined in one person or one workflow, but the checks they stand for may not disappear:
+
+| Strategy role | Responsible for | Carried out by (stages below) |
+|---|---|---|
+| Author | Central question, research, argument, references, technical work, visual assets, revisions | The writing pass (a person or an agent) |
+| Technical reviewer | Correctness, assumptions, equations, code, reproducibility, source quality, limitations; discloses conflicts of interest | Subject-Matter Editor and Research and Fact-Checking Editor |
+| Managing editor | Commissioning (Gate 1), structure, reader value, clarity, sourcing, classification, production status, coordination | Managing, Developmental, Copy and Series Editors; Technical Publishing Editor |
+| Chief editor | The final editorial decision and the quality of the published website, judged on the live page (Gates 7-9) | Editorial Director role, QA Editor (pre-publication), live-review stage |
+| Publisher | Commercial relationships, budgets, contracts, events, operations; never overrides an editorial decision | San |
+
+**Who acts as chief editor (decided by San, 23 October 2026).** Claude performs the chief editor's live review of every page and may accept a *routine* page. A *high-risk* page is accepted only by San: reporting, claims about named people or organizations, safety-relevant guidance, and anything commercial (sponsored or partner content, product comparisons with a commercial relationship). The risk is recorded in the queue entry (`risk`); `eos queue validate` rejects a high-risk item accepted by anyone not listed in `queue.highRiskApprovers`. For a high-risk piece the technical review must also be independent of the author in the strong sense: a separate reviewer, not the author's own re-reading, and for reporting a human check of every quotation and attributed claim (strategy 13, AI-assisted production).
+
+The nine stage roles below implement those responsibilities. They are responsibilities, not people. In ACRR's AI-assisted workflow each is a stage carried out by a skill or a dedicated agent of the `editorial-os` plugin (`plugins/editorial-os/agents/`), and a human may take any role. One rule is absolute: **the reviewer of a stage is never the author of the text under review in that pass.** An agent that wrote or revised a piece does not perform its fact-check, technical review, QA or live review.
 
 | Role | Accountable for | Decides | Implemented by |
 |---|---|---|---|
-| Editorial Director | This manual, the publication's identity and audience, the acceptance thresholds, exceptions | Policy; whether to accept an exception | The site owner; `editorial` skill (policy mode) |
+| Editorial Director (chief editor) | This manual, the publication's identity and audience, the acceptance thresholds, exceptions, live-site acceptance | Policy; exceptions; accept, revise, block or retire a live page | The site owner; `editorial` skill (policy mode); live review (Section 4.4) |
 | Managing Editor | The plan: what is in scope, the order of work, stage assignments, readiness of each item, the audit trail | Scheduling; when an item moves to the next stage | `editorial` skill (orchestrator) and `eos status` |
 | Developmental Editor | Purpose, audience fit, argument, structure, depth, completeness of each piece | Structural changes: reorganize, cut, expand | `developmental-editor` agent |
 | Subject-Matter Editor | Technical, scientific and mathematical accuracy: definitions, derivations, equations, code, diagrams, numerical examples | Whether a technical statement is correct and adequately qualified | `technical-reviewer` agent |
@@ -99,24 +142,69 @@ Escalation: any role that finds a problem it cannot resolve with confidence (a d
 
 ## 4. The editorial workflow
 
-Every new or revised item passes through the same twelve steps. They are implemented by the `editorial` orchestrator skill and documented operationally in `plugins/editorial-os/docs/workflow.md`; this section states what each step must achieve.
+### 4.1 The nine gates
 
-| # | Step | Role | Output | Gate |
-|---|---|---|---|---|
-| 1 | Discover and inventory | Managing Editor | `eos inventory` / `eos status` rows for the items in scope | — |
-| 2 | Classify | Managing Editor | Content type, audience, scope, required stages (from `eos.config.json`) | — |
-| 3 | Plan the review | Managing Editor | Which stages and tools apply; what is unavailable and the fallback | — |
-| 4 | Check sources and dependencies | Fact-Checker, Series Editor | Reference list verified or flagged; prerequisites and dependent articles identified | — |
-| 5 | Draft or revise | Author | The text | `eos lint` has no errors |
-| 6 | Review | Developmental, Copy, Fact-Checker, Subject-Matter | Findings with severity, location, evidence and a proposed correction | — |
-| 7 | Resolve | Author | Every blocking and should-fix finding applied or answered with a reason | No open blocking findings |
-| 8 | Series review | Series Editor | `reviews/<series>.md`, resolved and stamped | `series-pipeline gate` |
-| 9 | Validate | Technical Publishing Editor | Build, link check, `eos validate-site` | All pass |
-| 10 | Final gate | QA Editor | Review record with scores and decision | `eos gate` |
-| 11 | Publish | Managing Editor | Merge to `master`; deploy | Deploy workflow gates |
-| 12 | Record | Managing Editor | Review record, series report, PR description, live verification | Live check passes |
+The workflow is a sequence of approval gates, not a calendar (strategy 4). Work advances when a gate's acceptance criterion is met. A successful build, deployment or automated check is never editorial approval: technical quality assurance and editorial acceptance are separate controls.
+
+| Gate | What must be true to pass | Evidence left behind | Queue status after it |
+|---|---|---|---|
+| 1. Idea approval | The managing editor can say in one or two sentences why the piece is worth the intended reader's time (Section 2.4); it does not duplicate an existing page | Proposal (`plugins/editorial-os/templates/idea-proposal.md`), approved contract in the queue entry | `approved-for-research` (or `rejected`) |
+| 2. Research readiness | The central argument is supportable from sources actually read, run or derived | Research log (`templates/research-log.md`) | `drafting` |
+| 3. Draft completion | A qualified reader can follow the central argument: question, answer, reasoning, evidence, assumptions, alternatives, limitations, references and proposed visuals are present | The draft; `eos lint` has no errors | `technical-review` |
+| 4. Technical review | No unresolved critical technical error; limitations that affect the conclusion are stated | `technical-reviewer` and `fact-checker` findings | `editorial-review` |
+| 5. Editorial review | The piece delivers a clear, defensible benefit without unnecessary effort; content that is correct but adds nothing is identified and cut; the visual questions (Section 6.8) are answered | `developmental-editor` and `copy-editor` findings; for a series, `reviews/<id>.md` | `revision-required` until resolved, then `ready-to-publish` |
+| 6. Pre-publication checks | Title, description, type, dates, references, links, rights to third-party assets, disclosures, accessibility, notation, limitations and uncertainty are correct | `validate-site`, build, link check, `series-pipeline gate`, `qa-editor` record, `eos gate` | `ready-to-publish` |
+| 7. Publication and live inspection | The public page meets ACRR's editorial and presentation standards, not only its build requirements | Deployment and `verify-live`; live-review report (Section 4.4) | `published-awaiting-live-review` |
+| 8. Feedback and revision | Every live finding is resolved and re-checked on the updated public page, or the page is rejected, retired or accepted with documented non-critical limitations | Findings in the report and the queue; re-review section G | `revision-required-after-publication` until closed |
+| 9. Final acceptance and maintenance | The chief editor (Section 3) accepts the live page; the review history is kept; the page is reassessed when its standards, software versions, evidence or assumptions change | Queue `reviews.chiefEditor`, history | `accepted`, later `maintenance` |
+
+Exceptional states: `blocked` (cannot advance; the history says why and what would unblock it), `rejected`, `merged` (with `mergedInto`) and `retired` (with `redirect`).
+
+### 4.2 Operational steps
+
+Inside Gates 3 to 7 every new or revised item passes through the steps below. They are implemented by the `editorial` orchestrator skill and documented operationally in `plugins/editorial-os/docs/workflow.md`; this section states what each step must achieve.
+
+| # | Step | Gate | Role | Output | Check |
+|---|---|---|---|---|---|
+| 1 | Discover and inventory | — | Managing Editor | `eos inventory` / `eos status` / `eos queue` rows for the items in scope | — |
+| 2 | Classify | 1 | Managing Editor | Content type, format, value category, risk, required stages | Queue entry valid |
+| 3 | Plan the review | 1-2 | Managing Editor | Which stages and tools apply; what is unavailable and the fallback | — |
+| 4 | Check sources and dependencies | 2 | Fact-Checker, Series Editor | Reference list verified or flagged; prerequisites and dependent articles identified | — |
+| 5 | Draft or revise | 3 | Author | The text | `eos lint` has no errors |
+| 6 | Review | 4-5 | Developmental, Copy, Fact-Checker, Subject-Matter | Findings with severity, location, evidence and a proposed correction | — |
+| 7 | Resolve | 5 | Author | Every blocking and should-fix finding applied or answered with a reason | No open blocking findings |
+| 8 | Series review | 5 | Series Editor | `reviews/<series>.md`, resolved and stamped | `series-pipeline gate` |
+| 9 | Validate | 6 | Technical Publishing Editor | Build, link check, `eos validate-site` | All pass |
+| 10 | Final gate | 6 | QA Editor | Review record with scores and decision | `eos gate` |
+| 11 | Publish | 7 | Managing Editor | Merge to `master`; deploy; `verify-live` | Deploy workflow gates |
+| 12 | Live review | 7-9 | Chief editor | Live-review report; queue status and findings | Section 4.4 |
 
 A step may be repeated; none may be skipped. Steps 9-11 are enforced by CI (`.github/workflows/publication-gate.yml` on every pull request and `deploy.yml` before publication), so a failed mandatory check blocks publication automatically.
+
+### 4.3 The editorial queue
+
+Every item has a queue entry, `editorial/queue/<type>/<slug>.json` (schema `plugins/editorial-os/schema/queue-entry.schema.json`), separate from the content file and from its review record. It holds the item's public URL and source, format, value category, risk, reader-value contract, workflow status (Section 4.1), the status of the technical, editorial and chief-editor reviews, the open live findings, author, reviewers, disclosures and the history of status changes. Because it is not part of the content hash, editing it never makes a review stale.
+
+- `eos queue init` adds an entry for every item that has none; `eos queue set <id> <status>` changes a status and appends to the history; `eos queue` summarizes; `eos queue validate` checks the rules.
+- A proposal is a queue entry with no content file yet.
+- The rules: an accepted item has a chief-editor acceptance with a reviewer and a live-review report; a high-risk item is accepted only by a person in `queue.highRiskApprovers`; no item is accepted with an open critical or major finding; a merged item names what absorbed it and a retired item its redirect; an item started or first published on or after `queue.contractRequiredFrom` (24 October 2026) has an approved reader-value contract.
+- `eos gate` runs these rules according to `queue.enforce`. At adoption the value is `warn` (reported, not blocking), so that series work already in progress is not stopped; it becomes `error` once the open series branches have queue entries.
+
+The 120 items published before this edition were entered with status `published-awaiting-live-review`, contract `missing`: none has yet had a chief editor's review of its live page.
+
+### 4.4 The chief editor's live-site review
+
+After publication the chief editor inspects the actual public URL, not the source (strategy 4, Gate 7; strategy 5). The inspection covers, on a wide and a 360-pixel screen and in light and dark mode: the title and opening screen; the main answer and argument; the structure and flow of sections; equations, code, tables, diagrams, images and captions; references and internal links; related content and navigation; missing content, rendering defects and visual inconsistencies; and whether the page still satisfies its reader-value contract.
+
+The result is a report, `editorial/live-reviews/<type>/<slug>.md`, in the form of `plugins/editorial-os/templates/live-review-report.md` (A. decision; B. reader-value assessment; C. substantive findings; D. visual and structural findings; E. technical and source findings; F. required changes, mandatory and optional; G. re-review). Every finding states its location, the problem, why it matters, the required action, its priority (critical, major or minor) and an acceptance condition that can be checked on the live page; "improve clarity" is not a finding. The findings are copied into the queue entry. The author revises and republishes; the chief editor closes a finding only after seeing its acceptance condition met on the updated public page.
+
+The live review is performed by a reviewer who did not write or revise the page in that pass. Who may accept a page is set in Section 3.
+
+Captures of the live site are taken by the `Live review captures` workflow (`.github/workflows/live-review.yml`, `scripts/live-capture.mjs`) after every deployment, for the pages that changed, and on demand; it publishes screen-sized screenshots and rendering facts to the `live-captures` branch. A local build is not the live page. The procedure is the `live-review` skill of the editorial-os plugin; decisions and findings are recorded with `eos queue review` and `eos queue finding`.
+
+### 4.5 Monitoring, corrections and maintenance
+
+Readers must have a way to report an error; the channel is chosen by San and shown on the About page once chosen. A material correction is made promptly, reviewed like any other change, recorded in the item's review record and queue history, and, where a reader may have relied on the earlier statement, noted in the article (Section 10). An accepted item moves to `maintenance` when a standard, software version, piece of evidence or assumption it depends on changes, and is reassessed.
 
 ## 5. Policy A: language and style
 
@@ -173,13 +261,14 @@ The text must let the reader tell apart:
 
 - **established facts** (stated plainly, with a source or derivation where not common knowledge);
 - **interpretations** ("one reading is ...", "this suggests ...");
+- **assumptions** (what is taken as given but not established, stated where it is used);
 - **hypotheses** ("if ..., we would expect ...");
 - **recommendations** ("prefer ... when ...", with the condition);
 - **open questions** (stated as questions, with what would settle them).
 
-Insights carry this separation in their structure (`## Established`, `## Interpretation`, `## Open questions`). Articles carry it in the wording.
+Insights carry this separation in their structure (`## Established`, `## Interpretation`, `## Open questions`). Articles carry it in the wording. Confident wording never turns an interpretation into an established result. Evidence is proportional to the claim: the stronger or more consequential the claim, the stronger the source (primary papers, standards, original data, reproducible code), and a quantitative claim states its measurement, comparison basis and conditions. A citation is not proof by itself; the text must represent what the source actually supports.
 
-## 6. Policy B: structure and argument
+## 6. Policy B: structure, argument and visual communication
 
 ### 6.1 Every piece
 
@@ -190,6 +279,12 @@ Insights carry this separation in their structure (`## Established`, `## Interpr
 - **Earned elements.** A diagram, table, example or exercise stays only if it shows something the prose cannot show as well. Every figure has a caption that says what to look at.
 - **No redundancy.** The same explanation does not appear twice in a piece; across a series, a later entry refers back instead of repeating.
 - **A real ending.** The final section summarizes what was established and, in a series, leads to the next entry. No "In conclusion".
+- **Answer first, where the reader has a decision or a question.** A comparison, analysis or decision-oriented piece states the question, the answer, why it matters and the conditions under which the answer holds near the beginning. Tutorials whose order of discovery is the point, and narrative reporting, are exceptions.
+- **Every major section supports the central question.** A section that does not is removed, moved or justified. The supporting reasons are grouped (the Pyramid Principle as a writing technique); MECE is a diagnostic for categories, not a template to force on every subject.
+- **Explicit comparisons.** When methods, tools or systems are compared, the decision criteria (accuracy, latency, compute and memory, cost, robustness, reproducibility, maintainability, security, deployment constraints, fit to the task) are stated before any conclusion, a table is used when several dimensions matter, and a multi-dimensional trade-off is not collapsed into an unsupported ranking.
+- **Specific limitations.** Every substantial analysis names its actual limits (assumptions, data quality, external validity, computational cost, hardware, software versions, benchmark bias, incomplete evidence). "Further research is needed" is not a limitation.
+- **Actionable where the subject permits.** A practical guide leaves the reader with a tested procedure, a decision framework, a worked example, a reproducible implementation or a checklist. A conceptual piece does not invent an implementation to look practical.
+- **Depth, not volume.** Length is justified by the subject. Paragraphs that repeat a conclusion, restate a figure without interpreting it, or give background unrelated to the central question are cut.
 
 ### 6.2 Series entry (article with `series`)
 
@@ -226,6 +321,39 @@ The overview must not promise anything the entries do not deliver.
 ### 6.6 Learning entry
 
 Title, one-sentence description of what the resource covers and for whom, topic, type, and status. An entry without a real, checked URL is shown as "Coming soon" with no link. Never invent a URL.
+
+### 6.7 Templates by format
+
+The templates standardize quality without forcing every piece into one shape (strategy 8). A series entry follows Section 6.2 and, within it, the template of its format.
+
+| Format | Order of the piece |
+|---|---|
+| A. Technical explainer (tutorial, explainer) | The question; short answer; prerequisites; conceptual model (a diagram where it helps); technical explanation; worked example; practical application; limitations and failure modes; summary; references and further study |
+| B. Comparison or decision analysis | The decision; use case and constraints; evaluation criteria; evidence and method of comparison; comparison table or chart; trade-offs and failure modes; recommendation conditional on the use case; remaining uncertainty; sources and reproducibility information |
+| C. Research review | Research question and scope; why it matters; how sources were selected; concepts and terms; findings by theme, method or evidence; agreements, disagreements and methodological limits; evidence gaps; implications; references. Never called a systematic review unless its method justifies the name |
+| D. Technology and science reporting | The development, claim or issue; why it matters to the reader; what is known and how it is established; people, institutions and primary sources; independent context or corroboration; competing perspectives or right of reply where warranted; reported facts kept apart from the reporter's interpretation; implications and open questions; sources, disclosures and method. Quotations are never invented or altered in meaning. Always high risk (Section 3) |
+| E. Insight or short analysis | Section 6.4: a framing paragraph with the main observation, then Established (the evidence), Interpretation (why it matters; alternative explanations and limits) and Open questions (the implication or what is unresolved). Not a rewritten news item or a set of unsupported opinions |
+
+### 6.8 Visual communication
+
+Text is not the default for every kind of information (strategy 7). During drafting and editorial review the author and editor ask, for every substantial piece: would a diagram reduce the effort of understanding the main concept; would a table make a comparison easier to inspect; would a chart reveal a pattern prose hides; would an annotated example expose an assumption; would a worked calculation make the reasoning verifiable; would an interactive demonstration genuinely help, or is a static figure enough. The decision on each substantial opportunity is recorded in the review (developmental stage). Without the visual, the text must still be clear.
+
+| Information | Preferred representation |
+|---|---|
+| Sequence of operations, system behavior | Flowchart or sequence diagram (Mermaid) |
+| Components and relationships | Block or architecture diagram |
+| Change over time; control-system response | Line chart or response plot with labeled variables, units and conditions |
+| Comparison across categories or approaches | Bar chart, comparison table or decision matrix |
+| Distribution; relationship of two measured variables | Histogram or box plot; scatter plot |
+| Multi-step algorithm | Pseudocode, numbered procedure or flow diagram |
+| Derivation | Equations with intermediate steps and annotations |
+| Taxonomy | Hierarchical diagram or structured table |
+| Key findings of a long piece | Summary table or findings list |
+
+- **Chart integrity.** Title, axis labels, units, legend where needed, data provenance and method notes. No misleading scales, omitted comparison conditions or unsupported extrapolation. No chart when the data are unavailable or not comparable. ACRR plots are generated from the article's own formulas or from data the article states.
+- **Diagram integrity.** A diagram shows a real relationship, process, structure or distinction, with the article's own terms. Conceptual illustrations are distinguished from measured results, and simplified models are labeled as simplified when it matters.
+- **Captions** say what the reader should notice and, where relevant, what the figure does not establish; a caption does not repeat the title.
+- **On the rendered site.** Figures, tables, equations and code must be readable on a 360-pixel screen and in dark mode; a correct figure in the source that is clipped or unreadable on the public page is a live-review finding.
 
 ## 7. Policy C: research integrity and technical accuracy
 
@@ -297,6 +425,8 @@ The Content Auditor checks, site-wide: duplicated explanations that should be a 
 
 ## 9. Policy E: publication readiness
 
+This policy decides whether an item may be published (Gate 6). It does not decide whether the published page is accepted: that is the chief editor's live review (Section 4.4 and Section 9.5).
+
 ### 9.1 Critical conditions (pass/fail)
 
 An item fails, whatever its scores, if any of these holds:
@@ -359,6 +489,9 @@ The values are configured in `eos.config.json` (`review`) and enforced by `eos r
 - [ ] Title ≤ 70 characters; description 70-165 characters, one sentence.
 - [ ] `eos lint`: no errors; warnings resolved or justified in the record.
 - [ ] Build, link check and `eos validate-site` clean for the page.
+- [ ] For an item started or first published from 24 October 2026: an approved reader-value contract, a value category, a format and a risk level in its queue entry.
+- [ ] The visual questions (Section 6.8) answered and the decisions recorded.
+- [ ] Disclosures present where there is a sponsorship, partnership or conflict of interest; rights confirmed for third-party figures, code and data.
 
 **Insight**: framing paragraph; the three sections in order; Established contains only verifiable claims, each sourced or common knowledge; Interpretation labeled as such; open questions are questions; links to the in-depth articles; metadata as above.
 
@@ -366,20 +499,26 @@ The values are configured in `eos.config.json` (`review`) and enforced by `eos r
 
 **Static page**: true to the current state of the site (counts and statuses computed from content, not written by hand); no fabricated personal or organizational details; no authoring instructions in visitor copy; both languages say the same thing.
 
+### 9.5 Live-site acceptance
+
+A published page is accepted (Gate 9) when its live-review report (Section 4.4) records the decision "accept" or "accept with minor follow-up", no critical or major finding is open, the page still delivers its reader-value contract, and the acceptance is by a permitted reviewer (Section 3: San for high-risk pages). Minor findings may stay open as documented follow-ups. Acceptance is recorded in the queue entry (`reviews.chiefEditor`, status `accepted`).
+
 ## 10. Review records, revisions and corrections
 
 - Each published item has a review record, `editorial/records/<type>/<slug>.json`, written by `eos record` at the QA stage. It holds the content hash of the reviewed file, the stage outcomes, the scores, the finding counts, anything not verified, the reviewer roles, the commit, and the history of earlier records. `eos gate` fails if the file has changed since its record (the review is stale), if the record does not pass, or if the file has lint errors.
 - Series additionally carry `reviews/<id>.md` with a content-hash stamp (`scripts/series-pipeline.mjs`), checked by the series gate.
+- Each item has a queue entry (Section 4.3) with its workflow status, contract, live findings and the history of status changes. Live-review reports live in `editorial/live-reviews/<type>/<slug>.md`.
 - Audit reports live in `editorial/audit/`. The Git history is the revision history; each commit has one editorial purpose.
+- A merged or retired item keeps its queue entry (status `merged` with `mergedInto`, or `retired` with `redirect`), so the record of what was published, and why it was withdrawn, is preserved.
 - A substantive revision of a published item sets `updatedAt` (Section 8.1). Corrections of fact are made openly: the item's review record names the correction, and, where a reader may have relied on the earlier statement, the article says what changed.
 
 ## 11. Vietnamese translations
 
-English is the original; Vietnamese translations under `/vi` follow `docs/translation-vi.md`. A translation inherits the English item's technical content but is not reviewed by these stages. When an English item is revised, its translation is marked for update in the audit report; copied front-matter fields (dates, category, tags, series, order, flags) are kept identical in the same commit, as the build requires.
+English is the original; Vietnamese translations under `/vi` follow `docs/translation-vi.md`. A translation inherits the English item's technical content but is not reviewed by these stages. Vietnamese originals (`originalLang: "vi"`, see `docs/translation-vi.md`) are not translations: the strategy applies to them in full, but the engine does not yet review, record or queue them (adoption plan, gap G12); closing that gap is part of the adoption plan. When an English item is revised, its translation is marked for update in the audit report; copied front-matter fields (dates, category, tags, series, order, flags) are kept identical in the same commit, as the build requires.
 
 ## 12. Governance of these standards
 
-- The Editorial Director owns this manual. A change is made by pull request that edits this file and, where needed, `eos.config.json` and `glossary.json` together, with a version and date at the top and a line in the change log below.
+- The chief editor (Editorial Director role) owns this manual; [`strategy.md`](strategy.md) governs it. A change is made by pull request that edits this file and, where needed, `eos.config.json` and `glossary.json` together, with a version and date at the top and a line in the change log below.
 - A new house term is added to `glossary.json` with a note giving the reason; a new banned phrase needs an example of the problem it prevents.
 - An exception for one item (for example, a long description that cannot be shortened without losing meaning) is recorded in that item's review record notes, not by weakening the rule.
 - The standards are reviewed when a new content type is added, when an audit finds a class of problem the rules did not catch, or at least once a year.
@@ -389,3 +528,4 @@ English is the original; Vietnamese translations under `/vi` follow `docs/transl
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-10-13 | First edition: roles, workflow, policies A-E, rubric, records, governance. |
+| 2.0 | 2026-10-24 | Adopts the editorial strategy (`strategy.md`): identity and audience; value before volume, reader-value contract, value categories and formats (2.4); strategy roles and the chief-editor decision of 23 October (3); nine gates, editorial queue and status model, live-site review, corrections and maintenance (4); assumptions and evidence proportional to the claim (5.7); answer first, explicit comparisons, specific limitations (6.1); templates by format (6.7); visual communication (6.8); live-site acceptance (9.5); queue and live reviews in the records (10). |
