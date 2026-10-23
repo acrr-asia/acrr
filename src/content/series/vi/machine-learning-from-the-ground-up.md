@@ -9,11 +9,6 @@ objectives:
   - "Xây dựng hệ thống gợi ý dựa trên nội dung và lọc cộng tác (collaborative filtering), và giảm chiều dữ liệu bằng phân tích giá trị suy biến, phân tích thành phần chính và phân tích biệt thức tuyến tính."
   - "Nhận biết tập lồi, hàm lồi và bài toán tối ưu lồi, suy ra bài toán đối ngẫu Lagrange và điều kiện Karush-Kuhn-Tucker, và áp dụng chúng cho máy vector hỗ trợ lề cứng, lề mềm, hạt nhân và đa lớp."
 plannedEntries:
-  - title: "Gradient descent"
-  - title: "Thuật toán học perceptron"
-  - title: "Hồi quy logistic"
-  - title: "Hồi quy softmax"
-  - title: "Mạng nơ-ron đa tầng và lan truyền ngược"
   - title: "Hệ thống gợi ý dựa trên nội dung"
   - title: "Lọc cộng tác dựa trên lân cận"
   - title: "Lọc cộng tác bằng phân tích ma trận"
