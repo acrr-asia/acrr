@@ -1,0 +1,388 @@
+---
+title: "Natural-Gradient-Based Variational Inference"
+description: "Natural-gradient variational inference: the Bayesian learning rule, generalized Bayes and the VON, VOGN and IVON optimizers for training large neural networks."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - natural gradient
+  - optimization
+series: bayesian-deep-learning
+seriesOrder: 19
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl15IvonFlatMinimum from '../../components/diagrams/Bdl15IvonFlatMinimum.astro';
+import Bdl15IvonImagenet from '../../components/diagrams/Bdl15IvonImagenet.astro';
+
+Variational inference can make the optimization of large Bayesian neural networks tractable by restricting optimization to a specific class of distributions. This chapter discusses natural-gradient-based methods, where gradients are rescaled according to second-order information in order to adjust for the geometry when optimizing in terms of distributions. Using the frameworks of Generalized Bayes and the Bayesian Learning Rule, it shows that standard neural network optimizers can be derived as instances of natural-gradient descent given specific families of distributions. Finally, it derives practical natural-gradient-based optimization algorithms that closely resemble these standard neural network optimizers and can be used to train large neural networks effectively with arbitrary losses.
+
+## 1. Natural-gradient descent
+
+As introduced in [Chapter 12](/blog/introduction-to-variational-inference), variational inference approximates a posterior $p(\boldsymbol{\theta} \mid \mathcal{D})$ over neural network parameters $\boldsymbol{\theta} \in \mathbb{R}^P$ given data $\mathcal{D} = \{(x_t, y_t)\}_{t=1..N}$ by minimizing a regularized negative log-likelihood loss restricted to a (sub-)class of distributions $\mathcal{Q}$:
+
+$$
+q_*(\boldsymbol{\theta}) = \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[-\log p(\mathcal{D} \mid \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0). \tag{15.1}
+$$
+
+Here, $p_0$ is a prior belief over neural network weights discussed in detail in Chapter 28, and $\mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0)$ is the Kullback-Leibler divergence. For a well-specified model, and if $\mathcal{Q}$ is the space of all distributions, then the solution $q_*(\boldsymbol{\theta})$ is the Bayesian posterior:
+
+$$
+q_*(\boldsymbol{\theta}) \propto p_0(\boldsymbol{\theta}) \prod_{i=1}^{N} p(\mathcal{D}_i \mid \boldsymbol{\theta}), \tag{15.2}
+$$
+
+here written factorized over individual data examples. This may initially seem surprising, because the objective is very similar to conventional deep learning objectives; the first term corresponds to data fit and the KL-divergence is similar to a regularizer. Later on, this connection is deepened, and it is shown that many existing conventional deep learning optimizers actually solve a version of Equation 15.1 for a specific choice of $\mathcal{Q}$. New optimizers of Equation 15.1 are also derived, and these methods are generalized to arbitrary losses beyond likelihood-based objectives. Then, the term variational learning is used, as opposed to using the term variational inference. These new optimizers use natural-gradient descent but still have a similar form as conventional optimization algorithms.
+
+The difference between natural-gradient and standard gradient descent is how they measure proximity. To illustrate this, the objective from Equation 15.1 is rewritten in terms of variational parameters $\boldsymbol{\lambda}$. Denoting these by $\boldsymbol{\lambda}$, define the following loss:
+
+$$
+\mathcal{L}(\boldsymbol{\lambda}) := \mathbb{E}_q\left[-\log p(\mathcal{D} \mid \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0). \tag{15.3}
+$$
+
+Intuitively, one might want to optimize this loss using stochastic gradient descent (SGD) on the parameters $\boldsymbol{\lambda}$, since such strategies are well-established and work well for deep learning. This strategy has been used in earlier variational inference algorithms for neural networks, for example, Bayes-by-Backprop which showed promising results on smaller neural network experiments. SGD then corresponds to using the following rule,
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t \nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t), \tag{15.4}
+$$
+
+where the gradient $\nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t)$ may be based on mini-batches and the step-size is $\rho_t > 0$.
+
+Following Khan and Rue, it can be shown that Equation 15.4 solves the following objective:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \operatorname*{arg\,min}_{\boldsymbol{\lambda}} \langle \nabla_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{\lambda}_t), \boldsymbol{\lambda} \rangle + \frac{1}{2\rho_t} \|\boldsymbol{\lambda} - \boldsymbol{\lambda}_t\|_2^2, \tag{15.5}
+$$
+
+which reveals a Euclidean penalty on the parameters $\boldsymbol{\lambda}_t$. However, as shown next, this may be a bad choice for comparing distributions, for example, to understand how close a $q(\boldsymbol{\theta})$ is to a previous iterate $q_t(\boldsymbol{\theta})$ or to the "true" posterior $p(\boldsymbol{\theta} \mid \mathcal{D})$.
+
+To illustrate this, consider a classical example from the literature in which two pairs of Gaussian distributions are compared using the squared Euclidean distance. One pair, $\mathcal{N}(\mu_1 = 0, \sigma_1 = 0.01)$ and $\mathcal{N}(\mu_2 = 0.1, \sigma_2 = 0.01)$, is intuitively dissimilar: $\mu_2$ is multiples of $\sigma_1$ and $\sigma_2$ away from $\mu_1$. Yet, the Euclidean distance of their parameters $\|\boldsymbol{\lambda}_1 - \boldsymbol{\lambda}_2\|_2^2 = (\mu_1 - \mu_2)^2 + (\sigma_1 - \sigma_2)^2 = 0.01$ is small. The other pair consists of $\mathcal{N}(\mu_1 = 10, \sigma_1 = 1000)$ and $\mathcal{N}(\mu_2 = 0, \sigma_2 = 1000)$. Both have high variance and should intuitively be more similar but the Euclidean distance is 100. This motivates choosing an objective that measures proximity in terms of distributions. The example also shows that the resulting methods should perhaps be tied to second-order information, because the difference between distributions largely depends on their variances. Indeed, Section 3 shows that natural-gradient descent is tied to second-order methods.
+
+Instead of the Euclidean distance, natural-gradient descent uses the Kullback-Leibler (KL) divergence to compare distributions. Say an approximate posterior $q(\boldsymbol{\theta})$ and a prior $p_0(\boldsymbol{\theta})$ are given. The KL divergence between them is then defined as:
+
+$$
+\mathbb{D}_{\mathrm{KL}}(q(\boldsymbol{\theta}) \,\|\, p_0(\boldsymbol{\theta})) := \mathbb{E}_q\left[\log\left(\frac{q(\boldsymbol{\theta})}{p_0(\boldsymbol{\theta})}\right)\right] = \mathbb{E}_q[\log q(\boldsymbol{\theta})] - \mathbb{E}_q[\log p_0(\boldsymbol{\theta})], \tag{15.6}
+$$
+
+where the first part is actually the negative of the entropy $\mathcal{H}(q) := -\mathbb{E}_q[\log q(\boldsymbol{\theta})]$ of $q$ and the second one is called cross-entropy. Replacing the squared Euclidean distance with the KL finally results in the following:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \operatorname*{arg\,min}_{\boldsymbol{\lambda}} \langle \nabla_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{\lambda}_t), \boldsymbol{\lambda} \rangle + \frac{1}{\rho_t} \mathbb{D}_{\mathrm{KL}}(q_{\boldsymbol{\lambda}}(\boldsymbol{\theta}) \,\|\, q_t(\boldsymbol{\theta})), \tag{15.7}
+$$
+
+By using the following quadratic expansion,
+
+$$
+\mathbb{D}_{\mathrm{KL}}(q_{t+1}(\boldsymbol{\theta}) \,\|\, q_t(\boldsymbol{\theta})) \approx \frac{1}{2} (\boldsymbol{\lambda}_{t+1} - \boldsymbol{\lambda}_t)^T F(\boldsymbol{\lambda}_t) (\boldsymbol{\lambda}_{t+1} - \boldsymbol{\lambda}_t), \tag{15.8}
+$$
+
+a new update rule can be derived that uses natural gradients:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t). \tag{15.9}
+$$
+
+This update rule is the Bayesian learning rule when optimizing likelihoods, given that $\boldsymbol{\lambda}$ are the natural parameters of exponential-family distributions, as Section 2 shows. The natural gradients are the gradients preconditioned with the Fisher:
+
+$$
+\widetilde{\nabla}_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{\lambda}_t) := F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t). \tag{15.10}
+$$
+
+The Fisher accounts for an interplay between the different dimensions of $\boldsymbol{\lambda}$ which becomes evident by writing it as the covariance of the score function of $q$ as
+
+$$
+F(\boldsymbol{\lambda}) = \operatorname{Cov}_{q(\boldsymbol{\theta})}[\nabla_{\boldsymbol{\lambda}} \log q(\boldsymbol{\theta})]. \tag{15.11}
+$$
+
+As a consequence, natural-gradient-based variational inference can converge faster than regular gradient-descent-based methods when the Fisher is well-conditioned. Finally, the natural-gradient descent in Equation 15.9 is invariant to the parameterization, which does not always hold when using a Euclidean distance.
+
+Still, the inversion of the Fisher and the fact that it grows quadratically with the dimension of the neural network might seem problematic. The next section, Section 2, shows that these issues are overcome by using exponential-family distributions. It first introduces the exponential family and then uses exponential-family distributions to introduce practical second-order optimizers for natural-gradient descent.
+
+### 1.1 Distinction from natural gradient methods for maximum likelihood estimation
+
+Before that, note that the natural gradient presented here is distinct from the natural gradient for maximum likelihood estimation of $p(\mathcal{D} \mid \boldsymbol{\theta})$. There, the idea is to use natural gradients to compare the output distributions of a neural network given a point estimate over parameters $\boldsymbol{\theta} \in \mathbb{R}^P$ rather than to compare distributions over parameter configurations. The update is then only written in terms of $\boldsymbol{\theta}$ as:
+
+$$
+\boldsymbol{\theta}_{t+1} \leftarrow \boldsymbol{\theta}_t - \rho_t F(\boldsymbol{\theta}_t)^{-1} \nabla_{\boldsymbol{\theta}_t}[-\log p(y_t \mid x_t, \boldsymbol{\theta}_t)]. \tag{15.12}
+$$
+
+This is often used for second-order optimization. Then, the Fisher is defined based on data and the corresponding natural gradient is $F(\boldsymbol{\theta}_t)^{-1} \nabla_{\boldsymbol{\theta}_t}[-\log p(y_t \mid x_t, \boldsymbol{\theta}_t)]$. To make the distinction, some authors also refer to this as *natural gradient for point estimation* and the natural gradient discussed here as *natural gradient for variational inference*.
+
+## 2. Generalized Bayes & the Bayesian learning rule
+
+The previous section presented the variational objective for inference in Equation 15.1, discussed that it splits into data fit and regularizer terms, and showed how it can be optimized using natural-gradient-based methods. However, the data fit term in Equation 15.1 is defined assuming that the likelihood $p(\mathcal{D} \mid \boldsymbol{\theta})$ is well-specified in the sense that for some $\boldsymbol{\theta}^* \in \Theta$, $p(\mathcal{D} \mid \boldsymbol{\theta}^*)$ equals the true data-generating distribution. In addition, it is assumed that this is what the practitioner wants to optimize. However, in practice it is often not the case. For example, in machine translation one might instead want to optimize a quality rating assigned to a translation by a human rater or in LLM post-training one might want to optimize some reward assigned to a generation of the LLM by another LLM. These motivate extending variational inference to what is often referred to as Generalized Bayes or also called variational learning, where arbitrary losses can be used. The posterior is then called generalized posterior that can also be related to Gibbs posteriors with connections to thermodynamics.
+
+First, rewrite the posterior $q_*(\boldsymbol{\theta})$ from Equation 15.2 by using the loss function $\ell(\mathcal{D}_i, \boldsymbol{\theta}) = -\log p(\mathcal{D}_i \mid \boldsymbol{\theta})$ for a data likelihood $p(\mathcal{D}_i \mid \boldsymbol{\theta})$ as follows:
+
+$$
+q_*(\boldsymbol{\theta}) \propto p_0(\boldsymbol{\theta}) \prod_{i=1}^{N} \exp\{-\ell(\mathcal{D}_i, \boldsymbol{\theta})\}. \tag{15.13}
+$$
+
+By using generic $\ell(\mathcal{D}_i, \boldsymbol{\theta})$, a generalized posterior is obtained. Equation 15.13 is the solution to the following generalized Bayesian objective if $\mathcal{Q}$ is chosen to be the space of all distributions on $\Theta$:
+
+$$
+q_*(\boldsymbol{\theta}) = \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[\ell(\mathcal{D}, \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0). \tag{15.14}
+$$
+
+Again, $\ell : \mathcal{X} \times \mathcal{Y} \times \Theta \to \mathbb{R}$ can be any suitable loss function and for $\ell(\mathcal{D}, \boldsymbol{\theta}) \propto -\log p(\mathcal{D} \mid \boldsymbol{\theta})$ the Bayesian posterior is recovered. In variational learning, $\mathcal{Q}$ is restricted to a specific class of distributions, but note that the optimal distribution $q_* \in \mathcal{Q}$ might not coincide with the true solution, as this true solution may not be contained in $\mathcal{Q}$. This is similar to what is referred to as model uncertainty in Hüllermeier and Waegeman when choosing a specific hypothesis space in general machine learning.
+
+The objective in Equation 15.14 makes the parallels between standard optimization of neural networks and generalized variational methods more concrete: both optimize a loss term and a regularizer term but in Bayesian methods the loss uses an expectation over possible parameter values to account for uncertainty and a KL divergence to compare distributions, while standard optimization uses a loss based on a point estimate and Euclidean penalties. Intuitively, variational learning might seem to be more general and, indeed, a Bayesian learning rule that allows recovering standard optimizers is derived next.
+
+### 2.1 Exponential family distributions
+
+This section introduces the exponential-family distributions which include Gaussian, Poisson, and other distributions. It shows that exponential-family distributions are convenient for optimizing the generalized Bayesian objective in Equation 15.14.
+
+**Definition 15.1.** (Minimal exponential family) *Given natural parameters* $\boldsymbol{\lambda}$, *sufficient statistics* $\boldsymbol{T}(\boldsymbol{\theta})$, *base measure* $h(\boldsymbol{\theta})$ *and log-partition function* $Z(\boldsymbol{\lambda})$, *a minimal exponential family distribution is defined as:*
+
+$$
+q_{\boldsymbol{\lambda}}(\boldsymbol{\theta}) = h(\boldsymbol{\theta}) \exp[\boldsymbol{\lambda}^T \boldsymbol{T}(\boldsymbol{\theta}) - Z(\boldsymbol{\lambda})]. \tag{15.15}
+$$
+
+*The bijective map* $\boldsymbol{\mu}(\boldsymbol{\lambda}) = \mathbb{E}_{q_{\boldsymbol{\lambda}}}[\boldsymbol{T}(\boldsymbol{\theta})]$ *is called expectation parameter.*
+
+For example, for diagonal Gaussians of the form $\mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{s})$ the natural parameters are $\boldsymbol{\lambda} = (\boldsymbol{s}\boldsymbol{m}, -\frac{1}{2}\boldsymbol{s})^\top$, where $\boldsymbol{s} := (\boldsymbol{\sigma}^2)^{-1}$ is called precision.
+
+### 2.2 Bayesian learning rule
+
+This section now describes the Bayesian learning rule (BLR) which is a natural-gradient descent algorithm that optimizes Equation 15.14 using exponential family distributions. First, rewrite Equation 15.14 by noting that, when choosing a prior $p_0 \propto \exp[-r(\boldsymbol{\theta})]$ proportional to a regularizer $r(\boldsymbol{\theta})$, the KL term can be expressed using the entropy $\mathcal{H}(q)$ as follows up to an additive constant of $q$ that is dropped:
+
+$$
+\mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0) = \mathbb{E}_q[r(\boldsymbol{\theta})] - \mathcal{H}(q) + \text{const}. \tag{15.16}
+$$
+
+This leads to the following objective, where $\bar{\ell}$ is redefined as $\bar{\ell}(\mathcal{D}, \boldsymbol{\theta}) := \sum_{i=1}^{N} \ell(\mathcal{D}_i, \boldsymbol{\theta}) + r(\boldsymbol{\theta})$:
+
+$$
+\begin{aligned}
+q_*(\boldsymbol{\theta}) &= \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[\ell(\mathcal{D}, \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0) && (15.17) \\
+&= \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta})\right] - \mathcal{H}(q). && (15.18)
+\end{aligned}
+$$
+
+The objective can be reinterpreted as balancing loss and entropy of $q$.
+
+Using this formulation the BLR updates the natural parameters $\boldsymbol{\lambda}$ of an exponential family distribution as follows, where the natural gradient from Equation 15.9 is now defined in terms of an arbitrary loss with a standard deep learning regularizer:
+
+$$
+\begin{aligned}
+&\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}} \left[\mathbb{E}_{q_t}[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta})] - \mathcal{H}(q)\right] && (15.19) \\
+\Leftrightarrow\; &\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t \nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \left[\mathbb{E}_{q_t}[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta})] - \mathcal{H}(q)\right]. && (15.20)
+\end{aligned}
+$$
+
+The two updates are equivalent because for exponential-family distributions the following holds:
+
+$$
+F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}} \mathbb{E}_{q_t}[\cdot] = \nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \mathbb{E}_{q_t}[\cdot]. \tag{15.21}
+$$
+
+This simplifies computation as no inversion of the Fisher is required anymore due to the mapping between natural and expectation parameter. The next important step is then to express the term $\nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \mathbb{E}_{q_t}[\cdot]$ in a way that is convenient for deep learning algorithms.
+
+### 2.3 Stochastic gradient descent (SGD) from the Bayesian learning rule (BLR)
+
+For Gaussian $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{\Sigma})$ the BLR update simplifies to:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow (1 - \rho_t) \boldsymbol{\lambda}_t - \rho_t \nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \mathbb{E}_q[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta}) + \log h(\boldsymbol{\theta})]. \tag{15.22}
+$$
+
+To illustrate how the BLR can be used to recover and design optimization algorithms, the following briefly outlines how SGD can be seen as an instance of Equation 15.20 by following the derivations of Khan and Rue. The derivation starts by substituting an isotropic Gaussian posterior $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, I)$ in Equation 15.22. Then, $\boldsymbol{\mu}(\boldsymbol{\theta}) = \boldsymbol{m} = \boldsymbol{\lambda}$ and $\mathbb{E}_q[\log h] = -\boldsymbol{m}^\top \boldsymbol{m}/2 + \text{const}$. As a consequence, Equation 15.20 reduces to:
+
+$$
+\boldsymbol{m}_{t+1} \leftarrow \boldsymbol{m}_t - \rho_t \nabla_{\boldsymbol{m}} \mathbb{E}_{q_t}[\bar{\ell}(\mathcal{D}_t, \boldsymbol{m}_t)] \,|_{\boldsymbol{m} = \boldsymbol{m}_t}, \tag{15.23}
+$$
+
+where $\boldsymbol{m}_t$ are the model parameters at step $t$ and the variance is kept fixed to identity. This is gradient descent but the gradient is smoothed via the expectation. To arrive at regular gradient descent the Delta method is used, as detailed by Khan and Rue, where an expectation is approximated by the expectation of its first-order Taylor expansion, i.e.
+
+$$
+\mathbb{E}_q[f(\boldsymbol{\theta})] \approx \mathbb{E}_q[f(\boldsymbol{m}) + (\boldsymbol{\theta} - \boldsymbol{m})^T \nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})|_{\boldsymbol{\theta} = \boldsymbol{m}}] = f(\boldsymbol{m}). \tag{15.24}
+$$
+
+The delta method can be used to map from Bayesian methods to point estimation. Plugging this in Equation 15.23 immediately gives SGD. Next, the chapter turns to a more practical part and uses similar kinds of derivations to derive NGVI optimizers that can work well even for large deep learning models.
+
+## 3. Variational online Newton methods
+
+This section discusses practical natural-gradient-based deep learning optimizers that can be derived from the Bayesian learning rule. These optimizers are connected to Newton's method as they use second-order information. The first method is often referred to as Variational Online Newton (VON) and makes use of a Gaussian approximation $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{\Sigma})$. Usually, a mean-field assumption ([Chapter 13](/blog/gaussian-mean-field-variational-inference)) with diagonal Gaussians $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \operatorname{diag}(\boldsymbol{\sigma}^2))$ is made but the presentation here is more general at least in the beginning.
+
+The presentation follows the derivations of Khan et al. and Khan and Rue and gives the main points. A factorized loss $\ell(\mathcal{D}, \boldsymbol{\theta}) = \frac{1}{N} \sum_{i=1}^{N} \ell(\mathcal{D}_i, \boldsymbol{\theta})$ leads to:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \mathbb{E}_{q(\boldsymbol{\theta})}[N \cdot \ell(\mathcal{D}_i, \boldsymbol{\theta})] + \mathbb{D}_{\mathrm{KL}}(q(\boldsymbol{\theta}) \,\|\, p_0(\boldsymbol{\theta})). \tag{15.25}
+$$
+
+The size of $\mathcal{D}$ balances data fit and regularization which is intuitive as observing more data means that one can rely more on the data fit which is later exploited for tuning.
+
+Using the chain rule to express $\nabla_{\boldsymbol{\mu}}$ in terms of $\boldsymbol{m}$ and $\boldsymbol{\Sigma}$, Equation 15.22 can be rewritten:
+
+$$
+\begin{aligned}
+\boldsymbol{\Sigma}_{t+1}^{-1} &= \boldsymbol{\Sigma}_t^{-1} - 2\rho_t [\nabla_{\boldsymbol{\Sigma}} \mathcal{L}(\boldsymbol{\theta})] && (15.26) \\
+\boldsymbol{m}_{t+1} &= \boldsymbol{m}_t + \rho_t \boldsymbol{\Sigma}_{t+1} [\nabla_{\boldsymbol{m}} \mathcal{L}(\boldsymbol{\theta})]. && (15.27)
+\end{aligned}
+$$
+
+While this already resembles a practical algorithm, the gradient of the expectation that is hidden inside $\mathcal{L}(\boldsymbol{\theta})$ still has to be handled. Next, Bonnet's and Price's theorem are introduced, which allow the gradient to be pushed inside the expectations.
+
+**Theorem 15.1.** (Bonnet's theorem) *Let* $f : \Theta \to \mathbb{R}$ *once-differentiable,* $q = \mathcal{N}(\boldsymbol{m}, \boldsymbol{\Sigma})$, *and* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Then:*
+
+$$
+\nabla_{\boldsymbol{m}} \mathbb{E}_q[f(\boldsymbol{\theta})] = \mathbb{E}_q[\nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})]. \tag{15.28}
+$$
+
+**Theorem 15.2.** (Price's theorem) *Let* $f : \Theta \to \mathbb{R}$ *twice-differentiable,* $q = \mathcal{N}(\boldsymbol{m}, \boldsymbol{\Sigma})$, *and* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Then:*
+
+$$
+\nabla_{\boldsymbol{\Sigma}} \mathbb{E}_q[f(\boldsymbol{\theta})] = \frac{1}{2} \mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 f(\boldsymbol{\theta})]. \tag{15.29}
+$$
+
+Price's theorem shows that the variance is directly related to the Hessian.
+
+Then the updates can be written as follows using $\delta > 0$:[^1]
+
+$$
+\begin{aligned}
+\boldsymbol{\Sigma}_{t+1}^{-1} &\leftarrow (1 - \rho_t) \boldsymbol{\Sigma}_t^{-1} + \rho_t \left[N \cdot \mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}_t, \boldsymbol{\theta})] + \delta I\right] && (15.30) \\
+\boldsymbol{m}_{t+1} &\leftarrow \boldsymbol{m}_t - \rho_t \boldsymbol{\Sigma}_{t+1} \left[N \cdot \mathbb{E}_q[\nabla_{\boldsymbol{\theta}} \ell(\mathcal{D}_t, \boldsymbol{\theta})] + \delta \boldsymbol{m}_t\right], && (15.31)
+\end{aligned}
+$$
+
+The expectations $\mathbb{E}_q[\cdot]$ can be approximated using Monte-Carlo methods with samples $\boldsymbol{\theta}_t \sim \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_t, \boldsymbol{\Sigma}_t)$ at each iteration. This is similar to standard neural network training but noise is added to the current learned mean $\boldsymbol{m}_t$ which induces parameter exploration.
+
+In addition to the expectations, tractable approximations of the Hessian $H(\boldsymbol{\theta}) := \nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}_t, \boldsymbol{\theta}) \in \mathbb{R}^{P \times P}$ need to be found. While a mean-field approximation using $\mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_t, \operatorname{diag}(\boldsymbol{\sigma}^2))$ reduces storage cost to the same as the cost of storing the mean, an efficient computation of $\operatorname{diag}(H(\boldsymbol{\theta}))$ is still required. For this, Stein's Lemma for multivariate Gaussians is used as presented by Lin et al. and then applied for Hessian computation.
+
+**Lemma 15.1.** (Stein's Lemma for Multivariate Gaussians) *Given* $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{\Sigma})$, $f : \Theta \to \mathbb{R}$, *continuous, locally ACL, and* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Then, the following identity holds:*
+
+$$
+\mathbb{E}_q[\boldsymbol{\Sigma}^{-1} (\boldsymbol{\theta} - \boldsymbol{m}) f(\boldsymbol{\theta})] = \mathbb{E}_q[\nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})]. \tag{15.32}
+$$
+
+As a consequence, Price's theorem can be rewritten as follows.
+
+**Theorem 15.3.** (Price's Theorem, revisited) *Let* $f : \Theta \to \mathbb{R}$ *once-differentiable,* $q = \mathcal{N}(\boldsymbol{m}, \boldsymbol{\Sigma})$, *and* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Then:*
+
+$$
+\nabla_{\boldsymbol{\Sigma}} \mathbb{E}_q[f(\boldsymbol{\theta})] = \frac{1}{2} \mathbb{E}_q[\boldsymbol{\Sigma}^{-1} (\boldsymbol{\theta} - \boldsymbol{m}) \nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})]. \tag{15.33}
+$$
+
+Now $f$ only needs to be once-differentiable. Similarly, Bonnet's theorem could also be rewritten to obtain a gradient estimator even for non-differentiable functions. Applying Price's theorem to the loss $\ell(\mathcal{D}, \boldsymbol{\theta})$ gives:
+
+$$
+\mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}, \boldsymbol{\theta})] = \mathbb{E}_q[\boldsymbol{\Sigma}^{-1} (\boldsymbol{\theta} - \boldsymbol{m}) \nabla_{\boldsymbol{\theta}} \ell(\mathcal{D}, \boldsymbol{\theta})]. \tag{15.34}
+$$
+
+That is, the Hessian of the loss can be calculated by using first-order gradients. A Monte-Carlo estimator of Equation 15.34 is an unbiased estimate of the expected Hessian.
+
+VON is presented next with one Monte-Carlo sample and diagonal Gaussians. The variance in VON can be defined as $\boldsymbol{\sigma}^2 := 1/[N(\boldsymbol{h} + \delta)]$ for a Hessian estimate $\boldsymbol{h}$ and weight-decay $\delta$. The diagonal Hessian $\boldsymbol{h}$ is approximated by using Price's theorem coupled with Stein's Lemma which only requires first-order gradients. These gradients are estimated using an unbiased parameter sample from $q_t$. VON can then be implemented by the following algorithm for minibatch $\mathcal{B} \subset \mathcal{D}$, where the shorthand notation $\ell_i(\boldsymbol{\theta})$ is used for the loss of the i-th example in a mini-batch:
+
+$$
+\begin{aligned}
+\hat{\boldsymbol{g}} &\leftarrow \frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \nabla_{\boldsymbol{\theta}_t} \ell_i(\boldsymbol{\theta}_t) \quad \text{where } \boldsymbol{\theta}_t \sim q_t(\boldsymbol{\theta}) && (15.35) \\
+\hat{\boldsymbol{h}} &\leftarrow (\boldsymbol{\theta}_t - \boldsymbol{m}_t) \hat{\boldsymbol{g}} / \boldsymbol{\sigma}_t^2 && (15.36) \\
+\boldsymbol{g} &\leftarrow \beta_1 \boldsymbol{g} + (1 - \beta_1) \hat{\boldsymbol{g}} && (15.37) \\
+\boldsymbol{h}_{t+1} &\leftarrow \beta_2 \boldsymbol{h}_t + (1 - \beta_2) \hat{\boldsymbol{h}} && (15.38) \\
+\boldsymbol{m}_{t+1} &\leftarrow \boldsymbol{m}_t - \rho_t \left(\boldsymbol{g} + \delta \boldsymbol{m}_t\right) / (\boldsymbol{h}_{t+1} + \delta) && (15.39) \\
+\boldsymbol{\sigma}_{t+1}^2 &\leftarrow 1/N(\boldsymbol{h}_{t+1} + \delta) && (15.40)
+\end{aligned}
+$$
+
+The preconditioner in VON uses the Hessian without square root, which is used in Adam-like algorithms, and the Hessian is calculated online. Still, due to its similarity to conventional optimizers VON is easy to implement in standard deep learning frameworks.
+
+However, so far there is no guarantee that the Hessian will stay positive in VON. If the Hessian is not positive, $q$ is not in the family of diagonal Gaussians anymore, as inversion of the covariance is not possible. While Khan et al. note that backtracking could be used to prevent the Hessian from becoming negative, this strategy is slow. This motivates the next sections on VOGN and IVON, which first use a different Hessian estimator that guarantees positivity and then revisit VON with a positive definite correction that moves $q$ back into the feasible set of Equation 15.18.
+
+### 3.1 VOGN
+
+To optimize the variational objective, it has to be ensured that the solutions remain in the feasible set consisting of valid distributions $q \in \mathcal{Q}$. In the Gaussian case this means that $\boldsymbol{\Sigma} \in \mathbb{R}^{P \times P}$ has to be invertible. For VON, the relationship $\boldsymbol{\sigma}^2 = 1/[N(\boldsymbol{h} + \delta)]$ between variance and Hessian has been determined, but VON does not ensure that $\boldsymbol{h} + \delta$ stays positive. This section presents the Variational Online Gauss-Newton (VOGN) method based on the work of Khan et al. and Osawa et al., which uses a mean-field Gaussian with a positive-definite Hessian approximation.
+
+The approximation is based on the Generalized Gauss-Newton matrix (GGN). In order to define the GGN, decompose the Hessian by referring to the neural network output of a network with parameters $\boldsymbol{\theta} \in \mathbb{R}^P$ as $f_{\boldsymbol{\theta}}(x)$. The following result has been obtained previously and is also discussed elsewhere in the literature. It states that the Hessian consists of:
+
+$$
+\nabla_{\boldsymbol{\theta}}^2 \ell_i(\boldsymbol{\theta}) = \underbrace{(\nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i))^T \nabla_f^2 \ell_i(\boldsymbol{\theta}) \nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i)}_{\text{GGN}} + \underbrace{\nabla_{\boldsymbol{\theta}}^2 f_{\boldsymbol{\theta}}(x_i) \nabla_z \ell(y_i, z)_{|z = f(x_i)}}_{\text{residual}}, \tag{15.41}
+$$
+
+where $\nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i)$ is the Jacobian. Dropping the second term in the decomposition gives the GGN approximation of the Hessian. The GGN retains the curvature induced by the loss with respect to network outputs but drops curvature due to the network's nonlinear parameterization. For many settings it can be shown that the GGN and Fisher coincide. A discussion is available in the literature.
+
+Clearly, the GGN itself again requires the computation of a Hessian and Jacobian. This can be prohibitive in itself, as for a neural network with $P$ parameters and $C$ output classes, $\nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i) \in \mathbb{R}^{P \times C}$. For example, for LLMs $C$ is often in the order of tens of thousands as it consists of all possible tokens from the vocabulary. Conveniently, though, there are estimators for the GGN that are easy and comparably fast to compute simply based on first-order gradients. The estimator used in VOGN was presented in Graves and simply averages the squared gradients of examples in a mini-batch:
+
+$$
+\hat{\boldsymbol{h}} \approx \frac{1}{|\mathcal{B}|} \sum_{i=1}^{|\mathcal{B}|} [\nabla_{\boldsymbol{\theta}} \ell_i(\boldsymbol{\theta})]^2. \tag{15.42}
+$$
+
+This estimator is guaranteed to be nonnegative but popular deep learning libraries directly calculate a sum of gradients over the mini-batch and the per-example gradients can only be obtained with additional computation and overhead. Indeed, Shen et al. report an overhead of almost 1.8x in an image classification setting when compared to the estimator used in VON. Hence, it might seem intuitive to just square the gradients of the minibatch directly, i.e., to move the average inside the square:
+
+$$
+\hat{\boldsymbol{h}}^{\mathrm{GM}} \approx \left[\frac{1}{|\mathcal{B}|} \sum_{i=1}^{|\mathcal{B}|} \nabla_{\boldsymbol{\theta}} \ell_i(\boldsymbol{\theta})\right]^2. \tag{15.43}
+$$
+
+This is often referred to as gradient magnitude approximation and Khan et al. use this to derive a variational version of RMSprop called Vprop. Both estimates are compared in a theorem of Khan et al., which is restated here next.
+
+**Theorem 15.4.** (Bias of Gradient Magnitude Approximation) *Given are mini-batches* $\mathcal{B}$ *of size* $M$ *drawn uniformly from* $p(\mathcal{B})$ *over all mini-batches that can be formed based on* $\mathcal{D}$ *of size* $N$, *GGN* $\boldsymbol{h}$ *calculated on all data, Gradient Magnitude approximation* $\hat{\boldsymbol{h}}$, *and gradients* $\boldsymbol{g}$ *on all data. Using* $w = \frac{1}{M}(N - M)/(N - 1)$ *the following holds:*
+
+$$
+\mathbb{E}_{p(\mathcal{B})}[\hat{\boldsymbol{h}}^{GM}] = w\boldsymbol{h} + (1 - w)\boldsymbol{g}^2. \tag{15.44}
+$$
+
+Only $M = 1$ provides an unbiased estimate and the bias grows with $M$.
+
+Similar to Osawa et al., VOGN can then be implemented by simply replacing the Hessian estimator in VON with:
+
+$$
+\hat{\boldsymbol{h}} \leftarrow \frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} [\nabla_{\boldsymbol{\theta}_t} \ell_i(\boldsymbol{\theta}_t)]^2. \tag{15.45}
+$$
+
+Using a strictly positive damping of the Hessian guarantees a strictly positive estimate. The authors of VOGN report promising results, reaching an accuracy that is close to or better than SGD and Adam with improved calibration. However, they report a significant computational overhead of ca. 1.7x due to the per-example gradients required, similar to the overhead reported in Shen et al. In many modern applications, where training can take days, weeks, and months, this may be too expensive. Next, the Improved Variational Online Newton (IVON) optimizer is described, which is fast because it uses the same estimator as in VON and guarantees that $q$ stays within the feasible set.
+
+### 3.2 Improved variational online Newton (IVON)
+
+At the beginning of this section, the VON algorithm was introduced as a practical optimizer for neural networks with a mean-field Gaussian posterior approximation. However, VON does not constrain $q$ to be Gaussian which requires the covariance to be positive-definite (while $\boldsymbol{m}$ is unconstrained). The constraint can be unfulfilled when running VON on a non-convex loss $\ell(\mathcal{D}_i, \boldsymbol{\theta})$, because in Equation 15.30 the Hessian $\mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}_t, \boldsymbol{\theta})]$ can be indefinite if $\ell$ is not convex. This is also true for Equation 15.40, where the reparameterization trick is used to estimate the Hessian.
+
+IVON overcomes this by adding a positive-definite correction to the Hessian update, following the work of Lin et al. Their work gives a detailed derivation; only their main result is used next, in the context of IVON. In IVON every update step starts with a current approximate posterior $q_t = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_t, \boldsymbol{\sigma}_t^2)$. IVON uses the following update rule for the Hessian, where the positive-definite correction is shown in gray:
+
+$$
+\begin{aligned}
+\hat{\boldsymbol{g}} &\leftarrow \frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \nabla_{\boldsymbol{\theta}_t} \ell_i(\boldsymbol{\theta}_t) \quad \text{where } \boldsymbol{\theta}_t \sim q_t(\boldsymbol{\theta}) && (15.46) \\
+\hat{h} &\leftarrow \hat{\boldsymbol{g}} \cdot (\boldsymbol{\theta}_t - \boldsymbol{m}_t) / \boldsymbol{\sigma}_t^2 && (15.47) \\
+\boldsymbol{h}_{t+1} &\leftarrow \beta_2 \boldsymbol{h}_t + (1 - \beta_2) \hat{\boldsymbol{h}} + {\color{gray} \frac{1}{2} (1 - \beta_2)^2 (h_t - \hat{h})^2 / (h_t + \delta)}. && (15.48)
+\end{aligned}
+$$
+
+**Algorithm 19** Improved Variational Online Newton (IVON)
+
+```text
+Inputs : learning rates {ρₜ}; gradient momentum β₁ ∈ [0, 1); Hessian momentum β₂ ∈ [0, 1); weight
+         decay δ > 0; scaling parameter λ > 0; Hessian initialization h₀ > 0
+Outputs: mean parameter mₜ₊₁ and variance σ²ₜ₊₁
+initialize m ← (NN weight init), h ← h₀ · I, σ² ← 1/(λ(h + δ)), g ← 0, t ← 1, and αₜ ← (h₀ + δ)αₜ for all
+    t
+repeat
+    ĝ ← (1/|𝓑|) Σ_{i∈𝓑} ∇_θₜ ℓᵢ(θₜ), where θₜ ∼ qₜ(θ) = 𝒩(θ; mₜ, diag(σₜ²))
+    ĥ ← ĝ · (θₜ − mₜ)/σₜ²
+    g ← β₁ g + (1 − β₁) ĝ
+    h ← β₂ hₜ + (1 − β₂) ĥ + ½ (1 − β₂)² (hₜ − ĥ)²/(hₜ + δ)
+    ḡ ← g/(1 − β₁ᵗ)
+    mₜ₊₁ ← mₜ − αₜ (ḡ + δ mₜ)/(h + δ)
+    σ²ₜ₊₁ ← 1/(λ(h + δ))
+until convergence
+return mₜ₊₁, σ²ₜ₊₁
+```
+
+<Figure caption="Figure 15.1: The solution found by IVON lands in a flat region away from the MAP. Figure reproduced from the code of Shen et al. (Schematic reproduction computed for this page: a two-parameter loss with a wedge of low loss and a narrow pit near its tip; the MAP is the minimum of the loss, and the IVON solution is the minimum of the loss averaged over a Gaussian with fixed standard deviation 0.35, whose one-standard-deviation circle is drawn. The values are not those of the original figure.)">
+  <Bdl15IvonFlatMinimum />
+</Figure>
+
+<Figure caption="Figure 15.2: IVON vs. AdamW on ImageNet, taken from Shen et al. with permission. (Schematic reproduction redrawn for this page: smooth curves traced by eye from the published figure, not the measured data.)">
+  <Bdl15IvonImagenet />
+</Figure>
+
+The correction $\frac{1}{2}(1 - \beta_2)^2 (\boldsymbol{h}_t - \hat{\boldsymbol{h}})^2 / (\boldsymbol{h}_t + \delta) >^{\text{a.s.}} 0$ ensures that the current approximate posterior $q_{t+1} = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_{t+1}, \operatorname{diag}(\boldsymbol{\sigma}_{t+1}^2))$ is still a valid Gaussian distribution as $\boldsymbol{h}_{t+1}$ is always positive-definite if $\boldsymbol{h}_t$ is positive-definite, following Lin et al. A proof for a generalized setting with full covariance is found in the work of Lin et al.
+
+In addition to this, IVON uses a slightly different diagonal variance $\boldsymbol{\sigma}^2 = 1/\lambda(\boldsymbol{h} + \delta)$, where $\boldsymbol{h} = h_0 \cdot \boldsymbol{I}$ for $h_0 > 0$ in the first iteration, $\delta$ is a weight-decay parameter from using a prior with scalar variance and $\lambda$ is the effective sample size that can be tuned as a hyperparameter. Tuning $\lambda$ can be helpful in many situations, for example, when training many epochs on little data it can be set to $\lambda > N$ to simulate a setting where more data is available. Another example is when predicting using the posterior: when sampling from the final $q(\boldsymbol{\theta})$, it is possible to decrease $\lambda$ to sample more diverse models (that are farther away from $\boldsymbol{m}$) or increase $\lambda$ to sample less diverse models. Chapter 43 gives a more in-depth discussion of this in the context of large language models. The final updates of IVON are shown in Algorithm 19. IVON can also be used with multiple MC samples to estimate the gradient. In this case, the gradient is just averaged over MC samples and also estimate $\hat{\boldsymbol{h}}$ is averaged over multiple samples.
+
+The noise in IVON can be helpful for regularizing training, because IVON constantly explores new solutions according to the chosen noise level during training. This leads to it "bouncing" away from sharp solutions, as adding even a bit of noise there will heavily increase the loss, towards flatter minima, as is illustrated in Figure 15.1 on a small logistic regression problem, where the maximum-a-posteriori (MAP) problem finds a sharp minimum but IVON finds a flat minimum. Flatter minima have long been connected to improved generalization and better uncertainty estimates. Furthermore, gradient spikes can be smoothed out when multiple MC samples are used due to the Gaussian smoothing.
+
+Altogether, IVON enables scaling natural-gradient descent with online Newton methods to large problems. Figure 15.2 shows results on ImageNet for a ResNet-50, which were obtained in Shen et al., and in Chapter 43, Section 2 results for pretraining GPT-2 with 773M parameters from scratch are shown. In the ImageNet experiment, IVON obtains better or comparable accuracy as AdamW, improved calibration and uncertainty, and only requiring a computational overhead of 1.0-1.2x (depending on model size) due to the additional parameter sampling step. This shows that variational learning of large models is feasible and due to the techniques shown in this chapter is also easy to implement and use.
+
+## 4. Concluding remarks
+
+This chapter has presented natural-gradient-descent algorithms to learn generalized posterior using the framework of variational learning, where arbitrary losses can be used. In order to derive these algorithms, the Bayesian Learning Rule has been introduced as well as various convenient techniques to, for example, estimate second-order information. Various algorithms have been introduced that can use these techniques to learn distributions over neural network parameters in an efficient way with similar computational requirements as conventional neural network optimizers.
+
+[^1]: In Khan et al., $\delta = \delta'/N$, where $\delta'$ is the prior precision of $p_0 = \mathcal{N}(\boldsymbol{\theta}; 0, \boldsymbol{I}/\delta')$.

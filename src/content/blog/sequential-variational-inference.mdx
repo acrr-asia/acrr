@@ -1,0 +1,636 @@
+---
+title: "Sequential Variational Inference"
+description: "Online Bayesian inference for network parameters: state-space models, Kalman and extended Kalman filters, sequential VI and the BONG algorithm."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - kalman filter
+  - online learning
+series: bayesian-deep-learning
+seriesOrder: 22
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl18SsmGraph from '../../components/diagrams/Bdl18SsmGraph.astro';
+import Bdl18EkfMlp from '../../components/diagrams/Bdl18EkfMlp.astro';
+import Bdl18PredictUpdateProject from '../../components/diagrams/Bdl18PredictUpdateProject.astro';
+
+## 1. Introduction
+
+This chapter is concerned with sequential or online Bayesian inference of the parameters of a deep neural network. That is, the goal is to recursively compute $p(\theta_t \mid \mathcal{D}_{1:t})$ as the data streams in, where $\mathcal{D}_t = (x_t, y_t)$ is the $t^{\text{th}}$ datapoint, and $\theta_t$ are the parameters at time $t$. This is an online version of the standard Bayesian deep learning (BDL) problem, and is useful for settings where a decision must be taken at each step (e.g., contextual bandits), and/or for settings where the data generating process is non-stationary (e.g., continual learning). This chapter approaches this problem from the perspective of Bayesian filtering (as opposed to smoothing, which works offline to compute $p(\theta_t \mid \mathcal{D}_{1:T})$ where $\mathcal{D}_{1:T}$ is the full data set). If the parameters are assumed to be constant over time (which is initially assumed, for notational simplicity), $\theta_t$ can be replaced with $\theta$.
+
+The quantity $p(\theta \mid \mathcal{D}_{1:t})$ is known as the belief state, since it represents the current beliefs about the unknown parameters given the data so far. (It is also known as the filtering distribution, as mentioned in [Chapter 1, Section 6](/blog/introduction-to-sampling#6-sequential-monte-carlo).) This can be computed using repeated applications of Bayes' rule:
+
+$$
+p(\theta \mid \mathcal{D}_{1:t}) = \frac{p(y_t \mid x_t, \theta)\, p(\theta \mid \mathcal{D}_{1:t-1})}{p(y_t \mid x_t, \mathcal{D}_{1:t-1})} \tag{18.1}
+$$
+
+where the prior $p(\theta \mid \mathcal{D}_{1:t-1})$ is the previous belief state, and the denominator is given by
+
+$$
+p(y_t \mid x_t, \mathcal{D}_{1:t-1}) \stackrel{\text{def}}{=} Z_t = \int p(y_t \mid x_t, \theta)\, p(\theta \mid \mathcal{D}_{1:t-1})\, \mathrm{d}\theta \tag{18.2}
+$$
+
+Note that, in the batch (offline) setting, the product of the normalizing factors across steps corresponds to the marginal likelihood of the data:
+
+$$
+Z(\mathcal{D}) = p(y_{1:N} \mid x_{1:N}) = \prod_{n=1}^{N} Z_n \tag{18.3}
+$$
+
+The key challenge this chapter focuses on is how to efficiently compute the new belief state $p(\theta \mid \mathcal{D}_{1:t})$ at each step, when the unknown parameters $\theta \in \mathbb{R}^P$ are high dimensional, and where the likelihood is not conjugate to the prior. To make the problem computationally efficient (which is particularly important in online settings), the chapter focuses on variational inference (VI) methods, which were introduced (in a batch setting) in [Chapter 12](/blog/introduction-to-variational-inference). The approximate belief state at each step is represented by $q_t = q(\theta \mid \mathcal{D}_{1:t})$. The focus is on the special case where this variational distribution is a Gaussian, $q_t = \mathcal{N}(\cdot \mid \mu_t, \Sigma_t)$, where $\mu_t$ is the posterior mean and $\Sigma_t$ is the posterior covariance. (In many cases, it is more convenient to work with the posterior precision matrix, denoted $\Lambda_t = \Sigma_t^{-1}$.) The chapter discusses a variety of methods for efficiently updating these variational parameters, which will often require imposing additional assumptions on $\Sigma_t$ (or $\Lambda_t$), in order to trade off expressivity with efficiency. It also makes connections between these Bayesian inference methods and optimization algorithms, such as natural gradient descent (discussed in [Chapter 15](/blog/natural-gradient-variational-inference)) and other second-order methods.
+
+## 2. State-space models
+
+The methods discussed in this chapter can be applied to many kinds of state estimation problems, not just estimating neural network parameters. This section therefore starts with a general presentation before specializing it to the BDL case. This will make it easier to see connections to the broader literature on Bayesian filtering (e.g., Särkkä and Svensson).
+
+### 2.1 Modeling assumptions
+
+<Figure caption="Figure 18.1: State-space model (SSM) as a graphical model (shaded nodes are observed and unshaded are latent). (a) Standard SSM. (b) Specialized version for online parameter inference. Redrawn.">
+  <Bdl18SsmGraph />
+</Figure>
+
+The starting point is the definition of a state-space model (SSM), which is a way to define a joint distribution over a sequence of latent states $z_t$ and observed outputs $y_t$, given a set of observed inputs or controls $u_t$. The model has the following form:
+
+$$
+p(y_{1:T}, z_{1:T} \mid u_{1:T}) = p(z_1)\, p(y_1 \mid z_1, u_1) \prod_{t=2}^{T} p(y_t \mid z_t, u_t)\, p(z_t \mid z_{t-1}, u_t) \tag{18.4}
+$$
+
+See Figure 18.1(a) for an illustration.
+
+The distribution $p(z_t \mid z_{t-1}, u_t)$ is called the dynamics (or transition) model and specifies how the latent state changes over time. The distribution $p(y_t \mid z_t, u_t)$ is called the observation (or measurement) model and specifies the likelihood of the observations given the hidden state (and optionally the controls).
+
+Given the above model, the online inference problem (also called Bayesian filtering) refers to recursively updating the belief state to give $p(z_t \mid y_{1:t}, u_{1:t})$, taking advantage of the Markov property of the SSM. Algorithms for computing this are discussed in [Section 3](#3-online-inference). In the offline setting, where the entire data set is available, one may instead be interested in the Bayesian smoothing problem, which computes $p(z_{1:T} \mid y_{1:T}, u_{1:T})$ or corresponding marginals, such as $p(z_t \mid y_{1:T}, u_{1:T})$. However, this is beyond the scope of this chapter. (If you are interested in this case, see e.g., Courts et al., Dowling et al. for methods based on VI and Kamthe et al. for a method based on Expectation Propagation.)
+
+### 2.2 Examples
+
+As a concrete example, consider the problem of tracking a moving object (such as an airplane) given noisy observations of its location. In this case, $z_t$ represents the position and velocity of the object, $y_t$ represent the observation (e.g., from a radar or camera), and $u_t$ represents the input control signals chosen by the pilot which steer the plane. The belief state represents a distribution over the object's state given the noisy observations seen to date.
+
+In the case of neural network parameter estimation, the latent state $z_t$ corresponds to the parameters $\theta_t$ of the network, $y_t$ represents the target label, and the input $u_t$ represents the features or covariates $x_t$ which are passed into the network. In this application, the hidden states (network parameters) are assumed to be unaffected by the inputs, so there is no edge from $u_t$ to $z_t$ in the graphical model. The resulting simplified model is shown in Figure 18.1(b). See [Section 2.5](#25-ssms-for-online-bayesian-deep-learning) for more details.
+
+### 2.3 Linear dynamical systems
+
+This section now considers an important special case of an SSM known as a Linear Dynamical System (LDS). This model is widely used because it supports exact inference, as discussed in [Section 3.2](#32-kalman-filtering). In addition, it will be a building block for the approximate inference algorithms considered later in this chapter.
+
+In an LDS, both the transition model and dynamics model are conditional Gaussian distributions whose means are linear functions of their inputs, and whose variances are fixed. More precisely, the model assumes
+
+$$
+p(z_t \mid z_{t-1}, u_t) = \mathcal{N}(z_t \mid A_t z_{t-1} + B_t u_t + a_t, Q_t) \tag{18.5}
+$$
+
+$$
+p(y_t \mid z_t, u_t) = \mathcal{N}(y_t \mid C_t z_t + D_t u_t + c_t, R_t) \tag{18.6}
+$$
+
+Here $Q_t$ is the covariance of the system noise, and $R_t$ is the covariance of the observation noise. If the process is stationary, then the model parameters $(A_t, B_t, C_t, D_t, a_t, c_t, Q_t, R_t)$ will be independent of $t$.
+
+This formulation is known as the affine form of an LDS (see Särkkä and Svensson, Sec. 6.4). The term $a_t$ can be removed by appending a value of 1 to the input $u_t$ and appending $a_t$ as a column to $B_t$. Similarly $c_t$ can be removed by absorbing it into $D_t$. However, sometimes it is convenient to explicitly include these bias (offset) terms, just like in neural networks. Alternatively, since the inputs are fixed, $B_t u_t$ can be absorbed into $a_t$ and $D_t u_t$ into $c_t$.
+
+### 2.4 Nonlinear dynamical systems
+
+The assumption that the SSM has a linear dynamics model and a linear observation model (Equations 18.5–18.6) is quite restrictive. However, it is easy to relax this by defining a Gaussian SSM where the mean is a nonlinear function of its input:
+
+$$
+p(z_t \mid z_{t-1}, u_t) = \mathcal{N}(z_t \mid d(u_t, z_{t-1}), Q_t) \tag{18.7}
+$$
+
+$$
+p(y_t \mid z_t, u_t) = \mathcal{N}(y_t \mid f(u_t, z_t), R_t) \tag{18.8}
+$$
+
+Note that, since the noise is additive, the above model can be rewritten as follows:
+
+$$
+z_t = d_t(z_{t-1}) + \epsilon_t \tag{18.9}
+$$
+
+$$
+y_t = f_t(z_t) + \epsilon'_t \tag{18.10}
+$$
+
+where $\epsilon_t \sim \mathcal{N}(0, Q_t)$ is the system noise, $\epsilon'_t \sim \mathcal{N}(0, R_t)$ is the observation noise, and the shorthands $d_t(z_{t-1}) = d(u_t, z_{t-1})$ and $f_t(z_t) = f(u_t, z_t)$ have been defined.
+
+### 2.5 SSMs for online Bayesian deep learning
+
+This section discusses how to formulate the problem of online neural network parameter estimation as inference in an SSM, where $z_t = \theta_t$ are the unknown network parameters, $u_t = x_t$ are the inputs to the network, and $y_t$ are the observed outputs.
+
+#### Observation model
+
+The observation model $f$ corresponds to the neural network that maps inputs to outputs given the hidden parameters, so $f_t(\theta_t) = f(x_t, \theta_t)$. The assumption that the output distribution is Gaussian is often reasonable for real-valued targets (although one may want to use more robust loss functions to handle outliers, as discussed in Duran-Martin et al., Knoblauch et al.). In this case, it is often assumed that $R_t = \sigma_r^2 I$, where $\sigma_r > 0$ is a hyper-parameter.
+
+However, when the targets are discrete labels or integer counts, the Gaussian observation distribution should be replaced by a more suitable distribution from the exponential family. In this case, assume $f_t(\theta_t)$ represents the mean parameter of the output distribution, and $h_t(\theta_t)$ represents the natural parameter.[^1] For example, consider neural network classification. In this case, $f(x_t, \theta_t)$ represents the probability of each class label, and $h(x_t, \theta_t)$ represents the logits. This gives
+
+$$
+p(y_t \mid \theta_t, x_t) = \operatorname{Cat}(y_t \mid f(x_t, \theta_t)) = \operatorname{Cat}(y_t \mid S(h(x_t, \theta_t))) \tag{18.11}
+$$
+
+where $S$ is the softmax function.
+
+#### Dynamics model
+
+It is common to assume (e.g., Kurle et al., Titsias et al.) that the dynamics model is an Ornstein-Uhlenbeck process, i.e.,
+
+$$
+p(\theta_t \mid \theta_{t-1}) = \mathcal{N}(\theta_t \mid d_t(\theta_{t-1}), Q_t) \tag{18.12}
+$$
+
+$$
+d_t(\theta_{t-1}) = \gamma_t \theta_{t-1} + (1 - \gamma_t)\mu_0 \tag{18.13}
+$$
+
+$$
+Q_t = (1 - \gamma_t^2)\Sigma_0 \tag{18.14}
+$$
+
+where $0 \le \gamma_t \le 1$ is the degree of drift and $\mathcal{N}(\theta_0 \mid \mu_0, \Sigma_0)$ is the prior. If $\gamma_t = 1$, then the dynamics is the identity function and there is no noise ($Q_t = 0$), so the latents are constant, i.e., $p(\theta_t \mid \theta_{t-1}) = \delta(\theta_t - \theta_{t-1})$.
+
+The $(1 - \gamma_t^2)$ factor in Equation 18.14 implies a process with stationary marginals $p(\theta_t) = \mathcal{N}(\theta_t \mid \mu_0, \Sigma_0)$. Another common choice is to use a "variance exploding" Gaussian random walk, where $\gamma_t = 1$ but $Q_t = \sigma_q^2 I$ for $\sigma_q > 0$. This can provide a form of regularization. In this case, the quantity $\sigma_q^2/\sigma_r^2$, which is the ratio of the measurement precision to the dynamics precision, controls the learning rate of the system. (This can be seen by looking at the form of the Kalman gain matrix in Equation 18.25; see Ollivier for more discussion.) How to choose these hyper-parameters is discussed in [Section 3.6](#36-state-estimation-vs-parameter-estimation).
+
+## 3. Online inference
+
+This section discusses how to perform sequential (online) inference in SSMs using some common deterministic algorithms. (For a more detailed account, see e.g., Särkkä and Svensson, Triantafyllopoulos.)
+
+### 3.1 Bayesian filtering
+
+Defining $\mathcal{D}_t = (u_t, y_t)$, the belief state $p(z_t \mid \mathcal{D}_{1:t}) = p(z_t \mid u_t, y_t, \mathcal{D}_{1:t-1})$ can be recursively estimated by using a slight generalization of Equation 18.1, as follows:
+
+$$
+\underbrace{p(z_t \mid \mathcal{D}_{1:t-1}, u_t)}_{\text{posterior predictive}} = \int \underbrace{p(z_t \mid z_{t-1}, u_t)}_{\text{dynamics}}\, \underbrace{p(z_{t-1} \mid \mathcal{D}_{1:t-1})}_{\text{previous posterior}}\, \mathrm{d}z_{t-1} \tag{18.15}
+$$
+
+$$
+\underbrace{p(z_t \mid \mathcal{D}_{1:t})}_{\text{new posterior}} = \frac{1}{Z_t} \underbrace{p(y_t \mid z_t, u_t)}_{\text{likelihood}}\, \underbrace{p(z_t \mid \mathcal{D}_{1:t-1}, u_t)}_{\text{prior}} \tag{18.16}
+$$
+
+$$
+Z_t = \underbrace{p(y_t \mid \mathcal{D}_{1:t-1}, u_t)}_{\text{observation predictive}} \tag{18.17}
+$$
+
+Equation 18.15 is called the predict step. This uses the Chapman-Kolmogorov equation to compute the one-step-ahead predictive distribution for the latent state, before seeing the outcome $y_t$; this becomes the prior for step $t$. Equation 18.16 is called the update step. This uses Bayes' rule to compute the posterior after seeing the outcome $y_t$. Finally, Equation 18.17 is the one-step-ahead predictive distribution for observations evaluated at $y_t$.[^2]
+
+### 3.2 Kalman filtering
+
+This section presents the celebrated Kalman filter, which applies the Bayesian filtering equations from [Section 3](#3-online-inference) to the LDS model defined in [Section 2.3](#23-linear-dynamical-systems). The result is a recursive procedure for estimating the belief state $p(z_t \mid y_{1:t}, u_{1:t}) = \mathcal{N}(z_t \mid \mu_t, \Sigma_t)$. The derivation is well-known and can be found in many textbooks (see, e.g., Särkkä and Svensson, Sec. 6.3 or Murphy, Sec. 8.2.2). For brevity, the conditioning on the inputs $u_t$ is dropped and they are absorbed into the bias terms.
+
+The predict step is as follows:
+
+$$
+p(z_t \mid y_{1:t-1}) = \mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1}) \tag{18.18}
+$$
+
+$$
+\mu_{t|t-1} = A_t \mu_{t-1} + a_t \tag{18.19}
+$$
+
+$$
+\Sigma_{t|t-1} = A_t \Sigma_{t-1} A_t^\top + Q_t \tag{18.20}
+$$
+
+The predict step takes $O(P^3)$ time (recall that $P$ is the dimension of the latent state).
+
+The update step is as follows:
+
+$$
+p(z_t \mid y_{1:t}) = \mathcal{N}(z_t \mid \mu_t, \Sigma_t) \tag{18.21}
+$$
+
+$$
+\hat{y}_t = C_t \mu_{t|t-1} + c_t \tag{18.22}
+$$
+
+$$
+e_t = y_t - \hat{y}_t \tag{18.23}
+$$
+
+$$
+S_t = C_t \Sigma_{t|t-1} C_t^\top + R_t \tag{18.24}
+$$
+
+$$
+K_t = \Sigma_{t|t-1} C_t^\top S_t^{-1} \tag{18.25}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + K_t e_t \tag{18.26}
+$$
+
+$$
+\Sigma_t = \Sigma_{t|t-1} - K_t S_t K_t^\top = \Sigma_{t|t-1} - K_t C_t \Sigma_{t|t-1} \tag{18.27}
+$$
+
+Here $e_t$ is the innovation or residual error, $S_t$ is the innovation covariance, and $K_t$ is the Kalman gain matrix. The update step takes $O(P^2 C + P C^2 + C^3)$ time (recall that $C$ is the dimension of the observation).
+
+The posterior mean is thus the prior predicted mean plus the gain matrix times the residual, and the posterior covariance is the prior covariance minus a positive definite term, indicating that the uncertainty is usually reduced after conditioning. This becomes clearer in the information form, which works with precision matrices:
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} + C_t^\top R_t^{-1} C_t \tag{18.28}
+$$
+
+This shows that the posterior precision is the prior precision plus a term which depends on the precision of the observations.
+
+Finally, note that the observation predictive is given by
+
+$$
+p(y_t \mid y_{1:t-1}) = \mathcal{N}(y_t \mid \hat{y}_t, S_t) \tag{18.29}
+$$
+
+from which $Z_t$ can be computed.
+
+### 3.3 Extended Kalman filtering
+
+This section now extends the Kalman filtering equations to the case of a nonlinear (but still Gaussian) SSM. This is done by linearizing both the dynamics and measurement models around the current prior mean, and then performing a step of Kalman filtering. This is known as the Extended Kalman filter (EKF), and was first developed at NASA.
+
+To explain the method in more detail, consider a nonlinear function $g(z)$. A linear approximation of this around some point $\mu$ can be computed using a first-order Taylor series expansion:
+
+$$
+\hat{g}(z) = g(\mu) + J(z - \mu) \tag{18.30}
+$$
+
+where $J = \operatorname{Jac}(g)|_{\mu}$ is the Jacobian of $g$ evaluated at $\mu$ (see also [Chapter 8, Section 1](/blog/linearized-laplace-approximations#1-linearization)). If $g : \mathbb{R}^D \to \mathbb{R}^C$, then computing $J$ costs $O(C|g|)$ using reverse mode auto-differentiation, or $O(D|g|)$ using forward mode, where $|g|$ is the cost of evaluating $g$. The original conditional Gaussian distribution, with nonlinear mean, can now be approximated by a conditional Gaussian whose mean is an affine function of its input:
+
+$$
+\mathcal{N}(g(z), \Sigma) \approx \mathcal{N}(Az + b, \hat{\Sigma}) \tag{18.31}
+$$
+
+$$
+A = \operatorname{Jac}(g)|_{\mu} \tag{18.32}
+$$
+
+$$
+b = g(\mu) - A\mu \tag{18.33}
+$$
+
+$$
+\hat{\Sigma} = \Sigma \tag{18.34}
+$$
+
+Applying this to the SSM gives the following:
+
+$$
+\hat{d}_t(z_{t-1}) = \mu_{t|t-1} + A_t(z_{t-1} - \mu_{t-1}) \tag{18.35}
+$$
+
+$$
+\mu_{t|t-1} = d_t(\mu_{t-1}) \tag{18.36}
+$$
+
+$$
+A_t = \operatorname{Jac}(d_t)(\mu_{t-1}) \tag{18.37}
+$$
+
+$$
+\hat{f}_t(z_t) = \hat{y}_t + C_t(z_t - \mu_{t|t-1}) \tag{18.38}
+$$
+
+$$
+\hat{y}_t = f_t(\mu_{t|t-1}) \tag{18.39}
+$$
+
+$$
+C_t = \operatorname{Jac}(f_t)(\mu_{t|t-1}) \tag{18.40}
+$$
+
+One step of Kalman filtering is then applied.
+
+The EKF can be iterated, by relinearizing the model around the updated posterior mean, instead of the prior mean. This is equivalent to a Gauss-Newton optimization and can improve the accuracy of the approximation.
+
+The EKF can be applied to estimate the parameters of a neural network regression model as discussed in Puskorius and Feldkamp, Singhal and Wu. See Figure 18.2 for an example. However, this takes $O(P^3)$ time per step, in general, which is intractable if the number of parameters is large. In addition, the method is restricted to Gaussian observations. [Section 4](#4-bayesian-online-natural-gradient) presents faster and more general methods.
+
+<Figure caption="Figure 18.2: EKF applied to an MLP for a nonlinear 1d regression problem. Samples from the posterior predictive distribution over the output space are shown after seeing the first 10, 20, 30 and 200 observations. (For a video of this, see https://github.com/probml/probml-data/blob/main/data/ekf_mlp_demo.mp4.) The code to reconstruct this plot (written by Gerardo Duran-Martin) is at https://github.com/probml/JSL/blob/main/jsl/demos/ekf_mlp.py. Schematic reproduction: the panels were recomputed by running the EKF on a 1-6-1 tanh MLP with data from y = x − 10 cos(x) sin(x) + x³ plus Gaussian noise, an assumed setup that matches the shape of the original plot; faint lines are posterior samples, the thick line is the posterior-mean function and circles are the observations.">
+  <Bdl18EkfMlp />
+</Figure>
+
+### 3.4 Statistical linear regression
+
+This section presents an alternative way to linearize a nonlinear Gaussian system, known as Statistical Linear Regression (SLR), which can give higher accuracy but at increased computational cost. The basic idea is to compute the parameters of the linear Gaussian approximation by minimizing an expected regression loss:
+
+$$
+\mathcal{N}(g(z), \Sigma) \approx \mathcal{N}(Az + b, \hat{\Sigma}) \tag{18.41}
+$$
+
+$$
+A, b = \arg\min \mathbb{E}_{y,z}\big[\|y - Az - b\|_2^2\big] = \arg\min \mathbb{E}_{z}\big[\|g(z) - Az - b\|_2^2\big] \tag{18.42}
+$$
+
+$$
+A = \operatorname{Cov}[y, z]\, \mathbb{V}[z]^{-1} \tag{18.43}
+$$
+
+$$
+b = \mathbb{E}[y] - A\, \mathbb{E}[z] \tag{18.44}
+$$
+
+$$
+\hat{\Sigma} = \mathbb{V}[y] - A\, \mathbb{V}[z]\, A^\top \tag{18.45}
+$$
+
+(A similar method can be used for the dynamics model, substituting $z_{t-1}$ and $z_t$ for $z$ and $y$.) The integrals needed to evaluate the relevant expectations and variances can be approximated using Gaussian quadrature. This gives rise to a variety of popular algorithms, including the Unscented KF (also called sigma-point filtering), the Gauss-Hermite KF, and the cubature KF. These methods can also be iterated, giving rise to the posterior linearization filter.
+
+These techniques have been applied to neural network parameter estimation (e.g., de Lima et al.), but they are even less scalable than EKF-based methods. The chapter therefore now turns to VI methods, which are much faster.
+
+### 3.5 Variational inference
+
+The methods discussed in [Sections 3.3](#33-extended-kalman-filtering) and [3.4](#34-statistical-linear-regression) for computing an approximate Gaussian posterior do not give any guarantees that the result is the optimal Gaussian approximation. The chapter therefore turns to variational inference methods, which explicitly solve for the optimal Gaussian approximation.
+
+#### Predict step
+
+In the predict step, the integral in the Chapman-Kolmogorov equation 18.15 can be approximated by minimizing the forwards KL:
+
+$$
+q_{t|t-1}(z_t) = \arg\min_{q \in \mathcal{Q}} D_{\mathrm{KL}}\big(p_{t|t-1}(z_t) \,\big\|\, q(z_t)\big) \tag{18.46}
+$$
+
+This can be solved by moment matching, as is well known, giving rise to
+
+$$
+q_{t|t-1}(z_t) = \mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1}) \tag{18.47}
+$$
+
+$$
+\mu_{t|t-1} = \mathbb{E}_{p_{t|t-1}}[z_t] \tag{18.48}
+$$
+
+$$
+\Sigma_{t|t-1} = \operatorname{Cov}_{p_{t|t-1}}[z_t] \tag{18.49}
+$$
+
+In the case of nonlinear dynamics, linearization (as in the EKF discussed in [Section 3.3](#33-extended-kalman-filtering)) or Gaussian quadrature methods (as in the UKF discussed in [Section 3.4](#34-statistical-linear-regression)) can be used to approximate these moments. In the case of BDL with static parameters, where the dynamics is the identity function and the system noise is $Q_t = \sigma_q^2 I$, the predict step is much simpler, and reduces to $\mu_{t|t-1} = \mu_{t-1}$ and $\Sigma_{t|t-1} = \Sigma_{t-1} + \sigma_q^2 I$.
+
+#### Update step
+
+In the update step, a natural approach is again to minimize the forwards KL:
+
+$$
+q_t(z_t) = \arg\min_{q \in \mathcal{Q}} D_{\mathrm{KL}}\big(p_{t|t}(z_t) \,\big\|\, q(z_t)\big) \tag{18.50}
+$$
+
+$$
+p_{t|t}(z_t) = \frac{1}{Z_t}\, p(y_t \mid z_t)\, q_{t|t-1}(z_t) \tag{18.51}
+$$
+
+This can be interpreted as taking the prior distribution, $q_{t|t-1}$, updating it using Bayes' rule, and then projecting the resulting posterior $p_{t|t}$ back to the space of tractable distributions $\mathcal{Q}$, as illustrated in Figure 18.3. This is known as Assumed Density Filtering or Minimum Divergence Filtering. In the offline (smoothing) setting, this corresponds to the Expectation Propagation algorithm (see also Chapter 25). As in the predict step, minimizing $D_{\mathrm{KL}}(p \,\|\, q)$ amounts to matching the moments of the two distributions.[^3]
+
+<Figure caption="Figure 18.3: Illustration of the predict-update-project cycle for the measurement step, where pₜ = pₜ|ₜ. The corresponding predict-project step for the dynamics, which computes qₜ|ₜ₋₁ ≈ pₜ|ₜ₋₁, is omitted, since this is often easy to compute. Redrawn.">
+  <Bdl18PredictUpdateProject />
+</Figure>
+
+The ADF methodology has been applied to online neural network training, for example the expectation backpropagation algorithm of Soudry et al., the probabilistic backpropagation algorithm of Hernandez-Lobato and Adams and the work of Ghosh et al. However, in high-dimensional spaces, ADF is intractable, since it first requires computing the exact one-step posterior $p_{t|t}$ before extracting its moments (which in turn requires computing high dimensional integrals).
+
+The chapter therefore turns to the more common VI method, which minimizes the reverse KL, corresponding to information projection (resulting in mode seeking behavior, rather than mode covering). This is more tractable than ADF and forwards KL since the expectations are wrt the chosen distribution $q$ rather than wrt the true posterior $p$. More precisely, the update computes
+
+$$
+\begin{aligned}
+q_t(z_t) &= \arg\min_{q} D_{\mathrm{KL}}\big(q(z_t) \,\big\|\, p_{t|t}(z_t)\big) && (18.52) \\
+&= \arg\min_{q} \mathbb{E}_q\left[\log \frac{q(z_t)}{p(y_t \mid z_t)\, q_{t|t-1}(z_t) / Z_t}\right] && (18.53) \\
+&= \arg\min_{q} \underbrace{D_{\mathrm{KL}}\big(q(z_t) \,\big\|\, q_{t|t-1}(z_t)\big) - \mathbb{E}_q[\log p(y_t \mid z_t)]}_{\mathcal{L}_{t|t}(\mu_t, \Sigma_t)} && (18.54)
+\end{aligned}
+$$
+
+where the constant $Z_t$ was dropped from the last line since it does not depend on $q$ and hence does not affect the arg min. The resulting objective takes the familiar form of an expected negative log likelihood (NLL) loss plus a KL regularizer to the prior, and corresponds to an online version of the negative ELBO (evidence lower bound).
+
+It can be shown (e.g., Cao et al., Jones et al., Lambert et al., Zeno et al.) that the fixed points of the objective $\mathcal{L}_{t|t}$ satisfy the following conditions:
+
+$$
+\mu_t = \mu_{t|t-1} - \Sigma_{t|t-1}\, \mathbb{E}_{\mathcal{N}(z_t \mid \mu_t, \Sigma_t)}[\nabla_{z_t} \ell(z_t, y_t)] \tag{18.55}
+$$
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} + \mathbb{E}_{\mathcal{N}(z_t \mid \mu_t, \Sigma_t)}[\nabla^2_{z_t} \ell(z_t, y_t)] \tag{18.56}
+$$
+
+where $\ell(z_t, y_t) = -\log p(y_t \mid z_t)$ is the NLL loss.
+
+Note that the unknown parameters $\mu_t, \Sigma_t$ occur on both the left and right hand sides of the above equations, forming an implicit update. Therefore, in general, these equations must be iterated to find a solution. Suitable algorithms of this kind are discussed in [Section 4](#4-bayesian-online-natural-gradient). However, in the case of linear Gaussian systems, one can show that the expectations on the RHS have analytic solutions, so the update can be performed in one step, using the Kalman filtering equations discussed in [Section 3.2](#32-kalman-filtering).
+
+### 3.6 State estimation vs parameter estimation
+
+So far, the parameters representing the dynamics model and the observation model have been assumed to be known. More precisely, the quantity computed so far has been $p(z_t \mid \mathcal{D}_{1:t}, \phi_t)$, where $\phi_t$ are the parameters of the dynamics function $d_t$ and the observation function $f_t$. This problem is called "state estimation". If the parameters are unknown, they can be added to the hidden state space to perform joint state and parameter estimation, by computing $p(z_t, \phi_t \mid \mathcal{D}_{1:t})$. This is known as "system identification" and is a much more complicated problem (see e.g., Courts et al., Dowling et al.).
+
+Fortunately, in the case of BDL, the dynamics and observation models typically have very few free parameters (e.g., $\phi_t = (\gamma_t, \sigma_q)$ for OU dynamics in [Section 2.5](#25-ssms-for-online-bayesian-deep-learning)), since the unknown network parameters $\theta_t$ can be treated as hidden states $z_t$. The parameters $\phi$ can therefore be treated as hyper-parameters, which can be estimated using empirical Bayes (i.e., by optimizing them wrt the marginal likelihood). For example, Titsias et al. optimize the drift term $\gamma_t$ of the OU dynamics by maximizing the one-step-ahead log predictive likelihood, $p(y_t \mid y_{1:t-1}, \gamma_t)$, which can be computed from the normalization constant $Z_t$ of the approximate posterior distribution. By optimizing the drift term $\gamma_t$ online, they can adapt to non-stationarity in the data.
+
+## 4. Bayesian online natural gradient
+
+This section presents the Bayesian Online Natural Gradient (BONG) algorithm of Jones et al., which minimizes the VI objective in Equation 18.54 using natural gradient descent. BONG is a version of the Bayesian learning rule (BLR) of Khan and Rue (see [Chapter 15](/blog/natural-gradient-variational-inference)) adapted to the online case. The BLR update also works by natural gradient descent on a negative ELBO, but it uses a batch objective rather than the recursive one in Equation 18.54. Thus BONG differs from BLR by incorporating the online inference tools presented in [Sections 2](#2-state-space-models)–[3](#3-online-inference), namely dynamics models, iterative priors, and filtering-style updates with a sequential predict-update structure.[^4] In addition, this section discusses how to compute the various expectations required by these updates in an efficient manner. The main advantages of BONG are that it defines a computationally efficient update for Bayesian neural networks during online learning, and it provides a unified framework encompassing many existing methods.
+
+### 4.1 Background
+
+Some background material is introduced first. Assume $q_t$ is in the exponential family, where $\psi_t$ are the natural parameters, and $\rho_t$ are the dual (moment) parameters. For a Gaussian, the natural and moment parameters are given by
+
+$$
+\psi_t = \left(\Sigma_t^{-1}\mu_t, -\tfrac{1}{2}\Sigma_t^{-1}\right) \tag{18.57}
+$$
+
+$$
+\rho_t = \left(\mu_t, \mu_t \mu_t^\top + \Sigma_t\right) \tag{18.58}
+$$
+
+It can be shown that the Jacobian of the mapping from dual parameters to natural parameters for any exponential-family distribution is equal to the Fisher information matrix:
+
+$$
+F_{\psi_t} = \frac{\partial \rho}{\partial \psi}\Big|_{\psi_t} \tag{18.59}
+$$
+
+Consequently, the natural gradient wrt the natural parameters is equal to the regular gradient wrt the dual parameters, i.e.
+
+$$
+F_{\psi_t}^{-1} \nabla_{\psi_t} \ell(\psi) = \nabla_{\rho_t} \ell(\rho) \tag{18.60}
+$$
+
+Converting from the natural to the dual parameters has the same computational cost as computing the Fisher information matrix.
+
+The latent state continues to be written as $z_t$ and the input or controls as $u_t$, to reflect that the treatment applies to general state estimation problems. As a reminder, for online neural network parameter estimation, $z_t = \theta_t$ are taken as the unknown network parameters and $u_t = x_t$ as the inputs to the network.
+
+### 4.2 Update step
+
+Equation 18.54 can be minimized, or its negative maximized, by performing iterative updates following the natural gradient direction. At iteration $i$, the update becomes
+
+$$
+\begin{aligned}
+\psi_t^{i} &= \psi_t^{i-1} + \alpha_t F_{\psi_t^{i-1}}^{-1} \nabla_{\psi_t^{i-1}} \Big( \mathbb{E}_{\psi_t^{i-1}}\Big[\log p(y_t \mid f_t(z_t)) - D_{\mathrm{KL}}\Big(q_{\psi_t^{i-1}} \,\Big\|\, q_{\psi_{t|t-1}}\Big)\Big]\Big) && (18.61) \\
+&= \psi_t^{i-1} + \alpha_t \nabla_{\rho_t^{i-1}} \Big( \mathbb{E}_{\psi_t^{i-1}}\Big[\log p(y_t \mid f_t(z_t)) - D_{\mathrm{KL}}\Big(q_{\psi_t^{i-1}} \,\Big\|\, q_{\psi_{t|t-1}}\Big)\Big]\Big) && (18.62)
+\end{aligned}
+$$
+
+where $\alpha_t > 0$ is a learning rate. (The Bayes By Backprop (BBB) method of Blundell et al. uses a similar update, but uses standard gradient for $\psi_t$, instead of natural gradient. This requires more iterations due to the lack of preconditioning.)
+
+If the iteration is initialized with $\psi_t^0 = \psi_{t|t-1}$ and just a single iteration is done, the gradient of the KL regularizer vanishes, and the update is just a gradient update on the expected log likelihood, as follows:
+
+$$
+\psi_t = \psi_{t|t-1} + \nabla_{\rho_{t|t-1}} \underbrace{\mathbb{E}_{\psi_{t|t-1}}[\log p(y_t \mid f_t(z_t))]}_{\bar{\mathcal{L}}_{t|t-1}} \tag{18.63}
+$$
+
+This is the approach used in the BONG method of Jones et al. Even though the KL term has been dropped, an implicit (algorithmic) form of regularization is still in use, by initializing $q_t$ at the prior and not moving far from it (since just one step is taken). Furthermore, it can be shown that a single gradient step with unit learning rate ($\alpha_t = 1$) yields the exact Bayesian update in the conjugate case.
+
+In Jones et al., they show that the result of this explicit update is given by the following:
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} - \underbrace{\mathbb{E}_{\mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1})}[\nabla^2_{z_t} \log p(y_t \mid f_t(z_t))]}_{G_t} \tag{18.64}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + \Sigma_t \underbrace{\mathbb{E}_{\mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1})}[\nabla_{z_t} \log p(y_t \mid f_t(z_t))]}_{g_t} \tag{18.65}
+$$
+
+**Algorithm 22** BONG algorithm, assuming static parameters
+
+```text
+for t = 1 to ∞ do
+    // Predict
+    μ_{t|t−1} ← μ_{t−1},  Σ_{t|t−1} ← Σ_{t−1}
+    // Update
+    define loss ℓ_t(z_t) ← −log p(y_t | u_t, z_t)
+    compute g_t and G_t using methods in Section 4.3 applied to ℓ_t
+    compute Σ_t^{−1} using Equation 18.64
+    compute μ_t using Equation 18.65
+```
+
+See Algorithm 22 for the resulting pseudocode. [Section 4.3](#43-computing-the-expectations) explains how to compute the $g_t$ and $G_t$ terms, and [Section 4.4](#44-computational-complexity) discusses the computational complexity of the algorithm. The bottom line is that, with a full covariance Gaussian, the method takes either $O(P^2)$ or $O(P^3)$ time, depending on algorithmic choices, which is intractable for most applications. Therefore, [Section 4.5](#45-diagonal-case) considers a diagonal approximation, which only takes $O(P)$ time. Finally, [Section 4.6](#46-low-rank-case) considers using a low rank representation, which is more expressive than diagonal but still scales linearly in $P$.
+
+### 4.3 Computing the expectations
+
+In Cao et al. they approximate the relevant expectations using Gaussian quadrature, which they combine with natural gradient descent to get a method they call "NANO" (short for natural gradient Gaussian approximation filter). However, quadrature does not scale to high dimensions.
+
+Another approach (used e.g., in the RVGA method of Lambert et al.) is to use a Monte Carlo approximation, where one samples $z_t^m \sim \mathcal{N}(\mu_{t|t-1}, \Sigma_{t|t-1})$ and then computes
+
+$$
+g_t^{\mathrm{MC}} = \frac{1}{M} \sum_{m=1}^{M} g_t^m, \quad g_t^m = \nabla_{z_t^m} \log p(y_t \mid f_t(z_t)) \tag{18.66}
+$$
+
+$$
+G_t^{\mathrm{MC}} = \frac{1}{M} \sum_{m=1}^{M} G_t^m, \quad G_t^m = \nabla^2_{z_t^m} \log p(y_t \mid f_t(z_t)) \tag{18.67}
+$$
+
+Since computing the Hessian is intractable in high dimensions, $G_t^{\mathrm{MC}}$ can be replaced with an empirical Fisher (EF) approximation (e.g., Martens), defined as follows:
+
+$$
+G_t^{\mathrm{MCEF}} = -\frac{1}{M} G_t^{1:M} (G_t^{1:M})^\top, \quad G_t^{1:M} = [g_t^1, \dots, g_t^M] \tag{18.68}
+$$
+
+Another approach is to linearize the observation model, as in the EKF ([Section 3.3](#33-extended-kalman-filtering)). In addition, the observation distribution is approximated with its first two (conditional) moments, following Ollivier, Tronarp et al. That is, the following approximate likelihood is used:
+
+$$
+p_t^{\mathrm{LG}}(y_t \mid z_t) = \mathcal{N}(y_t \mid \hat{f}_t(z_t), R_t) \tag{18.69}
+$$
+
+$$
+\hat{f}_t(z_t) = \hat{y}_t + C_t(z_t - \mu_{t|t-1}) \tag{18.70}
+$$
+
+$$
+\hat{y}_t = f_t(\mu_{t|t-1}) \tag{18.71}
+$$
+
+$$
+C_t = \operatorname{Jac}(f_t)|_{\mu_{t|t-1}} \tag{18.72}
+$$
+
+$$
+R_t = \mathbb{V}\big[y_t \mid z_t = \mu_{t|t-1}\big] \tag{18.73}
+$$
+
+This yields
+
+$$
+g_t^{\mathrm{Lin}} = C_t^\top R_t^{-1}(y_t - \hat{y}_t), \quad G_t^{\mathrm{LinHess}} = -C_t^\top R_t^{-1} C_t \tag{18.74}
+$$
+
+To avoid having to compute the Jacobian (which takes $O(C|f|)$ time, and hence can be slow for high-dimensional targets), an empirical Fisher style approximation can be used:
+
+$$
+g_t^{\mathrm{LinEF}} = g_t^{\mathrm{Lin}}, \quad G_t^{\mathrm{LinEF}} = -g_t^{\mathrm{Lin}} (g_t^{\mathrm{Lin}})^\top \tag{18.75}
+$$
+
+Finally, the expectations can be approximated by using a plugin or delta approximation, where $\mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1})$ is replaced with $\delta(z_t - \mu_{t|t-1})$. This gives rise to
+
+$$
+g_t^{\delta} = \nabla_{z_t} \log p(y_t \mid f_t(z_t))\big|_{\mu_{t|t-1}}, \quad G_t^{\delta} = \nabla^2_{z_t} \log p(y_t \mid f_t(z_t))\big|_{\mu_{t|t-1}}, \tag{18.76}
+$$
+
+The plugin approximation can also be combined with the linearization or empirical Fisher approximation to get cheaper approximations to $G_t$:[^5]
+
+$$
+G_t^{\delta\mathrm{Lin}} = G_t^{\mathrm{LinHess}}, \quad G_t^{\delta\mathrm{EF}} = -g_t^{\delta} (g_t^{\delta})^\top \tag{18.77}
+$$
+
+Thus in summary, 4 ways to approximate $g_t$ have been identified: quadrature, sampling, linearization, and plugin. Similarly, 7 ways to approximate $G_t$ have been identified: quadrature, sampling (with or without EF), linearization (with or without EF), and plugin (with or without EF). The different methods trade off speed vs accuracy, as discussed in [Section 4.4](#44-computational-complexity).
+
+### 4.4 Computational complexity
+
+This section briefly discusses the computational complexity (running time) of the above algorithms. The time depends on three factors: (1) the form of the variational posterior $q$, (2) the method chosen for estimating $g_t$ and $G_t$, and (3) whether a one step update is done on the implicitly regularized expected log likelihood (ELL) objective $\bar{\mathcal{L}}_{t|t-1}$ defined in Equation 18.63, or multiple update steps on the explicitly regularized ELBO objective $\mathcal{L}_{t|t}$ defined in Equation 18.54. The details can be found in Jones et al., but some key results are briefly summarized here.
+
+Suppose a full covariance $q$ is used, $g_t$ and $G_t$ are computed by linearizing the model, as in Equation 18.74, and a one-step update is done on the ELL objective. One can show that the resulting update is equivalent to the information form of the Kalman filter shown in Equation 18.28:
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} - G_t = \Sigma_{t|t-1}^{-1} + C_t^\top R_t^{-1} C_t \tag{18.78}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + \Sigma_t g_t = \mu_{t|t-1} + \Sigma_t C_t^\top R_t^{-1}(y_t - \hat{y}_t) \tag{18.79}
+$$
+
+To avoid having to convert from $\Sigma_t^{-1}$ to $\Sigma_t$, the matrix inversion lemma can be used, which gives the standard form of the KF, repeated here for convenience:
+
+$$
+K_t = \Sigma_{t|t-1} C_t^\top (R_t + C_t \Sigma_{t|t-1} C_t^\top)^{-1} \tag{18.80}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + K_t(y_t - \hat{y}_t) \tag{18.81}
+$$
+
+$$
+\Sigma_t = \Sigma_{t|t-1} - K_t C_t \Sigma_{t|t-1} \tag{18.82}
+$$
+
+This method, which is equivalent to the CM-EKF method of Ollivier, Tronarp et al., takes $O(CP^2)$ time.
+
+If $G_t$ is approximated using the Monte Carlo EF approximation in Equation 18.68, as is done in the RVGA method of Lambert et al., the time is $O(MP^2)$. If $G_t$ is approximated using the linearized EF approximation in Equation 18.75, the time can be reduced to $O(P^2)$. All other variants (including the original BLR method of Khan and Rue) take $O(P^3)$ time. Therefore, the sections below discuss more restricted parameterizations for $q$, so the complexity can be reduced to linear in $P$.
+
+### 4.5 Diagonal case
+
+The easiest way to speed up the algorithm is to assume that the covariance matrix of the variational posterior is diagonal, i.e., to use $\psi_t = (\sigma_t^{-2}\mu_t, -\frac{1}{2}\sigma_t^{-2})$, or equivalently $\rho_t = (\mu_t, \operatorname{diag}(\mu_t^2 + \sigma_t^2))$, where the product and exponents are taken elementwise. The relevant update equations can be found in Jones et al. (Sec. E.3–E.4), but all can be done in $O(P)$ time.
+
+When combined with the linearized Hessian approximation of Equation 18.74, and applied to the one-step ELL objective, this recovers the variational diagonal EKF method of Chang et al. When combined with the MC Hessian approximation of Equation 18.67, and applied to the multi-step ELBO objective, this recovers an online version of the VON algorithm from Khan et al. If instead the MC EF approximation of Equation 18.68 is used, this recovers an online version of the VOGN algorithm from Khan et al. (See also the recently improved VON method in Shen et al.) If standard gradient descent is used (instead of NGD), and the mean parameters $\rho_t$ are optimized instead of $\psi_t$, this recovers an online version of the BBB method of Blundell et al.
+
+### 4.6 Low-rank case
+
+Finally, consider the case where the posterior precision matrix is diagonal plus low rank (DLR), i.e., $\Sigma_t^{-1} = D_t + W_t W_t^\top$, where $D_t$ is a diagonal matrix of size $P \times P$, and $W_t$ is a tall and skinny matrix of size $P \times R$, where $R \ll P$ is the rank of the approximation. This representation captures correlation among the latent parameters, unlike the diagonal representation, yet still scales linearly in the dimension, as shown below. (It is also possible to use the DLR approximation for the posterior covariance, $\Sigma_t$, as explained in Tomczak et al.)
+
+Directly applying NGD to the ELL objective of Equation 18.63 or the ELBO objective of Equation 18.54 is challenging, because the Fisher information matrix for the DLR parameterization cannot be easily inverted. The update is therefore first derived for the full covariance natural parameters, exploiting the fact that the prior $\Sigma_{t|t-1}^{-1}$ is DLR to make this efficient, and then SVD is used to project the resulting posterior precision matrix back to low-rank form. This can be done in $O(R^2 P)$ time; for the details, see Jones et al. (Sec. E.5).
+
+If this method is combined with the linearized Hessian approximation for $G_t$ given in Equation 18.74, and applied to the one-step ELL objective, this recovers the LOFI (low-rank filtering) method of Chang et al. If instead the MC-EF approximation for $G_t$ given in Equation 18.68[^6] is used and applied to the iterated ELBO objective, this recovers an online variant of the SLANG method of Mishkin et al. (SLANG uses a randomized SVD algorithm from Halko et al., whereas LOFI uses a deterministic SVD method.)
+
+An alternative to the above methods is to use standard gradient descent to optimize the DLR parameterization. This avoids the need to compute the Fisher information matrix. This simple scheme (which is called "BBB-DLR" in Jones et al.) has not been experimentally evaluated, as far as is known.
+
+The diagonal term can also be dropped from the DLR representation, giving rise to a degenerate low-rank matrix. This is the basic idea behind the low-rank Kalman filter (LRKF) and variants described in Duran-Martin et al. In more detail, LRKF uses the approximation $\Sigma_t = W_t W_t^\top$. Note that the resulting belief state, $p(z_t \mid y_{1:t})$ is not a proper Gaussian distribution, since the covariance matrix is singular, but it is still a valid probability measure. Also the corresponding predictive distribution over observations, $p(y_{t+1} \mid y_{1:t})$, is generally a proper Gaussian. Although the lack of a diagonal term means a larger rank must be used to capture a desired statistical performance, empirically the algorithm still offers a better compute-accuracy trade-off than LOFI, which relies on the DLR representation.
+
+### 4.7 Connections to second-order optimization
+
+This section shows an equivalence between the BONG algorithm (when combined with certain approximations and applied to the case of inference for static parameters) and standard second-order optimization algorithms. In particular, consider the BONG update for $\Sigma_t$ given in Equation 18.64 and $\mu_t$ given in Equation 18.65. For static parameters, $\mu_{t|t-1} = \mu_{t-1}$ and $\Sigma_{t|t-1} = \Sigma_{t-1}$, since there is no added noise. Combining this with the delta-function (plugin) approximation to the expectations gives $g_t^{\delta}$ from Equation 18.76 for the gradient, and $G_t^{\delta\mathrm{EF}}$ from Equation 18.77 for the Hessian (assuming the EF approximation is also used). The resulting update becomes
+
+$$
+\Sigma_t^{-1} = \Sigma_{t-1}^{-1} + g_t g_t^\top \tag{18.83}
+$$
+
+$$
+\mu_t = \mu_{t-1} + \Sigma_t g_t \tag{18.84}
+$$
+
+The mean update is equivalent to a standard preconditioned gradient ascent update. Furthermore, the precision update is a cumulative sum of approximate Hessians, as in most second-order optimizers. In fact, if $\Sigma_t^{\frac{1}{2}}$ is used as the preconditioner in Equation 18.84, and a learning rate is added, this exactly recovers full-matrix Adagrad. Most adaptive gradient methods (including Adagrad, Shampoo, and Adam) use a square root preconditioner, but performance can be comparable or improved without it. There are also very close connections between this (delta function) approximation to BONG and mirror descent methods used in online learning (e.g., Chérief-Abdellatif et al., Lyu and Tsang, van der Hoeven et al.). More connections between VI and popular gradient based learning methods used in the deep learning community are discussed in Khan and Rue (see [Chapter 15](/blog/natural-gradient-variational-inference)).
+
+## 5. Conclusions
+
+This chapter has shown how the parameters of a deep neural network can be learned online using tools from Bayesian filtering. Incorporating an SSM for parameter dynamics allows the model to maintain plasticity and is especially well-suited for nonstationary or continual learning tasks. The resulting learning rules have a two-step structure: a predict step to advance the dynamics and an update step to assimilate the next observation into the belief state. Linearizing the network (and dynamics) makes these steps analytically tractable and allows the use of classic Kalman filter methods. More generally, variational inference can be used for the update step to maintain a belief state within a given parametric family. In the Gaussian case, optimizing the online variational objective is efficiently approximated by one step of natural gradient descent, formalized in the BONG update. Making the update computationally efficient leads to a family of methods indexed by how the relevant integrals and Hessians are approximated (including Monte Carlo, quadrature, linearization, plugin, empirical Fisher) and how the posterior covariance is represented (diagonal, low rank, DLR, or full covariance). Open questions for future research include how to determine the optimal trade-off between computational efficiency and model expressiveness or fidelity for a given problem; richer dynamic models or learning the dynamics for specific domains; a deeper understanding of the connection to second-order optimizers; and whether variational families other than Gaussians yield effective methods for certain problems.
+
+[^1]: Note that in Jones et al., they use $f$ for the natural parameters and $h$ for the mean parameters, which is the opposite of the convention used here.
+
+[^2]: Here $p(y_t \mid u_t, \mathcal{D}_{1:t-1})$ is called the observation predictive, to distinguish it from $p(z_t \mid u_t, \mathcal{D}_{1:t-1})$, which is the posterior predictive. The former can be computed without the latter, as emphasized by the martingale posterior methodology of Holmes and Walker.
+
+[^3]: There is an interesting connection between ADF and the Gaussian Filtering (GF) methods discussed in [Section 3.3](#33-extended-kalman-filtering) and [Section 3.4](#34-statistical-linear-regression). As noted in Wüthrich et al., GF can be interpreted as first computing an approximate jointly Gaussian distribution $q(z_t, \tilde{y}_t)$ by minimizing $D_{\mathrm{KL}}(p(z_t, \tilde{y}_t \mid y_{1:t-1}) \,\|\, q)$ using moment matching, and then conditioning this joint on the event $\tilde{y}_t = y_t$, which corresponds to the standard Gaussian updating procedure, to get an approximation $q_t(z_t \mid y_{1:t})$. By contrast, ADF first computes the (locally) exact posterior $p_t(z_t \mid y_{1:t})$ and then approximates it (by moment matching) to compute $q_t(z_t \mid y_{1:t})$. Thus ADF is more accurate but also much slower.
+
+[^4]: When using a full covariance posterior, it is shown below that BONG takes $O(P^2)$ time per step whereas BLR takes $O(P^3)$. Both methods can be reduced to $O(P)$ time per step in the case of diagonal covariance, but BONG is still a constant factor faster, and is fully deterministic.
+
+[^5]: To define $G_t^{\delta\mathrm{Lin}}$, the natural parameters of the observation distribution $h_t(z_t)$ are linearized instead of the mean parameters $f_t(z_t)$ as in Equation 18.69. See Jones et al. for details and the proof that $G_t^{\delta\mathrm{Lin}} = G_t^{\mathrm{LinHess}}$.
+
+[^6]: Note that, to implement the MC-EF method, one has to be able to sample from the DLR prior, without inverting the full matrix. An efficient algorithm for this, based on EM, is given in the LRVGA paper of Lambert et al. This takes $O(R(R + M)P)$ time to draw $M$ samples.

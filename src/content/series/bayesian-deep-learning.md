@@ -10,13 +10,6 @@ objectives:
   - "Choose a method that scales to a given model and data set, and evaluate predictive uncertainty with calibration, proper scoring rules and selective prediction."
   - "Describe current research directions in Bayesian deep learning and state the open problems each one addresses."
 plannedEntries:
-  - title: "Chapter 12: Introduction to Variational Inference"
-  - title: "Chapter 13: Gaussian Mean-Field Variational Inference"
-  - title: "Chapter 14: Dropout-Based Variational Inference"
-  - title: "Chapter 15: Natural-Gradient-Based Variational Inference"
-  - title: "Chapter 16: Particle-Based Variational Inference"
-  - title: "Chapter 17: Variational Inference in Function Space"
-  - title: "Chapter 18: Sequential Variational Inference"
   - title: "Chapter 19: Ensembles: Introduction and Connections with Approximate Bayesian Inference"
   - title: "Chapter 20: Hybrid Ensemble Sampling Methods"
   - title: "Chapter 21: Practical Applications of Deep Ensembles"

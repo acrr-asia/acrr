@@ -1,0 +1,1109 @@
+---
+title: "Particle-Based Variational Inference"
+description: "Stein variational gradient descent, gradient flows on probability measures, second-order and stochastic variants, applications and theory of particle-based VI."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - stein variational gradient descent
+  - gradient flows
+series: bayesian-deep-learning
+seriesOrder: 20
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl16SvgdParticles from '../../components/diagrams/Bdl16SvgdParticles.astro';
+
+## 1. Introduction
+
+Bayesian deep learning (BDL) seeks to estimate the posterior distribution over the parameters of a deep neural network. In this setting, however, traditional methods for performing inference face significant challenges.
+
+Markov chain Monte Carlo (MCMC) methods like Hamiltonian Monte Carlo (HMC) ([Chapter 1](/blog/introduction-to-sampling)) are asymptotically exact and can, in principle, generate samples from the true posterior. In practice, however, they are often prohibitively slow and scale poorly to large data sets or high-dimensional neural network models.
+
+Variational inference (VI) offers a more scalable alternative by reframing inference as an optimization problem ([Chapter 12](/blog/introduction-to-variational-inference)): one posits an approximate distribution $q(\theta)$, and adjusts its parameters to minimize the Kullback–Leibler (KL) divergence $\mathrm{D}_{\mathrm{KL}}(q \| \pi)$ to the target posterior $\pi(\theta)$. The most common form of VI used in Bayesian neural networks is mean-field VI ([Chapter 13](/blog/gaussian-mean-field-variational-inference)), which assumes all weights are independent (e.g., diagonal Gaussian posteriors). While computationally convenient, this approximation is highly restrictive: it fails to capture complex posterior correlations or multimodality, often underestimates uncertainty, and can lead to miscalibrated models. More expressive variational families (e.g., full-covariance Gaussians, normalizing flows) do exist, but they introduce substantial optimization challenges and are hard to tune, often requiring model-specific derivations.
+
+If classical MCMC algorithms are asymptotically accurate but too slow for deep learning, whereas mean-field VI is fast but often leads to crude posterior approximations, then is there a way of leveraging the computational efficiency of VI with the nonparametric nature of MCMC? *Particle-Based Variational Inference* (ParVI) methods aim to bridge this gap by combining the strengths of both MCMC and variational inference.
+
+The core idea, first introduced by Liu and Wang, is to maintain a set of $n$ particles $\{\theta^i\}_{i=1}^n$ that collectively represent an approximate posterior. Instead of evolving each particle via random Monte Carlo moves, ParVI (in its prototypical form) deterministically transports the entire set of particles towards regions of high posterior density. In each iteration, the particles are used to approximate a population transport direction that decreases the KL divergence to the target $\pi$, via a form of gradient descent in the space of probability distributions. By using information from the target's score function (the gradient of $\log \pi(\theta)$) and coupling the particles through a repulsive interaction, ParVI methods encourage particles to spread out and cover the posterior's support rather than collapsing to a single mode (see Figure 16.1 for a visual illustration). In effect, ParVI treats Bayesian inference as an optimization in function space, finding a distribution (represented by particles) that minimizes $\mathrm{D}_{\mathrm{KL}}(q \| \pi)$. This approach retains the flexibility of nonparametric sampling, since the empirical distribution represented by the particles is not constrained to lie within a specific parametric family (e.g., Gaussian), while leveraging gradient-based optimization for efficiency and scalability. That said, for a finite number of particles the empirical approximation is itself restricted, and its quality depends on the number of particles, the choice of kernel, and the interactions between the particles.
+
+**Mathematical background and reading guide.** Relative to the preceding chapters, parts of this chapter make use of some additional mathematical background, in particular reproducing kernel Hilbert spaces, and notions from optimal transport and gradient flows on the space of probability measures. To help the reader navigate the chapter, sections marked with an asterisk ($^\ast$) are more advanced, and can safely be skipped on a first reading: a reader interested primarily in the basic methodology can read Sections 2, 3, 6, and 7, returning to the starred sections later.
+
+<Figure caption="Figure 16.1: An illustration of a particle-based variational inference approach on a mixture of three Gaussians target distribution π. Using the Stein variational gradient descent algorithm (SVGD, Algorithm 20), 100 particles are simulated from 𝒩(0, 0.5 I) and evolved via the SVGD dynamics; the three panels show the particles after 1, 10, and 50 iterations (left to right). Initially, the particles are attracted to regions of high posterior density, then the repulsive force of the kernel encourages the particles to spread out and produce a nonparametric approximation of the posterior distribution. Schematic reproduction: the panels are computed by running SVGD with an RBF kernel (median-heuristic bandwidth) and step size 0.5 on an equal-weight mixture of three isotropic Gaussians with standard deviation 0.6; the mode locations are read approximately from the original figure.">
+  <Bdl16SvgdParticles />
+</Figure>
+
+## 2. Variational objectives revisited
+
+### 2.1 The KL divergence and the evidence lower bound (ELBO)
+
+VI frames Bayesian posterior estimation as an optimization problem. In particular, given a target posterior $\pi(\theta) := p(\theta \mid \mathcal{D}) \propto p(\mathcal{D} \mid \theta) p(\theta)$, VI seeks an approximate distribution $q(\theta)$ that minimizes the KL divergence to the target posterior:
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q \| \pi) = \mathbb{E}_q\left[\log \frac{q(\theta)}{\pi(\theta)}\right] = -\mathbb{E}_q\left[\log \pi(\theta)\right] + \mathbb{E}_q\left[\log q(\theta)\right]. \tag{16.1}
+$$
+
+Minimizing the KL divergence is equivalent to maximizing the evidence lower bound (ELBO), since
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q \| \pi) = -\underbrace{\mathbb{E}_q\left[\log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log p(\mathcal{D})\right]}_{:= \mathbb{E}_q[\log \pi(\theta)]} + \mathbb{E}_q\left[\log q(\theta)\right] \tag{16.2}
+$$
+
+$$
+\phantom{\mathrm{D}_{\mathrm{KL}}(q \| \pi)} = -\underbrace{\mathbb{E}_q\left[\log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log q(\theta)\right]}_{:= \mathrm{ELBO}(q)} + \log p(\mathcal{D}) \tag{16.3}
+$$
+
+$$
+\phantom{\mathrm{D}_{\mathrm{KL}}(q \| \pi)} = -\mathrm{ELBO}(q) + \mathrm{const.} \tag{16.4}
+$$
+
+The ELBO provides a tractable objective for fitting the variational approximation. In conventional VI, $q$ is constrained to belong to a parametric family, say $\{q_\psi\}_{\psi \in \Psi}$, with variational parameters $\psi$. For example, one might specify a Gaussian family of distributions, in which case the variational parameters are simply $\psi = [\mu, \Sigma]$ specifying the mean $\mu$ and covariance $\Sigma$ of the variational family. One then maximizes the ELBO with respect to the variational parameters (e.g., via stochastic gradient ascent) to obtain the approximation of the posterior.
+
+In ParVI, the goal is still a variational distribution $q(\theta)$ that maximizes the ELBO. However, the constraint that $q(\theta)$ must belong to a parametric family is now relaxed. Thus, an *infinite-dimensional* optimization problem over the space of probability measures must now be solved, rather than a *finite-dimensional* optimization problem over the space of the variational parameters.
+
+### 2.2 Infinitesimal transport of q by a vector field
+
+Let $q$ and $\pi$ be strictly positive $C^1$ densities on $\mathbb{R}^d$. Fix a $C^1$ vector field $\phi : \mathbb{R}^d \to \mathbb{R}^d$ with sufficient decay (or compact support) so that the boundary terms below vanish. For $\varepsilon$ small, consider a transport map obtained as a small perturbation of the identity map, viz
+
+$$
+T_\varepsilon(\theta) = \theta + \varepsilon\, \phi(\theta), \qquad T_0 = \mathrm{Id}. \tag{16.5}
+$$
+
+Consider distributions obtained as the push-forward of $q$ under this transport map, viz
+
+$$
+q_\varepsilon = (T_\varepsilon)_\# q, \quad \text{i.e.} \quad \int f(\theta)\, q_\varepsilon(\theta)\, \mathrm{d}\theta = \int f(T_\varepsilon(\theta))\, q(\theta)\, \mathrm{d}\theta \quad \forall f. \tag{16.6}
+$$
+
+By the change-of-variables formula, the density $q_\varepsilon$ is given explicitly by
+
+$$
+q_\varepsilon(\theta) = q\big(T_\varepsilon^{-1}(\theta)\big) \left| \det \nabla T_\varepsilon^{-1}(\theta) \right|, \tag{16.7}
+$$
+
+where $T_\varepsilon^{-1}$ is the inverse of $T_\varepsilon$, and where $\nabla T_\varepsilon^{-1}$ denotes the Jacobian matrix of $T_\varepsilon^{-1}$. A first-order expansion in $\varepsilon$ gives the classical *continuity equation*
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon}\right|_{\varepsilon=0} q_\varepsilon(\theta) = -\nabla_\theta \cdot \big(q(\theta)\phi(\theta)\big) \quad \Longleftrightarrow \quad \partial_\varepsilon q_\varepsilon + \nabla \cdot (q_\varepsilon \phi) = 0 \quad \text{at } \varepsilon = 0. \tag{16.8}
+$$
+
+### 2.3 The derivative of the KL divergence
+
+The aim is to define the transport map $T_\varepsilon$, via the vector field $\phi$, in such a way that it decreases the KL divergence: $\mathrm{D}_{\mathrm{KL}}((T_\varepsilon)_\# q \| \pi) \leq \mathrm{D}_{\mathrm{KL}}(q \| \pi)$. In order to identify a suitable vector field, the KL functional is now differentiated w.r.t. the perturbation magnitude $\varepsilon$, viz
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi) = \int q_\varepsilon(\theta) \log \frac{q_\varepsilon(\theta)}{\pi(\theta)}\, \mathrm{d}\theta. \tag{16.9}
+$$
+
+Using the continuity equation in (16.8) and the product rule, this can be computed as follows:
+
+$$
+\begin{aligned}
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} &= \int \left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon}\right|_{\varepsilon=0} \left\{ q_\varepsilon(\theta) \log \tfrac{q_\varepsilon(\theta)}{\pi(\theta)} \right\} \mathrm{d}\theta \\
+&= \int \Big[ -\nabla \cdot \big(q(\theta)\phi(\theta)\big) \Big] \Big( \log \tfrac{q(\theta)}{\pi(\theta)} + 1 \Big)\, \mathrm{d}\theta \\
+&= \int q(\theta)\phi(\theta) \cdot \nabla_\theta \Big( \log \tfrac{q(\theta)}{\pi(\theta)} + 1 \Big)\, \mathrm{d}\theta \quad \text{(integration by parts)} \\
+&= \int q(\theta)\, \phi(\theta) \cdot \Big( \nabla \log q(\theta) - \nabla \log \pi(\theta) \Big)\, \mathrm{d}\theta \\
+&= \mathbb{E}_q\Big[ \phi(\theta)^\top \big( \nabla \log q(\theta) - \nabla \log \pi(\theta) \big) \Big] \\
+&= -\mathbb{E}_q\Big[ \nabla_\theta \cdot \phi(\theta) + \phi(\theta)^\top \nabla \log \pi(\theta) \Big],
+\end{aligned}
+$$
+
+where the final line uses the identity $\mathbb{E}_q[\nabla \cdot \phi] = -\mathbb{E}_q[\phi^\top \nabla \log q]$. This shows that
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} = -\mathbb{E}_q\big[T_\pi \phi(\theta)\big], \qquad T_\pi \phi := \nabla \cdot \phi + \phi^\top \nabla \log \pi. \tag{16.10}
+$$
+
+### 2.4 The direction of steepest descent
+
+From the previous expression, any direction that *increases* $\mathbb{E}_q[T_\pi \phi]$ yields a *decrease* in $\mathrm{D}_{\mathrm{KL}}(\cdot \| \pi)$. Naturally, the goal is to choose the direction $\phi$ which maximally decreases the KL divergence. That is, the problem to solve is
+
+$$
+\operatorname*{arg\,min}_{\phi \in \mathcal{G}} \left\{ \left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}((T_\varepsilon)_\# q \| \pi)\right|_{\varepsilon=0} : \|\phi\|_{\mathcal{G}} \leq 1 \right\} = \operatorname*{arg\,max}_{\phi \in \mathcal{G}} \Big\{ \mathbb{E}_q\left[T_\pi \phi(\theta)\right] : \|\phi\|_{\mathcal{G}} \leq 1 \Big\}, \tag{16.11}
+$$
+
+where $\mathcal{G}$ is a normed space of functions. In order to make progress, consider the restriction of the vector field $\phi$ to a ball within a reproducing-kernel Hilbert space (RKHS). This makes it possible to obtain a closed-form expression for the vector field which maximizes the negative gradient on the RHS of (16.11). The discussion begins with some background on the operator $T_\pi$.
+
+**The Stein operator and Stein's identity.** The operator $T_\pi$ is known as the (Langevin) *Stein operator*, due to its connection with *Stein's identity*. Let $\pi$ be a strictly positive $C^1$ density on $\mathbb{R}^d$ with score $u_\pi(\theta) := \nabla \log \pi(\theta)$. Then, for any sufficiently regular test function $f : \mathbb{R}^d \to \mathbb{R}^d$ satisfying mild zero boundary conditions, Stein's identity states that
+
+$$
+\mathbb{E}_\pi\left[T_\pi f(\theta)\right] = \mathbb{E}_\pi\left[\nabla_\theta \cdot f(\theta) + f(\theta)^\top u_\pi(\theta)\right] = 0, \tag{16.12}
+$$
+
+which is easily seen to hold via integration by parts. It is worth emphasizing that the (Langevin) Stein operator $T_\pi$ depends only on the *score* and therefore does not require the normalizing constant of $\pi$. Indeed, $\nabla_\theta \log \pi = \nabla_\theta \log \tilde{\pi}$ for $\pi = \tilde{\pi}/Z$. This is a particularly useful property in Bayesian deep learning, where the normalizing constant is intractable.
+
+**The Stein discrepancy.** The identity in (16.12) characterizes $\pi$ in the sense that, under mild conditions on the class of test functions $\mathcal{G}$, $\mathbb{E}_q[T_\pi f] = 0$ for all such $f \in \mathcal{G}$ *if and only if* $q = \pi$ a.e. More generally, the maximum value of this expectation over all test functions $f \in \mathcal{G}$ can be used to characterize the difference between the distributions $q$ and $\pi$. In particular, the *Stein discrepancy* is defined as
+
+$$
+\mathbb{D}(q \| \pi) := \max_{f \in \mathcal{G}} \left\{ \mathbb{E}_q\left[T_\pi f\right] : \|f\|_{\mathcal{G}} \leq 1 \right\}. \tag{16.13}
+$$
+
+Clearly, the choice of the function class $\mathcal{G}$ here is critical. It must be both sufficiently rich to ensure that $\mathbb{D}(q \| \pi)$ has adequate discriminative power, while not too rich to render $\mathbb{D}(q \| \pi)$ computationally intractable. Following Chwialkowski et al., Gorham and Mackey, and Liu and Wang, $\mathcal{G}$ is taken to be a vector-valued RKHS. This ensures not only that the linear functional $f \mapsto \mathbb{E}_q[T_\pi f]$ is continuous, but also that the optimization problem in (16.11), (16.13) has a closed form.
+
+**The kernel Stein discrepancy.** Let $\mathcal{H}$ be a RKHS of scalar-valued functions with positive-definite $C^2$ kernel $k : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$. Let $\mathcal{H}^d := \mathcal{H} \times \cdots \times \mathcal{H}$ denote the corresponding $\mathbb{R}^d$-valued RKHS, equipped with inner product $\langle f, g \rangle_{\mathcal{H}^d} = \sum_{\ell=1}^d \langle f_\ell, g_\ell \rangle_{\mathcal{H}}$. Using the reproducing property of the Hilbert space, and integration by parts, it holds for all $f \in \mathcal{H}^d$ that
+
+$$
+\begin{aligned}
+\mathbb{E}_q[T_\pi f] &= \mathbb{E}_q\big[\nabla \cdot f(\theta)\big] + \mathbb{E}_q\big[f(\theta)^\top u_\pi(\theta)\big] \\
+&= \mathbb{E}_q\big[\operatorname{Tr}(\nabla_\theta f(\theta))\big] + \mathbb{E}_q\big[f(\theta)^\top u_\pi(\theta)\big] \\
+&= \big\langle f(\cdot), \mathbb{E}_{\theta \sim q}\big[k(\theta, \cdot)\, u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\big] \big\rangle_{\mathcal{H}^d} = \langle f, \mu_{q,\pi} \rangle_{\mathcal{H}^d}.
+\end{aligned} \tag{16.14}
+$$
+
+where the final line uses $\mu_{q,\pi}$ to denote the *Stein witness function*, defined as
+
+$$
+\mu_{q,\pi}(\cdot) := \mathbb{E}_{\theta \sim q}\left[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\right] \in \mathcal{H}^d. \tag{16.15}
+$$
+
+Substituting back into (16.13), the *kernel Stein discrepancy* (KSD) between $q$ and $\pi$ is given by the RKHS dual norm
+
+$$
+\mathrm{KSD}(q \| \pi) := \max_{f \in \mathcal{H}^d} \left\{ \mathbb{E}_q\left[T_\pi f\right] : \|f\|_{\mathcal{H}^d} \leq 1 \right\} = \|\mu_{q,\pi}\|_{\mathcal{H}^d}. \tag{16.16}
+$$
+
+Using (16.15) and the reproducing property, one can obtain a closed-form expression for the (squared) KSD as
+
+$$
+\mathrm{KSD}^2(q \| \pi) = \mathbb{E}_{(\theta, \theta') \sim q \otimes q}\left[ k_\pi(\theta, \theta') \right], \tag{16.17}
+$$
+
+where
+
+$$
+k_\pi(\theta, \theta') := u_\pi^\top(\theta) k(\theta, \theta') u_\pi(\theta') + u_\pi^\top(\theta) \nabla_{\theta'} k(\theta, \theta') + \nabla_\theta^\top k(\theta, \theta') u_\pi(\theta') + \operatorname{Tr}(\nabla_\theta \nabla_{\theta'} k(\theta, \theta'))
+$$
+
+is the *Stein kernel*. Given a set of particles $\{\theta^i\}_{i=1}^n \sim q$, a (biased) V-statistic estimator for the KSD is then given by
+
+$$
+\widehat{\mathrm{KSD}^2}(q \| \pi) = \frac{1}{n^2} \sum_{i,j=1}^n k_\pi(\theta^i, \theta^j), \tag{16.18}
+$$
+
+with $\mathcal{O}(n^2)$ cost. As in the case of the maximum mean discrepancy (MMD), an unbiased U-statistic variant is also available. Given i.i.d. samples from $q$, (16.18) is a biased estimator of $\mathrm{KSD}^2(q \| \pi)$; for an interacting particle system, the same expression is more naturally interpreted as the squared KSD of the empirical measure $q^n = \frac{1}{n} \sum_{i=1}^n \delta_{\theta^i}$.
+
+The KSD has a number of special properties which make it particularly useful in the context of Bayesian deep learning:
+
+- **Normalization-free.** Only $u_\pi = \nabla \log \pi$ is needed from the target $\pi$ and the normalizing constant $Z$ cancels.
+- **Convergence-determining.** For suitable kernels (e.g., the inverse multi-quadric (IMQ) kernel with appropriate bandwidth) and mild tail conditions on $\pi$, $\mathrm{KSD}(q \| \pi) \to 0$ implies $q \Rightarrow \pi$.
+- **Algorithmic role.** By (16.16), KSD quantifies the norm of the steepest-descent direction within $\mathcal{H}^d$. Its Riesz representer $\mu_{q,\pi}$ is exactly the vector field used by SVGD.
+
+**The kernel Stein discrepancy as the direction of steepest descent.** Returning to (16.16), the maximizer of the constrained optimization problem in (16.11) is given by the normalized witness function
+
+$$
+\bar{\phi}_{q,\pi} = \operatorname*{arg\,max}_{\phi \in \mathcal{H}^d} \left\{ \mathbb{E}_q\left[T_\pi \phi\right] : \|\phi\|_{\mathcal{H}^d} \leq 1 \right\} = \frac{\mu_{q,\pi}}{\|\mu_{q,\pi}\|_{\mathcal{H}^d}}, \tag{16.19}
+$$
+
+assuming $\mu_{q,\pi} \neq 0$; the corresponding maximum value is precisely $\mathrm{KSD}(q \| \pi) = \|\mu_{q,\pi}\|_{\mathcal{H}^d}$. This characterizes the direction of steepest descent of the KL divergence in the vector-valued RKHS $\mathcal{H}^d$. In practice, the SVGD algorithm introduced in the next section uses the *unnormalized* witness function, $\phi^\ast_{q,\pi} := \mu_{q,\pi}$, which points in the same direction; with this choice, the instantaneous rate of decrease of the KL divergence is $-\|\mu_{q,\pi}\|^2_{\mathcal{H}^d} = -\mathrm{KSD}^2(q \| \pi)$.
+
+## 3. Stein variational gradient descent (SVGD)
+
+### 3.1 Basic overview
+
+Section 2 established that, given an infinitesimal transport map $T_\varepsilon(\theta) = \theta + \varepsilon \phi(\theta)$, which, recall, satisfies
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}((T_\varepsilon)_\# q \| \pi)\right|_{\varepsilon=0} = -\mathbb{E}_q[T_\pi \phi(\theta)], \qquad T_\pi \phi := \nabla \cdot \phi + \phi^\top \nabla \log \pi, \tag{16.20}
+$$
+
+the direction of *steepest descent* that maximizes the negative gradient in (16.20) among all perturbations lying in the ball $\{\phi \in \mathcal{H}^d : \|\phi\|_{\mathcal{H}^d} \leq 1\}$ of the vector-valued RKHS $\mathcal{H}^d$, is proportional to the witness function $\mu_{q,\pi}$, cf. (16.15). Following standard practice, the unnormalized direction is used:
+
+$$
+\phi^\star_{q,\pi}(\cdot) = \mathbb{E}_{\theta \sim q}\left[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\right]. \tag{16.21}
+$$
+
+This result suggests the following iterative procedure for transforming an initial measure $q_0$ into the target posterior distribution $\pi$: for $k = 0, 1, \ldots$
+
+$$
+q_{k+1} = \left(T^\ast_{\varepsilon_k}\right)_\# q_k, \quad \text{where} \quad T^\ast_{\varepsilon_k}(\theta) = \theta + \varepsilon_k \phi^\ast_{q_k,\pi}(\theta). \tag{16.22}
+$$
+
+An equivalent description of (16.22) can be given at the level of a single particle. In particular, for all $k = 0, 1, \ldots$, $q_k = \mathrm{Law}(\theta_k)$, where $(\theta_k)_{k \in \mathbb{N}}$ are defined according to[^1]
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k \mathbb{E}_{\theta \sim q_k}\left[k(\theta, \theta_k) u_\pi(\theta) + \nabla_\theta k(\theta, \theta_k)\right], \qquad \theta_0 \sim q_0. \tag{16.23}
+$$
+
+Two terms can be identified in the expectation in (16.23), each of which will play a different role in the updates:
+
+$$
+\underbrace{\mathbb{E}_{\theta \sim q_k}[k(\theta, \theta_k) \nabla_\theta \log \pi(\theta)]}_{\text{attraction to high } \pi} + \underbrace{\mathbb{E}_{\theta \sim q_k}[\nabla_\theta k(\theta, \theta_k)]}_{\text{repulsion \& diversity}}. \tag{16.24}
+$$
+
+The first term drives particles towards regions of high probability by following a smoothed version of the gradient of the log-density. The second term is a repulsive force which prevents all particles from collapsing to a single point.
+
+[^1]: Note a slight overload of notation: $k(\cdot, \cdot)$ denotes the kernel, while the subscript $k$ indexes the iteration. The intended meaning will always be clear from context.
+
+**Functional gradient descent interpretation.** The updates defined by (16.22) can be viewed as a form of functional gradient descent in the vector-valued RKHS $\mathcal{H}^d$. Recall that, for any functional $\mathcal{F} : \mathcal{H}^d \to \mathbb{R}$, the *first variation* $\mathrm{D}\mathcal{F}(f)(g)$ at $f \in \mathcal{H}^d$ along $g \in \mathcal{H}^d$ can be defined as
+
+$$
+\mathrm{D}\mathcal{F}(f)(g) := \lim_{\varepsilon \to 0} \frac{1}{\varepsilon} \left(\mathcal{F}(f + \varepsilon g) - \mathcal{F}(f)\right). \tag{16.25}
+$$
+
+Meanwhile, assuming $\mathcal{F}$ is Fréchet differentiable, its *functional gradient* $\nabla_f \mathcal{F}(f) : \mathbb{R}^d \to \mathbb{R}^d$ is the element in $\mathcal{H}^d$ such that, for all $g \in \mathcal{H}^d$:[^2]
+
+$$
+\mathrm{D}\mathcal{F}(f)(g) = \langle \nabla_f \mathcal{F}(f), g \rangle_{\mathcal{H}^d}. \tag{16.27}
+$$
+
+[^2]: Equivalently: $\mathcal{F}(f + \varepsilon g) = \mathcal{F}(f) + \varepsilon \langle \nabla_f \mathcal{F}(f), g \rangle_{\mathcal{H}^d} + \mathcal{O}(\varepsilon^2). \qquad (16.26)$
+
+Consider the transport map $T_f = \mathrm{id} + f$, where $\mathrm{id}$ is the identity map, and $f \in \mathcal{H}^d$. Define the functional
+
+$$
+\mathcal{F}_{q,\pi}(f) = \mathrm{D}_{\mathrm{KL}}\Big({T_f}_\# q \,\Big\|\, \pi\Big). \tag{16.28}
+$$
+
+Then it is possible to show that the functional gradient $\nabla_f \mathcal{F}_{q,\pi}(f)$, evaluated at the zero map $f = 0$, satisfies
+
+$$
+\nabla_f \mathcal{F}_{q,\pi}(0) = -\phi^\ast_{q,\pi}. \tag{16.29}
+$$
+
+Thus, the transport maps $T^\ast_{\varepsilon_k}(\theta)$ used to define the sequence of distributions $(q_k)_{k \in \mathbb{N}}$ in (16.22), viz
+
+$$
+T^\ast_{\varepsilon_k}(\theta) = \theta + \varepsilon_k \phi^\ast_{q_k,\pi}(\theta) = \theta - \varepsilon_k \nabla_f \mathcal{F}_{q_k,\pi}(0)(\theta) \tag{16.30}
+$$
+
+can be thought of as performing a sequence of steps of functional gradient descent in the RKHS.
+
+**Continuous-time limit.** The updates in (16.22) and (16.23) can also be viewed as a time-discretization of a continuous-time process referred to as the *Stein variational gradient flow*. In particular, as the step-size $\varepsilon_k \to 0$, the evolution of the densities $(q_k)_{k \in \mathbb{N}}$ defined by (16.22) is described by the continuity equation
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \phi^\ast_{q_t,\pi}(\theta)), \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.31}
+$$
+
+Equivalently, the evolution of the particle $(\theta_k)_{k \in \mathbb{N}}$ defined by (16.23) is described by the nonlinear ODE
+
+$$
+\mathrm{d}\theta_t = \phi^\ast_{q_t,\pi}(\theta_t)\, \mathrm{d}t, \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.32}
+$$
+
+One can view the updates in (16.22) or (16.23) as a forward Euler discretization of the dynamics in (16.31) and (16.32), respectively.
+
+**Basic convergence results.** The idea behind (16.22) or (16.23) is that, for sufficiently small step sizes $(\varepsilon_k)_{k \in \mathbb{N}_0}$, these updates decrease the KL divergence. Under additional assumptions on the target, kernel, and limiting dynamics, this descent can be used to establish convergence to $\pi$; see Section 8. Indeed, under suitable assumptions, it is possible to show that
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \mathcal{O}(\varepsilon_k^2). \tag{16.33}
+$$
+
+Thus, for a sufficiently small step size $\varepsilon_k$, the KL divergence between the current distribution $q_k$ and the target distribution $\pi$ does indeed decrease at each iteration.
+
+### 3.2 Particle-based approximation
+
+In the $k^{\text{th}}$ iteration, (16.23) requires computing an expectation with respect to the (unknown) distribution $q_k$. This term thus needs to be approximated. In order to do so, an empirical approximation can be used. In particular, let $\{\theta_0^i\}_{i=1}^n$ denote a set of particles drawn i.i.d. from the initial distribution $q_0$. The particles are then updated, for $k = 0, 1, 2, \ldots$, and $i = 1, \ldots, n$,
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \mathbb{E}_{\theta \sim q_k^n}\left[k(\theta, \theta_k^i) u_\pi(\theta) + \nabla_\theta k(\theta, \theta_k^i)\right], \tag{16.34}
+$$
+
+where $q_k^n = \frac{1}{n} \sum_{i=1}^n \delta_{\theta_k^i}$ denotes the empirical distribution of the particles $\{\theta_k^i\}_{i=1}^n$ in the $k^{\text{th}}$ iteration. That is, for $k = 0, 1, 2, \ldots$ and $i = 1, \ldots, n$,
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_k^j, \theta_k^i) u_\pi(\theta_k^j) + \nabla_{\theta_k^j} k(\theta_k^j, \theta_k^i) \Big]. \tag{16.35}
+$$
+
+This algorithm, summarized in Algorithm 20, is known as *Stein variational gradient descent* (SVGD).
+
+**Algorithm 20** Stein Variational Gradient Descent (SVGD)
+
+```text
+Inputs : target score u_π(θ) = ∇ log π(θ); kernel k; step sizes {ε_k}_{k∈ℕ}; particles {θ_0^i}_{i=1}^n
+Outputs: updated particles {θ_K^i}_{i=1}^n
+for k = 0 to K − 1 do
+    compute scores g_j ← u_π(θ_k^j) for j = 1, …, n
+    for i = 1 to n do
+        ϕ^i ← (1/n) Σ_{j=1}^n [ k(θ_k^j, θ_k^i) g_j + ∇_{θ_k^j} k(θ_k^j, θ_k^i) ]
+        θ_{k+1}^i ← θ_k^i + ε_k ϕ^i
+return {θ_K^i}_{i=1}^n
+```
+
+### 3.3 Complexity and practical implementation
+
+**Computational complexity.** For typical choices of the kernel $k$, each iteration in (16.35) requires the computation of all pairwise interactions. The computational cost thus scales as $\mathcal{O}(n^2)$ w.r.t. the number of kernel (and kernel gradient) evaluations, and as $\mathcal{O}(n)$ w.r.t. the number of score function evaluations. Given a large number of particles, or large data sets, there are several ways to reduce the computational cost:
+
+- **Mini-batch scores.** Estimate the score function $u_\pi(\theta) := \nabla_\theta \log \pi(\theta)$ using mini-batches of the data. This yields a stochastic but unbiased approximation (cf. Section 6).
+- **Kernel approximations.** Use random Fourier features to reduce the $\mathcal{O}(n^2)$ interaction to $\mathcal{O}(nm)$ or $\mathcal{O}(n \log n)$; see Section 6.3 for further details.
+- **Parallelism.** Use parallel computing, noting that both the kernel matrix and sums are data-parallel and GPU-friendly.
+
+**Bandwidth selection.** The choice of the kernel bandwidth critically affects the balance between the attractive and repulsive terms in the update equation, and thus the dispersal of particles. Adaptive schedules (e.g., the median heuristic) are commonly employed.
+
+**Step sizes and stopping criteria.** As with standard gradient descent, the step sizes $(\varepsilon_k)_{k \in \mathbb{N}}$ must also be chosen with some care: if too large, the discretization of the underlying gradient flow becomes unstable; if too small, convergence is unnecessarily slow. In practice, a small constant step size, or an adaptive scheme such as AdaGrad, is often used. Alternatively, learning-rate-free variants of SVGD, based on ideas from parameter-free online optimization (so-called coin betting), remove the need to select a step-size schedule altogether, and can be extended to constrained domains. More recently, adaptive step-size schedules derived from the gradient flow perspective (see Section 4) have been obtained for SVGD and related sampling algorithms, with convergence guarantees matching those of their optimally tuned counterparts up to logarithmic factors. Regarding termination, there is no universally agreed stopping criterion: common choices include running for a fixed computational budget, or monitoring the magnitude of the particle updates or an empirical estimate of the KSD, cf. (16.18), and stopping when these fall below a threshold.
+
+## 4. Particle-based variational inference (ParVI) as gradient flow∗
+
+Section 3 derived the SVGD algorithm and showed how it could be viewed as a time discretization, combined with a particle approximation of the evolving measure, of a continuous-time, mean-field process known as the Stein variational gradient flow. This section shows that this is just one example of a *gradient flow over the space of probability measures*. It provides a general recipe for constructing such gradient flows, and describes several examples, including the Stein variational gradient flow as a special case. It also shows how discretizing these gradient flows in time, and approximating the evolving measure with particles, yields practical ParVI algorithms.
+
+### 4.1 Basics of gradient flows
+
+This section introduces the notion of a gradient flow over the space of probability measures. The exposition relies on the formal identification of the space of probability measures with an (infinite-dimensional) Riemannian manifold. Thus, it begins by recalling some basic concepts from Riemannian geometry.
+
+**Manifold, tangent space, cotangent space.** For convenience, this section considers the manifold of smooth, strictly positive densities over $\mathbb{R}^d$, viz $\mathcal{P} = \left\{ q \in C^\infty(\mathbb{R}^d) : \int q\, \mathrm{d}\theta = 1, q > 0 \right\}$. For each $q \in \mathcal{P}$, the *tangent space* of $\mathcal{P}$ is given by $\mathcal{T}_q \mathcal{P} \subseteq \left\{ \sigma \in C^\infty(\mathbb{R}^d) : \int \sigma\, \mathrm{d}\theta = 0 \right\}$. Write $\mathcal{T}_q^\star \mathcal{P}$ for the cotangent space, the topological dual of $\mathcal{T}_q \mathcal{P}$.
+
+**Metric tensor, Onsager operator, Riemannian metric.** Let $M(q) : \mathcal{T}_q \mathcal{P} \to \mathcal{T}_q^\star \mathcal{P}$ denote a *metric tensor*, which maps elements in the tangent space $\mathcal{T}_q \mathcal{P}$ to elements in the cotangent space $\mathcal{T}_q^\star \mathcal{P}$. A *Riemannian metric* $g_q : \mathcal{T}_q \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$ can then be defined according to $g_q(\sigma_1, \sigma_2) = \langle M(q)\sigma_1, \sigma_2 \rangle$, where $\langle \cdot, \cdot \rangle$ is the *duality pairing* from $\mathcal{T}_q^\ast \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$. The inverse of the metric tensor $M(q)$, denoted $M^{-1}(q) : \mathcal{T}_q^\ast \mathcal{P} \to \mathcal{T}_q \mathcal{P}$, is referred to as the *Onsager operator*.
+
+**First variation, Riemannian gradient.** Next, recall the definition of the *first variation* of $\mathcal{F}$ w.r.t. $q$. This is the unique function in $\mathcal{T}_q^\ast \mathcal{P}$ such that
+
+$$
+\lim_{\varepsilon \to 0} \frac{1}{\varepsilon} \left[\mathcal{F}(q + \varepsilon\sigma) - \mathcal{F}(q)\right] = \left\langle \frac{\delta \mathcal{F}(q)}{\delta q}, \sigma \right\rangle, \tag{16.36}
+$$
+
+for all $\sigma \in \mathcal{T}_q \mathcal{P}$. The gradient of $\mathcal{F}$ w.r.t. the Riemannian metric $g_q$, denoted $\mathrm{grad}\mathcal{F}$, is then defined via the condition
+
+$$
+g_q\left(\mathrm{grad}\mathcal{F}, \sigma\right) = \left\langle \frac{\delta \mathcal{F}}{\delta q}, \sigma \right\rangle, \tag{16.37}
+$$
+
+for all $\sigma \in \mathcal{T}_q \mathcal{P}$. Using the characterization of the Riemannian metric in terms of the Onsager operator (see above), it is possible to write the Riemannian gradient as $\mathrm{grad}\mathcal{F}(q) = M^{-1}(q) \frac{\delta \mathcal{F}}{\delta q}$.
+
+**Gradient flows.** It is now possible to define the *gradient flow* of $\mathcal{F}$ over the space $(\mathcal{P}, g)$. It is a curve $t \mapsto q_t$ that satisfies
+
+$$
+\frac{\partial q_t}{\partial t} = -\mathrm{grad}\mathcal{F}(q_t) := -M^{-1}(q_t) \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}. \tag{16.38}
+$$
+
+Provided the flow is well posed, and under additional assumptions on the functional $\mathcal{F}$ and the geometry (e.g., suitable convexity, coercivity, or functional inequalities; see below), one can often establish convergence of (16.38) to a minimizer of the functional $\mathcal{F}$; for the KL objective considered below, the target $\pi$ is this minimizer, i.e., $q_t \to \pi$ as $t \to \infty$. This gradient flow thus provides a general method for transporting an initial reference distribution $q_0$ to a target posterior distribution $\pi$. In particular, different algorithms for sampling from the target posterior distribution are obtained according to different choices of:
+
+1. the *objective functional* $\mathcal{F}(q)$ (e.g., KL divergence, other $f$-divergence, KSD);
+2. the *geometry* over $\mathcal{P}$ (e.g., Wasserstein, Stein, Fisher-Rao);
+3. the *time-discretization* (e.g., forward Euler, backward Euler, forward flow);
+4. the *space-discretization* (e.g., finite element, particle-based approximation).
+
+**The objective functional.** In order to simplify the discussion, assume throughout this section that the objective functional is the KL divergence: $\mathcal{F}(q) = \mathrm{D}_{\mathrm{KL}}(q \| \pi)$. In this case, the first variation of $\mathcal{F}$ with respect to $q$ can be calculated as
+
+$$
+\frac{\delta \mathcal{F}}{\delta q}(\theta) = \log \frac{q(\theta)}{\pi(\theta)} + 1 = \log q(\theta) - \log \pi(\theta) + 1. \tag{16.39}
+$$
+
+This choice is well motivated: among all $f$-divergences with continuously differentiable $f$ defined on the positive reals, the KL divergence is the only one whose first variation is unchanged (up to constants) if $\pi$ is scaled by a positive constant.
+
+Other choices of objective functional are, of course, possible, and lead to different ParVI algorithms for sampling from $\pi$. These include the kernel Stein discrepancy, the mollified interacting energy (MIE), and the $\chi^2$-divergence.
+
+### 4.2 Wasserstein gradient flow
+
+**The geometry.** Consider first the gradient flow induced by the quadratic Wasserstein metric. In order to define the Wasserstein metric tensor, first define $\psi_\sigma$ as the solution of the elliptic PDE
+
+$$
+-\nabla_\theta \cdot (q \nabla_\theta \psi_\sigma) = \sigma. \tag{16.40}
+$$
+
+The Wasserstein metric tensor $M(q) : \mathcal{T}_q \mathcal{P} \to \mathcal{T}_q^\ast \mathcal{P}$ and its inverse $M^{-1}(q) : \mathcal{T}_q^\ast \mathcal{P} \to \mathcal{T}_q \mathcal{P}$ are then defined according to
+
+$$
+M(q)\sigma = \psi_\sigma, \quad \text{for all } \sigma \in \mathcal{T}_q \mathcal{P} \tag{16.41}
+$$
+
+$$
+M^{-1}(q)\psi = -\nabla_\theta \cdot (q \nabla_\theta \psi), \quad \text{for all } \psi \in \mathcal{T}_q^\ast \mathcal{P}. \tag{16.42}
+$$
+
+Meanwhile, following some elementary calculations, the Wasserstein-Riemannian metric $g_q : \mathcal{T}_q \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$ is identified as
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \nabla_\theta \psi_{\sigma_1}(\theta)^\top \nabla_\theta \psi_{\sigma_2}(\theta) q(\theta)\, \mathrm{d}\theta. \tag{16.43}
+$$
+
+**The gradient flow.** Substituting (16.42) into (16.38), and rearranging, shows that the Wasserstein gradient flow is given by the continuity equation
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \big(q_t(\theta)\, v_t(\theta)\big), \quad v_t(\theta) = -\nabla_\theta \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta). \tag{16.44}
+$$
+
+In addition, substituting the first-variation of the KL divergence from (16.39) into (16.44) yields the Wasserstein gradient flow of the KL divergence as
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \left( q_t(\theta) \nabla_\theta \log \frac{\pi(\theta)}{q_t(\theta)} \right) \tag{16.45}
+$$
+
+$$
+\phantom{\frac{\partial q_t(\theta)}{\partial t}} = -\nabla_\theta \cdot \big( q_t(\theta) \left(\nabla_\theta \log \pi(\theta) - \nabla_\theta \log q_t(\theta)\right) \big). \tag{16.46}
+$$
+
+Formally, a description of the gradient flow in (16.46) can also be provided at the level of a single particle, the so-called *Lagrangian description*. In particular, for all $t \geq 0$, it holds that $q_t = \mathrm{Law}(\theta_t)$, where $(\theta_t)_{t \geq 0}$ is the solution of
+
+$$
+\dot{\theta}_t = \nabla_\theta \log \pi(\theta_t) - \nabla_\theta \log q_t(\theta_t), \quad \theta_0 \sim q_0. \tag{16.47}
+$$
+
+This equation, sometimes referred to as the *deterministic Langevin equation*, is *nonlinear* in the sense that the time evolution depends not only on the process $\theta_t$, but also on its distribution $q_t$.
+
+Alternatively, observe that the second term in (16.46) is equal to $\Delta_\theta q_t$, where $\Delta_\theta$ denotes the Laplacian. Thus (16.46) can be rewritten as
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \nabla_\theta \log \pi(\theta)) + \Delta_\theta q_t(\theta). \tag{16.48}
+$$
+
+This is precisely the *Fokker–Planck equation* describing the time evolution of the marginal law of the overdamped Langevin dynamics w.r.t. $\pi$. In other words, for all $t \geq 0$, it holds that $q_t = \mathrm{Law}(\theta_t)$, where now $(\theta_t)_{t \geq 0}$ is defined as the solution of the *stochastic differential equation*
+
+$$
+\mathrm{d}\theta_t = \nabla \log \pi(\theta_t)\, \mathrm{d}t + \sqrt{2}\, \mathrm{d}w_t, \quad \theta_0 \sim q_0, \tag{16.49}
+$$
+
+where $w = (w_t)_{t \geq 0}$ is a standard $\mathbb{R}^d$-valued Brownian motion. Thus, one can view the overdamped Langevin dynamics as the gradient flow of the KL divergence with respect to the quadratic Wasserstein metric.
+
+**Convergence rate.** It is straightforward to obtain the dissipation of the KL divergence along the WGF. In particular, using the chain rule,
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} \mathrm{D}_{\mathrm{KL}}(q_t \| \pi) = -\int q_t(\theta) \left\| \nabla_\theta \log \tfrac{q_t(\theta)}{\pi(\theta)} \right\|^2 \mathrm{d}\theta = -\mathcal{I}(q_t \| \pi) \leq 0, \tag{16.50}
+$$
+
+where $\mathcal{I}(q \| \pi)$ is the *relative Fisher information* of $q$ with respect to $\pi$. Thus, $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi)$ dissipates at a rate equal to the relative Fisher information. If, in addition, the target distribution $\pi$ satisfies a log-Sobolev inequality with constant $\lambda$, then this inequality implies exponential convergence to the target distribution, at a rate determined by $\lambda$: $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq e^{-2\lambda t} \mathrm{D}_{\mathrm{KL}}(q_0 \| \pi)$.
+
+**Practical algorithms.** The previous section yielded two different differential equations, cf. (16.47) and (16.49), one of them stochastic, both of whose marginal distributions follow the Wasserstein gradient flow of the KL divergence, cf. (16.46). These equations suggest different algorithms for sampling from the target distribution $\pi$.
+
+Consider first (16.49), which easily yields a practical sampling algorithm. In particular, using an Euler–Maruyama discretization, one can define $(\theta_k)_{k = 0, 1, 2, \ldots}$ according to the update equation
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k \nabla_\theta \log \pi(\theta_k) + \sqrt{2\varepsilon_k}\, z_k, \quad \theta_0 \sim q_0, \tag{16.51}
+$$
+
+where $(\varepsilon_k)_{k = 0, 1, \ldots}$ is a positive, non-increasing sequence of step sizes; and where $(z_k)_{k = 0, 1, 2, \ldots}$ are i.i.d. standard normal random variables. The algorithm in (16.51) is nothing more than the *unadjusted Langevin algorithm* (ULA), also known as *Langevin Monte Carlo* (LMC), a popular MCMC algorithm; its stochastic gradient variants are discussed in detail in [Chapter 2](/blog/stochastic-gradient-mcmc), and in the recent monograph of Fearnhead et al. Despite its connection with the reformulation of sampling as an optimization problem, this is not typically viewed as a "particle-based variational inference" algorithm, since it does not necessitate the use of an ensemble of particles.
+
+Now consider (16.47). In this case, a forward Euler discretization defines a sequence $(\theta_k)_{k = 0, 1, \ldots}$ according to
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k (\nabla_\theta \log \pi(\theta_k) - \nabla_\theta \log q_k(\theta_k)), \quad \theta_0 \sim q_0. \tag{16.52}
+$$
+
+One cannot implement this directly, since it depends on the unknown sequence of distributions $(q_k)_{k = 0, 1, \ldots}$. Instead, one option is to evolve an ensemble of particles $(\theta_k^i)_{k = 0, 1, \ldots}^{i = 1, \ldots, n}$, and update
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \left( \nabla_\theta \log \pi(\theta_k^i) - \widehat{\nabla_\theta \log q_k}(\theta_k^i) \right), \quad \theta_0^i \overset{\text{i.i.d.}}{\sim} q_0, \tag{16.53}
+$$
+
+where $\widehat{\nabla_\theta \log q_k}$ denotes an approximation of $\nabla_\theta \log q_k$, formed using the particles $\{\theta_k^i\}_{i=1}^n$. There are various options for this approximation, including approximating the density $q_k$ directly using a kernel-density estimate or a normalizing flow, and approximating the score $\nabla \log q_k$ using score matching.
+
+### 4.3 Stein gradient flow
+
+This section now provides a more rigorous interpretation of the mean-field, continuous-time limit of the SVGD algorithm, cf. (16.31), as a gradient flow over the space of probability measures equipped with a suitably chosen Riemannian metric.
+
+**The geometry.** Similar to before, cf. (16.40), to define the Stein metric tensor, first introduce $\psi_\sigma$ as the solution of the integro-partial differential equation
+
+$$
+-\nabla_\theta \cdot \left( q(\theta) \int k(\theta', \theta) \nabla_{\theta'} \psi_\sigma(\theta') q(\theta')\, \mathrm{d}\theta' \right) = \sigma(\theta), \tag{16.54}
+$$
+
+where $k : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$ is a symmetric positive-definite kernel. The *Stein metric tensor* and its inverse can then be defined as
+
+$$
+M(q)\sigma = \psi_\sigma, \quad \text{for all } \sigma \in \mathcal{T}_q \mathcal{P} \tag{16.55}
+$$
+
+$$
+M^{-1}(q)\psi = -\nabla_\theta \cdot \left( q(\theta) \int k(\theta', \theta) \nabla_{\theta'} \psi(\theta') q(\theta')\, \mathrm{d}\theta' \right), \quad \text{for all } \psi \in \mathcal{T}_q^\ast \mathcal{P}. \tag{16.56}
+$$
+
+It follows that the Stein-Riemannian metric associated with this metric tensor is given by
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \nabla_\theta \psi_{\sigma_1}^\top(\theta) \left[ \int k(\theta', \theta) \nabla_{\theta'} \psi_{\sigma_2}(\theta') q(\theta')\, \mathrm{d}\theta' \right] q(\theta)\, \mathrm{d}\theta. \tag{16.57}
+$$
+
+**The gradient flow.** Similar to before, substituting (16.56) into (16.38), and rearranging, shows that the Stein gradient flow is given by the continuity equation
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \big(q_t(\theta)\, v_t(\theta)\big), \quad v_t(\theta) = -\int k(\theta', \theta) \nabla_{\theta'} \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta')\, q_t(\theta')\, \mathrm{d}\theta'. \tag{16.58}
+$$
+
+In addition, substituting the first-variation of the KL divergence from (16.39) into (16.58) yields the Stein gradient flow of the KL divergence (i.e., the Stein variational gradient flow) as
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \left( q_t(\theta) \int k(\theta', \theta) \nabla_{\theta'} \log \frac{\pi(\theta')}{q_t(\theta')} q_t(\theta')\, \mathrm{d}\theta' \right) \tag{16.59}
+$$
+
+$$
+\phantom{\frac{\partial q_t(\theta)}{\partial t}} = -\nabla_\theta \cdot \left( q_t(\theta) \int k(\theta', \theta) \left[\nabla_{\theta'} \log \pi(\theta') - \nabla_{\theta'} \log q_t(\theta')\right] q_t(\theta')\, \mathrm{d}\theta' \right). \tag{16.60}
+$$
+
+Finally, assuming appropriate boundary conditions on $k$, and integrating by parts, this leads back to
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \phi^\ast_{q_t,\pi}(\theta)), \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) \nabla_\theta \log \pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.61}
+$$
+
+**Convergence rate.** Using an appropriate version of the chain rule, one can show that the dissipation of the KL divergence along the Stein variational gradient flow is given by
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} \mathrm{D}_{\mathrm{KL}}(q_t \| \pi) = -\langle \phi_t, \mu_{q_t,\pi} \rangle_{\mathcal{H}^d} = -\|\mu_{q_t,\pi}\|^2_{\mathcal{H}^d} = -\mathcal{I}_{\mathrm{Stein}}(q_t \| \pi) := -\mathrm{KSD}^2(q_t \| \pi) \leq 0. \tag{16.62}
+$$
+
+Thus, $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi)$ is non-increasing, and dissipates at a rate equal to the *Stein-Fisher information*, i.e., the squared KSD. Similar to before, if $\pi$ satisfies a *Stein log-Sobolev inequality* with constant $\lambda$, then one has exponential convergence: $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq \mathrm{D}_{\mathrm{KL}}(q_0 \| \pi) e^{-2\lambda t}$.
+
+### 4.4 Fisher-Rao and Wasserstein-Fisher-Rao gradient flow
+
+The Wasserstein geometry and the Stein geometry both result in gradient flows which *transport mass*. On the other hand, the Fisher-Rao geometry leads to a gradient flow which changes mass locally through birth-death dynamics rather than spatial transport; informally, mass can be removed in one region and created in another, as if it were *teleported*.
+
+**The geometry.** The Fisher-Rao Riemannian metric $g_q : \mathcal{T}_q \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$ is defined according to
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \frac{\sigma_1 \sigma_2}{q}\, \mathrm{d}\theta, \tag{16.63}
+$$
+
+or, writing $\sigma = q \psi_\sigma$,
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \psi_{\sigma_1} \psi_{\sigma_2} q\, \mathrm{d}\theta. \tag{16.64}
+$$
+
+Meanwhile the Fisher-Rao metric tensor $M(q) : \mathcal{T}_q \mathcal{P} \to \mathcal{T}_q^\ast \mathcal{P}$ associated to $g_q$, and its inverse $M^{-1}(q) : \mathcal{T}_q^\ast \mathcal{P} \to \mathcal{T}_q \mathcal{P}$, are given by
+
+$$
+M(q)\sigma = \psi_\sigma = \frac{\sigma}{q}, \quad \text{for all } \sigma \in \mathcal{T}_q \mathcal{P} \tag{16.65}
+$$
+
+$$
+M^{-1}(q)\psi = q\left(\psi - \mathbb{E}_q[\psi]\right), \quad \text{for all } \psi \in \mathcal{T}_q^\ast \mathcal{P}. \tag{16.66}
+$$
+
+Strictly speaking, cotangent potentials are identified up to additive constants; equivalently, one may work with the centered representative $\psi - \mathbb{E}_q[\psi]$, in which case $M(q)$ and $M^{-1}(q)$ are strict inverses.
+
+**The gradient flow.** It follows, substituting (16.66) into (16.38), that the Fisher-Rao gradient flow reads
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -q_t(\theta) \left( \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta) - \mathbb{E}_{\theta \sim q_t}\left[ \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta) \right] \right). \tag{16.67}
+$$
+
+Thus, substituting also (16.39), the Fisher-Rao gradient flow of the KL divergence is given by
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = q_t(\theta) \Big[ \log \pi(\theta) - (\log q_t(\theta)) - \mathbb{E}_{\theta \sim q_t}\left[\log \pi(\theta) - \log q_t(\theta)\right] \Big]. \tag{16.68}
+$$
+
+This gradient flow is an example of a *birth-death process*. Since there is no spatial derivative, it can be viewed as an infinite system of ordinary differential equations, indexed by the parameter. The advantage of such a process is that it allows global moves (i.e., teleportation) of the mass of the probability density (e.g., from one mode to another) according to their relative weights, without the need to transport this mass through low probability regions. The disadvantage is that, due to the absence of diffusion, the support of $q_t$ never changes during the evolution. This means that effective numerical simulation of the Fisher-Rao gradient flow is not straightforward.
+
+One solution is to combine the Wasserstein and Fisher-Rao geometries into a hybrid geometry, which incorporates both mass transport and teleportation. In particular, the gradient flow w.r.t. the *Wasserstein-Fisher-Rao* geometry reads
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \big(q_t(\theta) v_t(\theta)\big) + q_t(\theta) \alpha_t(\theta), \tag{16.69}
+$$
+
+where
+
+$$
+v_t(\theta) = -\nabla_\theta \frac{\delta\, \mathrm{D}_{\mathrm{KL}}(q_t \| \pi)}{\delta q_t} = \nabla \log \pi(\theta) - \nabla \log q_t(\theta) \tag{16.70}
+$$
+
+$$
+\begin{aligned}
+\alpha_t(\theta) &= -\left( \frac{\delta\, \mathrm{D}_{\mathrm{KL}}(q_t \| \pi)}{\delta q_t} - \mathbb{E}_{q_t}\left[ \frac{\delta\, \mathrm{D}_{\mathrm{KL}}(q_t \| \pi)}{\delta q_t} \right] \right) \\
+&= (\log \pi(\theta) - \log q_t(\theta)) - \mathbb{E}_{q_t}[\log \pi(\theta) - \log q_t(\theta)].
+\end{aligned} \tag{16.71}
+$$
+
+**Convergence rate.** Under mild conditions on $\pi$ and $q_0$, it is possible to show that the asymptotic convergence rate of the Wasserstein-Fisher-Rao gradient flow is *independent* of the target distribution $\pi$. In particular, assuming $q_0$ and $\pi$ both have bounded second moments, and that their ratio satisfies a certain growth condition, it holds that $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq C e^{-t}$ for all $t \geq t_0$.
+
+## 5. Second-order methods and Riemannian ParVI∗
+
+Section 3 showed that SVGD can be viewed as performing a form of functional gradient descent w.r.t. the KL divergence on a vector-valued RKHS. In particular, defining the functional
+
+$$
+\mathcal{F}_{q,\pi}(f) = \mathrm{D}_{\mathrm{KL}}\Big((\mathrm{id} + f)_\# q \,\Big\|\, \pi\Big), \quad f \in \mathcal{H}^d, \tag{16.72}
+$$
+
+then the (infinite-population version) of the SVGD algorithm was defined via the updates
+
+$$
+q_{k+1} = \left(T^\ast_{\varepsilon_k}\right)_\# q_k, \quad \text{where} \quad T^\ast_{\varepsilon_k} = \mathrm{id} - \varepsilon_k \nabla_f \mathcal{F}_{q_k,\pi}(0). \tag{16.73}
+$$
+
+Based on this perspective of SVGD, there are various ways to accelerate the SVGD algorithm. These include:
+
+- Incorporating second-order information so that steps adapt to local ill-conditioning of the posterior.
+- Adapting the *geometry* of the parameter manifold via a Riemannian (natural-gradient) metric.
+
+Both of these approaches are outlined below.
+
+### 5.1 Stein variational Newton (SVN)
+
+The Stein variational Newton (SVN) algorithm, introduced by Detommaso et al., incorporates second-order information in the updates to accelerate convergence. In particular, the steepest descent direction in (16.73) is replaced by an approximation of the Newton direction.
+
+Recall that the Newton direction is defined as the minimizer of a local quadratic (rather than linear) approximation of $\mathcal{F}$. In order to define this minimizer, it is first necessary to introduce the *second variation* $\mathrm{D}^2\mathcal{F}(0)(g, g')$ of $\mathcal{F}$ at 0, along the pair of directions $g, g' \in \mathcal{H}^d$, defined as
+
+$$
+\mathrm{D}^2\mathcal{F}(0)(g, g') := \lim_{\varepsilon \to 0} \frac{1}{\varepsilon} \left(\mathrm{D}\mathcal{F}(\varepsilon g')(g) - \mathrm{D}\mathcal{F}(0)(g)\right). \tag{16.74}
+$$
+
+Meanwhile, assuming $\mathcal{F}$ is twice Fréchet differentiable at 0, its *functional Hessian* $\nabla_f^2 \mathcal{F}(0)$ at 0 is the linear operator $\mathcal{H}^d \to \mathcal{H}^d$ such that, for all $g, g' \in \mathcal{H}^d$,
+
+$$
+\mathrm{D}^2\mathcal{F}(0)(g, g') = \langle \nabla_f^2 \mathcal{F}(0)[g], g' \rangle_{\mathcal{H}^d}. \tag{16.75}
+$$
+
+In the $k^{\text{th}}$ iteration, the aim is to find the Newton direction $g = (g_1, \ldots, g_d) \in \mathcal{H}^d$ for the functional $\mathcal{F}_{q_k,\pi}(f)$, evaluated at $f = 0$. This is characterized by the first-order stationarity conditions: for all $g' \in \mathcal{H}^d$,
+
+$$
+\mathrm{D}^2\mathcal{F}_{q_k,\pi}(0)(g, g') = -\mathrm{D}\mathcal{F}_{q_k,\pi}(0)(g') \tag{16.76}
+$$
+
+or, equivalently, for all $g' \in \mathcal{H}^d$,
+
+$$
+\langle \nabla_f^2 \mathcal{F}_{q_k,\pi}(0)[g], g' \rangle_{\mathcal{H}^d} = -\langle \nabla_f \mathcal{F}_{q_k,\pi}(0), g' \rangle_{\mathcal{H}^d}. \tag{16.77}
+$$
+
+Due to Liu and Wang and Detommaso et al., explicit expressions are available for both the functional gradient $\nabla_f \mathcal{F}_{q_k,\pi}(0)$ and the functional Hessian $\nabla_f^2 \mathcal{F}_{q_k,\pi}(0)$, evaluated at $f = 0$. In particular, component-wise,
+
+$$
+\left[\nabla_f \mathcal{F}_{q_k,\pi}(0)\right]_i(\theta') = -\mathbb{E}_{\theta \sim q_k}\left[k(\theta, \theta') \partial_i \log \pi(\theta) + \partial_i k(\theta, \theta')\right] \tag{16.78}
+$$
+
+$$
+\left[\nabla_f^2 \mathcal{F}_{q_k,\pi}(0)\right]_{i,j}(\theta', \theta'') = -\mathbb{E}_{\theta \sim q_k}\left[\partial_{ij}^2 \log \pi(\theta) k(\theta, \theta') k(\theta, \theta'') - \partial_i k(\theta, \theta') \partial_j k(\theta, \theta'')\right]. \tag{16.79}
+$$
+
+In order to solve (16.77), Detommaso et al. propose a Galerkin approximation. In particular, let $(\theta_k^i)_{i=1}^n$ be a collection of particles distributed according to $q_k$. Define the finite-dimensional linear space $\mathcal{H}_n = \mathrm{span}\left\{k(\theta_k^1, \cdot), \ldots, k(\theta_k^n, \cdot)\right\} \subseteq \mathcal{H}$, and let $\mathcal{H}_n^d = \mathcal{H}_n \times \cdots \times \mathcal{H}_n$ denote the corresponding space of vector-valued functions. One can then look for an approximate solution $g = (g_1, \ldots, g_d) \in \mathcal{H}_n^d$, viz
+
+$$
+g_j(\theta) = \sum_{i=1}^n \alpha_i^j k(\theta_k^i, \theta), \tag{16.80}
+$$
+
+for some real-valued coefficients $(\alpha_i^j)_{i=1:n}^{j=1:d}$ to be determined. In this case, (16.77) reduces to a finite-dimensional linear system, given by
+
+$$
+\sum_{l=1}^n H_{rl} \alpha_l = b_r, \quad \text{for each } r = 1, \ldots, n, \tag{16.81}
+$$
+
+where $\alpha_l = (\alpha_l^1, \ldots, \alpha_l^d)$ is the vector of unknown coefficients, and where
+
+$$
+[H_{rl}]_{ij} = \left[\nabla_f^2 \mathcal{F}_{q_k,\pi}(0)\right]_{ij}(\theta_k^r, \theta_k^l), \quad b_r = -\nabla_f \mathcal{F}_{q_k,\pi}(0)(\theta_k^r). \tag{16.82}
+$$
+
+Solving (16.81), and substituting the coefficients back into the ansatz (16.80), gives an approximation $g = (g_1, \ldots, g_d) \in \mathcal{H}_n^d \subseteq \mathcal{H}^d$ for the Newton direction. More precisely, only a Monte Carlo approximation of the Hessian $H_{rl}$ and the gradient $b_r$ can be evaluated, using the ensemble $(\theta^i)_{i=1}^n$, which yields an estimate $\hat{g}^n$ of the Newton direction $g$. The SVN algorithm then reads
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \hat{g}^n(\theta_k^i). \tag{16.83}
+$$
+
+In practice, computing the solution of the linear system in (16.81) may be prohibitively expensive in high-dimensional problems or when using a large number of particles, and the solution may not be a valid descent direction. Detommaso et al. propose two solutions. The first is to use the inexact Newton-conjugate gradient (NCG) method, which guarantees a descent direction by terminating the conjugate gradient iteration. This approach is also scalable to high dimensions, as it only requires evaluating the matrix-vector product with each $H_{rl}$. The second is to use a block-diagonal approximation of the second variation, possibly in combination with a Gauss–Newton approximation of the $\nabla^2 \log \pi$, or inexact NCG.
+
+### 5.2 Riemannian SVGD (RSVGD)
+
+Let $(\Theta, g)$ be a Riemannian manifold, i.e., a differentiable manifold $\Theta$ equipped with a Riemannian metric $g$, defined as a collection $g = (g_\theta)_{\theta \in \Theta}$ of inner products $g_\theta(\cdot, \cdot) : \mathcal{T}_\theta \Theta \times \mathcal{T}_\theta \Theta \to \mathbb{R}$ on the tangent spaces $\mathcal{T}_\theta \Theta$, which vary smoothly with $\theta$.
+
+Given a local coordinate chart, the metric $g$ is represented by a $d \times d$ symmetric positive-definite matrix with entries $G_{ij}$. The gradient of a function $f : \Theta \to \mathbb{R}$ and the divergence of a vector field $V$ can then be written as
+
+$$
+\mathrm{grad} f = \sum_{i,j=1}^d G^{ij} \frac{\partial f}{\partial x_i} \frac{\partial}{\partial x_j} = G^{-1} \nabla f \tag{16.84}
+$$
+
+$$
+\mathrm{div}(V) = |G|^{-\frac{1}{2}} \sum_i \frac{\partial}{\partial x_i} \left( |G|^{\frac{1}{2}} V^i \right) = |G|^{-\frac{1}{2}} \nabla \cdot (|G|^{\frac{1}{2}} V), \tag{16.85}
+$$
+
+where $G^{ij}$ denotes the $(i, j)^{\text{th}}$ entry of the inverse matrix $G^{-1}$, $V^i$ denotes the $i^{\text{th}}$ (contravariant) component of $V$, and $|G| = \det(G)$.
+
+Following Liu and Zhu, the *Riemannian-Stein operator* and the *Riemannian-Stein identity* can now be defined as
+
+$$
+T_\pi^{(G)} \phi := \mathrm{div}_G \phi + \langle \phi, \mathrm{grad} \log \pi \rangle_G, \qquad \mathbb{E}_\pi\left[T_\pi^{(G)} \phi\right] = 0, \tag{16.86}
+$$
+
+where $\langle a, b \rangle_G = a^T G b$, $\mathrm{div}_G$ denotes the Riemannian divergence defined above, and $\pi$ is understood as a density with respect to the Riemannian volume measure. These are the natural generalizations of their (Euclidean) Stein operator and the (Euclidean) Stein identity introduced in Section 2.4, cf. (16.12).
+
+Once again, the goal is the direction of steepest descent of the KL divergence. Letting $T_\varepsilon(\theta) = \theta + \varepsilon \phi(\theta)$ and $q_\varepsilon = (T_\varepsilon)_\# q$,[^3] the derivative of the KL divergence w.r.t. the perturbation magnitude is given by
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} = -\mathbb{E}_q\left[T_\pi^{(G)} \phi(\theta)\right], \qquad T_\pi^{(G)} \phi := \mathrm{div}_G \phi + \langle \phi, \mathrm{grad} \log \pi \rangle_G. \tag{16.87}
+$$
+
+Similar to before, the task is now to solve the constrained optimization problem
+
+$$
+\phi^\ast = \operatorname*{arg\,min}_{\phi \in \mathcal{G}} \left\{ \left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} : \|\phi\|_{\mathcal{G}} \leq 1 \right\} = \operatorname*{arg\,max}_{\phi \in \mathcal{G}} \left\{ \mathbb{E}_q\left[T_\pi^{(G)} \phi(\theta)\right] : \|\phi\|_{\mathcal{G}} \leq 1 \right\}, \tag{16.88}
+$$
+
+where $\mathcal{G}$ is a normed space of functions. It is also required that $\phi^\ast$ is a valid vector field, coordinate invariant, and can be expressed in closed form.
+
+The first and second of these requirements rule out the naive Euclidean choice $\mathcal{G} = \mathcal{H}^d$, the vector-valued RKHS used in the derivation of the standard SVGD update, since its elements are not intrinsically defined vector fields on the manifold. Instead, take
+
+$$
+\mathcal{G} = \{\mathrm{grad} f : f \in \mathcal{H}\}, \tag{16.89}
+$$
+
+where $\mathcal{H}$ is the RKHS associated with a positive-definite kernel $k : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$. This gradient is a well-defined object on $\Theta$; it is guaranteed to be a valid vector field; and it is coordinate invariant. Furthermore, it is possible to derive a closed-form solution as
+
+$$
+\phi^\ast = \mathrm{grad}_{(\cdot)} f^\ast(\cdot), \quad f^\ast(\cdot) = \mathbb{E}_{\theta \sim q}\left[\langle \mathrm{grad}_\theta k(\theta, \cdot), \mathrm{grad}_\theta \log \pi(\theta) \rangle_{G_\theta} + \mathrm{div}_\theta\left(\mathrm{grad}_\theta k(\theta, \cdot)\right)\right], \tag{16.90}
+$$
+
+where all gradient and divergence operators are understood in the Riemannian sense defined above, with the subscript indicating the variable with respect to which they are taken. The Riemannian SVGD update thus reads
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \mathrm{grad}_{\theta_k^i} \left[ \frac{1}{n} \sum_{j=1}^n \Big[ \langle \mathrm{grad}_{\theta_k^j} k(\theta_k^j, \theta_k^i), \mathrm{grad}_{\theta_k^j} \log \pi(\theta_k^j) \rangle_{G_{\theta_k^j}} + \mathrm{div}_{\theta_k^j}\Big(\mathrm{grad}_{\theta_k^j} k(\theta_k^j, \theta_k^i)\Big) \Big] \right]. \tag{16.91}
+$$
+
+In a fully intrinsic implementation, the Euclidean addition in this update should be replaced by a retraction or exponential-map step on $\Theta$. The term $\mathrm{grad} \log \pi = G^{-1} \nabla \log \pi$ is a preconditioned version of the score function. If one chooses the Riemannian metric to approximate the posterior curvature (e.g., the Fisher information), then this has the effect of *whitening* the score. This can result in accelerated convergence in ill-conditioned models.
+
+[^3]: Here, the transport map is expressed in a local coordinate chart; more intrinsically, one would define $T_\varepsilon$ via the exponential map or a retraction.
+
+## 6. Stochastic and scalable ParVI
+
+In order to scale ParVI algorithms such as SVGD to large data sets and high-dimensional models, several adaptations are required. These include:
+
+- stochastic approximations of the score function (e.g., mini-batches, variance reduction);
+- *noisy* dynamics that retain exploration while preserving descent on the KL divergence;
+- *systems-level* techniques (random-feature kernels, GPU/distributed implementations).
+
+These are developed in a way consistent with the functional-gradient view established in Sections 2–3.
+
+### 6.1 Mini-batch SVGD
+
+**Basic overview.** Let the target posterior be $\pi(\theta) \propto p(\mathcal{D} \mid \theta) p(\theta)$ with $\mathcal{D} = \{(X_n, Y_n)\}_{n=1}^N$. The exact score of the target is given by
+
+$$
+u_\pi(\theta) = \nabla \log p(\theta) + \sum_{n=1}^N \nabla \log p(Y_n \mid X_n, \theta). \tag{16.92}
+$$
+
+Given a mini-batch $B_k \subset \{1, \ldots, N\}$ of size $b$, one can define an *unbiased* estimator of the score function as
+
+$$
+\widehat{u}_\pi(\theta; B_k) = \nabla \log p(\theta) + \frac{N}{b} \sum_{n \in B_k} \nabla \log p(Y_n \mid X_n, \theta), \tag{16.93}
+$$
+
+with $\mathbb{E}_{B_k}\big[\widehat{u}_\pi(\theta; B_k)\big] = u_\pi(\theta)$. Replacing $u_\pi$ by $\widehat{u}_\pi$ in the SVGD witness function, cf. (16.21), gives
+
+$$
+\widehat{\phi}^\ast_{q,\pi}(\cdot; B_k) = \mathbb{E}_{\theta \sim q}\left[k(\theta, \cdot) \widehat{u}_\pi(\theta; B_k) + \nabla_\theta k(\theta, \cdot)\right]. \tag{16.94}
+$$
+
+Substituting this into the population version of the SVGD algorithm, cf. (16.22) or (16.23), one arrives at
+
+$$
+q_{k+1} = (\hat{T}^\ast_{\varepsilon_k})_\# q_k, \quad \text{where} \quad \hat{T}^\ast_{\varepsilon_k}(\theta) = \theta + \varepsilon_k \hat{\phi}^\ast_{q_k,\pi}(\theta; B_k), \tag{16.95}
+$$
+
+or equivalently, in terms of a single particle $\theta_k$ whose distribution is given by $q_k = \mathrm{Law}(\theta_k)$, the updates
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k \mathbb{E}_{\theta \sim q_k}\left[k(\theta, \theta_k) \hat{u}_\pi(\theta; B_k) + \nabla_\theta k(\theta, \theta_k)\right], \quad \theta_0 \sim q_0. \tag{16.96}
+$$
+
+In practice, of course, one must approximate the expectation w.r.t. the unknown $(q_k)_{k \in \mathbb{N}}$. Similar to before, given $\{\theta_0^i\}_{i=1}^n \overset{\text{i.i.d.}}{\sim} q_0$, the particles are updated for $i = 1, \ldots, n$:
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \frac{1}{n} \sum_{j=1}^n \left[k(\theta_k^j, \theta_k^i) \widehat{u}_\pi(\theta_k^j; B_k) + \nabla_{\theta_k^j} k(\theta_k^j, \theta_k^i)\right]. \tag{16.97}
+$$
+
+This procedure is summarized in Algorithm 21.
+
+**Convergence results.** It is natural to ask whether the stochastic transformations defined in (16.95) will still result in a decrease in the KL divergence. That is, for sufficiently small step sizes $\varepsilon_k$, is it true that $\mathrm{D}_{\mathrm{KL}}\big((\hat{T}^\ast_{\varepsilon_k})_\# q \,\big\|\, \pi\big) \leq \mathrm{D}_{\mathrm{KL}}(q \| \pi)$?
+
+Equation (16.33) reported a descent lemma for SVGD: under suitable conditions, the SVGD algorithm decreases the KL divergence at each iteration. In the stochastic setting, an analogous result can be established for the *expected descent*. Let $\mu_{q,\pi}$ be the exact witness and $\widehat{\mu}_{q,\pi}$ its mini-batch version, so that $\mathbb{E}[\widehat{\mu}_{q,\pi}] = \mu_{q,\pi}$. In particular,
+
+$$
+\mathbb{E}\left[\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) \mid q_k\right] - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \mathcal{O}(\varepsilon_k^2), \tag{16.98}
+$$
+
+where the $\mathcal{O}(\varepsilon_k^2)$ term now also depends on the variance of the mini-batch score estimator. Thus, mini-batching preserves the descent of KL in expectation. Note that this statement concerns the population mini-batch dynamics; for the finite-particle algorithm, one must additionally account for the empirical approximation of the witness function. For stronger convergence guarantees (e.g., a.s. convergence), standard Robbins-Monro conditions must be imposed on the step sizes $(\varepsilon_k)_{k \in \mathbb{N}}$.
+
+**Algorithm 21** Mini-Batch Stein Variational Gradient Descent (SVGD)
+
+```text
+Inputs : particles {θ_0^i}_{i=1}^n; kernel k; step sizes {ε_k}; batch size b
+Outputs: updated particles {θ_K^i}_{i=1}^n
+for k = 0 to K − 1 do
+    sample mini-batch B_k of size b
+    compute û_π(θ_k^j; B_k) for j = 1, …, n
+    for i = 1 to n do
+        θ_{k+1}^i ← θ_k^i + (ε_k/n) Σ_{j=1}^n [ k(θ_k^j, θ_k^i) û_π(θ_k^j; B_k) + ∇_{θ_k^j} k(θ_k^j, θ_k^i) ]
+return {θ_K^i}_{i=1}^n
+```
+
+**Extensions.** While computationally convenient, using a mini-batch estimate is not without its drawbacks. For example, while unbiased, the stochastic approximation can have a high variance. There are various approaches to reducing the variance, including:
+
+1. **Control variates.** Define an anchor point (e.g., the maximum a posteriori (MAP) estimate) $\tilde{\theta}$, and use a stochastic variance reduced gradient (SVRG) style estimator:
+
+   $$
+   \tilde{u}_\pi(\theta; \tilde{\theta}, B_k) = \widehat{u}_\pi(\theta; B_k) - \widehat{u}_\pi(\tilde{\theta}; B_k) + u_\pi(\tilde{\theta}). \tag{16.99}
+   $$
+
+   This remains unbiased for $u_\pi(\theta)$, and has reduced variance in comparison to $\hat{u}_\pi(\theta)$.
+2. **Polyak–Ruppert averaging.** Use an average of the iterates to dampen stochastic oscillations. This results in a reduced (asymptotic) variance, and may yield a more stable approximation of the target posterior. Some care is required, however: averaging particle locations is not in general equivalent to improving the posterior approximation, and may be inappropriate for multimodal posteriors.
+
+### 6.2 Stochastic particle optimization sampling (SPOS)
+
+The stochastic particle optimization sampling (SPOS) algorithm, introduced in Zhang et al., augments the Stein variational gradient flow, cf. (16.31) or (16.32), with stochastic gradient Langevin dynamics (SGLD). In the continuous-time, mean-field limit, this algorithm is described by the McKean-Vlasov PDE
+
+$$
+\partial_t q_t(\theta) = -\nabla \cdot \left[ q_t(\theta) \left( \beta^{-1} u_\pi(\theta) + \int_{\mathbb{R}^d} \left[k(\theta', \theta) u_\pi(\theta') + \nabla_{\theta'} k(\theta', \theta)\right] \mathrm{d}q_t(\theta') \right) \right] + \beta^{-1} \Delta q_t(\theta), \tag{16.100}
+$$
+
+or, writing $q_t = \mathrm{Law}(\theta_t)$, the McKean SDE
+
+$$
+d\theta_t = \left[ \beta^{-1} u_\pi(\theta_t) + \int \left[k(\theta', \theta_t) u_\pi(\theta') + \nabla_{\theta'} k(\theta', \theta_t)\right] \mathrm{d}q_t(\theta') \right] dt + \sqrt{2\beta^{-1}}\, dw_t, \tag{16.101}
+$$
+
+where $\beta > 0$ is a temperature parameter.
+
+In the limit as the temperature $\beta \to \infty$, the Langevin drift and diffusion vanish, and (16.101) formally reduces to the continuous-time, mean-field SVGD dynamics, cf. (16.32); meanwhile, if the particle interaction term is removed or becomes negligible (e.g., in the limit of vanishing kernel bandwidth, in which the repulsion between distinct particles vanishes), SPOS reduces to a tempered variant of SGLD.
+
+In practice, of course, (16.101) is approximated using (i) a finite collection of particles and (ii) an appropriate time discretization (e.g., Euler Maruyama). A stochastic (e.g., mini-batch) estimate for the score function can also be used. This yields the final SPOS algorithm:
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \left[ \beta^{-1} \hat{u}_\pi(\theta_k^i; B_k) + \frac{1}{n} \sum_{j=1}^n \Big( k(\theta_k^j, \theta_k^i)\, \hat{u}_\pi(\theta_k^j; B_k) + \nabla_{\theta_k^j} k(\theta_k^j, \theta_k^i) \Big) \right] + \sqrt{2\varepsilon_k \beta^{-1}}\, \xi_k^i, \tag{16.102}
+$$
+
+where $\xi_k^i \sim \mathcal{N}(0, I)$ are a sequence of i.i.d. standard normal random variables.
+
+**Convergence results.** Under appropriate assumptions (e.g., log-concavity, bounded initial moments, constant or decreasing step sizes), it is possible to obtain *non-asymptotic* convergence rates for SPOS in the 1-Wasserstein metric $W_1$. In practice, the noise term improves exploration and mitigates spurious fixed points of the deterministic Stein flow.
+
+### 6.3 Random-feature kernels and sub-quadratic interactions
+
+In each iteration, SVGD requires computing $\{k(\theta^i, \theta^j)\}_{i,j=1}^n$. Its cost is thus $\mathcal{O}(n^2)$ per iteration. If a very large number of particles is required, there are several options for reducing the computational cost:
+
+- **Random Fourier features.** For shift-invariant kernels $k(\theta, \theta') = \kappa(\theta - \theta')$, one can use the approximation $k(\theta, \theta') \approx \varphi(\theta)^\top \varphi(\theta')$ with $m$ random Fourier features $\varphi : \mathbb{R}^d \to \mathbb{R}^m$. In this case,
+
+  $$
+  \phi_{q,\pi}(\cdot) \approx \underbrace{\mathbb{E}_{\theta \sim q}\big[\varphi(\theta)\, u_\pi(\theta)^\top\big]^\top}_{\in \mathbb{R}^{d \times m}} \varphi(\cdot) + \underbrace{\mathbb{E}_{\theta \sim q}\big[J_\varphi(\theta)\big]^\top}_{\in \mathbb{R}^{d \times m}} \varphi(\cdot), \tag{16.103}
+  $$
+
+  where $J_\varphi(\theta) \in \mathbb{R}^{m \times d}$ denotes the Jacobian of $\varphi$ at $\theta$; in mini-batch settings, $u_\pi$ can be replaced by the stochastic estimate $\widehat{u}_\pi$. This reduces the particle-interaction cost from $\mathcal{O}(n^2)$ to $\mathcal{O}(nm)$, up to the cost of evaluating the features and their Jacobians.
+- **Structured features.** The use of structured features (e.g., orthogonal random features) can further improve the computational cost.
+
+### 6.4 GPU and distributed implementations
+
+In the single-node GPU setting, both the kernel matrix $\mathbf{K} = [k(\theta^i, \theta^j)]_{ij}$ and score vector $\boldsymbol{u}_\pi = [\hat{u}_\pi(\theta^i)]_i$ are amenable to GPU parallelism. In particular, JIT-compiled implementations (e.g., PyTorch, JAX) fuse the two terms in (16.97) into batched tensor kernels.
+
+For multi-node GPUs, with $M$ devices, each holding roughly $n/M$ particles and a shard of data, a typical iteration would be:
+
+1. compute local scores on local batches;
+2. *all-reduce* particle features (or sufficient statistics for (16.103));
+3. update local particles.
+
+In the last step, there are several ways to avoid global $\mathcal{O}(n^2)$ communication. These include using a random-feature factorization (16.103) and *all-reduce* of the $m$-dimensional summaries; block-sparse kernels (nearest-neighbor graphs); or inducing-particle approximations (analogous to sparse GPs).
+
+## 7. Applications in Bayesian deep learning
+
+ParVI methods have been applied to a wide range of problems in BDL, offering scalable alternatives to exact Bayesian inference in high-dimensional, non-convex, and multimodal posterior landscapes.
+
+### 7.1 Bayesian neural networks
+
+Bayesian neural networks (BNNs) define a posterior over network parameters $\theta$ given data $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$:
+
+$$
+\pi(\theta) \propto p(\mathcal{D} \mid \theta) p(\theta), \tag{16.104}
+$$
+
+where $p(\mathcal{D} \mid \theta)$ is the likelihood induced by the network outputs $f(\cdot, \theta)$, and $p(\theta)$ is the prior over the network parameters.
+
+**Posterior prediction.** Using a BNN, predictions for new inputs $x_\ast$ are obtained by computing the *posterior predictive distribution*, defined as
+
+$$
+p(y_\ast \mid x_\ast, \mathcal{D}) = \int p(y_\ast \mid x_\ast, \theta) \pi(\theta)\, \mathrm{d}\theta. \tag{16.105}
+$$
+
+In modern architectures, exact computation of the posterior is infeasible, and the integral in (16.105) must be approximated. ParVI methods such as SVGD approximate $\pi$ using an ensemble of particles $\{\theta^i\}_{i=1}^n$, and can be readily applied in this context. In particular, these particles can be used to approximate the posterior predictive distribution as
+
+$$
+p(y_\ast \mid x_\ast, \mathcal{D}) \approx \frac{1}{n} \sum_{i=1}^n p(y_\ast \mid x_\ast, \theta^i). \tag{16.106}
+$$
+
+SVGD and related Stein ensemble methods have shown competitive empirical performance in BNNs, for both regression and classification tasks. For example, on image classification benchmarks such as CIFAR-10 and MNIST, SVGD with $n \approx 20$ particles has been reported to outperform competing methods (e.g., deep ensembles) in terms of predictive accuracy, functional diversity, and uncertainty quantification, although such gains are problem- and architecture-dependent.
+
+Of particular note is the work of D'Angelo et al., which unifies several variants of SVGD applicable to BNNs under the title of *Stein variational neural network ensembles*. Their framework includes the original SVGD algorithm (which performs inference directly in the weight space, and uses a kernel defined in the weight space) as well as the standard deep ensemble, which can be viewed as SVGD with a kernel defined by an indicator function.
+
+It also includes several novel variants of SVGD, designed specifically for BNNs, which are derived via careful choices of the kernel function. These include *function-kernel weight SVGD*, in which the kernel is defined in the output space of the neural network:
+
+$$
+k_f(\theta, \theta') = \exp\left( -\frac{1}{h} \mathbb{E}_{x \sim p(x)}\left[\|f(x; \theta) - f(x; \theta')\|^2\right] \right), \tag{16.107}
+$$
+
+where $h > 0$ is a bandwidth parameter, $p(x)$ denotes the marginal distribution of the inputs, and $f(x; \theta)$ denotes the output of the neural network with parameters $\theta$, given inputs $x$. In practice, this kernel is approximated using a Monte Carlo estimate over a mini-batch of inputs, typically sampled from the empirical training distribution. This choice of kernel, as shown in D'Angelo et al., encourages functional diversity of the particles and avoids functional posterior collapse. This results in improved calibration, a greater resemblance to the true posterior distribution, and enhanced out-of-distribution (OOD) detection.
+
+**Out-of-distribution detection.** The problem of out-of-distribution detection can be described as follows: given a test point $x_\ast$, decide whether $x_\ast$ is from the same distribution as the training data, or a different distribution. Given a test point $x_\ast$, the predictive entropy
+
+$$
+\mathcal{H}\left[p(y_\ast \mid x_\ast, \mathcal{D})\right] = -\sum_{y_\ast} p(y_\ast \mid x_\ast, \mathcal{D}) \log p(y_\ast \mid x_\ast, \mathcal{D}) \tag{16.108}
+$$
+
+can be used as an out-of-distribution score. In particular, smaller values of the entropy correspond to confident predictions (i.e., likely to be in distribution); larger values correspond to uncertain predictions (i.e., possible out of distribution). In ParVI methods such as SVGD (and variants), disagreement among particles in predictive space directly increases the entropy for test inputs far from the training data, thereby providing a useful OOD signal; D'Angelo et al. report improved OOD detection relative to methods such as deep ensembles, although relative performance is problem-dependent. See also Chapter 44 for a complementary treatment of predictive-uncertainty-based rejection.
+
+**Active learning.** In (Bayesian) active learning, the objective is to select the most informative data points to query in order to improve the performance of the model (e.g., the BNN). In Bayesian models, a popular acquisition function is the decrease in the expected posterior entropy, viz
+
+$$
+\mathrm{MI}(y_\ast, \theta \mid x_\ast, \mathcal{D}) = \mathcal{H}\left[p(y_\ast \mid x_\ast, \mathcal{D})\right] - \mathbb{E}_{\theta \sim \pi(\theta)}\left[\mathcal{H}(p(y_\ast \mid x_\ast, \theta))\right]. \tag{16.109}
+$$
+
+This is known as *Bayesian active learning by disagreement* (BALD); see Chapter 53 for a detailed treatment of Bayesian active learning. Using ParVI methods (e.g., SVGD), it is straightforward to approximate this acquisition function, replacing the posterior $\pi$ by its particle-based approximation.
+
+### 7.2 Large-scale models and Bayesian fine-tuning
+
+For very large models (e.g., large language models or vision foundation models), a fully Bayesian treatment over all parameters is usually computationally prohibitive, and can be difficult to justify relative to cheaper uncertainty quantification strategies. The large number of parameters renders even approximate posterior inference infeasible, and the vast size of the (pre)training data set often leads to relatively low posterior uncertainty in many parameters.
+
+On the other hand, during fine-tuning, the number of learnable parameters is much smaller, and the data set is typically much smaller, implying significantly more uncertainty. There is, therefore, a stronger justification for the additional expense associated with the use of Bayesian methods.
+
+Let $\theta$ denote the parameters of a large pre-trained model, and $\phi$ denote the parameters (e.g., of a small adapter, of the last layer) that are to be fine-tuned based on downstream data $\mathcal{D}$. The goal is to compute the posterior over the fine-tuning parameters, viz
+
+$$
+\pi(\phi) := p(\phi \mid \mathcal{D}, \theta) \propto p(\mathcal{D} \mid \theta, \phi) p(\phi), \tag{16.110}
+$$
+
+where, similar to before, $p(\mathcal{D} \mid \theta, \phi)$ denotes the likelihood induced by the model outputs, and $p(\phi)$ denotes a prior over the fine-tuning parameters.
+
+Since exact inference in $\pi(\phi)$ is generally intractable, it can be approximated using ParVI. In particular, using a ParVI algorithm, one obtains $n$ particles $\{\phi^i\}_{i=1}^n$, each representing the parameters of a slightly different fine-tuned model. This yields an approximate posterior predictive distribution given by
+
+$$
+p(y_\ast \mid x_\ast, \mathcal{D}) \approx \frac{1}{n} \sum_{i=1}^n p(y_\ast \mid x_\ast, \phi^i, \theta), \tag{16.111}
+$$
+
+which can quantify (epistemic) uncertainty in low-data regimes. ParVI-based fine-tuning is compatible with parameter-efficient strategies (e.g., low-rank adaptation (LoRA), bias-only tuning), keeping dimensionality manageable; see Chapters 39 and 43 for detailed treatments of last-layer inference and Bayesian approaches for large language models, respectively. Extensions to continual learning are also possible: as new data sets $\mathcal{D}_1, \mathcal{D}_2, \ldots$ arrive, the particle set can be propagated via sequential ParVI updates ([Chapter 18](/blog/sequential-variational-inference)), analogous to particle filtering.
+
+## 8. Theoretical guarantees and open problems∗
+
+Despite impressive empirical performance, ParVI algorithms such as SVGD still lack the kind of sharp, dimension-aware theory that is now standard for diffusion-based samplers (e.g., Langevin Monte Carlo, Hamiltonian Monte Carlo). This section summarizes existing theoretical results for SVGD, including (i) the continuous-time, infinite-particle dynamics; (ii) the discrete-time, infinite-particle dynamics; (iii) the continuous-time, finite-particle dynamics; and (iv) the discrete-time, finite-particle dynamics. The section concludes by outlining some open problems and interesting directions for future work.
+
+### 8.1 Continuous time, infinite-particle SVGD
+
+This section reviews convergence results for the continuous-time, infinite-particle SVGD dynamics, viz
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \phi^\ast_{q_t,\pi}(\theta)), \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.112}
+$$
+
+**Well-posedness.** Under smoothness and growth conditions on the target $\pi$ and the kernel $k$, this PDE is well posed (i.e., global existence, uniqueness, regularity). Although $\pi$ is a stationary solution of the PDE, establishing uniqueness of the invariant solution, and convergence of $q_t$ to $\pi$, generally requires further assumptions: e.g., that a vanishing KSD characterizes $\pi$ (i.e., the KSD is convergence-determining for the chosen kernel), or that the target satisfies an appropriate functional inequality (see below).
+
+**Dissipation identity.** Using calculus on the space of probability measures, the dissipation of the KL divergence along the continuous-time, mean-field SVGD dynamics is given by
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} \mathrm{D}_{\mathrm{KL}}(q_t \| \pi) = -\mathcal{I}_{\mathrm{Stein}}(q_t \| \pi), \tag{16.113}
+$$
+
+where $\mathcal{I}_{\mathrm{Stein}}(q \| \pi)$ denotes the *Stein-Fisher information* of $q$ relative to $\pi$, which coincides with the squared kernel Stein discrepancy (KSD)
+
+$$
+\mathcal{I}_{\mathrm{Stein}}(q \| \pi) := \mathrm{KSD}^2(q \| \pi). \tag{16.114}
+$$
+
+Thus, in particular, KL is a Lyapunov functional and the (squared) KSD is the dissipation rate. Under additional assumptions (e.g., bounded first moment, bounded kernel), (16.113) implies that $\mathcal{I}_{\mathrm{Stein}}(q_t \| \pi) \to 0$ as $t \to \infty$. Thus, for appropriate choices of the kernel, and given suitable tightness or moment conditions, this further implies that $q_t \Rightarrow \pi$. Another consequence of (16.113) is that
+
+$$
+\min_{0 \leq s \leq t} \mathrm{KSD}^2(q_s \| \pi) \leq \frac{1}{t} \int_0^t \mathrm{KSD}^2(q_s \| \pi)\, \mathrm{d}s \leq \frac{\mathrm{D}_{\mathrm{KL}}(q_0 \| \pi)}{t}. \tag{16.115}
+$$
+
+**Convergence rates.** Under the assumption that the target $\pi$ satisfies an appropriate functional inequality, it is possible to quantify how fast the flow converges to $\pi$. For example, if the target satisfies a *Stein log-Sobolev inequality* (LSI) with constant $\lambda$, viz
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q \| \pi) \leq \frac{1}{2\lambda} \mathcal{I}_{\mathrm{Stein}}(q \| \pi), \tag{16.116}
+$$
+
+then the continuous-time, mean-field SVGD dynamics converge exponentially fast to the target distribution
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq e^{-2\lambda t} \mathrm{D}_{\mathrm{KL}}(q_0 \| \pi). \tag{16.117}
+$$
+
+### 8.2 Discrete-time, infinite-particle SVGD
+
+Next, consider the forward-Euler discretization of the continuous-time, infinite-particle dynamics in (16.112), viz
+
+$$
+q_{k+1} = \left(\mathrm{id} + \varepsilon_k \phi^\ast_{q_k,\pi}\right)_\# q_k, \quad \phi^\ast_{q_k,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_k}\left[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\right], \tag{16.118}
+$$
+
+where $(\varepsilon_k)_{k \in \mathbb{N}}$ is a positive, non-increasing step-size schedule. This corresponds to the *population limit* or *mean-field limit* of the SVGD algorithm.
+
+**A first descent lemma.** The original work of Liu provided the first theoretical guarantees for SVGD in discrete time at the population level. In particular, assuming boundedness of the KSD and the kernel, Liu established a *descent lemma*, guaranteeing that for sufficiently small step sizes the KL decreased at each iteration. That is,
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \varepsilon_k^2 R \cdot \mathrm{KSD}^2(q_k \| \pi), \tag{16.119}
+$$
+
+where $0 < R < \infty$ is a positive constant depending on the kernel and the score, namely, $R = \sup_x \left[\frac{1}{2} \|\nabla \log p\|_{\mathrm{Lip}}\, k(x, x) + 2 \nabla_{xx'} k(x, x)\right]$.
+
+**Initial non-asymptotic convergence rates.** Subsequently, Korba et al. obtained a similar descent lemma and established the first non-asymptotic convergence rate for the population version of the SVGD algorithm. To be specific, assuming the kernel and its first derivative are bounded by $0 < B < \infty$; the target is $L$-smooth, so that the Hessian of the target is bounded by $0 < L < \infty$; and the KSD along the path of the algorithm iterates is bounded by $0 < C < \infty$, it was established in Korba et al. that
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \varepsilon_k^2 \frac{(\alpha^2 + L) B^2}{2} \cdot \mathrm{KSD}^2(q_k \| \pi), \tag{16.120}
+$$
+
+for any $\alpha > 1$, provided the step size $\varepsilon_k := \varepsilon \leq \frac{\alpha - 1}{\alpha B C^{1/2}}$. Although this descent lemma is rather similar to the one previously obtained in Liu, it was based on rather different proof techniques, namely, differential calculus on the Wasserstein space.
+
+Following this result, Korba et al. also obtained a $\mathcal{O}(\frac{1}{K})$ convergence rate for the arithmetic mean of the squared KSD between the iterates $q_k$ and $\pi$. In particular, writing $c_\varepsilon = \varepsilon\big(1 - \varepsilon \frac{(\alpha^2 + L) B^2}{2}\big)$, and assuming a similar condition on the step size, the authors showed that
+
+$$
+\min_{k = 0, \ldots, K-1} \mathrm{KSD}^2(q_k \| \pi) \leq \frac{1}{K} \sum_{k=0}^{K-1} \mathrm{KSD}^2(q_k \| \pi) \leq \frac{\mathrm{D}_{\mathrm{KL}}(q_0 \| \pi)}{c_\varepsilon K}. \tag{16.121}
+$$
+
+**Complexity bounds under Talagrand's $T_1$ inequality.** Following these results, Salim et al. obtained the first dimension-explicit iteration complexity bounds for SVGD, assuming the target $\pi$ satisfied Talagrand's $T_1$ inequality. Notably, unlike in previous works, their results did not require the assumption that the KSD was uniformly bounded along the algorithm iterates, an assumption which cannot be verified prior to running the algorithm.
+
+To be more specific, Salim et al. first established a descent lemma and a non-asymptotic convergence rate for the average of the squared KSD. Their results are essentially identical to the corresponding results in Korba et al., except that now the dependence on the kernel bound is linear rather than quadratic, and the bound on the step size does not require a bound on the KSD. Finally, the authors provided the first dimension-dependent complexity result for SVGD, showing that, provided the number of iterations satisfies
+
+$$
+K = \tilde{\Omega}\left( \frac{L d^{\frac{3}{2}}}{\lambda^{\frac{1}{2}} \varepsilon} \right), \tag{16.122}
+$$
+
+one obtains $\mathrm{KSD}^2(\bar{q}_K \| \pi) \leq \varepsilon$, where $\lambda$ denotes the constant in Talagrand's $T_1$ inequality; and $\bar{q}_K = \frac{1}{K} \sum_{k=0}^{K-1} q_k$ denotes the average of the iterates.
+
+**Convergence under weaker smoothness assumptions.** Most recently, Sun et al. established the convergence of SVGD (i.e., a descent lemma, convergence rate, iteration complexity) under weaker assumptions. In particular, their results required that (a) the target satisfies a $T_p$ inequality with constant $\lambda$ or a generalized $(T_p, J)$ inequality; and (b) the target potential is $(L_0, L_1)$-smooth, i.e., there exist constants $L_0, L_1 > 0$ such that $\|\nabla^2 V(\theta)\|_{\mathrm{op}} \leq L_0 + L_1 \|\nabla V(\theta)\|$ for all $\theta \in \mathbb{R}^d$. This significantly extended previous results, all of which had assumed $L$-smoothness of the potential (i.e., global Lipschitz continuity of the score, globally bounded Hessian), thereby excluding a large class of potential functions (e.g., polynomials of degree greater than two).
+
+### 8.3 Finite-particle SVGD
+
+Finally, this section reviews convergence results for the finite-particle system. It considers both the continuous-time dynamics, viz
+
+$$
+\dot{\theta}_t^i = \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_t^j, \theta_t^i) u_\pi(\theta_t^j) + \nabla_{\theta_t^j} k(\theta_t^j, \theta_t^i) \Big], \quad i = 1, \ldots, n, \tag{16.123}
+$$
+
+and its discrete-time counterpart, i.e., the SVGD algorithm itself, viz
+
+$$
+\theta_{t+1}^i = \theta_t^i + \varepsilon_t \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_t^j, \theta_t^i) u_\pi(\theta_t^j) + \nabla_{\theta_t^j} k(\theta_t^j, \theta_t^i) \Big], \quad i = 1, \ldots, n, \tag{16.124}
+$$
+
+where, in a slight abuse of notation, $t$ now indexes both the time in the continuous-time dynamics; and the iteration in the discrete-time algorithm.
+
+**General strategies for establishing convergence.** Broadly speaking, establishing convergence of the finite-particle system can proceed via two possible routes. Similar to before, let $q_t^n = \frac{1}{n} \sum_{j=1}^n \delta_{\theta_t^j}$ denote the empirical distribution of the interacting particle system. Then one can either:
+
+- (i) Show that $\lim_{t \to \infty} [\lim_{n \to \infty} q_t^n] = \lim_{t \to \infty} q_t = \pi$. That is:
+  - (i.a) **Propagation of chaos.** First establish that the empirical distribution $q_t^n$ converges to the mean-field distribution $q_t$ as $n \to \infty$, for any finite time $t \in [0, \infty)$.
+  - (i.b) **Infinite-particle convergence to equilibrium.** Then establish that the mean-field distribution $q_t$ converges to the target distribution $\pi$ as $t \to \infty$. This was the subject of Sections 8.1 and 8.2.
+- (ii) Show that $\lim_{n \to \infty} [\lim_{t \to \infty} q_t^n] = \lim_{n \to \infty} \pi^n = \pi$. That is:
+  - (ii.a) **Finite-particle convergence to equilibrium.** First establish that the empirical distribution $q_t^n$ converges to a (unique) equilibrium, say $\pi^n$, as $t \to \infty$.
+  - (ii.b) **Uniform-in-time propagation of chaos.** Then establish that the empirical equilibrium distribution $\pi^n$ converges to the target $\pi$ as $n \to \infty$.
+
+See Banerjee et al. and Liu et al. for a visual illustration of these two approaches. The subsequent discussion focuses on (i), this being the prevailing approach in the literature. Regarding (ii), it is worth briefly mentioning the recent work of Liu et al., which analyzed this approach for Gaussian SVGD, wherein both the target distribution and the initial distribution are Gaussian, and the kernel is bilinear. In this case, the mean-field distribution remains Gaussian for all times and it is possible to establish quantitative uniform-in-time convergence of the finite particle system to its mean-field limit. Most recently, Balasubramanian et al. have established uniform-in-time propagation-of-chaos bounds for SVGD, obtaining rates with logarithmic dependence on the number of particles in general settings, and parametric $\mathcal{O}(n^{-1/2})$ rates, uniform in time, for Gaussian targets with matrix-valued kernels. Karimi Jaghargh et al. and Priser et al. also study finite-particle asymptotics.
+
+**Propagation of chaos.** Several different papers have established the time-dependent convergence of the finite-particle system to its mean-field limit, in both continuous time and discrete time, under various assumptions on the kernel (e.g., continuous, Lipschitz, smooth) and the potential (e.g., uniformly bounded). For example, regarding the discrete-time algorithm, Korba et al. showed that, for any fixed finite horizon $T$, and for all iterations $t$ corresponding to times up to $T$,
+
+$$
+\mathbb{E}\left[W_2^2(q_t, q_t^n)\right] \leq \frac{1}{2} \left( \frac{1}{\sqrt{n}} \sqrt{\mathrm{Var}(q_0)}\, e^{LT} \right) \left( e^{2LT} - 1 \right), \tag{16.125}
+$$
+
+where $L$ is a constant depending on the kernel $k$ and the target $\pi$; see Korba et al. for details.
+
+**Unified convergence analyses.** By combining convergence of the finite-particle distribution $q_t^n$ to the mean-field distribution $q_t$ as $n \to \infty$ (see above), and convergence of the mean-field distribution $q_t$ to the target distribution $\pi$ as $t \to \infty$, two groups have now obtained a unified convergence analysis for the SVGD algorithm.
+
+The first such result was established in Shi and Mackey, who combined improved rates for $q_t^n \to q_t$, with existing rates for $q_t \to \pi$, to obtain a bound on $\min_{0 \leq s \leq t} \mathrm{KSD}(q_s^n \| \pi)$. However, due to the doubly exponential dependence on time of their bound between the finite-particle distribution and the mean-field distribution (via the sum of the step sizes), the obtained rate is rather slow, namely, of order $1/\sqrt{\log \log n}$.
+
+More recently, Banerjee et al. have obtained significantly improved finite-particle convergence rates for SVGD, in both KSD and Wasserstein-2 metrics. In particular, the authors improve the dependence on the number of particles from the $1/\sqrt{\log \log n}$ rate of Shi and Mackey to $1/\sqrt{n}$ (a double-exponential improvement), in both continuous and discrete time. Under mild assumptions on the kernel and potential, these bounds also grow polynomially in the dimension $d$.
+
+### 8.4 Curse-of-dimensionality
+
+The curse of dimensionality largely affects ParVI algorithms such as SVGD through the geometry of the RKHS.
+
+Even for simple Gaussian targets, SVGD with standard (e.g., radial basis function (RBF), IMQ) kernels can systematically underestimate the posterior variance in high dimensions. This is known as the *variance collapse phenomenon*. Indeed, for RBF kernels, the magnitude of the repulsive term in the Stein update equation, cf. (16.35), can be upper bounded by a quantity that decreases with $d$. Thus, the particles tend to exhibit mode collapse.
+
+In Ba et al., the authors undertake a detailed analysis of this phenomenon. They argue that, in high dimensions, the "driving force" (i.e., the kernel-weighted score function) has a higher variance than the repulsion. This, coupled with the deterministic nature of the SVGD updates (i.e., no noise or resampling), leads to systematic underestimation of the variance. The authors then consider the limit as $n, d \to \infty$, with $\frac{d}{n} \to \gamma$ for some $\gamma > 1$. For an isotropic Gaussian target, it is possible to explicitly characterize the behavior of the SVGD variance as a function of $\gamma$, for two common choices of the kernel (i.e., RBF, IMQ). In both cases, the learned variance decreases as $\gamma$ increases, suggesting the number of particles should grow linearly with $d$ in order to reliably estimate the dimension-averaged variance.
+
+The variance collapse phenomenon has motivated various methodological developments. Structural approaches reduce the effective dimensionality, including message-passing SVGD, projected SVGD, sliced SVGD, Grassmann SVGD, and function-space SVGD. Meanwhile, geometric approaches employ preconditioned or matrix-valued kernels to adaptively whiten the score. Finally, stochastic variants of SVGD, such as SPOS, inject noise into the dynamics to counteract deterministic collapse.
+
+### 8.5 Open problems
+
+This section concludes by highlighting a number of open problems.
+
+**Kernel design in high dimensions.** In most applications, practitioners resort to the use of an RBF kernel, with the bandwidth chosen adaptively according to a median heuristic. In very high dimensions, this choice is often ineffective. Open questions include the design of principled, problem-dependent kernels (e.g. function-space, neural tangent kernel (NTK)-like, or Fisher-preconditioned kernels) and adaptive, iteration-dependent kernels; and guarantees that connect kernel choice to *dimension-robust* rates.
+
+**Finite-particle degeneracy.** General (e.g., algorithm-independent) conditions that preclude particle collapse for a broad class of targets are currently lacking. Practical heuristics (e.g., an adaptive bandwidth, tempering, occasional noise injection, MCMC rejuvenation) can help, but remain outside of the current theory. Meanwhile, obtaining improved non-asymptotic, finite-particle convergence rates under weaker assumptions remains an ongoing and active topic of research.
+
+**Beyond the KSD.** Typical convergence rates (including infinite-particle and finite-particle) are stated in terms of the KSD. In reality, however, practitioners may be interested in other metrics such as the predictive risk, coverage, etc. An open question is when (and at what rate) does decreasing the KSD ensure calibrated predictive distributions? Currently, there exist only partial results assuming additional structure on the target (e.g., Gaussian) or the kernel (e.g., composite, bilinear).
+
+**Theory for SVGD with stochastic gradients.** Typical applications of ParVI in BDL (see Section 7.1) necessitate the use of stochastic gradients and/or the injection of additional noise. A complete theory for mini-batch SVGD (e.g., with variance reduction) and for noisy variants of SVGD (e.g., SPOS) is currently lacking.
+
+**Differential privacy.** Differential privacy for ParVI algorithms such as SVGD remains largely unexplored. While results exist for other sampling algorithms such as stochastic gradient MCMC ([Chapter 2](/blog/stochastic-gradient-mcmc)), the questions of how particle interactions affect privacy loss and how to calibrate ParVI algorithms for differential privacy, without destroying accuracy or causing particle collapse, have not yet been studied in detail.
+
+## 9. Summary
+
+This chapter introduced particle-based variational inference, a family of methods which combine the nonparametric flexibility of MCMC with the optimization-based efficiency of VI. Starting from SVGD, it showed how ParVI methods can be understood as time discretizations and particle approximations of gradient flows on the space of probability measures, and described a number of second-order, Riemannian, and stochastic variants. It then surveyed applications of these methods in Bayesian deep learning, ranging from Bayesian neural networks to the Bayesian fine-tuning of large-scale models, before reviewing existing theoretical guarantees. ParVI remains a rapidly developing field, and the open problems outlined in the previous section (including kernel design in high dimensions, finite-particle degeneracy, and theory for stochastic variants) are likely to remain active topics of research in the coming years.
