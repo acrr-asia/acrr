@@ -1,0 +1,306 @@
+---
+title: "Máy vector hỗ trợ hạt nhân"
+description: "Máy vector hỗ trợ hạt nhân: thủ thuật hạt nhân, điều kiện Mercer, các hạt nhân tuyến tính, đa thức, RBF và sigmoid, với ví dụ XOR và MNIST trong sklearn."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - machine learning
+  - classification
+  - support vector machines
+series: machine-learning-from-the-ground-up
+seriesOrder: 28
+originalLang: "vi"
+---
+
+> **Nguồn.** Bài này là Chương 28 của cuốn *Machine Learning cơ bản*, được chuyển thể sát văn bản gốc. Các số hiệu mục, công thức và chương được giữ nguyên như trong sách; "Chương *n*" ứng với bài thứ *n* của loạt bài này. Các hình minh họa của sách không được đưa vào; chú thích của chúng được giữ lại.
+
+## 28.1. Giới thiệu
+
+Có một sự tương đồng thú vị giữa hai nhóm thuật toán phân loại phổ biến nhất: mạng neuron và máy vector hỗ trợ. Chúng đều bắt đầu từ bài toán phân loại nhị phân với hai lớp dữ liệu tách biệt tuyến tính, phát triển tiếp cho trường hợp hai lớp gần tách biệt tuyến tính, tới các bài toán phân loại đa lớp và cuối cùng là các bài toán với các lớp dữ liệu hoàn toàn không tách biệt tuyến tính. Sự tương đồng này có thể thấy trong Bảng 28.1.
+
+**Bảng 28.1:** Sự tương đồng giữa mạng neuron và máy vector hỗ trợ
+
+| Mạng neuron | Máy vector hỗ trợ | Tính chất chung |
+| --- | --- | --- |
+| PLA | SVM lề cứng | Hai lớp tách biệt tuyến tính |
+| Hồi quy logistic | SVM lề mềm | Hai lớp gần tách biệt tuyến tính |
+| Hồi quy softmax | SVM đa lớp | Nhiều lớp dữ liệu, ranh giới tuyến tính |
+| Mạng neuron đa tầng | SVM hạt nhân | Bài toán phân loại hai lớp không tách biệt tuyến tính |
+
+Trong chương này, chúng ta cùng thảo luận về *SVM hạt nhân* (kernel SVM) cho bài toán phân loại dữ liệu không tách biệt tuyến tính. Bài toán phân loại đa lớp sử dụng ý tưởng SVM sẽ được thảo luận trong chương tiếp theo.
+
+Ý tưởng cơ bản của SVM hạt nhân và các *mô hình hạt nhân* (kernel model) nói chung là tìm một phép biến đổi dữ liệu không tách biệt tuyến tính ở một không gian thành dữ liệu (gần) tách biệt tuyến tính trong một không gian mới. Nếu có thể thực hiện điều này, bài toán phân loại sẽ được giải quyết bằng SVM lề cứng/mềm.
+
+> **Hình 28.1** (hình trong sách gốc). Ví dụ về SVM hạt nhân. (a) Dữ liệu hai lớp không tách biệt tuyến tính trong không gian hai chiều. (b) Nếu xét thêm chiều thứ ba là một hàm số của hai chiều còn lại $z = x^2 + y^2$, các điểm dữ liệu sẽ được phân bố trên một mặt parabolic và hai lớp đã trở nên tách biệt tuyến tính. Mặt phẳng cắt parabolic chính là mặt phân chia, có thể tìm được bởi một SVM lề cứng hoặc mềm. (c) Giao tuyến của mặt phẳng tìm được và mặt parabolic là một đường ellipse. Hình chiếu của đường ellipse này xuống không gian ban đầu chính là đường phân chia hai lớp dữ liệu.
+
+Xét ví dụ trên Hình 28.1 với việc biến dữ liệu không tách biệt tuyến tính trong không gian hai chiều thành tách biệt tuyến tính trong không gian ba chiều. Để quan sát ví dụ này một cách sinh động hơn, bạn có thể xem clip đi kèm trên blog Machine Learning cơ bản tại https://goo.gl/3wMHyZ.
+
+Nhìn từ góc độ toán học, SVM hạt nhân là phương pháp đi tìm một hàm số $\Phi(\mathbf{x})$ biến đổi dữ liệu $\mathbf{x}$ từ không gian đặc trưng ban đầu thành dữ liệu trong một không gian mới. Trong không gian mới, ta mong muốn dữ liệu giữa hai lớp là (gần) tách biệt tuyến tính. Khi đó, ta có thể dùng các bộ phân loại tuyến tính thông thường như hồi quy logistic/softmax hoặc SVM lề cứng/mềm.
+
+Các hàm $\Phi(\mathbf{x})$ thường tạo ra dữ liệu mới có số chiều lớn, thậm chí có thể vô hạn chiều. Nếu tính toán các hàm này trực tiếp, chắc chắn chúng ta sẽ gặp các vấn đề về bộ nhớ và hiệu năng tính toán. Có một cách tiếp cận khác là sử dụng các *hàm số hạt nhân* (kernel function) mô tả quan hệ giữa hai vector trong không gian mới thay vì tính toán trực tiếp biến đổi của từng vector. Kỹ thuật này được xây dựng dựa trên việc giải bài toán đối ngẫu trong SVM lề cứng/mềm.
+
+Nếu phải so sánh, ta thấy rằng hàm hạt nhân có chức năng tương tự như hàm kích hoạt trong mạng neuron vì chúng đều tạo ra các quan hệ phi tuyến.
+
+## 28.2. Cơ sở toán học
+
+Cùng nhắc lại bài toán đối ngẫu trong SVM lề mềm cho dữ liệu gần tách biệt tuyến tính:
+
+$$
+\begin{aligned}
+\boldsymbol{\lambda} = \arg\max_{\boldsymbol{\lambda}}\ & \sum_{n=1}^N \lambda_n - \frac{1}{2}\sum_{n=1}^N\sum_{m=1}^N \lambda_n\lambda_my_ny_m\mathbf{x}_n^T\mathbf{x}_m \\
+\text{s.t.}\ & \sum_{n=1}^N \lambda_ny_n = 0 \\
+& 0 \leq \lambda_n \leq C, \quad \forall n = 1, 2, \dots, N.
+\end{aligned}
+\tag{28.1}
+$$
+
+Trong đó, $N$ là số cặp điểm dữ liệu huấn luyện; $\mathbf{x}_n$ và $y_n = \pm 1$ lần lượt là vector đặc trưng và nhãn của dữ liệu thứ $n$; $\lambda_n$ là nhân tử Lagrange ứng với điểm dữ liệu thứ $n$; và $C$ là một hằng số dương giúp cân đối độ lớn giữa độ rộng lề và sự hy sinh của các điểm nằm trong vùng không an toàn. Khi $C = \infty$ hoặc rất lớn, SVM lề mềm trở thành SVM lề cứng.
+
+Sau khi tìm được $\boldsymbol{\lambda}$ cho bài toán (28.1), nhãn của một điểm dữ liệu mới sẽ được xác định bởi
+
+$$
+\text{class}(\mathbf{x}) = \text{sgn}\left\{\sum_{m \in \mathcal{S}} \lambda_my_m\mathbf{x}_m^T\mathbf{x} + \frac{1}{N_{\mathcal{M}}}\sum_{n \in \mathcal{M}}\left(y_n - \sum_{m \in \mathcal{S}} \lambda_my_m\mathbf{x}_m^T\mathbf{x}_n\right)\right\} \tag{28.2}
+$$
+
+trong đó, $\mathcal{M} = \{n : 0 < \lambda_n < C\}$ là tập hợp những điểm nằm trên hai đường thẳng hỗ trợ; $\mathcal{S} = \{n : 0 < \lambda_n\}$ là tập hợp các vector nằm trên hai đường hỗ trợ hoặc nằm giữa chúng; $N_{\mathcal{M}}$ là số phần tử của $\mathcal{M}$.
+
+Rất hiếm khi dữ liệu thực tế gần tách biệt tuyến tính, vì vậy nghiệm của bài toán (28.1) có thể không thực sự tạo ra một bộ phân loại tốt. Giả sử rằng ta có thể tìm được hàm số $\Phi()$ sao cho các điểm dữ liệu $\Phi(\mathbf{x})$ trong không gian mới (gần) tách biệt tuyến tính.
+
+Trong không gian mới, bài toán (28.1) trở thành:
+
+$$
+\begin{aligned}
+\boldsymbol{\lambda} = \arg\max_{\boldsymbol{\lambda}}\ & \sum_{n=1}^N \lambda_n - \frac{1}{2}\sum_{n=1}^N\sum_{m=1}^N \lambda_n\lambda_my_ny_m\Phi(\mathbf{x}_n)^T\Phi(\mathbf{x}_m) \\
+\text{s.t.}\ & \sum_{n=1}^N \lambda_ny_n = 0 \\
+& 0 \leq \lambda_n \leq C, \quad \forall n = 1, 2, \dots, N
+\end{aligned}
+\tag{28.3}
+$$
+
+Nhãn của một điểm dữ liệu mới được xác định bởi dấu của biểu thức:
+
+$$
+\begin{aligned}
+\mathbf{w}^T\Phi(\mathbf{x}) + b = \sum_{m \in \mathcal{S}} \lambda_my_m\Phi(\mathbf{x}_m)^T\Phi(\mathbf{x}) & \\
++ \frac{1}{N_{\mathcal{M}}}\sum_{n \in \mathcal{M}}\left(y_n - \sum_{m \in \mathcal{S}} \lambda_my_m\Phi(\mathbf{x}_m)^T\Phi(\mathbf{x}_n)\right)
+\end{aligned}
+\tag{28.4}
+$$
+
+Như đã đề cập, việc tính toán trực tiếp $\Phi(\mathbf{x})$ cho mỗi điểm dữ liệu có thể sẽ tốn rất nhiều bộ nhớ và thời gian vì số chiều của $\Phi(\mathbf{x})$ thường rất lớn, có thể là vô hạn. Thêm nữa, để tìm nhãn của một điểm dữ liệu mới $\mathbf{x}$, ta cần tính $\Phi(\mathbf{x})$ rồi lấy tích vô hướng với các $\Phi(\mathbf{x}_m), m \in \mathcal{S}$. Việc tính toán này có thể được hạn chế bằng quan sát dưới đây.
+
+Trong bài toán (28.3) và biểu thức (28.4), ta không cần tính trực tiếp $\Phi(\mathbf{x})$ cho mọi điểm dữ liệu. Thay vào đó, ta chỉ cần tính $\Phi(\mathbf{x})^T\Phi(\mathbf{z})$ với hai điểm dữ liệu $\mathbf{x}, \mathbf{z}$. Vì vậy, ta không cần xác định hàm $\Phi(.)$ mà chỉ cần tính giá trị $k(\mathbf{x}, \mathbf{z}) = \Phi(\mathbf{x})^T\Phi(\mathbf{z})$. Kỹ thuật tính tích vô hướng của hai điểm trong không gian mới thay vì tọa độ của từng điểm có tên gọi chung là *thủ thuật hạt nhân* (kernel trick).
+
+Bằng cách định nghĩa hàm hạt nhân $k(\mathbf{x}, \mathbf{z}) = \Phi(\mathbf{x})^T\Phi(\mathbf{z})$, ta có thể viết lại bài toán (28.3) và biểu thức (28.4) như sau:
+
+$$
+\begin{aligned}
+\boldsymbol{\lambda} = \arg\max_{\boldsymbol{\lambda}}\ & \sum_{n=1}^N \lambda_n - \frac{1}{2}\sum_{n=1}^N\sum_{m=1}^N \lambda_n\lambda_my_ny_mk(\mathbf{x}_n, \mathbf{x}_m) \\
+\text{s.t.}\ & \sum_{n=1}^N \lambda_ny_n = 0 \\
+& 0 \leq \lambda_n \leq C, \quad \forall n = 1, 2, \dots, N
+\end{aligned}
+\tag{28.5}
+$$
+
+và
+
+$$
+\sum_{m \in \mathcal{S}} \lambda_my_mk(\mathbf{x}_m, \mathbf{x}) + \frac{1}{N_{\mathcal{M}}}\sum_{n \in \mathcal{M}}\left(y_n - \sum_{m \in \mathcal{S}} \lambda_my_mk(\mathbf{x}_m, \mathbf{x}_n)\right) \tag{28.6}
+$$
+
+**Ví dụ:** Xét phép biến đổi một điểm trong không gian hai chiều $\mathbf{x} = [x_1, x_2]^T$ thành một điểm trong không gian sáu chiều $\Phi(\mathbf{x}) = [1, \sqrt{2}x_1, \sqrt{2}x_2, x_1^2, \sqrt{2}x_1x_2, x_2^2]^T$.[^1] Ta có:
+
+$$
+\begin{aligned}
+\Phi(\mathbf{x})^T\Phi(\mathbf{z}) &= [1, \sqrt{2}x_1, \sqrt{2}x_2, x_1^2, \sqrt{2}x_1x_2, x_2^2] \\
+&\quad \times [1, \sqrt{2}z_1, \sqrt{2}z_2, z_1^2, \sqrt{2}z_1z_2, z_2^2]^T \\
+&= 1 + 2x_1z_1 + 2x_2z_2 + x_1^2z_1^2 + 2x_1z_1x_2z_2 + x_2^2z_2^2 \\
+&= (1 + x_1z_1 + x_2z_2)^2 = (1 + \mathbf{x}^T\mathbf{z})^2 = k(\mathbf{x}, \mathbf{z})
+\end{aligned}
+$$
+
+Trong ví dụ này, việc tính toán hàm hạt nhân $k(\mathbf{x}, \mathbf{z}) = (1 + \mathbf{x}^T\mathbf{z})^2$ cho hai điểm dữ liệu đơn giản hơn việc tính từng $\Phi(.)$ rồi nhân chúng với nhau. Hơn nữa, giá trị thu được là một số vô hướng thay vì hai vector sáu chiều $\Phi(\mathbf{x})$, $\Phi(\mathbf{z})$.
+
+Hàm hạt nhân cần có những tính chất gì, và những hàm nào được sử dụng phổ biến?
+
+## 28.3. Hàm số hạt nhân
+
+### 28.3.1. Tính chất của các hàm hạt nhân
+
+Không phải hàm $k()$ nào cũng có thể được sử dụng. Các hàm hạt nhân cần có các tính chất:
+
+- **Đối xứng:** $k(\mathbf{x}, \mathbf{z}) = k(\mathbf{z}, \mathbf{x})$, vì tích vô hướng của hai vector có tính đối xứng.
+- Về lý thuyết, hàm kernel cần thỏa mãn *điều kiện Mercer*:[^2]
+
+  $$
+  \sum_{n=1}^N\sum_{m=1}^N k(\mathbf{x}_m, \mathbf{x}_n)c_nc_m \geq 0, \quad \forall c_i \in \mathbb{R}, i = 1, 2, \dots, N \tag{28.7}
+  $$
+
+  với mọi tập hữu hạn các vector $\mathbf{x}_1, \dots, \mathbf{x}_N$. Tính chất này giúp đảm bảo hàm mục tiêu trong bài toán đối ngẫu (28.5) là lồi. Thật vậy, nếu một hàm kernel thỏa mãn điều kiện (28.7), xét $c_n = y_n\lambda_n$, ta sẽ có:
+
+  $$
+  \boldsymbol{\lambda}^T\mathbf{K}\boldsymbol{\lambda} = \sum_{n=1}^N\sum_{m=1}^N k(\mathbf{x}_m, \mathbf{x}_n)y_ny_m\lambda_n\lambda_m \geq 0, \quad \forall \lambda_n \tag{28.8}
+  $$
+
+  với $\mathbf{K}$ là một ma trận đối xứng và $k_{nm} = y_ny_mk(\mathbf{x}_n, \mathbf{x}_m)$. Từ (28.8) ta suy ra $\mathbf{K}$ là một ma trận nửa xác định dương. Vì vậy, bài toán tối ưu (28.5) có ràng buộc là lồi và hàm mục tiêu là một hàm lồi (một quy hoạch toàn phương).[^3] Điều kiện này giúp bài toán được giải một cách hiệu quả.
+- Trong thực hành, một vài hàm số $k()$ không thỏa mãn điều kiện Mercer vẫn cho kết quả chấp nhận được. Những hàm số này vẫn được gọi là hạt nhân. Trong chương này, chúng ta chỉ quan tâm tới các hàm hạt nhân thông dụng có sẵn trong các thư viện.
+
+Việc giải quyết bài toán (28.5) hoàn toàn tương tự như bài toán đối ngẫu trong SVM lề mềm. Chúng ta sẽ không đi sâu vào việc tính nghiệm này. Thay vào đó, chúng ta sẽ thảo luận các hàm hạt nhân thông dụng và hiệu năng của chúng trong các bài toán.
+
+### 28.3.2. Một số hàm hạt nhân thông dụng
+
+#### Tuyến tính
+
+Đây là trường hợp đơn giản với hàm hạt nhân chính là tích vô hướng của hai vector: $k(\mathbf{x}, \mathbf{z}) = \mathbf{x}^T\mathbf{z}$. Như đã chứng minh trong Chương 26, hàm số thỏa mãn điều kiện (28.7). Khi sử dụng `sklearn.svm.SVC`, hàm này được chọn bằng cách gán `kernel = 'linear'`.
+
+#### Đa thức
+
+Hàm hạt nhân đa thức có dạng
+
+$$
+k(\mathbf{x}, \mathbf{z}) = (r + \gamma\mathbf{x}^T\mathbf{z})^d \tag{28.9}
+$$
+
+Với $d$ là một số thực dương. Khi $d$ là một số tự nhiên, hạt nhân đa thức có thể mô tả hầu hết các đa thức có bậc không vượt quá $d$.
+
+Khi sử dụng thư viện sklearn, hạt nhân này được chọn bằng cách gán `kernel = 'poly'`. Bạn đọc có thể tìm thấy tài liệu chính thức trong scikit-learn tại https://goo.gl/QvtFc9.
+
+#### Hàm cơ sở radial
+
+*Hàm cơ sở radial* (radial basis function, RBF hay *hạt nhân Gauss*) là lựa chọn mặc định trong sklearn, được sử dụng nhiều nhất trong thực tế. Hàm số này được định nghĩa bởi
+
+$$
+k(\mathbf{x}, \mathbf{z}) = \exp(-\gamma\|\mathbf{x} - \mathbf{z}\|_2^2), \quad \gamma > 0 \tag{28.10}
+$$
+
+#### Sigmoid
+
+Hàm dạng sigmoid cũng được sử dụng làm hạt nhân:
+
+$$
+k(\mathbf{x}, \mathbf{z}) = \tanh(\gamma\mathbf{x}^T\mathbf{z} + r) \tag{28.11}
+$$
+
+Trong sklearn, hạt nhân này được lựa chọn bằng cách gán `kernel = 'sigmoid'`.
+
+#### Bảng tóm tắt các hàm hạt nhân thông dụng
+
+Bảng 28.2 tóm tắt các hàm hạt nhân thông dụng và cách sử dụng trong sklearn.
+
+**Bảng 28.2:** Bảng các hàm hạt nhân thông dụng
+
+| Tên | Công thức | Thiết lập hệ số |
+| --- | --- | --- |
+| `'linear'` | $\mathbf{x}^T\mathbf{z}$ | không có hệ số |
+| `'poly'` | $(r + \gamma\mathbf{x}^T\mathbf{z})^d$ | $d$: `degree`, $\gamma$: `gamma`, $r$: `coef0` |
+| `'sigmoid'` | $\tanh(\gamma\mathbf{x}^T\mathbf{z} + r)$ | $\gamma$: `gamma`, $r$: `coef0` |
+| `'rbf'` | $\exp(-\gamma\|\mathbf{x} - \mathbf{z}\|_2^2)$ | $\gamma > 0$: `gamma` |
+
+Nếu muốn sử dụng các thư viện cho C/C++, các bạn có thể tham khảo LIBSVM (https://goo.gl/Dt7o7r) và LIBLINEAR (https://goo.gl/ctD7a3).
+
+#### Hàm tự định nghĩa
+
+Ngoài các hàm hạt nhân thông dụng như trên, chúng ta cũng có thể tự định nghĩa các hàm hạt nhân theo hướng dẫn tại https://goo.gl/A9ajzp.
+
+## 28.4. Ví dụ minh họa
+
+### 28.4.1. Bài toán XOR
+
+> **Hình 28.2** (hình trong sách gốc). Sử dụng SVM hạt nhân để giải quyết bài toán XOR: (a) hạt nhân sigmoid, (b) hạt nhân đa thức, (c) hạt nhân RBF. Các đường nét liền là các đường phân loại, ứng với giá trị của biểu thức (28.6) bằng 0. Các đường nét đứt là các đường đồng mức ứng với giá trị của biểu thức (28.6) bằng $\pm 0.5$. Các vùng có nền màu xám tương ứng với lớp các điểm đen hình tròn, các vùng có nền trắng tương ứng với lớp các điểm trắng hình vuông. Trong ba hạt nhân, RBF cho kết quả đối xứng, hợp lý với dữ liệu bài toán.
+
+Chúng ta biết rằng bài toán XOR không thể giải quyết nếu chỉ dùng một bộ phân loại tuyến tính. Trong mục này, chúng ta sẽ thử ba hàm hạt nhân khác nhau và sử dụng SVM. Kết quả được minh hoạ trong Hình 28.2. Dưới đây là đoạn mã tìm các mô hình tương ứng:
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn import svm
+# XOR dataset and targets
+X = np.array([[0, 0], [1, 1], [1, 0], [0, 1]])
+y = np.array([0, 0, 1, 1])
+# fit the model
+for kernel in ('sigmoid', 'poly', 'rbf'):
+    clf = svm.SVC(kernel=kernel, gamma=4, coef0 = 0)
+    clf.fit(X, y)
+```
+
+Nhận xét với mỗi hàm hạt nhân:
+
+- **sigmoid:** Nghiệm tìm được không thật tốt vì có ba trong bốn điểm nằm chính xác trên các đường phân chia.
+- **poly:** Nghiệm này tốt hơn nghiệm của sigmoid nhưng kết quả có phần quá khớp.
+- **rbf:** Đường phân chia tìm được khá hợp lý khi tạo ra các vùng đối xứng phù hợp với dữ liệu. Trên thực tế, các rbf kernel được sử dụng nhiều nhất và cũng là lựa chọn mặc định trong `sklearn.svm.SVC`.
+
+### 28.4.2. Dữ liệu gần tách biệt tuyến tính
+
+> **Hình 28.3** (hình trong sách gốc). Sử dụng SVM hạt nhân giải quyết bài toán với dữ liệu gần tách biệt tuyến tính: (a) hạt nhân sigmoid, (b) hạt nhân đa thức, (c) hạt nhân RBF. Hạt nhân đa thức cho kết quả hợp lý nhất.
+
+Xét một ví dụ khác với dữ liệu giữa hai lớp gần tách biệt tuyến tính như trong Hình 28.3. Trong ví dụ này, dường như quá khớp đã xảy ra với `kernel = 'rbf'`. Hạt nhân sigmoid cho kết quả không thực sự tốt và ít được sử dụng.
+
+### 28.4.3. Máy vector hỗ trợ hạt nhân cho MNIST
+
+Tiếp theo, chúng ta áp dụng SVM với hạt nhân RBF vào bài toán phân loại bốn chữ số 0, 1, 2, 3 của cơ sở dữ liệu chữ số viết tay MNIST. Trước hết, chúng ta cần lấy dữ liệu rồi chuẩn hóa về đoạn $[0, 1]$ bằng cách chia toàn bộ các thành phần cho 255 (giá trị cao nhất của mỗi điểm ảnh):[^4]
+
+```python
+from __future__ import print_function
+import numpy as np
+from sklearn import svm
+from sklearn.datasets import fetch_mldata
+data_dir = '../../data' # path to your data folder
+mnist = fetch_mldata('MNIST original', data_home=data_dir)
+X_all = mnist.data/255. # data normalization
+y_all = mnist.target
+digits = [0, 1, 2, 3]
+ids = []
+for d in digits:
+    ids.append(np.where(y_all == d)[0])
+selected_ids = np.concatenate(ids, axis = 0)
+X = X_all[selected_ids]
+y = y_all[selected_ids]
+print('Number of samples = ', X.shape[0])
+```
+
+Kết quả:
+
+```text
+Number of samples =  28911
+```
+
+Như vậy, tổng cộng có khoảng 29000 điểm dữ liệu. Chúng ta lấy ra 24000 điểm làm tập kiểm tra, còn lại là dữ liệu huấn luyện. Sử dụng bộ phân loại SVM hạt nhân:
+
+```python
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size= 24000)
+model = svm.SVC(kernel='rbf', gamma=.1, coef0 = 0)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+print("Accuracy: %.2f %%" %(100*accuracy_score(y_test, y_pred)))
+```
+
+Kết quả:
+
+```text
+Accuracy: 94.22 %
+```
+
+Kết quả thu được là khoảng 94%. Nếu chọn nhiều điểm dữ liệu huấn luyện hơn và thay đổi các tham số `gamma`, `coef0`, bạn đọc có thể sẽ thu được kết quả tốt hơn. Đây là một bài toán phân loại đa lớp, và kỹ thuật giải quyết của thư viện này là one-vs-rest.[^5] Như đã đề cập trong Chương 14, one-vs-rest có nhiều hạn chế vì phải huấn luyện nhiều bộ phân loại. Hơn nữa, với SVM hạt nhân, việc tính toán các hàm hạt nhân cũng trở nên phức tạp khi lượng dữ liệu và số chiều dữ liệu tăng lên.
+
+## 28.5. Tóm tắt
+
+- Trong bài toán phân loại nhị phân, nếu dữ liệu hai lớp không tách biệt tuyến tính, chúng ta có thể tìm cách biến đổi dữ liệu sao cho chúng (gần) tách biệt tuyến tính trong không gian mới.
+- Việc tính toán trực tiếp hàm $\Phi()$ đôi khi phức tạp và tốn nhiều bộ nhớ. Thay vào đó, ta có thể sử dụng thủ thuật hạt nhân. Trong cách tiếp cận này, ta chỉ cần tính tích vô hướng của hai vector bất kỳ trong không gian mới: $k(\mathbf{x}, \mathbf{z}) = \Phi(\mathbf{x})^T\Phi(\mathbf{z})$. Thông thường, các hàm $k(., .)$ thỏa mãn điều kiện Mercer, và được gọi là hàm hạt nhân. Cách giải bài toán SVM với hàm hạt nhân hoàn toàn giống cách giải bài toán tối ưu trong SVM lề mềm.
+- Có bốn hàm hạt nhân thông dụng: linear, poly, rbf, sigmoid. Trong đó, rbf được sử dụng nhiều nhất và là lựa chọn mặc định trong các thư viện SVM.
+- Mã nguồn cho chương này có thể được tìm thấy tại https://goo.gl/6sbds5.
+
+## Tài liệu tham khảo
+
+1. *Machine Learning cơ bản*, Chương 28 "Máy vector hỗ trợ hạt nhân".
+
+[^1]: Vector $\Phi(\mathbf{x})$ ở đây có sáu thành phần, nên không gian mới có sáu chiều; bản gốc ghi "năm chiều" ở câu này và ở cuối ví dụ. Ở dòng thứ hai của phép tính, bản gốc ghi các số hạng $x_1^2x_2^2$ và $x_2^2z_2^2$; tích của hai vector cho $x_1^2z_1^2$ và $x_2^2z_2^2$ như ở trên, và kết quả cuối cùng không đổi.
+
+[^2]: Xem Kernel method – Wikipedia (https://goo.gl/YXct7F).
+
+[^3]: Chính xác hơn, vì $\mathbf{K}$ nửa xác định dương, hàm mục tiêu của (28.5), tức $\mathbf{1}^T\boldsymbol{\lambda} - \frac{1}{2}\boldsymbol{\lambda}^T\mathbf{K}\boldsymbol{\lambda}$, là một hàm lõm. Bài toán tối đa một hàm lõm trên một tập ràng buộc lồi, tương đương với tối thiểu hàm lồi $\frac{1}{2}\boldsymbol{\lambda}^T\mathbf{K}\boldsymbol{\lambda} - \mathbf{1}^T\boldsymbol{\lambda}$, là một bài toán lồi.
+
+[^4]: Hàm `fetch_mldata` đã bị loại khỏi các phiên bản scikit-learn mới (từ 0.22). Với các phiên bản này, dữ liệu MNIST có thể được tải bằng `fetch_openml('mnist_784')`; nhãn khi đó ở dạng chuỗi ký tự.
+
+[^5]: Với bài toán đa lớp, `sklearn.svm.SVC` thực chất huấn luyện theo chiến lược one-vs-one (một bộ phân loại cho mỗi cặp lớp); tham số `decision_function_shape` chỉ thay đổi dạng đầu ra của hàm quyết định.

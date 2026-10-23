@@ -22,15 +22,18 @@ Arguments: a mode and a target. Modes: `status`, `audit` (see the `content-audit
 ## 1. Discover and inventory
 
 ```sh
-eos status           # per item: lint counts, review record, stage
+eos status           # per item: lint counts, review record, stage, queue status
+eos queue            # editorial queue: workflow status, contracts, open live findings, problems
 eos inventory --md   # adds routes, translations, references, built pages
 ```
+
+When the project has an editorial queue (`queue` in the config), a new item starts as a queue entry with status `proposed` and an idea proposal (`templates/idea-proposal.md`); it is not drafted until its reader-value contract is approved and its status is `approved-for-research` (strategy Gates 1 and 2). Run `eos queue init` after adding a content file, and keep its status current with `eos queue set <id> <status> --by <role> --note <why>`.
 
 Stages: `needs-review` (no record), `needs-fixes` (record says revise), `review-stale` (file changed after its record), `lint-errors`, `ready`, `draft`.
 
 ## 2. Classify
 
-For each item in scope, from the config: content type, rubric, required stages (`review.requiredStages`), required sections, and whether it belongs to a series. Read the audience and identity from `publication`.
+For each item in scope, from the config: content type, rubric, required stages (`review.requiredStages`), required sections, and whether it belongs to a series. Read the audience and identity from `publication`. Where the project uses a queue, also record in the queue entry the format, the primary value category and the risk (high: reporting, claims about named people or organizations, safety-relevant guidance, anything commercial).
 
 ## 3. Plan
 
@@ -97,7 +100,7 @@ Publish only through the project's normal path (for most static sites: commit on
 
 ## 12. Record
 
-After deployment, verify the live result with the project's post-deploy check (or by fetching the changed pages) before saying anything is published. Record in the pull request and in the final message: items, stage outcomes, scores, findings fixed and open, not-verified claims, validation results, deploy and live-verification evidence. A local build is not evidence of deployment.
+After deployment, verify the live result with the project's post-deploy check (or by fetching the changed pages) before saying anything is published. A deployment check is not editorial acceptance: set the item's queue status to `published-awaiting-live-review`; the chief editor's live review (`templates/live-review-report.md`) then accepts the page or opens findings, and only a permitted reviewer (`queue.highRiskApprovers` for a high-risk item) may accept it. Record in the pull request and in the final message: items, stage outcomes, scores, findings fixed and open, not-verified claims, validation results, deploy and live-verification evidence. A local build is not evidence of deployment.
 
 ## Failure handling
 

@@ -16,7 +16,14 @@ for visitors.
 | Interface text | `src/i18n/ui.ts` (`en`) | `src/i18n/ui.ts` (`vi`) | every `/vi/...` page |
 
 A translation has the same file name (slug or id) as its original; the build fails if a
-translation has no original. An untranslated article or insight still appears in Vietnamese
+translation has no original. The one exception is a **Vietnamese original**: an article written in
+Vietnamese first, at the user's request, while its English version is still planned. It lives in
+`src/content/blog/vi/<slug>.mdx` with `originalLang: "vi"` in its frontmatter, appears only in
+Vietnamese listings and routes, and its series' English file lists it under `plannedEntries` while
+the Vietnamese file does not (the build checks that the English planned count equals the Vietnamese
+count plus the series' Vietnamese originals, and allows the two `status` values to differ). When the
+English version is written, remove `originalLang` from the Vietnamese file and the planned entry
+from the English series file; from then on it is an ordinary translation. An untranslated article or insight still appears in Vietnamese
 listings, marked as English and linking to the English page.
 
 ## What stays identical to the original
@@ -557,3 +564,51 @@ from the measurement sense *độ chụm*. In prose, "et al." is written *và c�
 | Takeaways (box label) | Điểm cần ghi nhớ |
 | Equation N, Proposition, Definition, Theorem, Proof, Figure, Table, Algorithm | Phương trình N, Mệnh đề, Định nghĩa, Định lý, Chứng minh, Hình, Bảng, Thuật toán |
 | link text "Chapter K, Section j" | Chương K, Mục j (link to `/vi/blog/<slug>` without the `#` anchor) |
+| kernel method, kernel trick, kernelized, kernel machine | phương pháp hàm nhân (kernel methods), thủ thuật hàm nhân (kernel trick), hàm nhân hóa (kernelized), máy hàm nhân (kernel machine) |
+| feature map, feature space, input space | ánh xạ đặc trưng (feature map), không gian đặc trưng, không gian đầu vào |
+| Gram matrix, kernel matrix | ma trận Gram, ma trận hàm nhân |
+| positive (semi-)definite kernel, strictly positive definite | hàm nhân (nửa) xác định dương, xác định dương chặt |
+| covariance function, mean function | hàm hiệp phương sai, hàm trung bình |
+| linear / polynomial / Matérn / Laplacian / periodic / arc-cosine kernel | hàm nhân tuyến tính / đa thức / Matérn / Laplace / tuần hoàn / arc-cos |
+| radial basis function (RBF) kernel | hàm nhân hàm cơ sở bán kính (radial basis function, RBF) on first use, then *hàm nhân RBF* |
+| squared exponential (SE) / exponentiated quadratic kernel | hàm nhân mũ bình phương for both English names (they are the same kernel; not *mũ bậc hai*) |
+| stationary / isotropic kernel, non-stationarity | hàm nhân dừng / đẳng hướng, tính không dừng |
+| spectral density, Bochner's theorem, spectral-mixture kernel | mật độ phổ, định lý Bochner, hàm nhân hỗn hợp phổ |
+| universal / characteristic kernel, mean embedding | hàm nhân phổ quát / đặc trưng hóa, phép nhúng trung bình |
+| Representer theorem, Moore-Aronszajn theorem | định lý biểu diễn, định lý Moore-Aronszajn |
+| expressiveness, expressive (power) | sức biểu đạt, giàu sức biểu đạt (not *khả năng biểu diễn*, which collides with representation) |
+| composition, compose, process composition | hợp thành, phép hợp thành, hợp thành quá trình (not *ghép*); composed function: hàm hợp |
+| inducing input / variable / value / feature, interdomain | đầu vào / biến / giá trị / đặc trưng cảm sinh, liên miền (interdomain) |
+| sparse GP, sparse variational GP (SVGP) | GP thưa, GP biến phân thưa (sparse variational GP) |
+| deep kernel, deep kernel GP | hàm nhân sâu, GP với hàm nhân sâu (quá trình Gauss với hàm nhân sâu) |
+| feature extractor, base kernel (of a deep kernel) | bộ trích xuất đặc trưng (feature extractor), hàm nhân cơ sở (base kernel) |
+| stochastic variational deep kernel learning (SVDKL), structured kernel interpolation (SKI, KISS-GP) | học hàm nhân sâu biến phân ngẫu nhiên (SVDKL), nội suy hàm nhân có cấu trúc (SKI) |
+| deep Gaussian process (deep GP, DGP) | quá trình Gauss sâu (GP sâu, DGP) |
+| warping, input warping, warped GP | sự uốn (warping), uốn đầu vào, GP uốn (warped GP) |
+| bottleneck (layer), layer collapse | (lớp) nút cổ chai (bottleneck), sụp đổ lớp (layer collapse) |
+| explicit-latent / implicit-latent view | góc nhìn biến ẩn tường minh / ngầm định |
+| GP-LVM, hierarchical GP-LVM | GP-LVM (kept), GP-LVM phân cấp |
+| restricted Boltzmann machine, deep belief network, contrastive divergence | máy Boltzmann giới hạn (RBM), mạng niềm tin sâu (deep belief network), phân kỳ tương phản (contrastive divergence) |
+| collapsed / uncollapsed bound, variational compression | cận thu gọn / không thu gọn, nén biến phân |
+| doubly stochastic variational inference (DSVI), psi-statistics | suy luận biến phân ngẫu nhiên kép (DSVI), thống kê psi |
+| inference scheme, variational scheme | lược đồ suy luận, lược đồ biến phân (not *sơ đồ* or *cơ chế*) |
+| automatic relevance determination (ARD) | xác định mức liên quan tự động (ARD) |
+| "Schematic reproduction" (figure caption) | Bản tái hiện dạng sơ đồ |
+| deep kernel process (DKP), deep kernel machine (DKM) | quá trình hàm nhân sâu (DKP), máy hàm nhân sâu (DKM) |
+| Wishart distribution, scale matrix, degrees of freedom | phân phối Wishart, ma trận co giãn (scale matrix), bậc tự do |
+| deep (inverse) Wishart process (DWP / DIWP), (generalized) singular Wishart | quá trình Wishart (nghịch đảo) sâu, Wishart suy biến (tổng quát) |
+| permutation symmetry | đối xứng hoán vị |
+| Bayesian representation learning limit (BRLL), DKM objective | giới hạn học biểu diễn Bayes (BRLL), hàm mục tiêu DKM |
+| preactivation, postactivation | tiền kích hoạt, hậu kích hoạt |
+| partitioned Gaussian, prior conditional | Gauss phân khối (partitioned Gaussian), tiên nghiệm có điều kiện |
+| (Bayesian) model mismatch | đặc tả sai mô hình (Bayes) |
+| meta-learning, meta-learned, meta-training, meta-testing, meta-dataset | siêu học (meta-learning), được siêu học, siêu huấn luyện, siêu kiểm tra, siêu tập dữ liệu |
+| few-shot learning, support set, query set | học với ít mẫu (few-shot learning), tập hỗ trợ (support set), tập truy vấn (query set) |
+| single-task / multi-task (learning, GP) | đơn tác vụ / đa tác vụ |
+| bilevel optimization, inner optimization, hypergradient | tối ưu hóa hai cấp (bilevel optimization), tối ưu hóa bên trong, siêu gradient (hypergradient) |
+| implicit function theorem (IFT), implicit differentiation | định lý hàm ẩn (IFT), vi phân ẩn |
+| deep kernel transfer (DKT), ADKF-IFT | chuyển giao hàm nhân sâu (DKT), ADKF-IFT (name kept; glossed as *khớp hàm nhân sâu thích nghi bằng định lý hàm ẩn*) |
+| instantiation (of a framework) | hiện thực (instantiation) |
+| negative log marginal likelihood (NLML), negative log likelihood (NLL) | logarit âm của hàm hợp lý biên (NLML), logarit âm của hàm hợp lý (NLL) |
+| out-of-domain, in-domain | ngoài miền (out-of-domain, OOD), trong miền; distinct from out-of-distribution (*ngoài phân phối*) |
+| baseline, molecular fingerprint | phương pháp cơ sở (baseline), dấu vân tay phân tử (molecular fingerprint) |

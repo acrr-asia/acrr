@@ -4,8 +4,7 @@
 - Reviewed commit: 49941d2 (the wave-1 revision of this series is ab51b74; no file in scope changed after it). During the review the working tree gained an uncommitted, site-wide tag normalization that touches four entries' front matter only ("linear systems", "FFT", "control theory"); it changes no line number or text cited below.
 - Date: 2026-10-14
 - Review type: independent review (wave 2), fact-check, technical review and series review, of the text as revised in wave 1 (`git diff e21dcc8`).
-- Content hash: sha256:e21e48391dacc08c298e205d872bf276e54f94231c2c2a748e4e6f8334e116c1
-
+- Content hash: sha256:1ffe91b624fa58a5768f3b1508ba0231ddb722331011d9e0e3d5a2c214a19840
 ## Summary
 
 The series remains technically strong. All 13 Python blocks were rerun with Python 3.13.16 and NumPy 2.5.3 and every printed output matches the article byte for byte. Every other worked number was recomputed (window tables of entries 3 and 4, leakage levels, Kaiser formulas, Butterworth biquad, noise gains, stability limits, phase-lag table, all 25 exercise answers) and is correct. The wave-1 changes (sentence-case headings, American spelling, descriptions, reference format, sentence splits) introduced no technical error. All thirteen references exist and their bibliographic details are correct as far as could be checked.
@@ -185,3 +184,12 @@ QA editor (final gate), 2026-10-15, against the current working tree and the bui
 
 Verdict: no finding reopened.
 - Q2 (Optional, new): `designing-fir-and-iir-filters.mdx` has two serial commas against standards 5.1 (:17 "compares the two, and ends"; :63 "an electrocardiogram, or a data pulse"); the `serial-comma` lint suggestion at :324 is a false positive (clauses). Minor; reflected in the item's language score (3) and notes, not blocking.
+
+## Live-review revision (2026-10-23)
+
+The chief editor's live review of `/blog/dft-and-fft` (`editorial/live-reviews/article/dft-and-fft.md`) requested two presentation changes, made in an author pass independent of the live reviewer and checked by the QA editor:
+
+- L1: the two display equations of Section 3.2 are now `aligned` blocks; the mathematics and the trailing punctuation are unchanged. Measured in a local build: both fit their box at 1280 px (640 of 640 px) and at 360 px (328 of 328 px); 0 KaTeX errors.
+- L3: window-table header "Equivalent noise bandwidth (bins)" shortened to "ENBW (bins)"; the list after the table already introduces "Equivalent noise bandwidth (ENBW)". The table still scrolls by about 33 px at 1280 px because every cell has a 7rem minimum width (`prose.css`), a site-level matter left with the live finding.
+
+No wording, number, code or reference changed; the series review above still covers the text. `eos lint`: 0 errors, 0 warnings, 2 suggestions (as before).
