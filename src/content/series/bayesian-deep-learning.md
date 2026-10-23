@@ -10,11 +10,6 @@ objectives:
   - "Choose a method that scales to a given model and data set, and evaluate predictive uncertainty with calibration, proper scoring rules and selective prediction."
   - "Describe current research directions in Bayesian deep learning and state the open problems each one addresses."
 plannedEntries:
-  - title: "Chapter 7: Laplace Approximations: Introduction"
-  - title: "Chapter 8: Linearized Laplace Approximations"
-  - title: "Chapter 9: The Differential Geometric Perspective on Laplace"
-  - title: "Chapter 10: Analytic, Low-Cost Functionality from Laplace"
-  - title: "Chapter 11: Model Selection with the Marginal Likelihood"
   - title: "Chapter 12: Introduction to Variational Inference"
   - title: "Chapter 13: Gaussian Mean-Field Variational Inference"
   - title: "Chapter 14: Dropout-Based Variational Inference"

@@ -10,11 +10,6 @@ objectives:
   - "Chọn một phương pháp mở rộng được cho một mô hình và một tập dữ liệu cho trước, và đánh giá độ bất định dự đoán bằng hiệu chuẩn (calibration), quy tắc chấm điểm thích đáng (proper scoring rule) và dự đoán có chọn lọc (selective prediction)."
   - "Mô tả các hướng nghiên cứu hiện nay của học sâu Bayes và nêu các bài toán mở mà mỗi hướng giải quyết."
 plannedEntries:
-  - title: "Chương 7: Xấp xỉ Laplace: giới thiệu"
-  - title: "Chương 8: Xấp xỉ Laplace tuyến tính hóa"
-  - title: "Chương 9: Góc nhìn hình học vi phân về xấp xỉ Laplace"
-  - title: "Chương 10: Các chức năng giải tích, chi phí thấp từ xấp xỉ Laplace"
-  - title: "Chương 11: Lựa chọn mô hình bằng hàm hợp lý biên"
   - title: "Chương 12: Giới thiệu về suy luận biến phân"
   - title: "Chương 13: Suy luận biến phân trường trung bình Gauss"
   - title: "Chương 14: Suy luận biến phân dựa trên dropout"
