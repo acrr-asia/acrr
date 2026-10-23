@@ -1,0 +1,238 @@
+---
+title: "Introduction to Priors"
+description: "Priors in Bayesian deep learning: informative, conjugate, uniform and objective priors, Gaussian, sparsity-inducing and model priors with prior predictives."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - regularization
+  - sparsity
+series: bayesian-deep-learning
+seriesOrder: 35
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl28StudentHeights from '../../components/diagrams/Bdl28StudentHeights.astro';
+import Bdl28SpikeSlab from '../../components/diagrams/Bdl28SpikeSlab.astro';
+import Bdl28UniformPriors from '../../components/diagrams/Bdl28UniformPriors.astro';
+import Bdl28GaussianPriors from '../../components/diagrams/Bdl28GaussianPriors.astro';
+import Bdl28ActivationPriorPredictive from '../../components/diagrams/Bdl28ActivationPriorPredictive.astro';
+import Bdl28DecisionBoundaries from '../../components/diagrams/Bdl28DecisionBoundaries.astro';
+import Bdl28SparsityPriors from '../../components/diagrams/Bdl28SparsityPriors.astro';
+
+In classical Bayesian statistics, a *prior* $p(\boldsymbol{\theta})$ represents the initial beliefs about the parameters $\boldsymbol{\theta} \in \mathbb{R}^P$ of a given statistical model before observing data. Prior knowledge is a cornerstone of Bayesian analysis, as it allows existing knowledge or expert insights to be integrated into the models. This is typically motivated by subjective Bayesian probability, which represents a degree of belief, but is also contrasted with objective Bayesian approaches that seek to minimize the prior's influence when no prior knowledge is available.
+
+To illustrate classical prior elicitation, consider a highly informative prior expressing strong historical beliefs about the average heights of students. For first-grade students, a prior is used that suggests a normal distribution with mean 1.2 meters and variance 0.003. For third-grade students, the prior is a normal distribution with mean 1.4 meters and variance 0.002. Suppose heights are observed for 10 first-graders: $\{1.18, 1.22, 1.25, 1.20, 1.21, 1.19, 1.21, 1.24, 1.17, 1.26\}$ meters (sample mean 1.213), and 5 third-graders: $\{1.37, 1.39, 1.42, 1.36, 1.40\}$ meters (sample mean 1.388). The mean height $\theta_k$ for each group $k$ is modeled, assuming heights $y_{k,i} \sim \mathcal{N}(\theta_k, 0.001)$. The posterior distribution is $p(\theta_k \mid \mathbf{y}_k) \propto p(\theta_k) p(\mathbf{y}_k \mid \theta_k)$. The prior is $\mathcal{N}(\theta_k; \mu_{0,k}, \sigma_{0,k}^2)$, and the likelihood for $n_k$ observations is:
+
+$$
+p(\mathbf{y}_k \mid \theta_k) \propto \exp\left( -\frac{n_k}{2 \times 0.001} (\bar{y}_k - \theta_k)^2 \right).
+$$
+
+Since the prior and likelihood are both Gaussian, this is a conjugate prior-likelihood pair. The posterior is also Gaussian, $\mathcal{N}(\theta_k; \mu_{n,k}, \sigma_{n,k}^2)$, with parameters given analytically by:
+
+$$
+\mu_{n,k} = \frac{\frac{\mu_{0,k}}{\sigma_{0,k}^2} + \frac{n_k \bar{y}_k}{0.001}}{\frac{1}{\sigma_{0,k}^2} + \frac{n_k}{0.001}}, \quad \sigma_{n,k}^2 = \frac{1}{\frac{1}{\sigma_{0,k}^2} + \frac{n_k}{0.001}}.
+$$
+
+Thus, for first-graders, the posterior is $\mathcal{N}(1.212581, 0.00009677)$; while for third-graders, it is $\mathcal{N}(1.389091, 0.0001818)$. The uncertainty has been significantly reduced after observing the data, and the prior expectation has been updated, as shown in Figure 28.1. This solution is conjugate and analytical.
+
+<Figure caption="Figure 28.1: Informative priors for students’ average height (solid line for first-grade: N(1.2, 0.003), dashed line for third-grade: N(1.4, 0.002)) and their posteriors (right panel), showing updated beliefs after observing the data. (Redrawn for this page: the densities are computed from the priors and posteriors stated in the text.)">
+  <Bdl28StudentHeights />
+</Figure>
+
+In classical statistics, conjugate priors are highly valued because they yield closed-form posterior distributions. For example, a Beta prior combined with a Binomial likelihood yields a Beta posterior, and a Gamma prior with a Poisson likelihood yields a Gamma posterior. In BDL, however, conjugate updates are generally unavailable due to the highly nonlinear nature of neural networks, where weights are passed through multiple layers of nonlinear activations. An exception is last-layer BNN inference, where one can perform exact conjugate Gaussian-Gaussian updates on the final weights by treating the hidden activations of the penultimate layer as fixed features.
+
+An *informative prior* guides the model with subjective domain knowledge, balancing the data's information and the prior. However, in modern contexts like machine learning and high-dimensional statistics, priors often serve a broader range of purposes beyond encoding prior knowledge.[^1] When such knowledge is unavailable or neutrality is preferred, *uninformative priors*, such as near-flat or uniform distributions, minimize subjective influence. Similarly, *reference priors* are designed to maximize the difference between the prior and the resulting posterior, letting the data primarily drive inference. In advanced applications of BDL, priors are often selected for practical purposes, such as *convenience priors* for computational simplicity, *regularization priors* to prevent overfitting, or *sparsity-inducing priors* to promote simpler model structures.
+
+This chapter builds on these ideas, exploring the statistical properties of priors used in BDL. It examines their mathematical formulations, practical roles, and how they shape model behavior, equipping the reader with tools to design effective BDL models. Each subsection discusses a specific prior type, with examples and visualizations to illustrate their impact. Accompanying figures show the prior distributions and the corresponding prior predictive distributions, which reveal the range of functions a deep learning model might produce before observing data.
+
+[^1]: There still is a lot of philosophical debate on whether this is acceptable from a puristic Bayesian perspective. This chapter does not dive into this debate and rather introduces different concepts to the reader in the context of BDL.
+
+## 1. Introductory overview of priors for BDL
+
+This section introduces the fundamental priors employed in Bayesian deep learning, exploring their statistical properties and their impact on model behavior. For each prior, illustrations are provided of the *prior predictive distribution*, which reflects the range of possible model outputs before observing data. These visualizations are based on a neural network with two hidden layers, each containing two neurons, and logistic (sigmoid) activation functions. While the properties of prior predictive distributions may vary with changes in network depth, width, or activation functions, the focus here is on this simple architecture to build intuition.
+
+### 1.1 Informative priors
+
+Informative priors encode specific domain knowledge about the parameters $\boldsymbol{\theta}$, as illustrated in the student height example (Figure 28.1), where priors for average heights of first- and third-grade students were based on past studies. In BDL, "manually specified" informative priors are rare due to the complexity of the models, yet they can still be sometimes applied to specific parameters, such as the bias term $\theta_0$ in the output layer, to reflect expected model outputs at a baseline (e.g. all other input neurons to the last layer should be close to 0 for a chosen baseline combination of covariates). For example, in a BDL model predicting house prices in a city, one might use a one-dimensional Gaussian prior for $\theta_0^{(L)}$:
+
+$$
+p(\theta_0^{(L)}) = \mathcal{N}(\theta_0^{(L)}; \mu_0, \sigma_0^2),
+$$
+
+where $\mu_0$ is the average house price (e.g., 500,000 USD) based on market data, and a small $\sigma_0^2$ (e.g., 160,000) reflects the level of confidence in this estimate. A strong informative prior (small $\sigma_0^2$) dominates the data's influence (likelihood), while a weak one (larger $\sigma_0^2$) balances data and prior information.
+
+Another way to incorporate domain knowledge in BDL is through *spike-and-slab priors* for weights associated with specific covariates in the input layer. These priors are informative by design when certain inputs are known to be more relevant than others. For a weight $\theta_{ij}^{(1)}$ in the first layer corresponding to covariate $x_i$, the prior takes the form:
+
+$$
+p(\theta_{ij}^{(1)} \mid \gamma_i) = \gamma_i \mathcal{N}(\theta_{ij}^{(1)}; \mu_i, \sigma_i^2) + (1 - \gamma_i)\, \delta_0(\theta_{ij}^{(1)}), \quad \gamma_i \sim \operatorname{Bernoulli}(\rho_i),
+$$
+
+where $\delta_0(\cdot)$ is a point mass at zero (the "spike") that switches off covariate $x_i$ when $\gamma_i = 0$, while the Gaussian component $\mathcal{N}(\theta_{ij}^{(1)}; \mu_i, \sigma_i^2)$ (the "slab") keeps it active when $\gamma_i = 1$. The inclusion probability $\rho_i$ reflects the prior belief in the importance of covariate $x_i$. For instance, in a model predicting heart disease risk from age, blood pressure, and cholesterol, one might assign $\rho_i = 0.9$ to cholesterol and a lower $\rho_i = 0.1$ to a less relevant variable such as eye color, as illustrated in Figure 28.2.
+
+<Figure caption="Figure 28.2: Informative spike-and-slab prior density (left) and the corresponding prior predictive distributions (right) for input layer weights under different inclusion probabilities. (Schematic reproduction redrawn for this page. The book's figure contains only the density panel, although its caption also names a right-hand prior predictive panel, so only the density panel is shown here too; the slab means and variances are assumed because the book does not state them, the spike masses 0.1 and 0.9 follow from the inclusion probabilities, and each spike is drawn as a vertical bar whose height equals its probability mass.)">
+  <Bdl28SpikeSlab />
+</Figure>
+
+Specifying informative priors for all parameters in BDL is a non-trivial task, as the high-dimensional and complex nature of neural networks makes manual prior elicitation practically impossible. While informative priors, such as Gaussian priors for bias terms, can encode domain knowledge for specific parameters, scaling this approach to entire networks is hardly ever feasible. To address this challenge, techniques like pretraining prior hyperparameters, which leverage knowledge from pre-existing models or synthetic data (discussed further in [Chapter 30](/blog/informative-priors)), and function-space priors, which impose structure on the model's output functions (explored in detail in [Chapter 31](/blog/function-space-priors)), offer promising solutions. These approaches mitigate the difficulties of manual prior specification, at least to some extent, and provide practical strategies for effective prior design in BDL.
+
+### 1.2 Uninformative, reference, and objective priors
+
+When prior knowledge is absent or neutrality is desired, statisticians employ objective or *uninformative priors* to minimize subjective influence, letting the data dominate inference. In practice, a common choice is a uniform prior for each parameter:
+
+$$
+p(\boldsymbol{\theta}) = \prod_{i=1}^{P} \operatorname{Uniform}(\theta_i; a, b),
+$$
+
+where $[a, b]$ is a wide interval (e.g., $[-10, 10]$). This results in a joint prior that is uniform over a hyper-rectangle $[a, b]^P$, with each marginal distribution $p(\theta_i)$ being uniform, suggesting neutrality for individual parameters.
+
+However, marginally uniform priors do not always imply an uninformative joint prior, especially in high-dimensional BDL models. The independence assumption can impose unintended structure, as parameters like weights in deep learning models often interact. Moreover, the joint prior can become concentrated in certain regions, undermining its uninformativeness. For instance, if $[a, b] = [-1, 1]$ is chosen to be narrow, the joint prior restricts all weights to a small hyper-rectangle, concentrating probability mass and limiting the model's ability to capture complex functions, such as nonlinear patterns in a neural network. Similarly, in high-dimensional settings with large $P$, the product of uniform priors can lead to a prior predictive distribution (the range of possible model outputs) that concentrates around specific function classes, such as near-zero outputs if the network's activation functions (e.g., ReLU) amplify small weights. This concentration can bias inference, making the prior less uninformative than intended and resulting in quite concentrated prior predictive distributions. Additionally, there is a long-standing statistical debate regarding whether a bounded uniform prior is truly uninformative; strictly speaking, a uniform prior is only uninformative in its improper version (over the entire real line $\mathbb{R}$), which is non-normalizable, potentially causing unstable inference or improper posteriors in BDL's high-dimensional context. Furthermore, flat or uniform priors are not invariant under parameter transformations, meaning a prior that appears uniform on one scale may encode strong beliefs on another.
+
+To address this lack of invariance, statisticians construct *objective priors*. The classic example is Jeffreys prior, which is defined as proportional to the square root of the determinant of the Fisher information matrix. Jeffreys prior is invariant under reparameterization, meaning the same prior beliefs are represented regardless of how the model is parameterized. In multi-parameter settings, this idea is generalized by *reference priors*, which are designed to maximize the divergence (e.g., KL divergence) from the prior to the posterior as the sample size grows, ensuring the data's influence is maximized. Reference priors account for the model's structure and parameter interactions, making them more robust for complex models. For example, in a BDL model, a reference prior might adjust for the network's architecture to avoid the biases introduced by uniform priors. However, the computational complexity of computing Jeffreys or reference priors (which requires evaluating the Fisher information of a neural network) limits their use in BDL, where models often have millions of parameters. In practice, uninformative priors like uniform distributions are rarely used since despite simplicity they require careful selection of $[a, b]$ to avoid unintended concentration or instability.
+
+<Figure caption="Figure 28.3: Uniform priors for single parameters (left) and the corresponding prior predictive distributions (right) under varying intervals, showing how narrow bounds can restrict the function space. (Schematic reproduction redrawn for this page: the densities are exact; the right panels show 30 new random draws per interval from a network with two hidden layers of two logistic units, so individual trajectories differ from the book's.)">
+  <Bdl28UniformPriors />
+</Figure>
+
+The effect of different intervals is illustrated in Figure 28.3, which shows the density of uniform priors for three intervals: $[-1, 1]$, $[-10, 10]$, and $[-50, 50]$ and their impact on the prior predictive distribution. Sample trajectories for a BDL regression model under these priors are not uniform and can be strongly concentrated in specific regions, cutting the support for the prior predictive distribution and highlighting the discussion above. This prevents the prior predictive from being non-informative on one hand, and on the other, limits its support, which makes uniform priors a poor tool both for variational methods and for regularization in BDL. A related but distinct approach to an uninformative prior is the limiting Gaussian $\mathcal{N}(\theta_i; 0, \sigma^2)$ as $\sigma^2 \to \infty$, which behaves similarly to a flat prior over any bounded region of interest and avoids the boundary effects of uniform distributions. The next subsection discusses other prior alternatives for BDL.
+
+### 1.3 $\ell_2$ regularization priors
+
+Regularization priors prevent overfitting by constraining model complexity. A standard choice in BDL is the zero-centered isotropic Gaussian prior for all weights in the model:
+
+$$
+p(\boldsymbol{\theta}) = \prod_{i=1}^{P} \mathcal{N}(\theta_i; 0, \sigma^2).
+$$
+
+The popularity of this prior is not just in its simplicity, it actually corresponds to $\ell_2$ regularization in maximum a posteriori (MAP) estimation, as derived below. The variance $\sigma^2$ controls regularization strength: smaller $\sigma^2$ shrinks parameters toward zero, simplifying the model, while larger $\sigma^2$ allows more flexibility. To derive the link to $\ell_2$-regularization, consider a BDL model with parameters $\boldsymbol{\theta}$. In MAP estimation, the log-posterior is maximized:
+
+$$
+\log p(\boldsymbol{\theta} \mid \mathcal{D}) = \log p(\mathcal{D} \mid \boldsymbol{\theta}) + \log p(\boldsymbol{\theta}) + \text{constant}.
+$$
+
+For the i.i.d. Gaussian prior, the log-prior is:
+
+$$
+\log p(\boldsymbol{\theta}) = \sum_{i=1}^{P} \log \mathcal{N}(\theta_i; 0, \sigma^2) = -\frac{1}{2\sigma^2} \sum_{i=1}^{P} \theta_i^2 - \frac{P}{2} \log(2\pi\sigma^2).
+$$
+
+Thus, the log-posterior is:
+
+$$
+\log p(\boldsymbol{\theta} \mid \mathcal{D}) = \log p(\mathcal{D} \mid \boldsymbol{\theta}) - \frac{1}{2\sigma^2} \sum_{i=1}^{P} \theta_i^2 + \text{constant}.
+$$
+
+The term $\frac{1}{2\sigma^2} \sum_{i=1}^{P} \theta_i^2$ is the $\ell_2$-regularization penalty, with $\lambda = \frac{1}{2\sigma^2}$. A smaller $\sigma^2$ increases $\lambda$, enforcing stronger regularization.
+
+To illustrate the role of the prior variance $\sigma^2$ in regularization within BDL, consider three cases: $\sigma^2 = 0.02$, $\sigma^2 = 1$, and $\sigma^2 = 50$, corresponding to strong, moderate, and weak regularization, respectively. The regularization parameter $\lambda = \frac{1}{2\sigma^2}$ governs the penalty on model weights. The small $\sigma^2$ of 0.02 yields a large $\lambda = \frac{1}{2 \cdot 0.02} = 25$, heavily penalizing large weights, which constrains the model to produce simple, near-linear functions, particularly for activation functions like the logistic one, which is approximately linear near zero. Conversely, a large $\sigma^2$ of 50 results in a small $\lambda = \frac{1}{2 \cdot 50} = 0.01$, allowing larger weights and enabling complex, nonlinear functions, albeit with an increased risk of overfitting. A moderate $\sigma^2$ of 1 lies between these extremes, with $\lambda = 0.5$, permitting some flexibility while controlling model complexity.
+
+These effects manifest in the *prior predictive distribution*, which captures the range of possible model outputs before observing data. In a BDL regression model, a small $\sigma^2$ concentrates prior predictive outputs near zero, yielding smooth, constrained functions that are close to linear or even near-constant, while a large $\sigma^2$ permits highly variable, nonlinear outputs, accommodating diverse patterns. Notably, the support of the prior predictive distribution remains unconstrained across all cases, making Gaussian priors versatile for robust regularization. Figure 28.4 illustrates this effect, highlighting the critical role of $\sigma^2$ in shaping model behavior.
+
+<Figure caption="Figure 28.4: Gaussian priors for single parameters (left) and the corresponding prior predictive distributions (right) under the baseline architecture and varying σ². (Schematic reproduction redrawn for this page: the densities are exact; the right panels show 30 new random draws per variance from the baseline network, so individual trajectories differ from the book's.)">
+  <Bdl28GaussianPriors />
+</Figure>
+
+The above discussion assumes a neural network with two hidden layers, each with two neurons, and a logistic activation function. However, prior predictive behavior depends on architectural choices, particularly activation functions. While regularization persists if the activation is approximately linear near zero, the specific functional form of outputs varies with activation properties, such as boundedness. Figure 28.5 compares prior predictive distributions for tanh and ReLU activations in the same architecture, showcasing distinct behaviors.
+
+<Figure caption="Figure 28.5: Prior predictive distributions for tanh (left) and ReLU (right) activations. (Schematic reproduction redrawn for this page: 30 new random draws per panel from the same architecture with Gaussian priors of variance 0.02, 1 and 50, so individual trajectories differ from the book's.)">
+  <Bdl28ActivationPriorPredictive />
+</Figure>
+
+Such architectural dependencies introduce further risks of prior misspecification. To mitigate this, it is recommended to conduct prior predictive checks on simplified versions of the model.
+
+As an example of a well-specified model and a misspecified one, consider a classification problem using the baseline BDL model with two input covariates and Bernoulli-distributed responses. Varying the prior variance $\sigma^2$ alters the decision boundary based on the posterior predictive,[^2] transitioning from a near-constant model (small $\sigma^2 = 0.02$), to close to linear (moderate $\sigma^2 = 1$), to nonlinear boundaries (large $\sigma^2 = 50$). Figure 28.6 illustrates this property, underscoring that a naive Bayesian approach offers no inherent guarantees of optimality or robustness in the posterior predictive distribution.
+
+[^2]: Obtained with a 1000 HMC iterations on two chains, computed by Stan, yet inference details are not of central interest in this chapter, hence omitted.
+
+<Figure caption="Figure 28.6: Decision boundaries based on the posterior predictive of a BDL classification model with prior variances σ² = 0.02, 1, and 50. (Schematic reproduction redrawn for this page: the two point clouds and the boundaries are illustrative and do not reproduce the book's data or HMC results. Filled and open points are the two classes; the shaded background is the region predicted as the class of the filled points and the unshaded background the region predicted as the other class.)">
+  <Bdl28DecisionBoundaries />
+</Figure>
+
+As has been seen already, poorly chosen $\sigma^2$ in Gaussian priors can lead to severe model misspecification, resulting in distorted, misspecified posteriors, a phenomenon known as the *cold posterior effect*. Blindly adopting a standard Gaussian prior is ill-advised. To address this, $\sigma^2$ can be tuned via empirical Bayes or assigned a hyperprior, such as $\sigma^2 \sim \text{Inv-Gamma}(\alpha, \beta)$ resulting in a robust t-distributed marginal prior. In contrast, frequentist $\ell_2$-regularization typically selects $\lambda$ through cross-validation or model selection criteria.[^3]
+
+[^3]: Hyperparameter optimization can also tune $\sigma^2$ directly, but this approach deviates from a strictly Bayesian perspective.
+
+Another extension of i.i.d. Gaussian priors is the multivariate Gaussian prior, which accounts for parameter dependencies via a covariance structure:
+
+$$
+p(\boldsymbol{\theta}) = \mathcal{N}_P(\boldsymbol{\theta}; \mathbf{0}, \boldsymbol{\Sigma}),
+$$
+
+with the possibility to introduce an additional inverse-Wishart hyperprior on $\boldsymbol{\Sigma}$. Such priors (at least for sparse covariance structures) may be practical for large-scale BDL as they both provide regularization and allow for handling dependencies between the parameters.
+
+### 1.4 Sparsity-inducing and variable selection priors
+
+Sparsity-inducing priors encourage model parameters to be zero or near-zero, which helps simplify the model structure, prevent overfitting, and improve generalization. In BDL, two broad classes of sparsity are commonly distinguished. *Soft-sparsity*, achieved through continuous shrinkage priors such as the Laplace, Horseshoe, and scale mixtures of Gaussians, concentrates probability mass around zero but produces almost surely non-zero (non-sparse) posterior samples. These priors act as shrinkage mechanisms that pull uninformative weights toward zero while allowing large weights for genuinely important features, thanks to their heavy tails. The Laplace prior, for instance, yields exactly sparse MAP estimates (analogous to the frequentist Lasso), but posterior samples remain non-sparse. *Hard-sparsity*, in contrast, is achieved through priors that place a discrete probability mass exactly at zero, such as spike-and-slab priors. These priors allow parameters to be exactly zero in the posterior, performing explicit variable selection and zeroing out weights, which is particularly valuable in BDL for weight pruning, network compression, and feature selection.
+
+The Laplace prior is a common continuous shrinkage prior:
+
+$$
+p(\boldsymbol{\theta}) = \prod_{i=1}^{P} \operatorname{Laplace}(\theta_i; 0, b),
+$$
+
+which corresponds to $\ell_1$-regularization in MAP estimation with $\lambda = b^{-1}$. The scale parameter $b$ controls the degree of shrinkage, similar to $\sigma^2$ in the Gaussian prior.
+
+Other continuous options include the scale mixture of Gaussians:
+
+$$
+p(\boldsymbol{\theta}) = \prod_{i=1}^{P} \left( \pi \mathcal{N}(\theta_i; 0, \sigma_1^2) + (1 - \pi) \mathcal{N}(\theta_i; 0, \sigma_2^2) \right),
+$$
+
+with $\sigma_1^2 > \sigma_2^2$ and $\sigma_2^2 \ll 1$, which places a narrow Gaussian near zero to shrink small weights and a wide Gaussian to accommodate larger weights. Alternatively, one can use the horseshoe prior:
+
+$$
+p(\boldsymbol{\theta}) = \prod_{i=1}^{P} \mathcal{N}(\theta_i; 0, \sigma^2 \tau_i^2),
+$$
+
+where $\tau_i \sim \mathrm{C}^+(0, 1)$ is a half-Cauchy local shrinkage parameter. Both Laplace and Horseshoe priors are heavy-tailed, allowing them to shrink noise parameters aggressively while leaving large, informative parameters virtually unaffected. This heavy-tailed property makes them robust to misspecification and helps mitigate the cold posterior effect in BDL.
+
+For hard-sparsity and explicit variable selection, the spike-and-slab prior can be applied to every weight $\theta_{ij}^{(l)}$ in the network:
+
+$$
+p(\theta_{ij}^{(l)} \mid \gamma_{ij}^{(l)}) = \gamma_{ij}^{(l)}\, \mathcal{N}(\theta_{ij}^{(l)}; 0, \sigma_1^2) + (1 - \gamma_{ij}^{(l)})\, \delta_0(\theta_{ij}^{(l)}), \quad \gamma_{ij}^{(l)} \sim \operatorname{Bernoulli}(\rho),
+$$
+
+where $\delta_0(\cdot)$ is a Dirac delta point mass at zero (the "spike") that sets weight $\theta_{ij}^{(l)}$ to exactly zero when $\gamma_{ij}^{(l)} = 0$, while the Gaussian component $\mathcal{N}(\theta_{ij}^{(l)}; 0, \sigma_1^2)$ (the "slab") allows non-zero weights when $\gamma_{ij}^{(l)} = 1$. The inclusion probability $\rho$ governs the overall network sparsity: a low value encourages aggressive pruning, while a high value retains most weights. When the inclusion probabilities vary by weight or layer, they can encode structural domain knowledge, as illustrated in the informative prior example in Figure 28.2. The spike-and-slab prior is closely related to the model priors discussed in Section 1.5.
+
+Log-uniform priors, either improper:
+
+$$
+p(\boldsymbol{\theta}) = \prod_{i=1}^{P} \operatorname{LogU}_{\infty}(\theta_i) \propto \prod_{i=1}^{P} \frac{1}{\theta_i}
+$$
+
+or proper:
+
+$$
+p(\boldsymbol{\theta}) \propto \prod_{i=1}^{P} \operatorname{LogU}_{\infty}(\theta_i)\, \mathrm{I}_{[a,b]}(\log \theta_i),
+$$
+
+also promote sparsity by placing heavy mass near zero, though they remain less studied in classical statistics.
+
+<Figure caption="Figure 28.7: Continuous sparsity-inducing prior densities for single parameters (left column) and the corresponding prior predictive distributions (right column) under the baseline architecture: Laplace (top row), scale mixture of Gaussians (middle row), and horseshoe (bottom row) priors under varying hyperparameters. (Schematic reproduction redrawn for this page: the densities are computed from the formulas above (so the Laplace density for b = 0.1 reaches its exact peak of 5, above the peak of about 3 plotted in the book), the horseshoe density by numerical integration over τ, with its pole at zero cut off at the top of the axis; the mixture variances σ₁² = 10 and σ₂² = 0.02, with π the weight of the wide component, are assumed because the book does not state them; the right panels show 25 new random draws per setting, so individual trajectories differ from the book's.)">
+  <Bdl28SparsityPriors />
+</Figure>
+
+### 1.5 Model priors and Bayesian model selection and averaging
+
+All previous examples were restricted to a single BDL model. This subsection allows for multiple BDL models and thus captures model uncertainty. In Bayesian model averaging (BMA), multiple models $\{\mathcal{M}_1, \dots, \mathcal{M}_t\}$ are considered, requiring priors $p(\mathcal{M})$. Prior mass is assumed for all these models $p(\mathcal{M}_i), i \in \{1, \dots, t\}$, and parameter priors are defined conditionally on the respective models $p(\boldsymbol{\theta}_i \mid \mathcal{M}_i), i \in \{1, \dots, t\}$. Generally speaking, models could be competing neural networks of different types (such as dense, convolutional, or residual ones) with varying numbers of layers and hidden units, but for simplicity only models defined by different weight inclusion patterns are considered. The prior over the model indicator vector $\boldsymbol{\gamma} = (\gamma_1, \dots, \gamma_P)$ takes the same structural form as the spike-and-slab inclusion prior introduced in Section 1.4, but is now interpreted as selecting entire model structures rather than individual weights. In this context, Bernoulli inclusion priors are commonly used:
+
+$$
+p(\mathcal{M}) = \prod_{i=1}^{P} \operatorname{Bernoulli}(\gamma_i; \rho_i),
+$$
+
+where $\gamma_i \in \{0, 1\}$ indicates weight inclusion, and $\rho_i$ is the inclusion probability. Beta-Binomial priors are an alternative:
+
+$$
+p(\mathcal{M}) \propto \prod_{i=1}^{P} \operatorname{BetaBinomial}(\gamma_i; 1, a_i, b_i),
+$$
+
+which correspond to a Beta-Bernoulli hierarchy where the success probabilities $\rho_i$ are integrated out under a Beta prior, helping control the overall model size. These priors can encode domain knowledge, such as assigning higher inclusion probabilities for input weights in a BDL model for medical diagnosis. Parameter priors are then specified conditionally on the model: $p(\boldsymbol{\theta} \mid \mathcal{M})$, as discussed in the previous subsections.
+
+Inference on the posterior $p(\mathcal{M} \mid \mathcal{D})$ allows one to perform model selection through the median probability model, which often leads to extreme sparsification, or to perform global explanations based on posterior inclusion probabilities.
+
+## 2. Summary and outlook
+
+This chapter introduced the fundamental role of priors in Bayesian deep learning, progressing from classical informative and conjugate formulations to the regularization, shrinkage, and variable selection priors commonly applied in modern deep networks. While parameter-space prior elicitation remains challenging, understanding how weight-space choices shape the prior predictive distribution is vital for building robust BDL models. More advanced priors designed to scale to deep structures or handle dependencies have been proposed, including priors that model weight correlations (e.g. Rudner et al.) and subnetwork priors that isolate key parameters (e.g. Sell and Singh).
+
+The subsequent chapters in this part develop these concepts further. [Chapter 29](/blog/statistical-properties-of-priors) explores the statistical and mathematical properties of parameter priors as they propagate through hidden units and define infinite-width limits. [Chapter 30](/blog/informative-priors) studies data-driven informative priors constructed to achieve desired functional properties. Finally, [Chapter 31](/blog/function-space-priors) introduces function-space priors that bypass weight-space pathology by directly defining distributions over functional outputs.

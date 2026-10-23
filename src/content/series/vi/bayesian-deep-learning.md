@@ -10,10 +10,6 @@ objectives:
   - "Chọn một phương pháp mở rộng được cho một mô hình và một tập dữ liệu cho trước, và đánh giá độ bất định dự đoán bằng hiệu chuẩn (calibration), quy tắc chấm điểm thích đáng (proper scoring rule) và dự đoán có chọn lọc (selective prediction)."
   - "Mô tả các hướng nghiên cứu hiện nay của học sâu Bayes và nêu các bài toán mở mà mỗi hướng giải quyết."
 plannedEntries:
-  - title: "Chương 28: Giới thiệu về tiên nghiệm"
-  - title: "Chương 29: Các tính chất thống kê của tiên nghiệm"
-  - title: "Chương 30: Tiên nghiệm có thông tin"
-  - title: "Chương 31: Tiên nghiệm trong không gian hàm"
   - title: "Chương 32: Tính đối xứng trong mạng nơ-ron Bayes"
   - title: "Chương 33: Tính đối xứng và lấy mẫu"
   - title: "Chương 34: Học thiên hướng quy nạp và tính đối xứng"

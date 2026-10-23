@@ -1,0 +1,255 @@
+---
+title: "Function-Space Priors"
+description: "How priors over neural network weights induce priors over functions, why they can be pathological and how to match them to Gaussian process priors."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - gaussian processes
+  - wasserstein distance
+series: bayesian-deep-learning
+seriesOrder: 38
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl31SineManifold from '../../components/diagrams/Bdl31SineManifold.astro';
+import Bdl31DepthPathology from '../../components/diagrams/Bdl31DepthPathology.astro';
+import Bdl31PriorMatching from '../../components/diagrams/Bdl31PriorMatching.astro';
+import Bdl31RegressionExample from '../../components/diagrams/Bdl31RegressionExample.astro';
+
+As discussed in [Chapter 28](/blog/introduction-to-priors), in Bayesian statistics, the choice of prior distributions over model parameters represents a fundamental part of the modeling process. In many applications, the elicitation of such prior information on model parameters can be attempted through domain expertise (see, e.g., Lindley et al., O'Hagan).
+
+However, for deep learning models, this is not straightforward, and this is the focus of this chapter. Without loss of generality, this chapter considers the case of fully connected Neural Network (NN) models; much of the discussion applies to different architectures too. Let $f(x, \theta)$ denote the output obtained by a NN with parameters $\theta$ for an input $x$. There are a number of challenges in choosing sensible priors for $\theta$ due to the fact that NNs are typically over-parameterized. Over-parameterization in NNs means that the number of parameters can be very large (easily beyond a few millions) leading to statistical non-identifiability, and requiring one to pick a prior for every single parameter is a daunting task. Blocking strategies can alleviate this burden, e.g., by assigning the same prior to parameters in the same layer. However, a fundamental problem still remains: *what is the effect produced by the choice of a particular prior distribution over $\theta$ on the prior distribution over $f(x, \theta)$?*
+
+This chapter is dedicated to the study of such prior distributions over $f(x, \theta)$. Section 1 provides some background on function-space priors defined as the priors over $f(x, \theta)$ induced by the choice of a prior over $\theta$. After discussing the intractability of characterizing these priors analytically in Section 1.1 and Section 1.2, the chapter focuses on ways in which samples can be obtained from these priors in Section 1.4. It then moves on to discussing in Section 2 how the choice of convenient priors may lead to pathological priors in function-space. Indeed, astute readers with background in Bayesian Statistics may find it easy to circumvent the problem of specifying priors over NN parameters by opting for weakly informative priors over $\theta$. Unfortunately, such a naïve and seemingly benign approach may lead to function-space priors over $f(x, \theta)$ with undesirable properties; see Tran et al. for a study of Bayesian model selection in the context of unsupervised learning problems.
+
+The chapter concludes with Section 3, which studies ways in which priors over $\theta$ can be chosen inducing function-space priors exhibiting desirable properties. The majority of the focus of this latter section is on matching NN function-space priors with function-space priors of interest and for which samples are easily accessible. This is realized by casting this matching task as the optimization of a suitable objective, and a number of options are presented by drawing from the literature on divergences and integral probability metrics. All in all, this chapter should convince readers that care needs to be taken when choosing priors for Bayesian deep learning, and that there are practical strategies to adopt in order to do so.
+
+## 1. From priors over parameters to priors over functions
+
+For simplicity of exposition, consider the case of a supervised learning problem where the aim is to establish a mapping between inputs $x \in \mathcal{X}$, with $\mathcal{X} \subset \mathbb{R}^D$, and labels $y \in \mathcal{Y}$ given a collection of pairs $(x_i, y_i)$ with $i = 1, \ldots, N$. Consider the following definition of a NN-based model with parameters $\theta$:
+
+$$
+f(x, \theta) \in \mathbb{R}^C, \qquad \text{with} \qquad \theta \in \mathbb{R}^P, \tag{31.1}
+$$
+
+which can be used, together with an observation model, to define a likelihood function $p(y_1, \ldots y_N \mid x_1, \ldots, x_N, \theta)$ measuring the goodness of fit of the model to the given data (equivalently, one may write $p(y_{1:N} \mid x_{1:N}, \theta; f)$ to make the dependence on the network map explicit). For now no specific form is written for the likelihood, as it is not the focus of the discussion. In order to complete the specification of the Bayesian NN model for the given data, a prior for $\theta$ must be chosen:
+
+$$
+\theta \sim p(\theta). \tag{31.2}
+$$
+
+With a complete model specification, one can easily realize that the posterior over $\theta$ is intractable and that approximations are needed. This important point is revisited later in the chapter, but for now the discussion focuses on how to choose $p(\theta)$ sensibly.
+
+The choice of a prior over $\theta$ induces a distribution over $f(x, \theta)$, meaning that it yields a prior distribution over the NN output for any given input $x$. More formally, denote by $F_{1:n} = (F_1, \ldots, F_n)$ with $F_i \in \mathbb{R}^C$ the collection of random variables representing the NN function associated with the inputs $x_1, \ldots, x_n$. Note that the inputs are not necessarily the training inputs here, so the number of such inputs is denoted as $n$ instead of $N$. The prior distribution over $F_{1:n}$ can be obtained by marginalizing out $\theta$ as follows:
+
+$$
+p(F_{1:n}) = \int p(F_{1:n} \mid \theta) p(\theta) d\theta = \int \delta(F_{1:n} - (f(x_1, \theta), \ldots, f(x_n, \theta))) p(\theta) d\theta. \tag{31.3}
+$$
+
+The function $\delta(\cdot)$ represents the Dirac delta, and it is used here to highlight the deterministic nature of the forward computations of the NN which gives the components $f(x_i, \theta)$ for a given input $x_i$ and $\theta$.
+
+### 1.1 Function-space priors are desirable but intractable
+
+Equation 31.3 expresses the distribution over the output of the NN. Why is this of any interest? And what kind of properties should this distribution be expected to have? It was discussed earlier how in Bayesian inference it is important to include prior knowledge from experts into a modeling problem and how this principle is of little help in guiding the choice of a prior over NN parameters $\theta$. In contrast, it is often much easier to reason about the kind of functions one may want to model *a priori*. In other words, function-space priors are more "interpretable"; it is much easier to reason about macroscopic properties that one would like to encode in the functions represented by NNs, such as, e.g., degree of smoothness, periodicity, and marginal variance, rather than dealing with individual NN parameters. Indeed, the statistical nonidentifiability and nonlinearity induced by the over-parameterization of NNs make it challenging to study the sensitivity of the function-space prior with respect to the prior over individual parameters.
+
+Unfortunately, the integral in Equation 31.3 is generally intractable, again due to the nonidentifiability and nonlinearity of the NN parameterization, and reasoning about their function-space priors is not immediately possible. Considering a Gaussian prior $p(\theta)$, for example, it is easy to see that the nonlinear dependence of $f(x, \theta)$ from $\theta$ makes it intractable to calculate this integral. Section 3 discusses strategies to determine prior distributions over $\theta$ so that function-space priors exhibit properties of interest. Before doing so, more insights are presented into the function-space prior induced by a prior over the parameters by viewing Equation 31.3 as a change of variables operation and studying it in the context of neural processes.
+
+### 1.2 Interpretation of function-space priors as a change of variables
+
+Another way to interpret the operation carried out in Equation 31.3 is to view it as a change of variables, where the prior measure over $\theta$ is transformed into a measure over $F_{1:n}$. Here $n$ represents the number of input locations at which the function-space prior is evaluated. Recalling that $x_i \in \mathcal{X}$ with $\mathcal{X} \subset \mathbb{R}^D$, imagining that one is interested in analyzing the behavior of the function $f(x, \theta)$ at the $n$ input locations, one is then interested in the distribution of $F_{1:n}$. For reference, if $T$ were a differentiable bijection between spaces of the same dimension and $F = T(\theta)$, the usual change-of-variables formula would give
+
+$$
+p_F(f) = p_\theta(T^{-1}(f)) \left| \det J_{T^{-1}}(f) \right|.
+$$
+
+The map induced by a neural network at fixed inputs, $T_{x_{1:n}}(\theta) = (f(x_1, \theta), \ldots, f(x_n, \theta))$, rarely satisfies these assumptions: it is typically many-to-one and often maps parameter space into an output space of different dimension. It is clear that the mapping taking $\theta$ as input and mapping these into $F_{1:n}$ is not a bijection in general, which makes the Jacobian rank deficient (rank at most the minimum between $P$ and $nC$).
+
+This view, however, reveals something interesting about the properties that one can expect to observe in the prior over $F_{1:n}$. Assuming $nC > P$, the change of variables formula indicates that the prior over $F_{1:n}$ is going to live in a low-dimensional manifold of $P$ dimensions. One may be tempted to still characterize the change of measure over this manifold by computing the determinant of the Jacobian through the computation of its top $P$ eigenvalues; however, this requires computing and factorizing the Jacobian, which is an $(nC) \times P$ matrix, requiring $\mathcal{O}(nCP^2) + \mathcal{O}(P^3)$ computations. Thus the change-of-variables view is useful mainly as a diagnostic: it explains why evaluating the function-space density is difficult and why the induced distribution may concentrate on a low-dimensional set. The practical methods below therefore rely on samples from $p(F_{1:n})$ rather than on pointwise evaluations of this density.
+
+<Figure caption="Figure 31.1: Visualization of the mapping (F₁, F₂) = (sin(θ x₁), sin(θ x₂)) for θ ∼ N(0, 1) at input locations x₁ = 1 and x₂ = 2. (Left) Monte Carlo samples showing that all points lie on a one-dimensional sinusoidal curve in [−1, 1]²; (Right) Exact induced density along this curve, computed via the density-on-manifold change-of-variables formula p(F₁:₂) = p(θ)/‖dg(θ)/dθ‖₂. Reproduction computed from this formula: 400 samples on the left; on the right the density, capped at 0.4, is shown by the opacity of the curve.">
+  <Bdl31SineManifold />
+</Figure>
+
+To visualize this phenomenon better, consider a single-parameter sine network evaluated at two input points, $x_1, x_2 \in \mathbb{R}$, that is $g : \theta \mapsto (F_1, F_2) = (\sin(\theta x_1), \sin(\theta x_2))$. Note that this is the case discussed before, where the number of input points ($n = 2$) is greater than the number of parameters ($P = 1$). Figure 31.1 shows what happens to $p(F_{1:2})$. When $\theta \sim \mathcal{N}(0, 1)$ is sampled and the resulting pairs $(F_1, F_2)$ are plotted in the plane, the points concentrate along a smooth, closed curve in $[-1, 1]^2$ rather than filling the square, as expected by the low-rank form of the Jacobian. In this simple case, the induced density along the curve can also be derived explicitly, using the change-of-variable formulas.
+
+### 1.3 Connections with neural processes
+
+Stochastic processes offer a natural formalism to specify priors over functions. Formally, a stochastic process indexed by $x \in \mathcal{X}$ is a collection of random variables $\{F(x)\}_{x \in \mathcal{X}}$ such that, for any finite set of indices $x_1, \ldots, x_n$, the random vector $F_{1:n} = (F(x_1), \ldots, F(x_n))$ has a well-defined joint distribution $p(F_{1:n})$. These joint distributions are the *finite-dimensional marginals* of the process, and by the Kolmogorov extension theorem a family of such marginals that is consistent and exchangeable defines a unique process over the whole index set $\mathcal{X}$. The Gaussian process of Section 3 is the canonical example, its finite-dimensional marginals being Gaussians fully determined by a mean and a covariance function. The question is under what conditions the construction of a function-space prior in Equation 31.3 yields a stochastic process. The literature on stochastic processes provides a complete answer to this, based on the necessity to satisfy exchangeability and consistency. Exchangeability requires invariance of the joint distribution with respect to permutations of the inputs:
+
+$$
+p(F_{1:n}) = p(\tilde{F}_{1:n}) \tag{31.4}
+$$
+
+where $\tilde{F}_{1:n}$ denotes the permuted versions of $F_{1:n}$. Consistency requires some form of "closure" with respect to marginalization; in particular, it requires that:
+
+$$
+p(F_{1:m}) = \int p(F_{1:n}) dF_{m+1:n} \tag{31.5}
+$$
+
+For a fixed prior over $\theta$ and a measurable deterministic neural network, the finite-dimensional marginals induced by Equation 31.3 are permutation invariant and marginally consistent, and therefore define a stochastic process in this formal sense. This observation is conceptually useful, but it does not remove the main computational issue: the finite-dimensional densities are still generally unavailable in closed form. In the literature, a construction making use of NNs to learn process-like finite-dimensional distributions has been proposed in Garnelo et al. These so-called Neural Processes possess some interesting properties, as they allow for their direct use as function-space priors. Intuitively, a neural process learns to behave like a stochastic process directly: given a *context* set of input–output pairs, an encoder network summarizes them into a global latent variable, and a decoder network maps this latent variable, together with a target input, to a predictive distribution over the corresponding output. Sharing the latent variable across all target inputs is what couples the predictions and lends the model its process-like, internally consistent behavior, while training over many randomly sampled context/target splits encourages (approximate) exchangeability and consistency. The result is a flexible, learnable prior over functions whose finite-dimensional marginals are produced by a single forward pass, rather than by marginalizing a prior over weights as in Equation 31.3. In the remainder of this chapter, however, the full stochastic-process structure does not need to be used explicitly in order to determine priors over parameters.
+
+### 1.4 Sampling from function-space priors
+
+The intractability of the function-space prior Equation 31.3 does not prevent one from being able to obtain samples from it. Viewing Bayesian NNs as hierarchical models characterized by $p(\theta)$ and $p(F_{1:n} \mid \theta)$, it is a simple matter to set up a sampling scheme to obtain samples of $f(x, \theta)$ for a finite set of locations $x_1, \ldots, x_n$. This can be achieved by iteratively sampling $\theta' \sim p(\theta)$ and then $F_i \sim p(F_i \mid \theta')$, that is simply $f(x_i, \theta')$ for $i = 1, \ldots, n$. By repeating the sampling of $\theta'$ and by evaluating the corresponding $f(x_i, \theta')$ for $i = 1, \ldots, n$, samples are obtained from the joint distribution $(\theta, F_{1:n})$; one can then simply disregard samples from $\theta$ to be left with samples from the marginal distribution $p(F_{1:n})$.
+
+## 2. Pathologies of function-space priors
+
+Having established that the function-space prior density $p(F_{1:n})$ of Equation 31.3 is generally analytically intractable, so that it can be sampled from but not evaluated in closed form, this section now studies the behavior of function-space priors. This analysis aims at highlighting certain pathologies which emerge from making simple and seemingly benign choices for the priors over the parameters $\theta$. In particular, function-space priors are studied for various NN architectures, by varying their depth.
+
+### 2.1 Possible priors over θ
+
+The most common choice is an independent Gaussian prior over the weights, $\theta \sim \mathcal{N}(0, \sigma^2 I)$. More flexible alternatives include *hierarchical* Gaussian priors, which place hyper-priors on the per-layer variances and thereby induce heavier-tailed weight marginals, and *normalizing-flow* priors, which transform a simple base distribution through an invertible neural network to obtain a far richer family of weight distributions. These last two families return in Section 3, where their flexibility is exploited to match a target function-space prior; in the present section, which is concerned only with illustrating pathologies, the focus is on the simplest Gaussian case. In all cases, the prior is normalized by scaling the prior variance with the dimension of the preceding layer. This is inspired by the literature on initialization of NN parameters to avoid saturation effects which induce exploding/vanishing gradients (see, e.g., He et al.). The top row of Figure 31.2 illustrates the functions generated by a fully-connected network with tanh activations whose weights are drawn from a fan-in-scaled Gaussian prior with unit base variance, for increasing depth (2, 4, and 8 layers). Increasing depth results in progressively more pathological functions. Interestingly, the marginal variance of the function-space prior can be kept under control, but the covariance of the realization of the function $f(x, \theta)$ at different inputs becomes increasingly large, leading to nearly-constant functions. This is hardly desirable in any applications where one expects to observe some interesting behavior in the data. This prior is putting a considerable amount of emphasis on "uninteresting" nearly-constant functions; Section 3 discusses how to tackle this problem.
+
+Increasing the width of each layer results in function-space priors resembling Gaussian processes. This can be verified by looking at finite-dimensional distributions of $f(x, \theta)$ at any fixed collection of inputs, which become increasingly Gaussian as the width increases. However, this effect can only be seen in shallow architectures unless skip connections are introduced.
+
+## 3. Matching neural network priors with target function-space priors
+
+This section studies ways in which priors over $\theta$ can be imposed so that the induced distribution over the output of the network matches some target function-space prior of interest. The only working assumption made is that samples from the target function-space prior are easily accessible. This makes the approach presented here quite general and applicable in a wide range of scenarios.
+
+### 3.1 Candidates for function-space priors
+
+This section proposes a few ideas of possible function-space priors for which it is easy to obtain samples, without necessarily having access to their analytical form.
+
+<Figure caption="Figure 31.2: (Top) Sample functions of a fully-connected BNN with (left to right) 2, 4, and 8 layers, obtained by placing a fan-in-scaled Gaussian prior with unit base variance on the weights with tanh activations; increasing depth drives the prior towards progressively more pathological, nearly-constant functions. (Bottom) Samples from a GP prior with an RBF (left) and a Matérn-3/2 (right) kernel, which retain a controlled length-scale and marginal variance. The horizontal axis is the one-dimensional input and the vertical axis the function value. The two rows are shown together to contrast the pathologies of deep BNN priors with the well-behaved GP priors. Reproduction computed for this page: 14 draws per panel from tanh networks of width 24 with unit-variance biases, and from GP priors with unit variance and length-scale 1.6; the dashed line is the zero mean and the shaded band spans two standard deviations.">
+  <Bdl31DepthPathology />
+</Figure>
+
+#### Gaussian process priors
+
+As a candidate for an easy-to-interpret function-space prior, Gaussian processes can be used, for which sampling is easy. In particular, considering again a set of $n$ input points $x_i \in \mathcal{X} \subset \mathbb{R}^D$, a Gaussian process can be defined through the choice of a covariance function $k(\cdot, \cdot)$ and a mean function $\mu(\cdot)$. These functions define the behavior and properties of samples in the function space, as illustrated in the second row of Figure 31.2. In order to draw samples from the Gaussian process prior, first calculate the covariance matrix $K$ with entries $k_{ij} = k(x_i, x_j)$ and the mean vector with entries $\mu_i = \mu(x_i)$, and then factorize it using the Cholesky decomposition as $K = LL^\top$. The lower triangular factor $L$ allows one to obtain one sample from the Gaussian process prior by drawing $n$ independent Gaussian random variables $\nu \sim \mathcal{N}(0, I)$ and then by setting $f = L\nu + \mu$. This process can be repeated as many times as needed to obtain multiple samples $f$ from the Gaussian process prior. Once $K$ is factorized (cost in $\mathcal{O}(n^3)$), the cost of drawing one sample is in $\mathcal{O}(n^2)$. Gaussian processes also have the added benefit of providing an analytical form for their density, but this is not used specifically here.
+
+#### Physics-based simulations
+
+Beyond explicit function-space priors like Gaussian processes, physics-based simulations offer a sophisticated means to define function-space priors, especially when the underlying system dynamics are governed by known physical laws. These simulations can be driven by differential equations (see, e.g., Lorenzi and Filippone) and specific boundary/initial conditions, intrinsically constrain the space of admissible functions to those that are physically consistent and plausible. By running these simulations under varied, yet physically realistic, input parameters or initial states, one can generate prior samples in function space that implicitly encode the structure, symmetries, and conservation laws dictated by the physics. This approach is particularly valuable when analytical forms of function-space priors are unavailable or overly simplistic, allowing for the sampling of complex functions that capture the true behavior of the system, thus providing a rich and informative prior for neural networks.
+
+#### The case of unsupervised learning
+
+To highlight the generality of this approach, note that choosing a prior over $\theta$ from target distribution *samples* extends naturally from supervised to unsupervised learning. In unsupervised learning tasks, NNs can be used to model the true underlying probability distribution over the inputs $\pi(x)$ or to obtain a model to sample from $\pi(x)$ without explicitly modeling it. In these cases, NNs implement functions $f(x, \theta)$ aiming at reconstructing the inputs themselves. The function-space prior of interest is then $\pi(x)$ and the samples are just the given input data $x_i$, as studied in Tran et al. for Bayesian Auto-Encoders. The point for present purposes is that, exactly as in the supervised case, the matching objectives of Section 3 require only samples from the target, here the data themselves, and never an analytical form for it.
+
+### 3.2 Matching problem and objectives
+
+Assuming access to samples from a function-space prior of interest, say $p_{\text{target}}(F_{1:n})$, the aim is to choose a prior over $\theta$ so that the induced prior $p_{\text{nn}}(F_{1:n})$ (where the subscript "nn" stands for "neural network") matches the target function-space prior $p_{\text{target}}(F_{1:n})$ as closely as possible. If only samples from $p_{\text{target}}(F_{1:n})$ are available, one can only hope to establish a close match conditioned on a set of input locations $x_1, \ldots, x_n$; expecting a perfect match of the two distributions when $n$ is large is generally unrealistic.
+
+Aiming for a "soft" match of these distributions, this section now studies objective functions measuring the dissimilarity between distributions over functions evaluated at $n$ input locations. Denote by $\psi$ the parameters (also known as hyper-parameters) of the prior over $\theta$, that is $p(\theta \mid \psi)$. For example, for a Gaussian prior, $\psi$ could include its mean and variance. The induced function-space prior in Equation 31.3 now reads:
+
+$$
+p_{\text{nn}}(F_{1:n} \mid \psi) = \int p(F_{1:n} \mid \theta) p(\theta \mid \psi) d\theta. \tag{31.6}
+$$
+
+The goal is to minimize an objective measuring the dissimilarity between $p_{\text{nn}}(F_{1:n} \mid \psi)$ and the target function-space prior $p_{\text{target}}(F_{1:n})$ as follows:
+
+$$
+\arg\min_{\psi} \left\{ \mathcal{D}[p_{\text{nn}}(F_{1:n} \mid \psi), p_{\text{target}}(F_{1:n})] \right\}, \tag{31.7}
+$$
+
+where $\mathcal{D}(\cdot, \cdot)$ represents a dissimilarity measure between the two arguments.
+
+This section begins by choosing $\mathcal{D}(\cdot, \cdot)$ to be the Kullback-Leibler divergence. As will be seen shortly, the difficulties stemming from the use of this divergence motivate the need to consider alternatives, and two integral probability metrics are presented for this purpose, namely the Wasserstein distance and the Maximum Mean Discrepancy.
+
+#### KL divergence
+
+The KL divergence objective reads:
+
+$$
+\mathcal{D}_{\text{KL}}[p_{\text{nn}} \| p_{\text{target}}] = \int p_{\text{nn}}(F_{1:n} \mid \psi) \log \left( \frac{p_{\text{nn}}(F_{1:n} \mid \psi)}{p_{\text{target}}(F_{1:n})} \right) dF_{1:n} \tag{31.8}
+$$
+
+The calculation of this KL divergence is analytically intractable and approximating it through samples is notoriously challenging for large-dimensional distributions. In order to see this, the KL divergence can be rewritten as:
+
+$$
+\mathcal{D}_{\text{KL}}[p_{\text{nn}} \| p_{\text{target}}] = \mathcal{H}[p_{\text{nn}}] - \mathcal{CH}[p_{\text{nn}} \| p_{\text{target}}] \tag{31.9}
+$$
+
+where $\mathcal{H}$ and $\mathcal{CH}$ denote the entropy and cross-entropy, respectively. Estimators for the entropy of large dimensional distributions through samples generally suffer from high variance, making it difficult to optimize the KL objective with respect to $\psi$. Similar issues arise in the case of $f$-divergences and $\alpha$-divergences. An alternative is to consider other measures of dissimilarity which are easy to estimate based on samples from the two distributions. This is what is discussed next by considering two integral probability metrics.
+
+#### Wasserstein distance
+
+The Wasserstein distance is a popular integral probability metric frequently used in optimal transport problems. Let $\mathcal{F} \subset \mathbb{R}^C$ and $\mathcal{F}' \subset \mathbb{R}^C$ and let $p_1(f)$ and $p_2(f')$ be two (Borel) probability measures. The generic symbols $p_1$ and $p_2$ are used while introducing the distance; they will be instantiated as the BNN and target function-space priors, $p_1 = p_{\text{nn}}$ and $p_2 = p_{\text{target}}$, in Equation 31.13 below. The $p$-Wasserstein distance is defined as[^1]
+
+$$
+W_p(p_1, p_2) = \left( \inf_{\gamma \in \Gamma(p_1, p_2)} \int_{\mathcal{F} \times \mathcal{F}'} D(f, f')^p \gamma(f, f') df df' \right)^{1/p}, \tag{31.10}
+$$
+
+where $D(f, f')$ is a proper distance metric between $f, f' \in \mathcal{F} \times \mathcal{F}'$ and $\Gamma(p_1, p_2)$ is the set of all joint distributions (couplings) with marginals $p_1$ and $p_2$.
+
+When $\mathcal{F} = \mathcal{F}'$ the most common formulation is the 1-Wasserstein distance with $D(\cdot, \cdot)$ taken to be the Euclidean norm:
+
+$$
+W(p_1, p_2) = \inf_{\gamma \in \Gamma(p_1, p_2)} \int_{\mathcal{F} \times \mathcal{F}} \|f - f'\| \gamma(f, f') df df', \tag{31.11}
+$$
+
+The intuitive meaning of this distance is to measure the minimum amount of mass which should be transported in order to transform the distribution $p_1$ into the distribution $p_2$. This is why the 1-Wasserstein distance is also referred to as the Earth-Mover distance.
+
+A convenient rewriting of the 1-Wasserstein distance leads to a dual form which lends itself to a tractable estimation:
+
+$$
+W(p_1, p_2) = \sup_{\|g\|_L \leq 1} \int_{\mathcal{F}} g(f) p_1(f) df - \int_{\mathcal{F}} g(f') p_2(f') df' \tag{31.12}
+$$
+
+where $g$ is a 1-Lipschitz continuous function defined on $\mathcal{F} \to \mathbb{R}$. Indeed, the calculation of the 1-Wasserstein distance can now be viewed as an optimization problem of a simple objective with respect to 1-Lipschitz continuous functions. The objective is just a difference of two expectations, which can be estimated through Monte Carlo, whereas the optimization with respect to $g$ can be tackled by parameterizing $g$ as a neural network.
+
+The 1-Wasserstein distance can be used as a matching objective between $p_{\text{nn}}(F_{1:n} \mid \psi)$ and $p_{\text{target}}(F_{1:n})$:
+
+$$
+W(p_{\text{nn}}, p_{\text{target}}) = \sup_{\|g\|_L \leq 1} \int_{\mathcal{F}} g(f) p_{\text{nn}}(f \mid \psi) df - \int_{\mathcal{F}} g(f') p_{\text{target}}(f') df' \tag{31.13}
+$$
+
+#### Maximum mean discrepancy
+
+Another classic example of integral probability metric is the Maximum Mean Discrepancy (MMD). The presentation of the Wasserstein distance in the previous section allows one to view MMD under a similar vein, as it results in the same objective except that the supremum is taken with respect to functions belonging to a Reproducing Kernel Hilbert Space (RKHS) $\mathcal{H}$ and bounded norm. The MMD between $p_{\text{target}}$ and $p_{\text{nn}}$ is defined as follows
+
+$$
+\operatorname{MMD}(p_{\text{nn}}, p_{\text{target}}) = \sup_{\|g\|_{\mathcal{H}} \leq 1} \int_{\mathcal{F}} g(f) p_{\text{nn}}(f \mid \psi) df - \int_{\mathcal{F}} g(f') p_{\text{target}}(f') df' \tag{31.14}
+$$
+
+The Hilbert space $\mathcal{H}$ is induced by the choice of a kernel function $k(\cdot, \cdot)$, and it is desirable to consider kernels inducing infinite dimensional Hilbert spaces, which are capable of capturing discrepancies between an infinite number of moments for the two distributions. By leveraging the so-called kernel trick, it is possible to express the square MMD in such a way that does not require $g(f)$ directly, but just scalar products between elements of the RKHS, that is the kernel function evaluated at pairs of $f$, leading to:
+
+$$
+\operatorname{MMD}^2(p_{\text{nn}}, p_{\text{target}}) = \mathbb{E}_{f, f' \sim p_{\text{target}}, h, h' \sim p_{\text{nn}}(\cdot \mid \psi)} \left[ k(f, f') + k(h, h') - 2k(f, h') \right]. \tag{31.15}
+$$
+
+All these expectations can be estimated in an unbiased fashion through Monte Carlo by using samples from $p_{\text{target}}$ and $p_{\text{nn}}$. Furthermore, this formulation lends itself to mini-batching, while preserving unbiasedness.
+
+### 3.3 Imposing GP priors on Bayesian neural networks using Wasserstein distance
+
+This section presents a practical implementation for imposing GP priors on Bayesian neural networks in function space, using the previously introduced 1-Wasserstein distance. The two stochastic processes are matched at measurement points $Z = [z_1, \ldots, z_M]^\top$ sampled from a distribution $q(z)$. For low-dimensional inputs, $Z$ can be drawn from a grid or uniformly sampled. In higher dimensions, samples can be taken from the training set, optionally augmented with noise. If the test input region is known, $q(z)$ can be chosen to cover it.
+
+To match the BNN function-space prior $p_{\text{nn}}$ to the target GP prior $p_{\text{gp}}$ at these measurement points, a sample-based approach is employed that uses the 1-Wasserstein distance of Equation 31.13 as the objective:
+
+$$
+\min_{\psi} \max_{\omega} \mathbb{E}_q \Big[ \underbrace{\mathbb{E}_{p_{\text{nn}}(\cdot \mid \psi)}[g(f_M, \omega)] - \mathbb{E}_{p_{\text{gp}}}[g(f_M, \omega)]}_{\mathcal{L}(\psi, \omega)} \Big], \tag{31.16}
+$$
+
+where $f_M$ denotes the set of random variables associated with the inputs $Z$, and $g(\cdot, \omega)$ is a 1-Lipschitz function parameterized by a neural network with parameters $\omega$. The dependence on the prior hyper-parameters $\psi$ enters through the BNN function-space prior $p_{\text{nn}}(\cdot \mid \psi)$: its samples $f_M$ are produced by first drawing $\theta \sim p(\theta \mid \psi)$ and then evaluating the network at $Z$, so that minimizing over $\psi$ reshapes the BNN prior to match the target.
+
+<Figure caption="Figure 31.3: Schematic representation of the process of imposing GP priors on BNNs via Wasserstein distance minimization. Schematic redrawn for this page.">
+  <Bdl31PriorMatching />
+</Figure>
+
+Regarding the optimization of the $\psi$ and $\omega$ parameters, the procedure alternates between $n_{\text{Lipschitz}}$ steps of maximizing $\mathcal{L}$ with respect to the Lipschitz function's parameters $\omega$ and one step of minimizing the Wasserstein distance with respect to the prior's parameters $\psi$. Two independent optimizers are therefore used for $\psi$ and $\omega$. Figure 31.3 offers a high-level schematic representation of the proposed procedure. Given samples from two stochastic processes, the Wasserstein distance is estimated by considering the inner maximization of Equation 31.16, resulting in an optimal $g^*$. This inner optimization step is repeated for every step of the outer optimization loop. Notice that the objective is fully sample-based. As a result, it is not necessary to know the closed-form of the marginal density $p_{\text{nn}}(\mathbf{f}; \psi)$. One may consider any stochastic process as a target prior over functions, as long as samples can be drawn from it.
+
+To enforce the Lipschitz constraint on $g_\omega$, Arjovsky et al. propose clipping the weights $\omega$ to lie within a compact set $[-c, c]$, ensuring all functions $g_\omega$ are $K$-Lipschitz. However, this often biases $g_\omega$ toward overly simple functions. Building on the fact that a differentiable function is 1-Lipschitz if and only if the norm of its gradient is at most one everywhere, Gulrajani et al. propose penalizing deviations of the gradient norm from 1. Specifically, they augment the loss with a gradient penalty term:
+
+$$
+\mathcal{L}_R(\psi, \omega) = \mathcal{L}(\psi, \omega) + \lambda \, \mathbb{E}_{p_{\hat{\mathbf{f}}}} \left[ \left( \left\| \nabla_{\hat{\mathbf{f}}} g(\hat{\mathbf{f}}) \right\|_2 - 1 \right)^2 \right], \tag{31.17}
+$$
+
+where $p_{\hat{\mathbf{f}}}$ is the distribution of interpolated functions $\hat{\mathbf{f}} = \varepsilon \mathbf{f}_{\text{nn}} + (1 - \varepsilon) \mathbf{f}_{\text{gp}}$, with $\varepsilon \sim \mathcal{U}[0, 1]$, and $\mathbf{f}_{\text{nn}} \sim p_{\text{nn}}$, $\mathbf{f}_{\text{gp}} \sim p_{\text{gp}}$ drawn from BNN and GP priors, respectively. The coefficient $\lambda$ controls the strength of the regularization.
+
+### 3.4 Examples on a 1D regression synthetic data set
+
+The data set is constructed as follows: (1) uniformly sample 64 input locations $\mathbf{x}$ in the interval $[-10, 10]$; (2) rearrange these locations to introduce a gap in the input space; (3) sample function values $\mathbf{f}$ from a GP prior with lengthscale $l = 0.6$ and amplitude $\alpha = 1$, evaluated at $\mathbf{x}$; (4) corrupt the targets with i.i.d. Gaussian noise with variance $\sigma_\epsilon^2 = 0.1$. A three-layer MLP is used as the model. Figure 31.4 presents the results, organized in five rows, with the reference Gaussian process shown in the leftmost column throughout. Three GP-induced (GPi) BNN priors are considered: GPi-Gaussian, GPi-Hierarchical, and GPi-NFlow, whose prior over $\theta$ is parameterized by Gaussian, hierarchical, and normalizing-flow distributions, respectively. The first row shows samples from these priors with their hyper-parameters kept *fixed* at sensible default values, that is *not* matched to the GP (labeled "Fixed"), whereas the second row shows samples after the hyper-parameters $\psi$ have been *optimized* to match the GP prior by minimizing the Wasserstein distance (labeled "Optim"). The third row reports the convergence of this prior-matching optimization. The last two rows show the posteriors obtained with the fixed and the optimized priors, respectively.
+
+The procedure is therefore two-stage, and the two stages should not be conflated. In the first (prior-matching) stage the optimization problem of Equation 31.16 is solved to obtain the prior hyper-parameters $\psi^\star$; this stage operates purely in function space and only requires *samples* from $p_{\text{nn}}$ and $p_{\text{gp}}$. In the second (inference) stage $\psi = \psi^\star$ is fixed and posterior samples are drawn with stochastic gradient Hamiltonian Monte Carlo (SGHMC; [Chapter 2](/blog/stochastic-gradient-mcmc)). It is worth emphasizing why the second stage is unproblematic even though the *function-space* prior density is intractable: posterior sampling is carried out in *parameter* space, where the prior $p(\theta \mid \psi^\star)$, a Gaussian, hierarchical-Gaussian, or normalizing-flow density over $\theta$, is available in closed form and is differentiable. The sampler thus targets the unnormalized parameter-space posterior $p(y \mid x, \theta) \, p(\theta \mid \psi^\star)$ and never needs to evaluate the intractable marginal $p_{\text{nn}}(F_{1:n})$; the optimization of Equation 31.16 is performed once, beforehand, and is not part of the sampler's inner loop.
+
+From the analysis of these plots, the benefit of placing a prior on the functions rather than on the parameters is clearly visible. First, the Wasserstein distance plots show satisfactory convergence, with the normalizing-flow prior closely matching the GP prior thanks to its flexibility. Second, as expected, the posteriors exhibit similar behavior according to the possible solutions realizable from the prior: classic priors tend to yield degenerate functions resulting in overconfidence in regions without data, while the GP-induced priors retain information regarding lengthscale and amplitude.
+
+Overall, the examples show why parameter-space convenience is not enough for Bayesian deep learning: apparently innocuous weight priors can induce highly restrictive priors over functions. Matching in function space provides a practical way to encode interpretable assumptions such as length-scale, amplitude, and smoothness while still carrying out posterior inference in parameter space.
+
+<Figure caption="Figure 31.4: Visualization of a one-dimensional regression example with a three-layer MLP. Throughout, the left column is the reference Gaussian process and the horizontal/vertical axes are the input and the function value, respectively. The first row shows BNN prior samples with fixed (default, unmatched) hyper-parameters and the second row with hyper-parameters optimized to match the GP prior; the middle row shows the convergence of this prior-matching optimization. The last two rows show the posteriors obtained, respectively, with the fixed and the optimized priors, sampled with SGHMC. The dashed line and shaded areas denote the posterior mean and the 95% credible intervals. Schematic reproduction redrawn for this page; it does not reproduce the book's experiment or its results. Only the GP prior and GP posterior panels are computed (RBF kernel, variance 2, length-scale 1.4, on synthetic data with a gap). The fixed-prior samples come from small tanh networks and the GP-induced prior samples from random-feature networks that stand in for the optimized priors. The Wasserstein traces are illustrative decays, not optimization results. The six BNN posterior panels are illustrative only, not computed BNN posteriors: each is the GP posterior with its credible band narrowed (strongly for the fixed priors, slightly for the GP-induced priors) to depict the behavior described in the text.">
+  <Bdl31RegressionExample />
+</Figure>
+
+[^1]: The definition of the $p$-Wasserstein distance holds more generally for any complete separable metric spaces $\mathcal{F}$ and $\mathcal{F}'$.
