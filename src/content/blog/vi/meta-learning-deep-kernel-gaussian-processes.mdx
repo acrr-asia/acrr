@@ -1,0 +1,249 @@
+---
+title: "Siêu học quá trình Gauss với hàm nhân sâu"
+description: "ADKF-IFT siêu học bộ trích xuất đặc trưng của hàm nhân sâu qua nhiều tác vụ và thích nghi tham số hàm nhân cơ sở cho từng tác vụ, với kết quả trên tác vụ phân tử."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - gaussian processes
+  - meta-learning
+  - deep kernel learning
+  - few-shot learning
+series: bayesian-deep-learning
+seriesOrder: 33
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl27TrainingProcedures from '../../../components/diagrams/Bdl27TrainingProcedures.astro';
+import Bdl27FsMolResults from '../../../components/diagrams/Bdl27FsMolResults.astro';
+import Bdl27BoOutOfDomain from '../../../components/diagrams/Bdl27BoOutOfDomain.astro';
+
+Mặc dù phương pháp học hàm nhân sâu (deep kernel learning) được giới thiệu ở [Chương 24](/vi/blog/deep-kernel-learning) chính quy hóa các hàm nhân sâu bằng ước lượng hợp lý cực đại loại II (type-II maximum likelihood), nó vẫn có xu hướng quá khớp (overfitting) trên các tập dữ liệu nhỏ. Chương này giới thiệu *Adaptive Deep Kernel Fitting with Implicit Function Theorem* (ADKF-IFT, khớp hàm nhân sâu thích nghi bằng định lý hàm ẩn), một khuôn khổ tổng quát để học các quá trình Gauss với hàm nhân sâu trên những tác vụ ít dữ liệu bằng cách nội suy giữa siêu học (meta-learning) và học hàm nhân sâu thông thường. ADKF-IFT dùng một hàm mục tiêu tối ưu hóa hai cấp (bilevel optimization), trong đó các biểu diễn đặc trưng hữu ích một cách tổng quát được siêu học qua nhiều tác vụ, sao cho các mô hình quá trình Gauss riêng cho từng tác vụ được ước lượng trên các đặc trưng đó đạt mất mát dự đoán trung bình thấp nhất có thể. Bài toán tối ưu hóa lồng nhau thu được được giải bằng định lý hàm ẩn (implicit function theorem). Có thể chứng minh rằng khuôn khổ ADKF-IFT chứa Deep Kernel Learning và Deep Kernel Transfer như các trường hợp đặc biệt. Mặc dù ADKF-IFT là một phương pháp hoàn toàn tổng quát, nó đặc biệt phù hợp với các bài toán khám phá thuốc (drug discovery) do bản chất ít dữ liệu của chúng, và vượt trội đáng kể so với các phương pháp hiện đại nhất trước đó trên nhiều tác vụ thực tế về dự đoán tính chất phân tử với ít mẫu (few-shot) cũng như trên các tác vụ dự đoán và tối ưu hóa tính chất phân tử ngoài miền (out-of-domain).
+
+## 1. Giới thiệu
+
+Nhiều ứng dụng thực tế đòi hỏi các thuật toán học máy đưa ra dự đoán vững với độ bất định được hiệu chuẩn tốt khi chỉ có rất ít dữ liệu huấn luyện. Một ví dụ quan trọng là khám phá thuốc, nơi người làm thực tế không chỉ muốn mô hình dự đoán chính xác các tính chất hóa sinh và hóa lý của phân tử, mà còn muốn dùng mô hình để định hướng việc tìm kiếm các phân tử mới có tính chất mong muốn, tận dụng các kỹ thuật như tối ưu hóa Bayes (Bayesian optimization, BO), vốn phụ thuộc nhiều vào các ước lượng độ bất định chính xác. Bất chấp sự phát triển vượt bậc của mạng nơ-ron trong thập kỷ qua, các ước lượng độ bất định nổi tiếng là quá tự tin và không đáng tin cậy của chúng khiến chúng nói chung là những mô hình thay thế (surrogate model) kém hiệu quả cho BO. Thay vào đó, phần lớn các cài đặt BO hiện nay dùng quá trình Gauss (Gaussian process, GP) làm mô hình thay thế nhờ các ước lượng độ bất định tính được bằng giải tích và nói chung đáng tin cậy của chúng, kể cả trên các tập dữ liệu nhỏ.
+
+Theo truyền thống, GP được khớp trên các đặc trưng được thiết kế thủ công (chẳng hạn dấu vân tay phân tử (molecular fingerprint)), điều có thể hạn chế hiệu năng dự đoán của chúng trên dữ liệu phức tạp, có cấu trúc, nhiều chiều như phân tử, nơi việc thiết kế các đặc trưng giàu thông tin là khó khăn. Một cách tự nhiên, nhiều công trình đã đề xuất cải thiện hiệu năng bằng cách khớp GP trên các đặc trưng do một mạng nơ-ron sâu học được, một họ mô hình thường được gọi là GP với hàm nhân sâu (Deep Kernel GP) như đã giới thiệu ở [Chương 24](/vi/blog/deep-kernel-learning). Tuy nhiên, chưa có sự đồng thuận rõ ràng về cách huấn luyện các mô hình này trên những tác vụ ít dữ liệu: cực đại hóa hàm hợp lý biên (marginal likelihood) của GP đã được chỉ ra là quá khớp trên các tập dữ liệu nhỏ, còn các cách tiếp cận siêu học và Bayes hoàn toàn tránh được điều này nhưng phải trả giá bằng những giả định mạnh, thường không thực tế.
+
+Chương này trình bày một khuôn khổ tổng quát có tên *Adaptive Deep Kernel Fitting with Implicit Function Theorem* (ADKF-IFT) để huấn luyện GP với hàm nhân sâu, đặc biệt phù hợp với các tập dữ liệu nhỏ. Về bản chất, ADKF-IFT huấn luyện một tập con các tham số mô hình bằng một hàm mất mát siêu học, và thích nghi riêng các tham số còn lại trên từng tác vụ bằng ước lượng hàm hợp lý biên cực đại. Khác với các phương pháp trước đó dùng một hàm mất mát duy nhất cho mọi tham số, ADKF-IFT có thể tận dụng tác dụng chính quy hóa ngầm của siêu học để ngăn quá khớp, đồng thời tránh các giả định mạnh của một cách tiếp cận siêu học thuần túy, vốn có thể dẫn đến chưa khớp (underfitting).
+
+Cấu trúc của chương như sau. Mục 3.1 trình bày khuôn khổ ADKF-IFT tổng quát và cách phát biểu tự nhiên của nó dưới dạng một bài toán tối ưu hóa hai cấp. Mục 3.2 giải thích cách dùng định lý hàm ẩn (IFT) để giải hiệu quả bài toán tối ưu hóa hai cấp bằng các phương pháp dựa trên gradient trong bối cảnh học với ít mẫu. Mục 3.3 cho thấy ADKF-IFT có thể được xem là một sự *tổng quát hóa* và *thống nhất* các cách tiếp cận trước đó để huấn luyện GP với hàm nhân sâu, vốn chỉ dựa thuần túy trên học đơn tác vụ hoặc thuần túy trên siêu học. Chương này tập trung vào một hiện thực cụ thể mang tính thực tiễn của ADKF-IFT, trong đó mọi tham số của bộ trích xuất đặc trưng đều được siêu học; hiện thực này có cách diễn giải rõ ràng và loại bỏ nhu cầu dùng bất kỳ xấp xỉ ma trận Hesse (Hessian) nào. Mục 3.4 lập luận vì sao hiện thực cụ thể này phù hợp để giữ lại những tính chất tốt nhất của các phương pháp đã được đề xuất trước đó. Xuất phát từ nhu cầu chung về các mô hình GP tốt hơn trong hóa học, Mục 5 trình bày một đánh giá thực nghiệm rộng về ADKF-IFT trên nhiều tác vụ hóa học, cho thấy nó cải thiện đáng kể so với các phương pháp hiện đại nhất trước đó.
+
+## 2. Kiến thức chuẩn bị
+
+### 2.1 Siêu học và học với ít mẫu
+
+Học với ít mẫu (few-shot learning) là việc học trên nhiều tác vụ liên quan khi mỗi tác vụ chỉ có ít mẫu được gán nhãn. Nó đòi hỏi thuật toán học có khả năng thích nghi với các tác vụ chưa gặp khi chỉ có ít mẫu được gán nhãn. Các thuật toán học với ít mẫu thường được lợi từ việc chuyển giao tri thức giữa các tác vụ ít dữ liệu có liên quan, trong khi các thuật toán học đơn tác vụ có thể dễ dàng quá khớp hoặc chưa khớp trong bối cảnh này. Trong thiết lập học với ít mẫu, cho trước một tập các tác vụ huấn luyện $\mathcal{D} = \{\mathcal{T}_t\}_{t=1}^{T}$ (một *siêu tập dữ liệu*, meta-dataset) và một số tác vụ kiểm tra chưa gặp $\mathcal{D}_* = \{\mathcal{T}_*\}$. Mỗi tác vụ $\mathcal{T} = \{(x_i, y_i)\}_{i=1}^{N_\mathcal{T}}$ là một tập các điểm trong miền $\mathcal{X}$ (chẳng hạn không gian các phân tử) cùng các nhãn tương ứng (liên tục, phân loại, v.v.), và được chia thành một *tập hỗ trợ* (support set) $\mathcal{S}_\mathcal{T} \subseteq \mathcal{T}$ dùng cho siêu huấn luyện và một *tập truy vấn* (query set) $\mathcal{Q}_\mathcal{T} = \mathcal{T} \setminus \mathcal{S}_\mathcal{T}$ dùng cho siêu kiểm tra. Thông thường, tổng số tác vụ huấn luyện $|\mathcal{D}|$ lớn, trong khi kích thước của mỗi tập hỗ trợ $|\mathcal{S}_\mathcal{T}|$ nhỏ. Các mô hình học với ít mẫu thường được huấn luyện để dự đoán chính xác các mẫu chưa gặp trong tập truy vấn $\mathcal{Q}_\mathcal{T}$ khi biết các mẫu được gán nhãn trong tập hỗ trợ $\mathcal{S}_\mathcal{T}$, với mọi tác vụ $\mathcal{T} \in \mathcal{D}$, trong một pha *siêu huấn luyện* (meta-training), rồi được đánh giá bằng sai số dự đoán trên $\mathcal{Q}_{\mathcal{T}_*}$ khi biết $\mathcal{S}_{\mathcal{T}_*}$ với các tác vụ kiểm tra chưa gặp $\mathcal{T}_* \in \mathcal{D}_*$ trong một pha *siêu kiểm tra* (meta-testing).
+
+### 2.2 Quá trình Gauss với hàm nhân sâu
+
+Như đã giới thiệu ở [Chương 24](/vi/blog/deep-kernel-learning), quá trình Gauss với *hàm nhân sâu* (deep kernel) là các GP có hàm hiệp phương sai được xây dựng bằng cách trước hết dùng một *bộ trích xuất đặc trưng* (feature extractor) là mạng nơ-ron $f_\phi$ với tham số $\phi \in \Phi$ để tạo các biểu diễn đặc trưng $h = f_\phi(x)$, $h' = f_\phi(x')$ của các điểm đầu vào $x, x'$, rồi đưa các biểu diễn đặc trưng này vào một *hàm nhân cơ sở* (base kernel) tiêu chuẩn $c_\theta(h, h')$ (chẳng hạn một hàm nhân RBF). Do đó hàm hiệp phương sai đầy đủ là $k_\psi(x, x') := c_\theta(f_\phi(x), f_\phi(x'))$ với các tham số học được $\psi := (\theta, \phi)$. GP với hàm nhân sâu có thể được xem là thực hiện suy luận Bayes cho lớp tuyến tính cuối cùng của một mạng nơ-ron trong không gian hàm.
+
+Phương pháp *học hàm nhân sâu* (Deep Kernel Learning, DKL) được giới thiệu ở [Chương 24](/vi/blog/deep-kernel-learning) là một phương pháp đơn tác vụ để khớp một hàm nhân sâu với một tập dữ liệu. DKL khớp đồng thời cả tham số bộ trích xuất đặc trưng $\phi$ lẫn tham số hàm nhân cơ sở $\theta$ bằng cách cực đại hóa hàm hợp lý biên của GP trên một tập dữ liệu duy nhất (tức là, về bản chất DKL khớp một mạng nơ-ron với một "đầu" GP vào một tập dữ liệu). Ai cũng biết rằng mạng nơ-ron rất dễ quá khớp trên các tập dữ liệu nhỏ. Hiện tượng quá khớp này cũng xảy ra ở DKL, mặc dù nó khớp các tham số mạng nơ-ron bằng cách tiếp cận hợp lý cực đại loại II: dù các bài báo DKL ban đầu cho rằng số hạng "độ phức tạp mô hình" (được đo bằng logarit định thức của ma trận hàm nhân) trong hàm mục tiêu hàm hợp lý biên của GP sẽ ngăn hiện tượng quá khớp này xảy ra, công trình tiếp nối gần đây đã chỉ ra rằng điều đó không đúng, vì một GP với hàm nhân sâu có thể đồng thời quá khớp dữ liệu huấn luyện và có vẻ có "độ phức tạp mô hình" thấp.
+
+*Chuyển giao hàm nhân sâu* (Deep Kernel Transfer, DKT) là một phương pháp siêu học để khớp một hàm nhân sâu với một phân phối các tập dữ liệu. DKT khớp đồng thời cả tham số bộ trích xuất đặc trưng $\phi$ lẫn tham số hàm nhân cơ sở $\theta$ bằng cách cực đại hóa kỳ vọng của hàm hợp lý biên GP theo một phân phối các tập dữ liệu (tức là một siêu tập dữ liệu). Để giảm vấn đề quá khớp của DKL bằng siêu học, DKT đưa ra một giả định rất mạnh rằng các tác vụ khác nhau trong phân phối tác vụ được rút ra từ cùng một tiên nghiệm GP trên hàm. Cụ thể, điều này có nghĩa là quá trình sinh dữ liệu được giả định có cùng mức nhiễu, cùng biên độ và cùng "thang độ dài đặc trưng" (characteristic lengthscale) cho mọi tác vụ trong siêu tập dữ liệu, một giả định rất hạn chế bị vi phạm trong phần lớn các bài toán thực tế. Lấy khám phá thuốc làm ví dụ, các tính chất thuốc trong những tập dữ liệu khác nhau của một siêu tập dữ liệu có thể có (1) mức nhiễu biến thiên rất mạnh, nên việc mô hình hóa mọi tác vụ với cùng một lượng nhiễu quan sát sẽ không thực tế; (2) các khoảng giá trị đầu ra và đơn vị khác nhau đối với hồi quy: chẳng hạn, một tác vụ có thể có dữ liệu trong khoảng 1-20 µM, trong khi tác vụ khác có thể là mức ức chế 0-100%, nghĩa là một phương sai tín hiệu duy nhất (biên độ hàm nhân) sẽ không mô hình hóa tốt dữ liệu; (3) các "thang độ dài đặc trưng" khác nhau: với một số tác vụ, các phân tử có cấu trúc tương tự có nhãn đầu ra tương quan rất mạnh, trong khi với các tác vụ khác mối tương quan này yếu hơn nhiều (tức là nhãn của các phân tử rất giống nhau biến thiên nhiều hơn hẳn), cho thấy "thang độ dài đặc trưng" sẽ khác nhau. Tất yếu, việc cố khớp một mô hình đặc tả sai (misspecification) như vậy sẽ cho ra một bộ tham số hàm nhân cơ sở $\theta$ mang tính thỏa hiệp, khớp tạm ổn với mọi tập dữ liệu xét trung bình nhưng không khớp thật tốt với từng tập dữ liệu riêng lẻ. Đây là vấn đề chưa khớp của DKT.
+
+## 3. Khớp hàm nhân sâu thích nghi bằng định lý hàm ẩn
+
+Gọi $\Theta$ và $\Phi$ lần lượt là tập tham số hàm nhân cơ sở và tập tham số bộ trích xuất đặc trưng của một GP với hàm nhân sâu. Ký hiệu tập mọi tham số là $\Psi \equiv \Theta \times \Phi$.
+
+### 3.1 Khuôn khổ ADKF-IFT tổng quát với tối ưu hóa hai cấp
+
+Ý tưởng then chốt của khuôn khổ ADKF-IFT tổng quát là chia các tham số thành hai tập con rời nhau $\Psi = \Psi_{\text{adapt}} \times \Psi_{\text{meta}}$, trong đó chỉ một tập con các tham số $\psi_{\text{adapt}} \in \Psi_{\text{adapt}}$ được thích nghi với từng tác vụ riêng lẻ bằng cách cực tiểu hóa một mất mát huấn luyện $\mathcal{L}_T$, còn tập tham số còn lại $\psi_{\text{meta}} \in \Psi_{\text{meta}}$ được siêu học trong một pha *siêu huấn luyện* để đạt mất mát kiểm định $\mathcal{L}_V$ tốt nhất có thể *xét trung bình* trên nhiều tác vụ huấn luyện có liên quan (*sau khi* $\psi_{\text{meta}}$ được thích nghi riêng với từng tác vụ đó). Điều này có thể được hình thức hóa một cách tự nhiên thành bài toán *tối ưu hóa hai cấp* sau:
+
+$$
+\psi_{\text{meta}}^{*} = \operatorname*{arg\,min}_{\psi_{\text{meta}}} \; \mathbb{E}_{p(\mathcal{T})}\big[\mathcal{L}_V(\psi_{\text{meta}}, \psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T}), \mathcal{T})\big], \tag{27.1}
+$$
+
+$$
+\text{such that} \quad \psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T}) = \operatorname*{arg\,min}_{\psi_{\text{adapt}}} \; \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_\mathcal{T}). \tag{27.2}
+$$
+
+Các Phương trình 27.1 và 27.2 dễ hiểu nhất khi xét riêng các tham số được siêu học $\psi_{\text{meta}}$ và các tham số riêng cho tác vụ $\psi_{\text{adapt}}$. Với một tác vụ $\mathcal{T}$ cho trước và một giá trị tùy ý của các tham số được siêu học $\psi_{\text{meta}}$, trong Phương trình 27.2 các tham số riêng cho tác vụ $\psi_{\text{adapt}}$ được chọn để cực tiểu hóa *mất mát huấn luyện* $\mathcal{L}_T$ tính trên tập hỗ trợ $\mathcal{S}_\mathcal{T}$ của tác vụ. Tức là $\psi_{\text{adapt}}$ được *thích nghi* với tập hỗ trợ $\mathcal{S}_\mathcal{T}$ của tác vụ $\mathcal{T}$, với mục đích tạo ra mô hình tốt nhất có thể trên $\mathcal{S}_\mathcal{T}$ ứng với giá trị cho trước của $\psi_{\text{meta}}$. Kết quả là một mô hình với các tham số riêng cho tác vụ tối ưu $\psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T})$ ứng với các tham số được siêu học $\psi_{\text{meta}}$ và tác vụ $\mathcal{T}$ cho trước. Câu hỏi còn lại là chọn giá trị cho các tham số được siêu học $\psi_{\text{meta}}$ như thế nào, khi biết rằng $\psi_{\text{adapt}}$ sẽ được thích nghi riêng với từng tác vụ. Trong Phương trình 27.1, các tham số được siêu học tối ưu $\psi_{\text{meta}}^{*}$ thu được bằng cách cực tiểu hóa kỳ vọng của *mất mát kiểm định* $\mathcal{L}_V$ theo một phân phối các tác vụ huấn luyện $p(\mathcal{T})$. Có hai lý do cho lựa chọn này như sau:
+
+1. Trên một tác vụ $\mathcal{T}$ bất kỳ, mất mát kiểm định thường phản ánh thước đo hiệu năng cần quan tâm trên tập truy vấn $\mathcal{Q}_\mathcal{T}$ của $\mathcal{T}$ (chẳng hạn sai số dự đoán).
+2. Vì cùng một giá trị $\psi_{\text{meta}}$ sẽ được dùng cho mọi tác vụ, hợp lý khi chọn một giá trị có *hiệu năng kỳ vọng* tốt trên nhiều tác vụ rút ra từ $p(\mathcal{T})$. Tức là $\psi_{\text{meta}}$ được chọn sao cho một GP đạt mất mát kiểm định trung bình thấp nhất có thể trên tập truy vấn $\mathcal{Q}_\mathcal{T}$ của một tác vụ huấn luyện ngẫu nhiên $\mathcal{T} \sim p(\mathcal{T})$ sau khi $\psi_{\text{adapt}}$ được thích nghi với tập hỗ trợ $\mathcal{S}_\mathcal{T}$ của tác vụ đó.
+
+Trong thực hành, $\psi_{\text{meta}}$ sẽ được tối ưu hóa trong một pha *siêu huấn luyện* dùng một tập các tác vụ huấn luyện $\mathcal{D}$ để xấp xỉ Phương trình 27.1. Sau siêu huấn luyện (tức là ở thời điểm siêu kiểm tra), phân phối dự đoán hậu nghiệm (posterior predictive) đồng thời của GP được dùng để dự đoán cho từng tác vụ kiểm tra chưa gặp $\mathcal{T}_*$ với các tham số tối ưu $\psi_{\text{meta}}^{*}$ và $\psi_{\text{adapt}}^{*}(\psi_{\text{meta}}^{*}, \mathcal{S}_{\mathcal{T}_*})$:
+
+$$
+p(\mathcal{Q}^{y}_{\mathcal{T}_*} \mid \mathcal{Q}^{x}_{\mathcal{T}_*}, \mathcal{S}_{\mathcal{T}_*}, \psi_{\text{meta}}^{*}, \psi_{\text{adapt}}^{*}(\psi_{\text{meta}}^{*}, \mathcal{S}_{\mathcal{T}_*})). \tag{27.3}
+$$
+
+Lưu ý rằng mô tả ở trên không chỉ định một lựa chọn cụ thể cho $\Psi_{\text{meta}}, \Psi_{\text{adapt}}, \mathcal{L}_T, \mathcal{L}_V$. Điều này là có chủ ý, vì có nhiều lựa chọn hợp lý cho các đại lượng này. Do đó, ADKF-IFT nên được xem là một *khuôn khổ tổng quát*, và một lựa chọn cụ thể cho các đại lượng này là một *hiện thực* (instantiation) của khuôn khổ ADKF-IFT. Các ví dụ về điều này được đưa ra ở Mục 3.3 và 3.4.
+
+### 3.2 Thuật toán siêu huấn luyện hiệu quả cho ADKF-IFT
+
+Nói chung, tối ưu hóa các hàm mục tiêu tối ưu hóa hai cấp như Phương trình 27.1 phức tạp về mặt tính toán, chủ yếu vì mỗi lần tính giá trị hàm mục tiêu đòi hỏi giải một bài toán tối ưu hóa bên trong riêng biệt (Phương trình 27.2).
+
+**Thuật toán 28** Tính chính xác siêu gradient trong ADKF-IFT
+
+```text
+Input : training task T′; current meta-learned parameters ψ′_meta
+Output: hypergradient dL_V/dψ_meta for T′ evaluated at ψ′_meta
+solve Equation 27.2 to obtain ψ′_adapt = ψ*_adapt(ψ′_meta, S_T′)
+compute g1 = ∂L_V(ψ_meta, ψ_adapt, T′)/∂ψ_meta |(ψ′_meta, ψ′_adapt) and g2 = ∂L_V(ψ_meta, ψ_adapt, T′)/∂ψ_adapt |(ψ′_meta, ψ′_adapt)
+compute Hessian H = ∂²L_T(ψ_meta, ψ_adapt, S_T′)/(∂ψ_adapt ∂ψ_adapt^⊤) |(ψ′_meta, ψ′_adapt)
+solve the linear system vH = g2 for v
+compute mixed partial derivatives P = ∂²L_T(ψ_meta, ψ_adapt, S_T′)/(∂ψ_adapt ∂ψ_meta^⊤) |(ψ′_meta, ψ′_adapt)
+compute hypergradient dL_V/dψ_meta = g1 − vP
+```
+
+Mặc dù việc tính *siêu gradient* (hypergradient, tức đạo hàm toàn phần) của mất mát kiểm định $\mathcal{L}_V$ theo các tham số được siêu học $\psi_{\text{meta}}$ sẽ cho phép giải Phương trình 27.1 bằng tối ưu hóa dựa trên gradient:
+
+$$
+\frac{\mathrm{d}\mathcal{L}_V}{\mathrm{d}\psi_{\text{meta}}} = \frac{\partial \mathcal{L}_V}{\partial \psi_{\text{meta}}} + \frac{\partial \mathcal{L}_V}{\partial \psi_{\text{adapt}}^{*}} \frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}, \tag{27.4}
+$$
+
+Phương trình 27.4 cho thấy điều này đòi hỏi tính $\frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}$, tức là các tham số riêng cho tác vụ tối ưu $\psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T})$ thay đổi thế nào theo các tham số được siêu học $\psi_{\text{meta}}$. Tính đại lượng này một cách trực tiếp bằng các nền tảng vi phân tự động sẽ đòi hỏi theo dõi gradient qua nhiều vòng lặp của bài toán tối ưu hóa bên trong (Phương trình 27.2), điều mà trong thực tế đòi hỏi quá nhiều bộ nhớ để khả thi. May mắn là, vì $\psi_{\text{adapt}}^{*}$ là một điểm tối ưu của mất mát huấn luyện $\mathcal{L}_T$, *định lý hàm ẩn* (Implicit Function Theorem, IFT) của Cauchy cung cấp một công thức để tính $\frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}$ với một giá trị tùy ý của các tham số được siêu học $\psi'_{\text{meta}}$ và một tác vụ cho trước $\mathcal{T}'$:
+
+$$
+\left.\frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}\right|_{\psi'_{\text{meta}}} = -\left(\frac{\partial^2 \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_{\mathcal{T}'})}{\partial \psi_{\text{adapt}}\, \partial \psi_{\text{adapt}}^{\top}}\right)^{-1} \left.\frac{\partial^2 \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_{\mathcal{T}'})}{\partial \psi_{\text{adapt}}\, \partial \psi_{\text{meta}}^{\top}}\right|_{\psi'_{\text{meta}}, \psi'_{\text{adapt}}}, \tag{27.5}
+$$
+
+trong đó $\psi'_{\text{adapt}} = \psi_{\text{adapt}}^{*}(\psi'_{\text{meta}}, \mathcal{S}_{\mathcal{T}'})$. Vấn đề tiềm ẩn duy nhất của Phương trình 27.5 là việc tính và nghịch đảo ma trận Hesse $\frac{\partial^2 \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_\mathcal{T})}{\partial \psi_{\text{adapt}}\, \partial \psi_{\text{adapt}}^{\top}}$. Phép tính này có thể thực hiện chính xác nếu $|\Psi_{\text{adapt}}|$ nhỏ, và đó là trường hợp được xét trong chương này (như sẽ thảo luận ở Mục 3.4). Nếu không, có thể dùng một xấp xỉ cho nghịch đảo ma trận Hesse (chẳng hạn xấp xỉ Neumann), cách này giảm cả độ phức tạp bộ nhớ lẫn độ phức tạp tính toán xuống $\mathcal{O}(|\Psi|)$. Kết hợp các Phương trình 27.4 và 27.5, Thuật toán 28 tóm tắt một quy trình tính chính xác siêu gradient $\frac{\mathrm{d}\mathcal{L}_V}{\mathrm{d}\psi_{\text{meta}}}$ cho một tác vụ đơn lẻ. Sau đó, các tham số được siêu học $\psi_{\text{meta}}$ có thể được cập nhật bằng kỳ vọng của siêu gradient theo $p(\mathcal{T})$.
+
+### 3.3 ADKF-IFT như một khuôn khổ thống nhất
+
+Phương pháp phổ biến nhất để huấn luyện GP với hàm nhân sâu là cực tiểu hóa logarit âm của hàm hợp lý biên (negative log marginal likelihood, NLML) trên một tập dữ liệu duy nhất (có thể kèm thêm các số hạng chính quy hóa như sẽ thảo luận ở Mục 4.1). Cách này thường được gọi là *học hàm nhân sâu* (DKL) và được giới thiệu ở [Chương 24](/vi/blog/deep-kernel-learning):
+
+$$
+\psi^{*} = \operatorname*{arg\,min}_{\psi} \; \operatorname{NLML}(\psi, \mathcal{S}_\mathcal{T}). \tag{27.6}
+$$
+
+Điểm khác biệt đáng chú ý nhất so với DKL là *chuyển giao hàm nhân sâu* (DKT), phương pháp thay vào đó đề xuất huấn luyện GP với hàm nhân sâu hoàn toàn bằng siêu học, cực tiểu hóa NLML *kỳ vọng* theo một phân phối các tác vụ huấn luyện:
+
+$$
+\psi^{*} = \operatorname*{arg\,min}_{\psi} \; \mathbb{E}_{p(\mathcal{T})}[\operatorname{NLML}(\psi, \mathcal{T})]. \tag{27.7}
+$$
+
+Điều thú vị là cả DKL lẫn DKT đều có thể được xem là các *trường hợp đặc biệt* của khuôn khổ ADKF-IFT tổng quát. Dễ thấy rằng chọn cách chia $\Psi_{\text{meta}} = \varnothing$, $\Psi_{\text{adapt}} = \Psi$ và chọn mất mát huấn luyện $\mathcal{L}_T$ là NLML trong các Phương trình 27.1 và 27.2 sẽ cho Phương trình 27.6: DKL chính là ADKF-IFT khi không có tham số nào được siêu học. Tương tự, chọn cách chia $\Psi_{\text{meta}} = \Psi$, $\Psi_{\text{adapt}} = \varnothing$ và chọn mất mát kiểm định $\mathcal{L}_V$ là NLML trong các Phương trình 27.1 và 27.2 sẽ cho Phương trình 27.7: DKT chính là ADKF-IFT khi mọi tham số đều được siêu học. Điều này khiến ADKF-IFT *tổng quát hơn một cách chặt chẽ* so với hai phương pháp trước đó.
+
+### 3.4 Hiện thực nổi bật của ADKF-IFT
+
+Trong số nhiều biến thể khả dĩ của ADKF-IFT, hiện thực sau đây được làm nổi bật.
+
+- $\Psi_{\text{meta}} = \Phi$, tức là mọi tham số bộ trích xuất đặc trưng $\phi$ được siêu học qua các tác vụ.
+- $\Psi_{\text{adapt}} = \Theta$, tức là mọi tham số hàm nhân cơ sở $\theta$ (chẳng hạn phương sai nhiễu, các thang độ dài, biên độ) được thích nghi với từng tác vụ.
+- Mất mát huấn luyện $\mathcal{L}_T$ được chọn là logarit âm của hàm hợp lý biên GP tính trên tập hỗ trợ $\mathcal{S}_\mathcal{T}$, như thông lệ khi chọn các tham số hàm nhân cơ sở của GP:
+
+  $$
+  \begin{aligned}
+  \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_\mathcal{T}) &= -\log p(\mathcal{S}^{y}_\mathcal{T} \mid \mathcal{S}^{x}_\mathcal{T}, \psi_{\text{meta}}, \psi_{\text{adapt}}) \\
+  &= \frac{1}{2} (\mathcal{S}^{y}_\mathcal{T})^{\top} K_{\mathcal{S}_\mathcal{T}}^{-1} \mathcal{S}^{y}_\mathcal{T} + \frac{1}{2} \log\det(K_{\mathcal{S}_\mathcal{T}}) + \frac{N_{\mathcal{S}_\mathcal{T}}}{2} \log(2\pi),
+  \end{aligned} \tag{27.8}
+  $$
+
+  trong đó $K_{\mathcal{S}_\mathcal{T}} := k_{\psi_{\text{meta}}, \psi_{\text{adapt}}}(\mathcal{S}^{x}_\mathcal{T}, \mathcal{S}^{x}_\mathcal{T}) + \sigma^2 I_{N_{\mathcal{S}_\mathcal{T}}}$.
+- Mất mát kiểm định $\mathcal{L}_V$ được chọn là logarit âm của phân phối dự đoán hậu nghiệm đồng thời của GP tính trên tập truy vấn $\mathcal{Q}_\mathcal{T}$ khi biết tập hỗ trợ $\mathcal{S}_\mathcal{T}$, cũng vì nó thường được dùng để dự đoán với GP:
+
+  $$
+  \begin{aligned}
+  \mathcal{L}_V(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{T}) &= -\log p(\mathcal{Q}^{y}_\mathcal{T} \mid \mathcal{Q}^{x}_\mathcal{T}, \mathcal{S}_\mathcal{T}, \psi_{\text{meta}}, \psi_{\text{adapt}}) \\
+  &= -\log \mathcal{N}(\mathcal{Q}^{y}_\mathcal{T} \mid K_{\mathcal{Q}_\mathcal{T} \mathcal{S}_\mathcal{T}} K_{\mathcal{S}_\mathcal{T}}^{-1} \mathcal{S}^{y}_\mathcal{T},\; K_{\mathcal{Q}_\mathcal{T}} - K_{\mathcal{S}_\mathcal{T} \mathcal{Q}_\mathcal{T}}^{\top} K_{\mathcal{S}_\mathcal{T}}^{-1} K_{\mathcal{S}_\mathcal{T} \mathcal{Q}_\mathcal{T}}),
+  \end{aligned} \tag{27.9}
+  $$
+
+  trong đó $K_{\mathcal{Q}_\mathcal{T}} := k_{\psi_{\text{meta}}, \psi_{\text{adapt}}}(\mathcal{Q}^{x}_\mathcal{T}, \mathcal{Q}^{x}_\mathcal{T}) + \sigma^2 I_{N_{\mathcal{Q}_\mathcal{T}}}$ và $K_{\mathcal{S}_\mathcal{T} \mathcal{Q}_\mathcal{T}} := k_{\psi_{\text{meta}}, \psi_{\text{adapt}}}(\mathcal{S}^{x}_\mathcal{T}, \mathcal{Q}^{x}_\mathcal{T})$.
+
+Lựa chọn này có một số lợi ích như trình bày chi tiết dưới đây.
+
+1. Lựa chọn hàm mất mát cụ thể này có ưu điểm là quy trình dự đoán trong pha siêu kiểm tra như định nghĩa ở Phương trình 27.3 khớp chính xác với quy trình siêu huấn luyện, nhờ đó bám sát nguyên tắc *học cách học* (learning to learn).
+2. Cách chia tham số có thể được hiểu một cách trực quan là siêu học một bộ trích xuất đặc trưng $f_\phi$ hữu ích một cách tổng quát, sao cho xét trung bình có thể khớp một GP có mất mát thấp với các biểu diễn đặc trưng do $f_\phi$ trích xuất cho từng tác vụ riêng lẻ. Điều này rất giống với các cách tiếp cận học chuyển giao (transfer learning) trước đó.
+3. Vì phần lớn các hàm nhân cơ sở của GP chỉ có một vài tham số, ma trận Hesse trong Phương trình 27.5 có thể được tính và nghịch đảo chính xác trong quá trình siêu huấn luyện bằng Thuật toán 28; điều này loại bỏ mọi nhu cầu dùng xấp xỉ ma trận Hesse.
+4. Bài toán tối ưu hóa bên trong (Phương trình 27.2) cho $\psi_{\text{adapt}}$ hiệu quả về mặt tính toán, vì nó không đòi hỏi lan truyền ngược qua bộ trích xuất đặc trưng $f_\phi$.
+
+Tổng quát hơn, ADKF-IFT kết hợp DKL và DKT theo cách có thể thừa hưởng điểm mạnh của cả hai phương pháp mà không mang điểm yếu của phương pháp nào. Bằng cách thích nghi các tham số hàm nhân cơ sở $\theta$ riêng cho từng tác vụ, nó ngăn hiện tượng chưa khớp do khoảng giá trị, thang độ dài hoặc mức nhiễu khác nhau giữa các tập dữ liệu. Bằng cách siêu học bộ trích xuất đặc trưng trên nhiều tập dữ liệu, nó ngăn hiện tượng quá khớp như Ober và cộng sự đã quan sát. Ưu điểm này vừa *có cơ sở lý thuyết* (nhờ giải một hàm mục tiêu tối ưu hóa hai cấp bằng định lý hàm ẩn) vừa *quan sát được bằng thực nghiệm* (như sẽ được chỉ ra ở Mục 5).
+
+Mối quan hệ giữa các phương pháp này được minh họa ở Hình 27.1. Khung (c) cho thấy DKL, phương pháp huấn luyện một GP với hàm nhân sâu riêng cho từng tác vụ. Không khó hình dung rằng điều này có thể dẫn đến quá khớp nghiêm trọng trên các tập dữ liệu nhỏ, điều đã được Ober và cộng sự quan sát bằng thực nghiệm. Khung (b) cho thấy DKT, phương pháp ngăn quá khớp bằng cách khớp một GP với hàm nhân sâu duy nhất cho mọi tác vụ. Tuy nhiên, điều này ngầm đưa ra một giả định mạnh rằng mọi tác vụ đến từ cùng một phân phối trên hàm, kể cả cùng mức nhiễu, cùng biên độ và cùng các thang độ dài đặc trưng, điều khó có thể đúng trong thực tế. Khung (a) cho thấy ADKF-IFT, phương pháp cho phép thích nghi các tham số quan trọng này, trong khi vẫn chính quy hóa bộ trích xuất đặc trưng bằng siêu học. Việc chọn hiện thực cụ thể này dựa trên giả định rằng thích nghi các tham số hàm nhân cơ sở là phù hợp hơn khi xét đến những khác biệt có thể dự kiến giữa các tác vụ: hai tác vụ có liên quan có khả năng khác nhau về mức nhiễu hoặc thang độ dài đặc trưng cao hơn là đòi hỏi các biểu diễn đặc trưng khác nhau đáng kể (như đã thảo luận ở Mục 2.2).
+
+<Figure caption="Hình 27.1: Sơ đồ đối chiếu quy trình huấn luyện của ADKF-IFT, DKT và DKL. (a) ADKF-IFT siêu học các tham số bộ trích xuất đặc trưng ϕ qua mọi tác vụ và thích nghi các tham số hàm nhân cơ sở θ với từng tác vụ trong một khuôn khổ tối ưu hóa hai cấp. (b) DKT siêu học mọi tham số qua mọi tác vụ. (c) DKL thích nghi mọi tham số với từng tác vụ. (Vẽ lại dưới dạng sơ đồ; các phân phối hậu nghiệm GP thu nhỏ là phác họa minh họa, và nhãn của khung (c) được lấy từ chú thích này.)">
+  <Bdl27TrainingProcedures />
+</Figure>
+
+## 4. Liên hệ với các phương pháp khác
+
+### 4.1 Quá trình Gauss với hàm nhân sâu
+
+ADKF-IFT thuộc về một khối tài liệu ngày càng lớn về các kỹ thuật huấn luyện GP với hàm nhân sâu. Như đã thảo luận ở Mục 3.3, ADKF-IFT *tổng quát hóa* DKL và DKT, hai phương pháp lần lượt chỉ dùng học đơn tác vụ và chỉ dùng siêu học. Liu và cộng sự cùng van Amersfoort và cộng sự đề xuất thêm các số hạng chính quy hóa vào hàm mất mát của DKL nhằm giảm quá khớp. Các công trình này nên được xem là *bổ sung* cho ADKF-IFT hơn là *thay thế*: các số hạng chính quy hóa tương ứng của chúng có thể dễ dàng được thêm vào $\mathcal{L}_T$ trong Phương trình 27.2 để cải thiện hiệu năng. Tuy nhiên, các chiến lược chính quy hóa trong cả hai bài báo này chỉ được thiết kế cho đầu vào liên tục, làm hạn chế khả năng áp dụng chúng cho dữ liệu có cấu trúc như phân tử.
+
+Bản tiền ấn phẩm (preprint) của Tossou và cộng sự đề xuất một cách khác để siêu huấn luyện các GP với hàm nhân sâu thích nghi, gọi là ADKL-GP, trong đó việc thích nghi được thực hiện bằng cách cho bộ trích xuất đặc trưng phụ thuộc có điều kiện vào một vector nhúng của toàn bộ tập hỗ trợ thay vì điều chỉnh một tập con các tham số hàm nhân như trong ADKF-IFT. Nói chung, phương pháp này rất dễ quá khớp. Lý do là hàm mục tiêu huấn luyện của ADKL-GP tương đương với hàm mục tiêu của DKT cộng thêm một mất mát tương phản (contrastive loss), được đặt trọng số bởi một siêu tham số (hyperparameter) nhạy $\gamma$, có thể được diễn giải là cân bằng mức độ chính quy hóa giữa hai thái cực. Để phương pháp này hữu ích, có vẻ $\gamma$ cần được tinh chỉnh cẩn thận để cân bằng giữa hai thái cực này. Tuy nhiên, các kết quả thực nghiệm cho thấy không có xu hướng nhất quán nào ngoài việc $\gamma > 0$ giúp ích đôi chút, mặc dù khác biệt về hiệu năng là nhỏ. Điều này gợi ý rằng phương pháp có thể khó dùng trong thực tế. Ngược lại, ADKF-IFT không có siêu tham số cần tinh chỉnh nào như vậy, và đó là một điểm mạnh đáng kể. Thay vào đó, sự cân bằng giữa DKL và DKT được điều khiển bằng việc chọn tham số nào được thích nghi và tham số nào được siêu học, điều này dễ diễn giải hơn nhiều và giúp phương pháp dễ dùng hơn trong thực tế.
+
+### 4.2 Siêu học
+
+ADKF-IFT cũng có thể được xem là một thuật toán siêu học, so sánh được với nhiều phương pháp đã được đề xuất trước đó. Một đặc điểm phân biệt của ADKF-IFT là nó được thiết kế riêng cho GP với hàm nhân sâu, trong khi phần lớn các phương pháp đến từ thị giác máy tính được thiết kế chỉ cho các mô hình mạng nơ-ron, vốn như đã nói là không phù hợp khi cần các ước lượng độ bất định đáng tin cậy. Hơn nữa, nhiều thuật toán trong số này, chẳng hạn ProtoNet, được thiết kế chủ yếu hoặc chỉ cho bài toán phân loại, trong khi ADKF-IFT phù hợp với cả hồi quy lẫn phân loại. So với các khuôn khổ không phụ thuộc mô hình (model-agnostic) như MAML, vốn siêu học một điểm khởi tạo chung để thích nghi mọi tham số, ADKF-IFT siêu học một tập con các tham số qua các tác vụ và thích nghi các tham số còn lại với từng tác vụ.
+
+### 4.3 Quá trình Gauss đa tác vụ
+
+ADKF-IFT có thể được xem là một phương pháp học GP đa tác vụ (multi-task GP). Cách tiếp cận chủ đạo cho bài toán này trong các công trình trước là học một hàm nhân dùng chung cho mọi điểm dữ liệu qua mọi tác vụ, truyền thông tin bằng cách mô hình hóa tường minh hiệp phương sai giữa dữ liệu từ các tác vụ khác nhau. Khác biệt chính giữa các phương pháp trong họ này là dạng chính xác của hàm nhân, thường được giả định có một cấu trúc cụ thể (chẳng hạn tích Kronecker hoặc tổng có trọng số của các hàm nhân đơn giản hơn). ADKF-IFT không thể được nhìn nhận một cách tự nhiên theo cách này vì hiệp phương sai giữa các điểm dữ liệu từ những tác vụ khác nhau luôn bằng không; thay vào đó, thông tin được truyền qua các tác vụ thông qua một tập tham số mô hình dùng chung. Do đó, ADKF-IFT là một bước rời xa đáng kể khỏi mô thức chủ đạo trong học chuyển giao với GP.
+
+### 4.4 Định lý hàm ẩn trong học máy
+
+Định lý hàm ẩn được dùng trong ADKF-IFT đã được sử dụng trong nhiều bài báo học máy trước đó ở nhiều bối cảnh khác nhau, chẳng hạn tìm kiếm kiến trúc mạng nơ-ron (neural architecture search), tinh chỉnh siêu tham số và siêu học.
+
+Một thách thức khi áp dụng định lý hàm ẩn là việc tính nghịch đảo ma trận Hesse. Trong khi các công trình trước tính tường minh đại lượng này như trong ADKF-IFT, các công trình gần đây dùng nhiều kỹ thuật xấp xỉ khác nhau như xấp xỉ Neumann, gradient liên hợp (conjugate gradient) và ma trận đơn vị để giữ cho việc tính toán khả thi.
+
+## 5. Đánh giá thực nghiệm
+
+Mục này trình bày kết quả đánh giá thực nghiệm cho hiện thực cụ thể của ADKF-IFT từ Mục 3.4. Các thí nghiệm được chọn để chỉ tập trung vào các tác vụ dự đoán và tối ưu hóa tính chất phân tử, vì ứng dụng này sẽ được lợi rất nhiều từ các mô hình GP tốt hơn: thứ nhất vì nhiều phương pháp hiện có gặp khó khăn trên các tập dữ liệu nhỏ cỡ $\sim 10^2$ vốn rất phổ biến trong hóa học, và thứ hai vì nhiều tác vụ trong hóa học đòi hỏi các ước lượng độ bất định chất lượng cao. Cụ thể, ADKF-IFT được đánh giá trên một bộ dữ liệu chuẩn (benchmark) dự đoán tính chất phân tử quy mô lớn hơn có tên FS-Mol. Các kết quả thực nghiệm xác nhận rằng ADKF-IFT là phương pháp có hiệu năng tốt nhất (Mục 5.1), ủng hộ giả thuyết ở Mục 3.4 rằng ADKF-IFT đạt được sự cân bằng giữa quá khớp và chưa khớp tốt hơn DKL và DKT. Ngoài ra, các kết quả tối ưu hóa Bayes bổ sung chứng tỏ rằng biểu diễn đặc trưng của ADKF-IFT có thể chuyển giao sang các tác vụ dự đoán và tối ưu hóa tính chất phân tử ngoài miền (out-of-domain, OOD) (Mục 5.2).
+
+### 5.1 Dự đoán tính chất phân tử với ít mẫu trên FS-Mol
+
+Đánh giá thực nghiệm được thực hiện trên bộ dữ liệu chuẩn FS-Mol, bộ chứa một tập các tác vụ học với ít mẫu được xây dựng cẩn thận cho dự đoán tính chất phân tử. FS-Mol chứa hơn 5 000 tác vụ với 233 786 hợp chất khác nhau từ ChEMBL27, được chia thành các tập huấn luyện (4 938 tác vụ), kiểm định (40 tác vụ) và kiểm tra (157 tác vụ). Mỗi tác vụ gắn với một protein đích. Bộ dữ liệu chuẩn gốc chỉ xét bài toán phân loại nhị phân các hợp chất có hoạt tính/không có hoạt tính. Tuy vậy, tác vụ hồi quy cho đại lượng đích là hoạt tính số thực tế IC50 hoặc EC50 cũng được đưa vào đánh giá này, vì đây là tác vụ được mong muốn và ưa chuộng hơn trong các dự án khám phá thuốc thực tế.
+
+<Figure caption="Hình 27.2: Hiệu năng trung bình kèm sai số chuẩn của từng phương pháp được so sánh trên mọi tác vụ kiểm tra của FS-Mol. (a) Phân loại (157 tác vụ). (b) Hồi quy (111 tác vụ). (Bản tái hiện dạng sơ đồ: các giá trị trung bình được đọc từ hình đã công bố, không lấy từ dữ liệu đo, và các thanh sai số chuẩn được lược bỏ.)">
+  <Bdl27FsMolResults />
+</Figure>
+
+**ADKF-IFT** được so sánh với bốn nhóm phương pháp cơ sở (baseline): (1) *Các phương pháp học đơn tác vụ*: rừng ngẫu nhiên (random forest, **RF**), k lân cận gần nhất (k-nearest neighbors, **kNN**), GP đơn tác vụ với hàm nhân Tanimoto (**GP-ST**), GNN đơn tác vụ (**GNN-ST**), học hàm nhân sâu (**DKL**); (2) *Phương pháp tiền huấn luyện đa tác vụ*: GNN đa tác vụ (**GNN-MT**); (3) *Phương pháp tiền huấn luyện tự giám sát*: transformer chú ý phân tử (molecule attention transformer, **MAT**); (4) *Các phương pháp siêu học*: mạng quan hệ nhận biết tính chất (property-aware relation networks, **PAR**), mạng nguyên mẫu với khoảng cách Mahalanobis (prototypical network, **ProtoNet**), siêu học không phụ thuộc mô hình (model-agnostic meta-learning, **GNN-MAML**), quá trình nơ-ron có điều kiện (conditional neural process, **CNP**), chuyển giao hàm nhân sâu (**DKT**).
+
+Kiến trúc bộ trích xuất đặc trưng GNN $f_\phi$ dùng cho DKL, PAR, CNP, DKT và ADKF-IFT giống với kiến trúc dùng cho ProtoNet, GNN-ST, GNN-MT và GNN-MAML trong Stanley và cộng sự. Mọi phương pháp đa tác vụ và siêu học đều được huấn luyện từ đầu trên các tác vụ huấn luyện của FS-Mol. MAT được tiền huấn luyện trên 2 triệu phân tử lấy mẫu từ tập dữ liệu ZINC15. Các kết quả phân loại của RF, kNN, GNN-ST, GNN-MT, MAT, ProtoNet và GNN-MAML được tái hiện theo Stanley và cộng sự.
+
+Các thước đo ở cấp tác vụ cho phân loại nhị phân và hồi quy lần lượt là $\Delta$AUPRC (độ thay đổi của diện tích dưới đường cong precision–recall) và $R^2_{os}$ (hệ số xác định dự đoán/ngoài mẫu). Quy trình đánh giá giống như trong Stanley và cộng sự, trong đó hiệu năng trung bình trên mười phép chia ngẫu nhiên phân tầng hỗ trợ/truy vấn khác nhau của mỗi tác vụ kiểm tra được báo cáo cho từng phương pháp được so sánh. Quá trình đánh giá này được thực hiện với năm kích thước tập hỗ trợ khác nhau 16, 32, 64, 128 và 256. Lưu ý rằng, khác với MoleculeNet, các tập hỗ trợ cho tác vụ phân loại trong FS-Mol nói chung không cân bằng, điều này là tự nhiên vì phần lớn các phân tử ứng viên trong khám phá thuốc không có hoạt tính.
+
+Hình 27.2 cho thấy hiệu năng kiểm tra tổng thể của mọi phương pháp được so sánh, tổng hợp trên mọi tác vụ. Lưu ý rằng RF là một phương pháp cơ sở mạnh, vì nó được dùng rộng rãi trong các dự án khám phá thuốc thực tế và có hiệu năng tương đương nhiều phương pháp tiền huấn luyện. Kết quả cho thấy ADKF-IFT vượt trội mọi phương pháp được so sánh khác ở mọi kích thước tập hỗ trợ được xét cho tác vụ phân loại. Với tác vụ hồi quy, mức cải thiện hiệu năng của ADKF-IFT so với phương pháp tốt thứ hai, cụ thể là DKT, tăng lên khi kích thước tập hỗ trợ tăng.
+
+### 5.2 Dự đoán và tối ưu hóa tính chất phân tử ngoài miền
+
+Mục này chứng tỏ thêm rằng biểu diễn đặc trưng do ADKF-IFT học được hữu ích không chỉ cho các tác vụ dự đoán tính chất phân tử trong miền mà còn cho các tác vụ dự đoán và tối ưu hóa tính chất phân tử ngoài miền (OOD). Để làm điều này, các thí nghiệm được thực hiện nhằm tìm các phân tử có tính chất đích mong muốn tốt nhất trong các tập dữ liệu OOD cho trước bằng tối ưu hóa Bayes (BO), với một mô hình thay thế GP hoạt động trên các biểu diễn đặc trưng được so sánh. Các biểu diễn này được đánh giá trên bốn tác vụ thiết kế phân tử tiêu biểu nằm ngoài FS-Mol, như tóm tắt trong Bảng 27.1. Với mô hình thay thế GP, hàm nhân Tanimoto được dùng cho biểu diễn dấu vân tay (với bán kính 2 và 2 048 bit dựa trên mô phỏng đếm). Mọi biểu diễn đặc trưng được so sánh khác dùng hàm nhân Matérn-5/2 không có xác định mức liên quan tự động (automatic relevance determination, ARD) nhưng có một tiên nghiệm log-chuẩn trên thang độ dài, có tâm tại giá trị khởi tạo theo quy tắc trung vị (median heuristic). Với BO, hàm thu nhận (acquisition function) cải thiện kỳ vọng (expected improvement, EI) được dùng với kích thước lô truy vấn 1. Các tham số hàm nhân cơ sở được khớp lại ở đầu mỗi vòng lặp BO bằng mọi điểm dữ liệu sẵn có. Mọi biểu diễn đặc trưng được so sánh đều được trích xuất bằng các mô hình được huấn luyện từ đầu trên tập dữ liệu FS-Mol ở Mục 5.1, ngoại trừ biểu diễn MAT đã tiền huấn luyện và biểu diễn dấu vân tay cố định. Mỗi thí nghiệm BO được lặp lại 20 lần, mỗi lần bắt đầu từ 16 phân tử được lấy mẫu ngẫu nhiên trong số $\sim 700$ phân tử kém nhất của tập dữ liệu. Hình 27.3 cho thấy biểu diễn ADKF-IFT cho phép phát hiện nhanh nhất các phân tử có hiệu năng hàng đầu cho các tác vụ gắn kết phân tử (molecular docking), khám phá kháng sinh và thiết kế vật liệu. Với tác vụ thiết kế thuốc kháng virus, mặc dù biểu diễn ADKF-IFT kém hơn các biểu diễn MAT và GNN-MT, nó vẫn đạt hiệu năng cạnh tranh so với các phương pháp cơ sở khác.
+
+<Figure caption="Hình 27.3: Giá trị đích top-1 trung bình kèm sai số chuẩn theo số phân tử đã truy vấn, cho từng biểu diễn đặc trưng được so sánh trên bốn tác vụ tối ưu hóa phân tử ngoài miền. (a) Gắn kết phân tử. (b) Khám phá kháng sinh. (c) Thiết kế thuốc kháng virus. (d) Thiết kế vật liệu. (Bản tái hiện dạng sơ đồ: các đường cong được đọc từ hình đã công bố, không lấy từ dữ liệu đo, và các dải sai số chuẩn được lược bỏ.)">
+  <Bdl27BoOutOfDomain />
+</Figure>
+
+**Bảng 27.1:** Mô tả bốn tác vụ thiết kế phân tử ngoài miền. Các tập dữ liệu cho tác vụ gắn kết phân tử và thiết kế vật liệu được lấy mẫu con từ các tập dữ liệu lớn hơn nhiều do DockString và Harvard Clean Energy Project cung cấp, theo thứ tự tương ứng. Các tập dữ liệu cho tác vụ khám phá kháng sinh và thiết kế thuốc kháng virus được lấy từ tập huấn luyện kháng sinh và tập dữ liệu COVID Moonshot do Stokes và cộng sự và The COVID Moonshot Consortium cung cấp, theo thứ tự tương ứng.
+
+| Tác vụ thiết kế phân tử | Nguồn dữ liệu | Số hợp chất | Đại lượng đích |
+| --- | --- | --- | --- |
+| Gắn kết (ESR2) | Tập huấn luyện DockString | 2 312 | điểm gắn kết |
+| Kháng sinh (E. coli BW25113) | Tập huấn luyện kháng sinh | 2 335 | mức tăng trưởng tương đối |
+| Kháng virus (SARS-CoV-2) | COVID Moonshot | 1 926 | pIC50 huỳnh quang |
+| Vật liệu (OPV) | Harvard Clean Energy Project | 2 012 | hiệu suất chuyển đổi năng lượng |
+
+**Bảng 27.2:** Hiệu năng dự đoán trung bình (NLL kiểm tra) kèm sai số chuẩn của một GP hoạt động trên từng biểu diễn đặc trưng, trên bốn tác vụ thiết kế phân tử ngoài miền.
+
+<table>
+  <thead>
+    <tr><th rowspan="2">Đặc trưng</th><th colspan="4">Tác vụ thiết kế phân tử ngoài miền</th></tr>
+    <tr><th>Gắn kết phân tử</th><th>Khám phá kháng sinh</th><th>Thiết kế thuốc kháng virus</th><th>Thiết kế vật liệu</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Dấu vân tay</td><td><u>1.138 ± 0.014</u></td><td>1.669 ± 0.075</td><td><strong>4.601 ± 0.086</strong></td><td>1.091 ± 0.011</td></tr>
+    <tr><td>PAR</td><td>1.270 ± 0.019</td><td>2.185 ± 0.115</td><td>4.840 ± 0.086</td><td>1.283 ± 0.017</td></tr>
+    <tr><td>MAT</td><td>1.528 ± 0.028</td><td>2.390 ± 0.104</td><td>4.797 ± 0.088</td><td>2.198 ± 0.063</td></tr>
+    <tr><td>GNN-MT</td><td>1.994 ± 0.050</td><td>3.692 ± 0.225</td><td>6.399 ± 0.181</td><td>7.254 ± 0.217</td></tr>
+    <tr><td>CNP</td><td>1.493 ± 0.028</td><td>2.537 ± 0.162</td><td>5.005 ± 0.086</td><td>1.741 ± 0.043</td></tr>
+    <tr><td>ProtoNet</td><td>1.147 ± 0.013</td><td>1.615 ± 0.094</td><td>5.060 ± 0.086</td><td>1.032 ± 0.009</td></tr>
+    <tr><td>DKT</td><td>1.167 ± 0.012</td><td><u>1.602 ± 0.073</u></td><td>4.975 ± 0.092</td><td><u>1.026 ± 0.009</u></td></tr>
+    <tr><td>ADKF-IFT</td><td><strong>1.137 ± 0.011</strong></td><td><strong>1.496 ± 0.043</strong></td><td><u>4.781 ± 0.087</u></td><td><strong>0.996 ± 0.007</strong></td></tr>
+  </tbody>
+</table>
+
+Bảng 27.2 báo cáo tường minh hiệu năng dự đoán hồi quy của một GP hoạt động trên từng biểu diễn đặc trưng được so sánh cho bốn tác vụ thiết kế phân tử ngoài miền này. Cấu hình của GP giống như trong các thí nghiệm BO. Báo cáo là logarit âm của hàm hợp lý (negative log likelihood, NLL) trên tập kiểm tra, lấy trung bình trên 200 phép chia ngẫu nhiên hỗ trợ/truy vấn (100 cho mỗi kích thước tập hỗ trợ 32 và 64). Kết quả cho thấy biểu diễn ADKF-IFT có NLL kiểm tra tốt nhất trên các tác vụ gắn kết phân tử, khám phá kháng sinh và thiết kế vật liệu, và xếp thứ hai trên tác vụ thiết kế thuốc kháng virus.
+
+## 6. Tóm tắt
+
+Chương này đã trình bày Adaptive Deep Kernel Fitting with Implicit Function Theorem (ADKF-IFT), một khuôn khổ tổng quát để khớp hàm nhân sâu, nội suy giữa siêu học và học hàm nhân sâu thông thường. ADKF-IFT siêu học một bộ trích xuất đặc trưng qua các tác vụ sao cho các mô hình GP riêng cho từng tác vụ được ước lượng trên các biểu diễn đặc trưng đã trích xuất có thể đạt sai số dự đoán trung bình thấp nhất có thể. ADKF-IFT được hiện thực bằng cách giải một hàm mục tiêu tối ưu hóa hai cấp thông qua vi phân ẩn (implicit differentiation), dẫn đến một khuôn khổ thống nhất chứa DKL và DKT như các trường hợp đặc biệt. Các kết quả thực nghiệm đã chứng tỏ rằng ADKF-IFT học được các biểu diễn đặc trưng hữu ích một cách tổng quát, đạt hiệu năng hiện đại nhất trên nhiều tác vụ thực tế về dự đoán tính chất phân tử với ít mẫu và trên các tác vụ dự đoán và tối ưu hóa tính chất phân tử ngoài miền, vượt trội một loạt rộng các phương pháp đơn tác vụ, đa tác vụ, tiền huấn luyện và siêu học. Trong tương lai, ADKF-IFT có thể trở thành một phương pháp quan trọng để tạo ra các mô hình được hiệu chuẩn tốt cho thực nghiệm thông lượng cao tự động hóa hoàn toàn.
+
+Dù vậy, một yếu tố tiềm năng có thể hạn chế phạm vi sử dụng của ADKF-IFT là nó đòi hỏi một siêu tập dữ liệu gồm nhiều tác vụ có liên quan để siêu huấn luyện bộ trích xuất đặc trưng, điều không phải lúc nào cũng có sẵn trong thực tế. Hơn nữa, quy trình tối ưu hóa bên trong là một nút thắt cổ chai lớn của ADKF-IFT vì nó cần được thực hiện cho đến khi hội tụ ở mọi bước huấn luyện và suy luận.

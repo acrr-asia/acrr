@@ -1,0 +1,423 @@
+---
+title: "Deep Gaussian Processes"
+description: "How deep Gaussian processes compose GP layers, why inference in them is hard, and how variational, doubly stochastic, EP, random-feature and sampling methods work."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - gaussian processes
+  - deep gaussian processes
+  - variational inference
+series: bayesian-deep-learning
+seriesOrder: 31
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl25DeepGpChain from '../../components/diagrams/Bdl25DeepGpChain.astro';
+import Bdl25DensityPropagation from '../../components/diagrams/Bdl25DensityPropagation.astro';
+import Bdl25FeatureWarping from '../../components/diagrams/Bdl25FeatureWarping.astro';
+import Bdl25DeepGpSamples from '../../components/diagrams/Bdl25DeepGpSamples.astro';
+import Bdl25InducingGraphs from '../../components/diagrams/Bdl25InducingGraphs.astro';
+import Bdl25StepPosterior from '../../components/diagrams/Bdl25StepPosterior.astro';
+import Bdl25StepWarping from '../../components/diagrams/Bdl25StepWarping.astro';
+import Bdl25LayerMaps from '../../components/diagrams/Bdl25LayerMaps.astro';
+
+Bayesian deep learning strives to combine the expressive power of deep models with Bayesian uncertainty quantification. By placing distributions over the unknowns, one can propagate the uncertainty to predictions and embody Occam's Razor. As [Chapter 23](/blog/introduction-to-kernel-methods) showed, Gaussian process (GP) models also offer a Bayesian treatment over the unknowns and their predictions naturally incorporate both data fit and epistemic uncertainty. Unlike deep neural networks, GPs operate directly in *function space*. By specifying distributions over functions rather than over parameters they provide flexible, non-parametric, probabilistic approaches to function estimation in an analytically tractable manner.
+
+Traditional Gaussian process models have been extended to more expressive variants, for example by considering sophisticated covariance functions or by embedding GPs in more complex probabilistic structures able to learn more powerful representations of the data. Going further, the research community has sought approaches which combine the advantages of GPs with the ability of deep learning architectures to achieve hierarchical feature learning, such as deep kernel learning which was discussed in the [previous chapter](/blog/deep-kernel-learning).
+
+This chapter discusses an alternative approach to combining GPs with deep feature learning: Deep Gaussian processes (deep GPs). Deep GPs are deep architectures which compose functions drawn from GP priors. In particular, the chapter considers constructions where the output of one layer is the input to the next as follows:
+
+$$
+\begin{aligned}
+\mathbf{f}^{1:L}(\mathbf{x}) &= \mathbf{f}^{L}(\mathbf{f}^{L-1}(\dots \mathbf{f}^{1}(\mathbf{x}))\dots), \\
+\text{where: } f^{\ell} &\sim \mathcal{GP}\left(0, k_j^{\ell}(\cdot, \cdot)\right).
+\end{aligned}
+\tag{25.1}
+$$
+
+Here, $\mathbf{f}$ denotes a vector-valued function and $L$ is the total number of layers in the deep GP construction. Crucially, the overall process is *no longer Gaussian*, due to the nonlinear warping induced by each layer, and the model can learn much more complex interactions between data.
+
+## 1. Composing functions and processes
+
+### 1.1 Function composition for deep learning
+
+Activation functions employed in neural networks are vector valued functions $\boldsymbol{\phi}(\cdot)$ of an adjustable basis, which are controlled by a parameter matrix $\mathbf{U}$. In a similar way to generalized linear models, the final activation $\mathbf{g}(\mathbf{x})$ for a single layer neural network and input $\mathbf{x}$ is obtained by linearly weighting the bases using a matrix $\mathbf{V}$:
+
+$$
+\mathbf{g}(\mathbf{x}) = \mathbf{V}^{T}\boldsymbol{\phi}(\mathbf{U}\mathbf{x}).
+\tag{25.2}
+$$
+
+Deep neural networks then take the form of a functional composition of the basis functions,
+
+$$
+\mathbf{g}(\mathbf{x}) = (\mathbf{V}^{L})^{T}\boldsymbol{\phi}^{L}(\mathbf{U}^{L}\mathbf{g}^{L-1}(\dots \mathbf{U}^{2}\mathbf{g}^{1}(\mathbf{x}))),
+\tag{25.3}
+$$
+
+where $L$ denotes the total number of layers and the overall composition is represented with the unindexed notation $\mathbf{g}(\cdot)$. The above expression can alternatively be re-written by using equation (25.2) to replace all $\mathbf{g}^{\ell}(\cdot)$ terms:
+
+$$
+\mathbf{g}(\mathbf{x}) = (\mathbf{V}^{L})^{T}\boldsymbol{\phi}^{L}(\mathbf{W}^{L}\boldsymbol{\phi}^{L-1}(\dots \mathbf{W}^{2}\boldsymbol{\phi}^{1}(\mathbf{U}^{1}\mathbf{x}))),
+\tag{25.4}
+$$
+
+where $\mathbf{W}^{\ell}$ is the matrix mapping between each set of basis functions and is typically treated as a parameter to be learned. A serious challenge for deep networks, when trained in a feed-forward manner, is overfitting. As the number of layers and the number of basis functions per layer increases, a very powerful but also highly parametrized representation is formed. The matrix $\mathbf{W}^{\ell}$ has size $d^{\ell} \times d^{\ell-1}$, where $d^{\ell}$ is the number of basis functions in the $\ell$th layer.
+
+### 1.2 Weight matrix factorization
+
+One approach to dealing with the many parameters contained in the matrices $\mathbf{W}^{\ell}$, is to replace them with a lower rank form. This draws inspiration from the first function composition formulation shown in equation (25.3), but now the low rank decomposition is made explicit and clear. Select $r^{\ell} < d^{\ell}, d^{\ell-1}$ so as to obtain:
+
+$$
+\mathbf{W}^{\ell} = \mathbf{U}^{\ell}(\mathbf{V}^{\ell-1})^{\top},
+$$
+
+where $\mathbf{U}^{\ell} \in \mathbb{R}^{d^{\ell} \times r^{\ell}}$ and $\mathbf{V}^{\ell-1} \in \mathbb{R}^{d^{\ell-1} \times r^{\ell}}$.
+
+Denil et al. have empirically shown that trained neural networks might be well approximated by low rank matrices as evidenced by the ability to predict one part of the weight matrix given another. The approach of "dropout" is also widely applied to control the complexity of the model implying the models are over parameterized. Substituting the low rank form into the compositional structure for the deep network gives
+
+$$
+\mathbf{g}(\mathbf{x}) = (\mathbf{V}^{L})^{\top}\boldsymbol{\phi}^{L}(\mathbf{U}^{L}(\mathbf{V}^{L-1})^{\top}\boldsymbol{\phi}^{L-1}(\dots \mathbf{U}^{2}(\mathbf{V}^{1})^{T}\boldsymbol{\phi}^{1}(\mathbf{U}^{1}\mathbf{x}))).
+$$
+
+One can now identify the following form inside the functional decomposition,
+
+$$
+\mathbf{g}^{\ell}(\mathbf{z}) = (\mathbf{V}^{\ell})^{\top}\boldsymbol{\phi}^{\ell}(\mathbf{U}^{\ell}\mathbf{z})
+\tag{25.5}
+$$
+
+and once again obtain a functional composition,
+
+$$
+\mathbf{g}(\mathbf{x}) = \mathbf{f}^{L}(\mathbf{f}^{L-1}(\dots \mathbf{f}^{1}(\mathbf{x}))).
+\tag{25.6}
+$$
+
+The standard deep network is recovered when $r^{\ell} = \min(d^{\ell}, d^{\ell-1})$.
+
+### 1.3 Process composition with latent variables
+
+To obtain a deep Gaussian process, consider a nested structure as shown above with equation (25.6). The deep Gaussian process is recovered by keeping $r^{\ell}$ finite and allowing $d^{\ell} \to \infty$ for all layers. Of course, the mappings in the Gaussian process are treated probabilistically and integrated out[^1], rather than optimized, so despite the increase in layer size the parameters in the resulting model are many times fewer than those in a standard deep neural network. Further, Duvenaud et al. additionally analyze the effect of dropout in the GP limit, showing it produces spike-and-slab lengthscale priors.
+
+The latent variable construction above is not the only route to a deep GP. Alternative formulations include viewing the composition as a stochastic differential equation whose layers become continuous, representing the deep GP as a state-space model amenable to sequential filtering, or describing it through composed covariance operators. These perspectives are discussed further below.
+
+The compositional idea also places deep GPs in a broader landscape of models. Warped GPs constitute a single-layer precursor, in which the output of a GP is transformed through a parametric monotonic function (which can also admit a GP prior), while normalizing flows likewise construct flexible distributions by composing nonlinear transformations, although through deterministic, invertible parametric maps rather than draws from nonparametric function priors.
+
+To generalize a Gaussian process to the deep domain, rather than assuming that a data observation, $\mathbf{y}$, is a draw from a noise corrupted Gaussian process prior, a functional composition is used instead,
+
+$$
+\begin{aligned}
+\mathbf{y} &= \mathbf{f}^{1:L} + \boldsymbol{\epsilon} \\
+&= \mathbf{f}^{L}(\mathbf{f}^{L-1}(\dots \mathbf{f}^{1}(\mathbf{x}))) + \boldsymbol{\epsilon}.
+\end{aligned}
+\tag{25.7}
+$$
+
+This is the same form as for standard neural networks, shown in equation (25.6), but now each function in the composition, $\mathbf{f}^{\ell}(\cdot)$, is a draw from a Gaussian process. However, the overall prior $\mathbf{f}^{1:L}$ is no longer a Gaussian process. In the above equation, $\boldsymbol{\epsilon}$ represents the noise, and Gaussian noise can be introduced in every layer. In this case, the noise corrupted function instantiations (corresponding to $n$ data points) can be collected into a vector for each layer, giving the following recursive definition:
+
+$$
+\mathbf{h}^{\ell} = \mathbf{f}^{\ell}(\mathbf{h}^{\ell-1}) + \boldsymbol{\epsilon}^{\ell}.
+\tag{25.8}
+$$
+
+From this recursive definition, the whole hierarchical construction is obtained by denoting $\mathbf{x} \triangleq \mathbf{h}^{0}$ and considering $\mathbf{y}$ as the last layer. The corresponding graphical model for a deep Gaussian process is illustrated in Figure 25.1.
+
+<Figure caption="Figure 25.1: A deep Gaussian process with two hidden layers.">
+  <Bdl25DeepGpChain />
+</Figure>
+
+As can be seen, the generative procedure defined by the function $\mathbf{f}^{1:L}$ can be represented in a graphical model as a deep architecture where each layer corresponds to a generative procedure associated with a function $\mathbf{f}^{\ell}$.
+
+Given equation (25.7), it is clear that this chapter develops a full probabilistic model through *process composition*. Process composition has the appealing property of retaining the theoretical qualities of the underlying stochastic process (such as Kolmogorov consistency) while providing a richer class of process priors. For example, for deep Gaussian processes, it has been shown that for particular assumptions of covariance function parameters, the derivatives of functions sampled from the process have a marginal distribution that is heavier tailed than a Gaussian. In contrast, it is known that in a standard Gaussian process the derivatives of functions sampled from the process are jointly Gaussian with the original function. The next section compares the properties of deep Gaussian processes with the properties of traditional deep learning methods.
+
+### 1.4 Inference challenges and expressiveness
+
+The discussion has so far focused on a deep GP construction with a hierarchy of intermediate latent variables. To highlight the inference challenges and expressiveness of the model, it is instructive to compare this construction to the generative deep learning approach that was dominant when deep GPs were first introduced: restricted Boltzmann machines (RBMs), stacked to construct deep belief networks. Deep belief networks have since been superseded as the workhorses of deep generative modeling, first by variational autoencoders and more recently by diffusion models (Chapter 50), but the comparison remains instructive: like the deep GP, a deep belief network is a hierarchy of latent variables whose training requires marginalizing the intermediate layers, and the contrast cleanly exposes what changes when each layer is a nonparametric function rather than a parametric mapping.
+
+Various approximate inference techniques (such as contrastive divergence) are used for estimating model parameters in RBMs. A significant amount of work has then to be done with annealed importance sampling if even the *likelihood*[^2] of a data set under the RBM model is to be estimated. When deeper hierarchies are considered, the estimate is only of a lower bound on the data likelihood. By considering sigmoidal activation functions, $\sigma(z) = (1 + \exp(-z))^{-1}$, the conditional probability of a single hidden unit in a deep belief network given its parents is obtained as
+
+$$
+p(y|\mathbf{x}) = \sigma(\mathbf{U}\mathbf{x})^{y}(1 - \sigma(\mathbf{U}\mathbf{x}))^{(1-y)}.
+$$
+
+The conditional density of the output $y$ depends only on a linear weighted sum of the inputs $\mathbf{x}$. The representational power of a Gaussian process in the same role is significantly greater than that of an RBM. For the GP the corresponding likelihood is over a continuous variable, but it is a nonlinear function of the inputs,
+
+$$
+p(y|\mathbf{x}) = \mathcal{N}(y|f(\mathbf{x}), \beta^{-1}).
+$$
+
+In this case the likelihood is dependent on a mapping function, $f(\cdot)$, rather than a set of intermediate parameters, $\mathbf{U}$. By placing a GP prior over $f$, the mappings can be analytically integrated out. In the RBM, instead, the model likelihood is estimated and maximized with respect to the parameters, $\mathbf{U}$. For the RBM, marginalizing $\mathbf{U}$ is not analytically tractable. Note that the two approaches can be mixed if
+
+$$
+p(y|\mathbf{x}) = \sigma(f(\mathbf{x}))^{y}(1 - \sigma(f(\mathbf{x})))^{(1-y)},
+$$
+
+which recovers a GP classification model. Analytic integration is no longer possible though, and a common approach to approximate inference is the expectation propagation algorithm. Expectation propagation has also been applied to deep GPs; this and other inference approaches are discussed in Section 4. The focus here is on the variational approximation.
+
+<Figure caption="Figure 25.2: A Gaussian distribution propagated through a nonlinear mapping. Figures a and b show the likelihood and unnormalized posterior respectively. The posterior density (plotted for given data using a faint line in figure b and on the right in figure c) is multimodal and difficult to normalize. (a) The likelihood plotted as a function of y and x. y is obtained through a nonlinear function plus noise. The faint line corresponds to fixing x to some value x̂. (b) Unnormalized posterior plotted as a function of x and y. The faint line corresponds to a fixed y and the darker line shows p(x). (c) Propagating the Gaussian density p(x) through a nonlinear mapping. Schematic reproduction: f(x) = 3.5 sin(6πx), noise standard deviation 0.8, p(x) Gaussian with mean 0.25 and standard deviation 0.1, ŷ = 1.5 and x̂ = 0.3; the surfaces of panels a and b are drawn as a series of slices, and the highlighted (faint in the original) slice is drawn in the accent color.">
+  <Bdl25DensityPropagation />
+</Figure>
+
+Inference in deep models requires marginalization of the stacked input spaces, denoted as $\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}$ in equation (25.8). These *intermediate* spaces are typically treated as *latent* variables[^3], which in the case of the RBM are binary variables. The number of the terms in the sum scales exponentially with the input dimension rendering it intractable for anything but the smallest models. In practice, sampling and, in particular, the contrastive divergence algorithm, are used for training. Similarly, marginalizing the intermediate, latent spaces in the deep GP is analytically intractable: despite the simplicity of the Gaussian density its propagation through nonlinear mappings is challenging. This is illustrated in Figure 25.2.
+
+For this reason, the hierarchical GP-LVM, which constituted the first approach to stacking GPs, was defined within a maximum a posteriori (MAP) framework where the latent variables were maximized rather than marginalized out. For this MAP approach to work, however, a strong prior is required on the top level of the hierarchy. Further, MAP learning prohibits model selection because no estimate of the marginal likelihood is available.
+
+Most deep algorithms require a large amount of data to perform learning. Fitting such models to smaller data sets and using Bayesian approaches to deal with the complexity seems completely futile when faced with the associated computational intractabilities. However, it is known that humans are able to perform inductive reasoning (equivalent to concept generalization) with only a few examples. This provokes the question as to whether deep structures and the learning of abstract structure can be undertaken in *smaller* data sets. For smaller data sets, questions of generalization arise: to demonstrate such structures are justified it is useful to have an objective measure of the model's applicability. This chapter demonstrates the ability of deep Gaussian processes to learn even from small training sets. This property can be attributed to their fully Bayesian nature.
+
+<Figure caption="Figure 25.3: Samples from a deep GP showing the generation of features. The upper plot shows the successive nonlinear warping of a two-dimensional input space. The circles correspond to specific locations in the input space for which a feature (a “loop”) is created in layer 1. As can be seen, when traversing the hierarchy towards the right, this feature is maintained in the next layers and is potentially further transformed. The bottom plot is similar as the upper plot, but a linear covariance function is used (equivalent to performing stacked principal component analysis (PCA) for training given observed data). As can be seen, linear transformations seem nonsensical in this setting, since multiplying an input by two matrices (two linear transformations) is equivalent to multiplying the input with a single combined matrix (one linear transformation). Schematic reproduction: 120 points on a circle pushed through three freshly drawn two-output GP layers with an exponentiated quadratic covariance function (top) and through three random linear maps, which are draws from a GP with a linear covariance function (bottom); the points are drawn as dots.">
+  <Bdl25FeatureWarping />
+</Figure>
+
+### 1.5 Characteristics of deep GPs as priors
+
+Deep GPs compose nonlinear mappings to yield much richer prior function classes compared to single layer GPs. To start with, a single-layer GP defines a distribution over functions which is Gaussian: any finite collection of function values has a joint multivariate Gaussian distribution. This Gaussianity imposes certain limitations on expressiveness. For instance, function derivatives in a GP are also Gaussian distributed which means that very sharp changes or large jumps in the function space are a priori unlikely under a GP. On the other hand, the output of a deep GP is not Gaussian distributed in general; even if each layer is a GP, the marginal distribution $p(y|x)$ as modeled by $y = \mathcal{DGP}(x)$, where $\mathcal{DGP}$ denotes the composite deep GP mapping, is an integral of Gaussian distributions over random inputs, which can produce heavy tails, skewness or multimodality. More generally, as the number of layers increases, the distribution of outputs given an input can develop increasingly non-trivial shapes, as discussed by Duvenaud et al. who also elaborate on caveats related to this characteristic.
+
+Furthermore, as a function prior, a deep GP can induce non-stationarity and input warping. By composing multiple GPs, the effective covariance function of the input-output mapping becomes input-dependent. For instance, a single GP with a stationary kernel (such as the exponentiated quadratic) is limited in that it has a single global lengthscale of correlation. A deep GP can *learn* location-varying lengthscales: the first GP layer might warp the input $x$ into a new space $h^1$, stretching or contracting regions differently. The second layer then operates on $h^1$ and so on. The result is that the final function can exhibit non-stationary behavior, even if each layer used stationary kernels. For instance, one part of the input space might effectively be magnified (leading to fine-scale, rapidly varying output), while another part is shrunk (output varies more slowly), because the latent $h^1$ learned that certain inputs require more detail. This is illustrated in Figures 25.3, 25.4 and 25.7.
+
+Another view is to consider what covariance function a deep GP implies for the direct input-output relationship. In a few cases, for example simple linear compositions or analogies to infinite-width neural networks, one can derive an equivalent covariance function for the composed function analytically. Classic results by Neal and Williams showed that a single-layer Bayesian neural network with an infinite number of hidden units converges to a GP with a closed-form covariance function for certain activation functions. However, for a general deep GP with nonlinear covariance at each layer, there is generally no closed-form kernel for the overall composed mapping.
+
+An important line of work has extended the single-layer GP limit to deep networks. Dutordoir et al. showed that a fully-connected Bayesian neural network of fixed depth, with i.i.d. weight priors converges to a single GP as layer widths are taken to infinity sequentially. The limiting kernel $\mathbf{K}^{\ell}$ is obtained by a deterministic recursion: each layer applies a map to the previous layer's kernel, determined by the activation function and the weight and bias variances. de G. Matthews et al. made this result rigorous for simultaneous width growth across all layers, resolving the key technical obstacle that the standard central limit theorem no longer applies in deep architectures (since the required independence assumptions fail) by reformulating the layerwise sums as exchangeable sequences and invoking a central limit theorem for exchangeable arrays. Crucially, in both cases the limit is a single GP, not a deep GP: depth enters only through the kernel recursion, and the hierarchy collapses into a fixed, deterministic kernel. This limiting object is sometimes called the neural network GP (NNGP) and is best understood as a *deep kernel GP* rather than a deep GP in the sense of Damianou and Lawrence. The relationship to deep kernel learning, where a neural network is used to parameterize the kernel of a (single-layer) GP, is discussed in [Chapter 24](/blog/deep-kernel-learning).
+
+Agrawal et al. resolve the apparent disconnect between these GP limits and deep GPs. They unify the NNGP and deep GP perspectives by showing that when some hidden layers are kept at finite width (bottlenecks) while others tend to infinity, the network converges to a composition of Gaussian processes, i.e. a deep Gaussian process. These bottleneck layers introduce shared latent representations that induce dependence between outputs and preserve discriminative structure through depth. In contrast, when all layers are taken to infinite width, the model reduces to a single Gaussian process. Conversely, Pleiss and Cunningham demonstrate that width and depth have opposite effects in hierarchical models: while depth accentuates non-Gaussianity, increasing the output dimensionality of the intermediate layers causes a deep GP to converge toward a standard GP. Because deep GPs are already nonparametric, this collapse cannot be attributed to gaining capacity; it is a structural consequence of width itself, reinforcing the importance of narrow bottleneck layers for preserving hierarchical structure. Since Bayesian neural networks constitute a subclass of deep GPs with degenerate, finite-capacity layers, these structural findings extend to standard neural network architectures as well.
+
+Connecting in the reverse direction, Dutordoir et al. construct deep sparse GP models whose layerwise mean propagation matches the forward pass of a standard neural network through interdomain inducing-feature constructions. This provides a practical bridge: neural networks can serve as point estimates for deep GP inference, and a trained neural network can be used to initialize a deep GP.
+
+The covariance-function perspective connects to a broader class of constructions of deep Gaussian processes, including formulations based on covariance operators and convolution. Dunlop et al. place these approaches within a unified framework in which the sequence of functions across layers forms a Markov chain, and analyze its ergodicity properties to characterize an effective depth: in ergodic settings, the process admits a stationary distribution and additional layers yield little further benefit beyond the mixing time, whereas in non-ergodic settings the behavior can remain non-trivial or unstable as depth increases. From a statistical perspective, Finocchio and Schmidt-Hieber complement this view by showing that deep Gaussian process priors can achieve (near-)minimax posterior contraction rates for regression functions with compositional structure, demonstrating that depth can be advantageous in such settings.
+
+A practical concern related to depth is the pathology identified by Duvenaud et al., whereby the prior's expressive degrees of freedom can collapse as the number of layers grows. In the context of variational inference, this can manifest as layer collapse: mean-field approximations may lead to intermediate layers being effectively 'turned off', with their contribution diminishing as the signal-to-noise ratio vanishes. This pathology is not intrinsic, however: as the following section discusses, architectural modifications at the bottleneck layers can alleviate it.
+
+### 1.6 Modeling bottleneck layers
+
+The preceding section established that bottleneck layers (narrow intermediate layers) are the load-bearing structural element of a deep GP. This section now turns to the complementary question how these bottleneck layers can be modeled. It first discusses architectural choices aimed at preserving the contribution of intermediate layers, directly addressing the pathology just mentioned, and then turns to a deeper modeling axis: whether the bottleneck is represented as an explicit latent variable in the generative model, or left implicit in the composition.
+
+To mitigate the pathology noted by Duvenaud et al. and discussed in the previous section, the authors propose architectures that connect the input directly to each layer, and Salimbeni and Deisenroth introduce a closely related modification in the deep GP setting by equipping each layer with a linear mean function $m(\mathbf{x}) = \mathbf{W}\mathbf{x}$. This acts as a residual connection: even if a layer's stochastic component contributes little, the input can still propagate through the linear mean. This modification has been shown to alleviate the degeneracies identified by Duvenaud et al. and is consistent with the analysis of deep GP priors in Salimbeni and Deisenroth. More recently, de Souza et al. propose *thin and deep* architectures that combine low-dimensional latent representations with interpretable kernel parametrizations at each layer, addressing these pathologies through architectural design while preserving the benefits of depth.
+
+Beyond architectural modifications, the bottleneck layer itself admits two fundamentally different modeling treatments, distinguished by whether it is represented as an explicit latent variable in the generative model or only implicitly via the composition. In the explicit-latent view, followed by Damianou and Lawrence, each bottleneck is a random variable $\mathbf{h}^{\ell} = f^{\ell}(\mathbf{h}^{\ell-1}) + \boldsymbol{\epsilon}^{\ell}$, distinct from the GP function values, with Gaussian noise $\boldsymbol{\epsilon}^{\ell}$ injected between every pair of layers. Each layer then has the structural form of a GP-LVM, and inference includes estimating $p(\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}|\text{Data})$, the posterior over the intermediate bottlenecks. In the implicit-latent view, followed by Salimbeni and Deisenroth, the inter-layer noise is absorbed into the covariance function and there is no separately named bottleneck variable: the state at layer $\ell$ is the GP function value $\mathbf{f}^{\ell}$ itself, and the key interest is the induced marginal process $y(x) = \mathcal{DGP}(x)$, with intermediate $\mathbf{f}^{\ell}$ regarded as instrumental rather than as objects of inference.
+
+This distinction looks small, as it just amounts to whether noise is injected between layers, but its consequences are substantial. The explicit-latent view makes each layer a GP-LVM and so it places the model squarely in the lineage of representation learning: the inferred intermediate bottlenecks are analogs of the embeddings obtained from intermediate layers of deep networks, and the generative interpretation readily accommodates supervised, unsupervised, and semi-supervised learning, as well as the modeling of high-dimensional data. The implicit-latent view instead emphasizes the induced function $y(x) = \mathcal{DGP}(x)$ and its properties rather than the learned inner representations, making function learning the natural framing; this reorientation has also motivated different, more scalable inference schemes for the supervised learning scenario. Finally, the implicit-latent view is sometimes taken to include nested GP models, where a GP prior is placed on the parameters of a GP as in Zhao et al.
+
+### 1.7 Outline for the rest of this chapter
+
+After establishing these alternative modeling choices for deep GP bottleneck layers, this chapter proceeds by diving deeper into two families of approaches which are particularly instructive. Firstly, it discusses the explicit-latent view; this has been the initial introduction of deep GPs with variational Bayesian inference by Damianou and Lawrence and constitutes an intuitive description of the generative model and its relation to BDL. This view also has been amenable to a variety of inference schemes, including variational inference which has been discussed in this book. Secondly, it discusses approaches such as Salimbeni and Deisenroth where estimation of the distribution of intermediate latents is not the key focus, further motivating a relaxation for the requirement that inner expectations be evaluated analytically. In turn, this gives rise to a Monte-Carlo approximation of the predictive (approximate) posterior which unlocks both scalability and stability.
+
+Overall, by elaborating on the above two approaches, their different points of focus and how their associated variational inference schemes deeply relate to each other, the hope is that the reader will get a rounded understanding of deep GPs, also facilitated by the previous discussion of different deep GP constructions.
+
+A detailed explanation of the VI-based inference schemes used in these approaches is given to expose the readers to the precise approximations made; this is important since the central technical challenge of deep GPs is inference. Indeed, deep GPs have been established as BDL models operating in function space directly, giving the combined benefit of: (a) function space inference (b) fully Bayesian treatment and (c) nonlinear mappings; however exactly this induced requirement of propagating densities through nonlinearities means that the analytically tractable methodologies of shallow GPs can no longer be applied, nor can deep learning optimization techniques which work in the parameter space be employed directly (they are not required to propagate densities). The intra-layer as well as inter-layer intractabilities mean that standard variational inference also fails. Consequently, practical trade-offs and challenges for deep GP constructions and usage depend critically on inference. The thorough discussion of the VI schemes is complemented by additionally discussing other inference schemes besides variational inference. Finally, the chapter closes with an illustrative example.
+
+## 2. Deep Gaussian processes with latent variables
+
+This section describes the deep GP framework in more detail, starting with the probabilistic definition and then developing the variational inference methodology used for training.
+
+<Figure caption="Figure 25.4: Samples from a deep Gaussian process with three-dimensional hidden and output nodes. A linear input x (not depicted) was propagated through two hidden layers (top and middle plot) to the output layer (bottom plot). Schematic reproduction: one draw per layer from GP priors with exponentiated quadratic covariance functions (lengthscales 0.18, 0.9 and 0.5); the three line styles are the three dimensions of each layer, and values beyond ±3 are clipped.">
+  <Bdl25DeepGpSamples />
+</Figure>
+
+### 2.1 Probabilistic definition
+
+The deep Gaussian process class of probabilistic models is now formally described. To do so, single-dimensional variables will again be considered, although it is underlined that this is only for simplicity and without loss of generality for models with conditionally independent output dimensions. Further, the analysis is made by firstly considering the unsupervised learning scenario, where a hierarchy of latent spaces is assumed to generate observed outputs.
+
+The deep GP consists of a cascade of $L$ hidden layers of latent variables, $\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}$ with the observed outputs being placed in the leaves of the hierarchy. An intermediate node $\mathbf{h}^{\ell} \in \mathbb{R}^{n}$ associated with layer $\ell$ constitutes the output of that layer and acts as an input for the generative procedure of the subsequent layer, $\ell + 1$. Gaussian processes govern the mappings between the layers. Each mapping corresponds to a separate GP, having covariance function $k^{\ell}$ and hyperparameters $\boldsymbol{\theta}^{\ell}$. Further, every set of latent variables $\mathbf{h}^{\ell}$ is obtained from the functional output of the previous layer with the addition of Gaussian noise $\boldsymbol{\epsilon}^{\ell} \sim \mathcal{N}(\mathbf{0}, (\beta^{\ell})^{-1}\mathbf{I})$. Therefore, a single layer of the deep GP is effectively a GP-LVM, just as a single layer of a deep belief network is an RBM. The joint distribution of a deep GP model with $L$ hidden layers can be written as:
+
+$$
+p(\mathbf{y}, \{\mathbf{h}^{\ell}\}_{\ell=1}^{L}) = p(\mathbf{y}|\mathbf{h}^{L})p(\mathbf{h}^{L}|\mathbf{h}^{L-1}) \cdots p(\mathbf{h}^{2}|\mathbf{h}^{1})p(\mathbf{h}^{1}),
+\tag{25.9}
+$$
+
+where $p(\mathbf{h}^{1}) = \mathcal{N}(\mathbf{h}^{1}|\mathbf{0}, \mathbf{I})$. As for the conditional probabilities, they can be expanded as:
+
+$$
+p(\mathbf{h}^{\ell}|\mathbf{h}^{\ell-1}) = \int p(\mathbf{h}^{\ell}|\mathbf{f}^{\ell})p(\mathbf{f}^{\ell}|\mathbf{h}^{\ell-1})\mathrm{d}\mathbf{f}^{\ell},
+\tag{25.10}
+$$
+
+where inside the integral are the likelihood $p(\mathbf{h}^{\ell}|\mathbf{f}^{\ell}) \sim \mathcal{N}(\mathbf{f}^{\ell}, (\beta^{\ell})^{-1}\mathbf{I})$ and the conditional $p(\mathbf{f}^{\ell}|\mathbf{h}^{\ell-1}) \sim \mathcal{N}(\mathbf{0}, \mathbf{K}_{f^{\ell-1}f^{\ell-1}})$. Notice that the covariance matrix for each layer is evaluated with the corresponding covariance function evaluated at the inputs of the previous layer, that is, $\mathbf{K}_{f^{\ell-1}f^{\ell-1}} = k^{\ell}(\mathbf{h}^{\ell-1}, \mathbf{h}^{\ell-1})$. The observations are included in this recursive formulation by considering the special notation $\mathbf{h}^{L+1} \triangleq \mathbf{y}$.
+
+Figure 25.4 shows examples of samples drawn from the deep GP architecture, where the top layer was chosen deterministically. This figure makes evident that deep GPs constitute much more powerful priors compared to traditional GPs (observe, for example, the long range correlations in the samples). However, although sampling from a deep GP is easy, training it is challenging. MAP optimization for $\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}$ turns all hidden nodes into extra model parameters, creating a severe regularization problem. The focus here is instead on marginalizing out all hidden layers in a Bayesian paradigm, which drastically reduces the number of parameters (each layer mainly contributes variational rather than model parameters) and enables automatic structure discovery through the model evidence and automatic relevance determination (ARD).
+
+However, the nonlinearities introduced by the GP covariance functions make the Bayesian treatment of this model challenging. To demonstrate this, consider a deep GP with two hidden layers. Then, the marginal likelihood can be written as:
+
+$$
+p(\mathbf{y}) = \int p(\mathbf{y}|\mathbf{h}^{2})\left(\int p(\mathbf{h}^{2}|\mathbf{h}^{1})p(\mathbf{h}^{1})\mathrm{d}\mathbf{h}^{1}\right)\mathrm{d}\mathbf{h}^{2}.
+\tag{25.11}
+$$
+
+The nested integral can be written according to equation (25.10) as:
+
+$$
+p(\mathbf{h}^{2}) = \int p(\mathbf{h}^{2}|\mathbf{f}^{2})p(\mathbf{f}^{2}|\mathbf{h}^{1})p(\mathbf{h}^{1})\mathrm{d}\mathbf{h}^{1}\mathrm{d}\mathbf{f}^{2} = \left\langle p(\mathbf{h}^{2}|\mathbf{h}^{1})\right\rangle_{p(\mathbf{h}^{1})}
+\tag{25.12}
+$$
+
+where $\langle\cdot\rangle_{p}$ denotes expectation with respect to $p$; the above integral is intractable, because the density $p(\mathbf{h}^{1})$ cannot be propagated through the function $p(\mathbf{f}^{2}|\mathbf{h}^{1})$ which is constructed by a nonlinear covariance function $k^{2}(\mathbf{h}^{1}, \mathbf{h}^{1})$. A similar situation arises in every layer when deeper architectures are employed. That is, if there was an additional layer, the expectation $\left\langle p(\mathbf{h}^{3}|\mathbf{h}^{2})\right\rangle_{\tilde{p}(\mathbf{h}^{2})}$ would have to be computed, where $\tilde{p}(\mathbf{h}^{2}) = \left\langle p(\mathbf{h}^{2}|\mathbf{h}^{1})\right\rangle_{p(\mathbf{h}^{1})}$ is coming from equation (25.12). The problem can, thus, be formalized by writing the recursive definition
+
+$$
+\tilde{p}(\mathbf{h}^{\ell}) = \left\langle p(\mathbf{h}^{\ell}|\mathbf{h}^{\ell-1})\right\rangle_{\tilde{p}(\mathbf{h}^{\ell-1})}
+$$
+
+of the densities required for the calculation of the marginal likelihood and observing that all required expectations are intractable, as demonstrated for the two hidden layer architecture above. The next section develops variational methodologies which solve this intractability.
+
+### 2.2 Variational inference
+
+**Inducing variables and sparse GP conditionals.** This section demonstrates the variational framework employed by Damianou and Lawrence to introduce tractable deep GPs. The reader's attention is also pointed to [Chapter 12](/blog/introduction-to-variational-inference) and the chapters that follow it for more information on variational inference. First, following the variational sparse GP framework, the probability space of every layer is augmented with $m$ inducing function values $\mathbf{u}^{\ell}$ evaluated at pseudo-inputs $\mathbf{x}_{u}^{\ell}$ (Figure 25.5), treated in depth in Chapter 38. The inducing inputs will be omitted from the expressions, since they always appear in the conditioning set of any probability involving $\mathbf{u}$. For layers with latent inputs ($\ell \geq 2$ in the unsupervised formulation), the inducing inputs $\mathbf{x_u}^{\ell}$ must be placed in the same latent space as $\mathbf{h}^{\ell-1}$, whose geometry is itself being learned; both are optimized jointly, and poor coordination between them can degrade the sparse approximation.
+
+Given these inducing variables, the standard sparse GP decomposition gives the conditional of the latent function values at layer $\ell$:
+
+$$
+p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1}) = \mathcal{N}(\mathbf{f}^{\ell}|\mathbf{a}^{\ell}, \widetilde{\mathbf{K}}^{\ell}),
+\tag{25.13}
+$$
+
+where:
+
+$$
+\begin{aligned}
+\mathbf{a}^{\ell} &= \mathbf{K}_{f^{\ell-1}u^{\ell-1}}\mathbf{K}_{u^{\ell-1}u^{\ell-1}}^{-1}\mathbf{u}^{\ell} \\
+\widetilde{\mathbf{K}}^{\ell} &= \mathbf{K}_{f^{\ell-1}f^{\ell-1}} - \mathbf{K}_{f^{\ell-1}u^{\ell-1}}\mathbf{K}_{u^{\ell-1}u^{\ell-1}}^{-1}\mathbf{K}_{u^{\ell-1}f^{\ell-1}}.
+\end{aligned}
+\tag{25.14}
+$$
+
+**Variational compression within each layer.** Even with the inducing point expansion, a density of $\mathbf{h}^{\ell-1}$ cannot be propagated through the nonlinear $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$. Following Titsias, Titsias and Lawrence, $q(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ is set to $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$, which yields a tractable bound; this bound becomes tight in the limit where $u^{\ell}$ is a sufficient statistic for $f^{\ell}$. Applying Jensen's inequality within each layer then yields a per-layer contribution to the bound:
+
+$$
+\mathcal{L}^{\ell} = \log\mathcal{N}(\mathbf{h}^{\ell}|\mathbf{a}^{\ell}, (\beta^{\ell})^{-1}\mathbf{I}) - \frac{\beta^{\ell}}{2}\operatorname{tr}\widetilde{\mathbf{K}}^{\ell}.
+\tag{25.15}
+$$
+
+Equation (25.15) lower bounds $\log p(\mathbf{h}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$: the Gaussian uses only the noise covariance $(\beta^{\ell})^{-1}\mathbf{I}$ in place of the full $\widetilde{\mathbf{K}}^{\ell} + (\beta^{\ell})^{-1}\mathbf{I}$, while the trace term penalizes the residual GP variance not captured by the inducing variables. Conditioned on $\mathbf{u}$, this per-layer bound factorizes across data points.
+
+**Integrating out hidden variables and inducing outputs.** It remains to marginalize out the hidden variables $\{\mathbf{h}^{\ell}\}$ *across layers* and the inducing function values $\{\mathbf{u}^{\ell}\}$. To do so, introduce a variational distribution
+
+$$
+\mathcal{Q} = \prod_{\ell=1}^{L} q(\mathbf{u}^{\ell+1})q(\mathbf{h}^{\ell}).
+\tag{25.16}
+$$
+
+where both $q(\mathbf{h}^{\ell})$ and $q(\mathbf{u}^{\ell})$ are chosen to be Gaussian, with $q(\mathbf{h}^{\ell})$ factorized across data points (diagonal covariance per data point) and $q(\mathbf{u}^{\ell})$ having full covariance. Notice that factorizing $q(\{\mathbf{h}^{\ell}\})$ across layers is a (sub-optimal) mean-field approximation.
+
+<Figure caption="Figure 25.5: A graphical model representation of: the unsupervised (left) and the supervised (right) deep GP structure with inducing variables and L = 2 hidden layers. Nodes arranged horizontally form part of the same layer.">
+  <Bdl25InducingGraphs />
+</Figure>
+
+Applying Jensen's inequality with this $\mathcal{Q}$ and substituting the per-layer bounds from equation (25.15), the variational lower bound $\mathcal{F} \leq \log p(\mathbf{y})$ is obtained (see Damianou, Damianou and Lawrence for the full derivation):
+
+$$
+\begin{aligned}
+\mathcal{F}(q\{\mathbf{H}^{\ell}\}, q\{\mathbf{U}^{\ell}\}) = {} & \sum_{\ell=2}^{L+1}\left(\left\langle \log\mathcal{N}(\mathbf{h}^{\ell}|\mathbf{a}^{\ell}, (\beta^{\ell})^{-1}\mathbf{I})\right\rangle_{q(\mathbf{h}^{\ell-1})q(\mathbf{h}^{\ell})q(\mathbf{u}^{\ell})} - \frac{\beta^{\ell}}{2}\left\langle \operatorname{tr}\widetilde{\mathbf{K}}^{\ell}\right\rangle_{q(\mathbf{h}^{\ell-1})}\right) \\
+& - \mathrm{D}_{\mathrm{KL}}\big(q(\mathbf{h}^{1})\,\big\|\,p(\mathbf{h}^{1})\big) - \sum_{\ell=2}^{L+1}\mathrm{D}_{\mathrm{KL}}\big(q(\mathbf{u}^{\ell})\,\big\|\,p(\mathbf{u}^{\ell})\big) + \sum_{\ell=2}^{L}\mathcal{H}q(\mathbf{h}^{\ell}),
+\end{aligned}
+\tag{25.17}
+$$
+
+where $\mathbf{h}^{L+1} \triangleq \mathbf{y}$ and $\mathcal{H}\cdot$ denotes the entropy. Note that within the ELBO derived using $\mathcal{Q}' = \prod_{\ell} p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})\, q(\mathbf{u}^{\ell})\, q(\mathbf{h}^{\ell})$, the per-layer term $\mathcal{L}^{\ell}$ arises as an exact computation (the $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ terms cancel between model and variational distribution), and the looseness relative to $\log p(\mathbf{h}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ is a consequence of using the prior conditional $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ rather than the posterior $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1}, \mathbf{h}^{\ell})$, a choice made for tractability.
+
+Hence, all terms are tractable: the KL and entropy terms are standard Gaussian quantities, while the expectations involving covariance matrices require that the chosen kernel can be feasibly convolved with Gaussian densities, restricting the choice to kernels such as the exponentiated quadratic and the linear kernel. The bound factorizes across data points, and is maximized with respect to model parameters $\{\beta^{\ell}, \boldsymbol{\theta}_{f}^{\ell}\}$ and variational parameters $\{\mathbf{x}_{u}^{\ell}, \mathbf{m}^{\ell}, \operatorname{diag}(\mathbf{S}_{i}^{\ell}), \boldsymbol{\mu}^{\ell+1}, \boldsymbol{\Sigma}^{\ell+1}\}$. Notice that the variational parameters for $q(\mathbf{h}^{\ell})$ scale as $\mathcal{O}(n)$ per layer.
+
+**Collapsed bound.** Alternatively, one can determine the optimal $q(\mathbf{u}^{\ell})$ analytically and substitute it back, yielding a *collapsed* bound that depends only on $q(\{\mathbf{H}^{\ell}\})$. This gives a tighter approximation, but the marginalization of $q(\mathbf{u}^{\ell})$ re-introduces coupling across data points: the collapsed objective no longer factorizes in $n$, preventing minibatch training. For smaller data sets (where processing all data points jointly is feasible) the collapsed bound may be preferred for its tightness; for larger data sets, the uncollapsed, factorized bound is necessary, and stochastic variational inference methods become essential (Section 3).
+
+### 2.3 Supervised learning with noisy bottleneck layers
+
+So far, the variational framework was demonstrated for the general scenario where all inputs are associated with a density, such as in an unsupervised learning scenario. However, in typical supervised learning applications, the top layer's inputs are observed and deterministic. Therefore, inference for that layer is simpler, as there is no intractable density propagation issue; correlations in the input space are explicitly modeled through the approximate posterior $q(\mathbf{h}^{1})$ which, in this case, constitutes a variational distribution $q$ which is a Gaussian with *full* covariance matrix (rather than a diagonal one). Writing the general multi-dimensional form, let $\mathbf{h}_{j}^{\ell}$ denote the $j$-th output dimension across all $n$ datapoints (a column of $\mathbf{H}^{\ell}$) and $\mathbf{h}_{i,:}^{\ell}$ the $i$-th datapoint across all dimensions (a row of $\mathbf{H}^{\ell}$). The latent space distribution would then factorize as:
+
+$$
+q(\{\mathbf{H}^{\ell}\}) = \prod_{j=1}^{d^{1}}\mathcal{N}(\mathbf{h}_{j}^{1}|\mathbf{m}_{j}^{1}, \mathbf{S}_{j}^{1})\prod_{\ell=2}^{L}\prod_{i=1}^{n}\mathcal{N}(\mathbf{h}_{i,:}^{\ell}|\mathbf{m}_{i,:}^{\ell}, \mathbf{S}_{i}^{\ell}),
+\tag{25.18}
+$$
+
+where $\mathbf{S}_{j}^{1}$ is a *full* $n \times n$ matrix, as in Damianou et al.
+
+## 3. Scalable deep GPs
+
+Section 2.2 discussed two versions of the variational lower bound: collapsed and uncollapsed. For smaller training sets the collapsing approach might be preferred, because of the tighter bound and the reduced size of the parameters. For larger training sets, however, this approach becomes infeasible since all datapoints need to be considered together during the optimization of the parameters. To tackle this issue, Dai et al., Gal et al. have devised parallel training regimes, while Dai et al. takes this one step further by also amortizing the variational distributions $q(\mathbf{h})$ such that their variational parameters do not scale per-datapoint but, instead, they are determined by a fixed, user-selected set of neural network variables; essentially, a multilayer perceptron (MLP) is trained to output these variables (see also Meng and Zhang for a recent treatment).
+
+To scale to real-world big data sets, the researchers have further developed methodologies for stochastic variational inference (SVI) which allow the variational lower bound to handle training data as batches. These methodologies adopt the factorized, non-collapsed version of the variational bound, following the paradigm developed by Hensman et al. for single-layer GPs. Indeed, since the likelihood factorizes across data points, the bound involves the sparse GP conditional only through its per-datapoint marginals $p(f_n|\mathbf{u})$, with $f_n = f(x_n)$; the bound therefore decomposes into a sum over data points in which all dependence between data points is mediated by the global variables $\mathbf{u}$. Note that it is the structure of the bound, not of the model, that decouples the data points: the exact conditional $p(\mathbf{f}|\mathbf{u})$ itself remains correlated across data points through the residual covariance $\widetilde{\mathbf{K}}$ of equation (25.14). Taking this one step further, Hensman and Lawrence eliminate the variational distribution for the bottleneck layers entirely by marginalizing via layer-wise compression. This allows for mini-batch optimization, reduced variational parameter space as well as the incorporation of "messages" (in the form of Gaussian moments resulting from expectations of the marginalized $q(\mathbf{h})$) passed across layers.
+
+Salimbeni and Deisenroth proposed *doubly stochastic variational inference* (DSVI), an approach in which no explicit $q(\mathbf{h}^{\ell})$ distributions appear. Rather than propagating Gaussian messages across layers, DSVI retains the exact model conditional inside the approximate posterior and handles the resulting intractabilities through Monte Carlo sampling. A key departure from the framework of Section 2.2 is in how layers are connected. Previously, each layer introduced a noise-corrupted bottleneck $\mathbf{h}^{\ell} = \mathbf{f}^{\ell}(\mathbf{h}^{\ell-1}) + \boldsymbol{\epsilon}^{\ell}$, and inference required estimating distributions over these noisy representations. In DSVI, the inter-layer noise is absorbed into the covariance function, so the GP function values $\mathbf{f}^{\ell}$ serve directly as the output of layer $\ell$ and input to layer $\ell + 1$. Concretely, this means the GP kernel at each layer includes a noise component $\sigma_{\ell}^{2}\delta_{ij}$, but no separate latent variable $\mathbf{h}^{\ell}$ is introduced. Therefore, the distinction between function values $\mathbf{f}^{\ell}$ and noisy latent function instantiations $\mathbf{h}^{\ell}$ dissolves, and there is no separate $q(\mathbf{h}^{\ell})$ to estimate.
+
+Consider a deep GP with $L$ layers, inputs $\mathbf{f}^{0} = \mathbf{x}$, and each layer augmented with inducing variables $(\mathbf{u}^{\ell}, (\mathbf{x}_{u})^{\ell})$. The approximate posterior is:
+
+$$
+\mathcal{Q}_{\text{DSVI}} = \prod_{\ell=1}^{L} p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}; \mathbf{f}^{\ell-1})\, q(\mathbf{u}^{\ell}),
+\tag{25.19}
+$$
+
+where $q(\mathbf{u}^{\ell}) = \mathcal{N}(\mathbf{u}^{\ell}|\boldsymbol{\mu}^{\ell}, \boldsymbol{\Sigma}^{\ell})$ and $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}; \mathbf{f}^{\ell-1})$ is the exact sparse GP conditional from the model. Since this conditional depends on $\mathbf{f}^{\ell-1}$ (the actual output of the previous layer, not a variational approximation to it), inter-layer dependencies are preserved. Since both factors are Gaussian, $\mathbf{u}^{\ell}$ can be marginalized analytically to yield:
+
+$$
+q(\mathbf{f}^{\ell} \mid \mathbf{f}^{\ell-1}) = \int p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}; \mathbf{f}^{\ell-1})\, q(\mathbf{u}^{\ell})\, \mathrm{d}\mathbf{u}^{\ell} = \mathcal{N}(\mathbf{f}^{\ell}|\tilde{\boldsymbol{\mu}}^{\ell}, \tilde{\mathbf{K}}_{q}^{\ell}),
+\tag{25.20}
+$$
+
+where $\tilde{\boldsymbol{\mu}}^{\ell}$ and $\tilde{\mathbf{K}}_{q}^{\ell}$ take the same structural form as $\mathbf{a}^{\ell}$ and $\widetilde{\mathbf{K}}^{\ell}$ in equation (25.14) but with $\mathbf{u}^{\ell}$ replaced by the variational mean $\boldsymbol{\mu}^{\ell}$ and the covariance adjusted to incorporate $\boldsymbol{\Sigma}^{\ell}$. The $i$-th marginal of this Gaussian depends only on $f_{i,:}^{\ell-1}$, since both its mean and its variance involve kernel evaluations of the layer inputs only at that point (together with the inducing inputs); as the bound below requires only these marginals, each data point can be propagated through the hierarchy independently.
+
+In the ELBO, the model conditionals cancel between numerator and denominator, giving:
+
+$$
+\mathcal{F}_{\text{DSVI}} = \sum_{i=1}^{n}\mathbb{E}_{q(f_{i,:}^{L})}\left[\log p(y_{i,:}|f_{i,:}^{L})\right] - \sum_{\ell=1}^{L}\mathrm{D}_{\mathrm{KL}}\big(q(\mathbf{u}^{\ell})\,\big\|\,p(\mathbf{u}^{\ell})\big).
+\tag{25.21}
+$$
+
+The KL terms are analytic. The expected log-likelihood involves propagating each input $x_{i,:}$ through $L$ layers of the stochastic conditionals (25.20), a composition of nonlinear transformations that is intractable in closed form. This is handled through two sources of stochasticity (hence the name): first, Monte Carlo sampling through the layers using the reparameterization trick; second, minibatch subsampling over data points. Together, these yield unbiased gradient estimates of $\mathcal{F}_{\text{DSVI}}$.
+
+Comparing with the bound of equation (25.17), the DSVI formulation differs in three main respects. First, the only variational parameters are the inducing distributions $q(\mathbf{u}^{\ell})$, scaling as $\mathcal{O}(m^{2})$ per layer regardless of $n$; the $\mathcal{O}(n)$ parameters of $q(\mathbf{h}^{\ell})$ are absent. The reduction in parameter count comes at the cost of not maintaining an explicit latent variable posterior over the intermediate representations, which the bound of equation (25.17) does provide. Second, no trace penalty $\frac{\beta^{\ell}}{2}\langle\operatorname{tr}(\widetilde{\mathbf{K}}^{\ell})\rangle$ appears. In contrast to earlier approaches that rely on analytic expectations of kernels under Gaussian inputs, this formulation avoids such expectations and therefore does not impose corresponding restrictions on the choice of covariance function. Third, inter-layer correlations are retained: each layer's function values are conditioned on the sampled outputs of the previous layer rather than decoupled by a mean-field factorization across layers. This reduces the variance underestimation typical of mean-field approximations, at the cost of the analytic tractability and closed-form per-layer bound that the factorization affords. The first two differences reflect both the model structure (no separate noise variables) and the inference method (Monte Carlo rather than analytic expectations); the third reflects the inference method alone.
+
+However, a mean-field assumption remains at the level of the inducing distributions $q(\mathbf{u}^{\ell})$, which are treated as independent across layers; this factorization can force intermediate layers to collapse to near-deterministic transformations, losing compositional uncertainty. In supervised regression and classification benchmarks, Salimbeni and Deisenroth demonstrated that deep GPs trained with DSVI consistently match or exceed single-layer GP performance, with the largest gains on large data sets (scaled up to a demonstration on over a billion points).
+
+## 4. Further inference approaches
+
+Sections 2.2 and 3 developed two variational inference frameworks in detail: the mean-field approach of Damianou and Lawrence and the doubly stochastic formulation of Salimbeni and Deisenroth. These are not the only routes to approximate inference in deep GPs. This section surveys three complementary approaches, each addressing different limitations of the variational schemes above. Together, they illustrate the trade-offs between approximation quality, computational cost, and modeling assumptions that shape practical choices.
+
+### 4.1 Expectation propagation
+
+Bui et al. proposed an alternative to variational inference for deep GPs based on approximate expectation propagation (EP). Where variational methods optimize a lower bound on the marginal likelihood, EP approximates the posterior by iteratively matching the moments of local factors. Combined with inducing point representations and *stochastic* EP (which ties the local factors across data points for scalability), it propagates Gaussian approximations through successive layers, rather than maintaining an explicit variational distribution over the hidden variables. On eleven regression benchmarks, Bui et al. report that their method consistently outperforms single-layer GP regression and is competitive with Bayesian neural network baselines, while providing well-calibrated uncertainty estimates. A limitation is that EP requires moment computations under the approximate posterior that restrict the choice of kernel, similarly to the psi-statistic requirements of the framework of Damianou and of Titsias and Lawrence. See also Hernández-Muñoz et al. for a more recent extension combining EP with Monte Carlo sampling.
+
+### 4.2 Random feature approximations
+
+A different strategy is to approximate each GP layer with a finite-dimensional feature expansion, turning the deep GP into a form of Bayesian neural network. Cutajar et al. realize this at each layer using random feature expansions, so that the deep GP composition takes the layer-wise form:
+
+$$
+\mathbf{F}^{\ell+1} = \boldsymbol{\Phi}^{\ell}\mathbf{W}^{\ell}, \qquad \boldsymbol{\Phi}^{\ell} = \gamma^{\ell}(\mathbf{F}^{\ell}\boldsymbol{\Omega}^{\ell}),
+\tag{25.22}
+$$
+
+up to the standard random-feature scaling, which is omitted for clarity; in the above, $\mathbf{F}^{\ell}$ is the matrix of layer-$\ell$ outputs, $\mathbf{W}^{\ell}$ are Bayesian linear weights, the columns of $\boldsymbol{\Omega}^{\ell}$ are random frequencies sampled from a kernel-specific measure, and $\gamma^{\ell}$ is a kernel-specific nonlinearity.
+
+Replacing each GP layer with this approximation transforms the deep GP into a deep network with random fixed features and Bayesian linear weights, on which stochastic variational inference can be performed in the standard weight-space manner. This approach is presented as substantially more scalable than inducing-point-based approaches and is demonstrated on data sets with over 8 million observations. The trade-off is that the GP posterior at each layer is no longer represented explicitly in function space but rather through the weight distribution, and the feature expansion is restricted to kernels that admit a tractable random feature representation; Cutajar et al. derive expansions for the squared exponential (via Bochner's theorem, yielding trigonometric features) and for the arc-cosine kernel (via the integral representation of Cho and Saul, yielding ReLU features).
+
+There is an appealing conceptual symmetry here with the constructions of Section 1: the chapter began by deriving deep GPs from deep neural networks via the infinite-width limit; random feature methods reverse this by approximating each GP layer with a finite-width neural network layer, returning to weight space for tractability.
+
+### 4.3 Sampling-based and structured variational inference
+
+The variational methods discussed so far, whether based on inducing points or random features, employ Gaussian approximate posteriors. Havasi et al. argue that this can be a "potentially poor unimodal approximation of the generally multimodal posterior" and propose to bypass the Gaussian assumption entirely by applying stochastic gradient Hamiltonian Monte Carlo (SGHMC) (see [Chapter 2](/blog/stochastic-gradient-mcmc)) to sample from the posterior over the inducing outputs. Working within the inducing-point framework of Section 3, they interleave these SGHMC draws with hyperparameter optimization via a novel moving window Monte Carlo EM algorithm. The resulting method achieves significantly better predictive performance at lower computational cost than variational inference on several regression benchmarks, and importantly, provides empirical evidence for the non-Gaussian nature of deep GP posteriors (see also Rossi et al., who extend this approach to jointly sample inducing inputs and hyperparameters). From a different angle, Dunlop et al. propose a Metropolis-within-Gibbs sampler across the levels of the hierarchy. The sampler is demonstrated on function-space Bayesian inverse problems using a covariance-operator deep GP construction (distinct from the composition deep GPs that are the focus of the chapter). While neither sampler has been demonstrated at the very largest scales reached by the variational methods above, they establish quality benchmarks that expose fundamental limitations of Gaussian variational approximations.
+
+Beyond switching inference paradigm, several works have sought to improve the fidelity of the variational family itself. Ustyuzhaninov et al. show that the standard mean-field approximation causes deep GP layers to collapse toward near-deterministic transformations, severely limiting uncertainty quantification; they propose a structured variational distribution that preserves inter-layer correlations. More recently, Xu et al. replace the Gaussian variational family with diffusion-based posteriors learned through a denoising process (cf. Chapter 50), shifting the paradigm from choosing a fixed-form parametric family to learning a flexible one.
+
+In practice, DSVI remains a widely adopted inference method, with implementations available in frameworks such as GPflux and GPyTorch. The alternatives surveyed here offer complementary strengths: EP swaps variational ELBO optimization for an EP energy function optimization via moment matching, random features enable weight-space inference without matrix decompositions, and sampling methods and richer variational families relax the Gaussian posterior assumption itself.
+
+## 5. Illustration
+
+To further illustrate the properties and behavior of deep GPs, a simple example is considered, that is, attempting to fit the simulated step function; this follows the experimental setting of Calandra et al., Hensman and Lawrence. $n = 40$ equidistant training inputs $\{x_{i,:}\}_{i=1}^{n}$ were generated in the interval $[0, 1]$. As for the outputs, they are set as $y_{i,:} = 1$ if $x_{i,:} < 0.5$ and $0$ otherwise, plus the addition of Gaussian noise with standard deviation $0.02$. Therefore, the output space is very "flat" but broken by a big discontinuity (step), thus making the application of a standard GP very challenging. In contrast, a deep GP as a generative model is able to capture this extreme non-stationarity and bimodality by making use of the available intermediate layers that gradually "push" the points in the two extrema. The results presented below confirm this, and they are very similar to those of Hensman and Lawrence who used a deep GP variant with nested variational compression.
+
+<Figure caption="Figure 25.6: Samples drawn from the posterior of a standard GP (top), a deep GP with 1 hidden layer (middle) and a deep GP with three hidden layers (bottom). As in Hensman and Lawrence, for better visualization the sampled points are drawn as small, faint semi-transparent squares, whereas the training points are plotted as dark opaque x's. Schematic reproduction, not the output of trained deep GPs: 30 faint sample paths per panel on a 120-point grid instead of squares. The data follow the original figure (y near 0 below x = 0.5 and near 1 above, noise standard deviation 0.02), which is the reverse of the rule stated in the text of this section; the top panel is exact GP regression with an exponentiated quadratic covariance function, and the deep GP panels pass posterior draws of a latent GP through fixed, hand-chosen sigmoidal warpings of the kind shown in Figure 25.8 (one for the middle panel, three for the bottom panel).">
+  <Bdl25StepPosterior />
+</Figure>
+
+Indeed, Figure 25.6 shows 300 sample paths from the posterior obtained by a standard GP with exponentiated quadratic covariance function (top panel) and a deep GP with one (middle panel) and three (bottom panel) hidden layers. Each of the paths corresponds to the discretization of the interval $[-1, 2]$ in 500 points. The figure demonstrates how even a 1 hidden layer deep GP is able to easily operate in a regime which seems bimodal. A deeper architecture (bottom panel) fits in this regime even better, with fewer samples falling between the two extrema. It is interesting to examine the locations of these samples: they seem to cover uniformly and very sparsely the area between the "modes". Further, such samples are only obtained away from the interval $[0, 1]$, signifying that a "jump" is expected to happen (although with extremely low probability) in regions away from the data. On the other hand, away from the data the standard GP produces many samples corresponding to $y$ values that are too far from the training points. Furthermore, the GP is even forced to underfit the data; there are no samples falling in the region close to the "jump" even if two training points (one up and one down) exist there while, at the same time, the variance around the training data is too large.
+
+<Figure caption="Figure 25.7: (a) Successive warping of sample paths drawn from a deep GP, gradually “pushing” them towards a bimodal regime. (b) Sample paths drawn from a standard GP. In this figure, each sample is drawn versus the initial input x. Instead, figure 25.8 shows a plot of each layer's output signal versus its input signal. Schematic reproduction built in the same way as Figure 25.6, not the output of a trained deep GP: three posterior draws of the latent first layer passed through three sigmoidal warpings (panel a, data shown as crosses in the last layer), and three draws of the standard GP posterior (panel b).">
+  <Bdl25StepWarping />
+</Figure>
+
+To confirm the above intuitions, as well as to draw further conclusions, Figure 25.7 plots whole sample paths from the deep and the standard GP. For the deep GP, Figure 25.7(a) shows the samples' successive warping through the deep hierarchy, which gradually "pushes" them towards the bimodal regime. As can be seen, the samples (especially in the middle layers) are smooth, and are probabilistically assigned to one of the two modes. Jumps can occur but are rare, perhaps because only one jump exists in the training data. The interpolation suggests that the deep GP interprets the differences of the points *within* each cluster mostly as noise, which matches the actual toy data generation. Finally, Figure 25.8 also depicts sample paths, but there each plot shows the sample output signal in every layer versus its corresponding *input signal*, in contrast to Figure 25.7 where the $x$-axis is the input $\mathbf{x}$. As can be seen in Figure 25.8, each layer's warping function is learned to have a sigmoidal shape, so as to successively "push" the top layer's samples into the bi-modal regime.
+
+<Figure caption="Figure 25.8: Plotting the input versus the output sample signals of every layer in the deep GP. This reveals sigmoidal warping functions which successively “push” the top layer's samples into the bi-modal regime. In the axis labels, the superscript denotes the layer number; each column corresponds to a single sample propagated through the hierarchy. Schematic reproduction for the three samples of Figure 25.7 (a), not the output of a trained deep GP: the dots are the sample values at every second grid point and the thin line is the fixed, hand-chosen (not learned) sigmoidal warping function of that layer.">
+  <Bdl25LayerMaps />
+</Figure>
+
+[^1]: If the mappings are instead fixed, then a standard (shallow) GP with a hierarchical covariance function is obtained, as noted and investigated by Duvenaud et al.
+
+[^2]: Emphasis is used to clarify that the model likelihood is meant, not the marginal likelihood required in Bayesian model selection.
+
+[^3]: Some of the variables can also be treated as observed, e.g. in the upper most layer of the hierarchy where the data label or inputs for regression might be included.

@@ -1,0 +1,422 @@
+---
+title: "Introduction to Kernel Methods"
+description: "Kernels as feature maps and similarity measures, the kernel trick, RKHS and the Representer theorem, Gaussian process regression and the limits of fixed kernels."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - kernel methods
+  - gaussian processes
+  - rkhs
+series: bayesian-deep-learning
+seriesOrder: 29
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl23KernelTrick from '../../components/diagrams/Bdl23KernelTrick.astro';
+
+Kernel methods form one of the earliest and most elegant realizations of Bayesian learning in function space. Before deep networks, they provided a way to express flexible, non-parametric priors while preserving exact Bayesian inference, building on early work connecting Bayesian ideas to neural networks. Today they play a dual role: (i) as stand-alone probabilistic models such as Gaussian Processes (GPs) and (ii) as analytic limits or building blocks of deep architectures: indeed, in the infinite-width limit, neural networks converge to GPs whose kernel is determined by the network architecture. From the perspective of **Bayesian deep learning**, kernels are the original tools for placing priors over functions rather than parameters.
+
+While Parts I–IV developed inference schemes (sampling, variational, ensemble), Part V explores how the *function priors themselves* can be made expressive, deep, and learnable. The chapter supplies the fundamentals used throughout Part V and motivates the deep extensions that follow.
+
+The chapter begins with kernel functions and how they encode inductive biases (Section 2), then introduces the *kernel trick*, the RKHS view, and the Representer theorem (Section 3). Building on these foundations, it presents Gaussian processes as distributions over functions and derives standard regression formulas (Section 4). It then discusses the key limitations of standard kernels and GPs, including representation rigidity and scalability, and motivates deep, adaptive alternatives (Section 5). This sets up the next chapters on Deep Gaussian Processes ([Chapter 25](/blog/deep-gaussian-processes)), Deep Kernel Learning ([Chapter 24](/blog/deep-kernel-learning)), and Meta-Learning function priors ([Chapter 27](/blog/meta-learning-deep-kernel-gaussian-processes)).
+
+## 1. Kernel as feature map
+
+At the heart of kernel methods lies a powerful geometric intuition: complex patterns in raw data can often be understood more easily after transforming the data into a different representation space. A *kernel function* formalizes this idea by implicitly defining a transformation from an input space to a feature space where data relationships become more tractable.
+
+### 1.1 From input space to feature space
+
+Consider a data set of objects $\{x_1, \dots, x_n\}$ residing in some *input space* $\mathcal{X}$. The input space represents the original, observed form of the data, for example, raw pixel values of an image, coordinates in Euclidean space, or even non-numeric structures like sequences or graphs.
+
+A *feature map* $\phi : \mathcal{X} \to \mathcal{F}$ is a function that transforms each input $x$ into a vector $\phi(x)$ in a *feature space* $\mathcal{F}$. The feature space is typically a vector space (often a Hilbert space) equipped with an inner product $\langle \cdot, \cdot \rangle_{\mathcal{F}}$, which allows one to measure angles, distances, and perform geometric operations.
+
+The choice of feature map $\phi$ determines what aspects of the data are emphasized. By mapping data into a carefully chosen feature space, one can:
+
+- Make nonlinear patterns in $\mathcal{X}$ appear linear in $\mathcal{F}$
+- Encode domain knowledge about relevant data characteristics
+- Change the dimensionality to enable different representations (increasing it for richer structure, or reducing it via feature selection)
+- Define meaningful notions of similarity that are difficult to express in the original space
+
+**Algorithm 26** Kernel nearest neighbor regression
+
+```text
+Input: kernel k on X, minimum number of neighbors n ∈ N+, data {(x_i, y_i)}_{i=1}^P ⊂ X × R, new input
+       x_* ∈ X
+Output: predicted label y of x_*
+S = {(x_i, y_i)}_{i=1}^P
+S_n = ∅
+while |S_n| < n do
+    S' ← { argmin_{(x,y)∈S} sqrt( k(x_*, x_*) − 2 k(x_*, x) + k(x, x) ) }
+    S_n ← S_n ∪ S'
+    S ← S \ S'
+return y = (1/|S_n|) Σ_{(x_i,y_i)∈S_n} y_i
+```
+
+### 1.2 Kernels as inner products in feature space
+
+A *kernel function* $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ computes the inner product between feature representations without explicitly constructing those representations. Specifically, for any two inputs $x, x' \in \mathcal{X}$:
+
+$$
+k(x, x') = \langle \phi(x), \phi(x') \rangle_{\mathcal{F}} \tag{23.1}
+$$
+
+That is, every kernel is a dot product in a (possibly infinite-dimensional) transformed space. This fact also holds in reverse: every feature map determines a kernel. This equation also reveals the kernel's dual nature: it is both a similarity measure in the input space and an inner product in the feature space. The kernel value $k(x, x')$ quantifies how aligned the feature representations $\phi(x)$ and $\phi(x')$ are in $\mathcal{F}$.
+
+**Geometric Interpretation.** In the feature space $\mathcal{F}$, the inner product $\langle \phi(x), \phi(x') \rangle_{\mathcal{F}}$ captures:
+
+- **Magnitude and direction:** Large positive values indicate that $\phi(x)$ and $\phi(x')$ point in similar directions and have large norms
+- **Similarity:** The inner product is maximized when the two vectors are parallel
+- **Orthogonality:** When $k(x, x') = 0$, the feature representations are orthogonal, indicating complete dissimilarity in the feature space
+
+Note that the inner product conflates magnitude and direction: a large value of $k(x, x')$ may reflect either strong alignment or large norms $\|\phi(x)\|, \|\phi(x')\|$. To interpret the inner product purely as directional similarity, one can normalize by the norms, yielding the cosine similarity $k(x, x')/\sqrt{k(x, x)\, k(x', x')}$. Alternatively, the kernel induces a metric in feature space:
+
+$$
+d_k(x, x') = \|\phi(x) - \phi(x')\|_{\mathcal{F}} = \sqrt{k(x, x) + k(x', x') - 2\, k(x, x')}, \tag{23.2}
+$$
+
+which provides a proper distance that separates magnitude from direction. The feature map can capture complex, nonlinear relationships, and this distance need not correspond to simple distance in the input space.
+
+This metric immediately gives rise to simple kernelized algorithms. As an example, Algorithm 26 shows kernel nearest neighbor regression, which finds the closest training points to a query using only kernel evaluations and averages their labels.
+
+### 1.3 Example: quadratic feature map
+
+To make these ideas concrete, consider a simple nonlinear transformation in two dimensions.
+
+**Example 23.1** (Quadratic Feature Map). *Let* $\mathcal{X} = \mathbb{R}^2$ *be the two-dimensional input space. Define the quadratic feature map* $\phi : \mathbb{R}^2 \to \mathbb{R}^3$ *by:*
+
+$$
+\phi\begin{pmatrix} x_1 \\ x_2 \end{pmatrix} = \begin{pmatrix} x_1^2 \\ x_2^2 \\ \sqrt{2}\, x_1 x_2 \end{pmatrix} \tag{23.3}
+$$
+
+*This mapping transforms each point* $x = (x_1, x_2)^\top$ *into a three-dimensional vector whose components are quadratic monomials of the input coordinates. The feature space* $\mathcal{F} = \mathbb{R}^3$ *is equipped with the standard Euclidean inner product.*
+
+**Computing similarity via inner products.** *Consider two input points:*
+
+$$
+x = \begin{pmatrix} 5.9 \\ 3.0 \end{pmatrix}, \qquad y = \begin{pmatrix} 6.9 \\ 3.1 \end{pmatrix}
+$$
+
+*Their feature representations are:*
+
+$$
+\phi(x) = \begin{pmatrix} 5.9^2 \\ 3.0^2 \\ \sqrt{2} \cdot 5.9 \cdot 3.0 \end{pmatrix} = \begin{pmatrix} 34.81 \\ 9.00 \\ 25.03 \end{pmatrix}
+$$
+
+$$
+\phi(y) = \begin{pmatrix} 6.9^2 \\ 3.1^2 \\ \sqrt{2} \cdot 6.9 \cdot 3.1 \end{pmatrix} = \begin{pmatrix} 47.61 \\ 9.61 \\ 30.25 \end{pmatrix}
+$$
+
+*The inner product in feature space is:*
+
+$$
+\begin{aligned}
+\langle \phi(x), \phi(y) \rangle_{\mathcal{F}} &= 34.81 \times 47.61 + 9.00 \times 9.61 + 25.03 \times 30.25 \\
+&= 1657.30 + 86.49 + 757.16 \\
+&= 2500.95
+\end{aligned}
+$$
+
+*This value quantifies the similarity between* $x$ *and* $y$ *in the quadratic feature space. Large positive values indicate strong similarity under this particular nonlinear transformation.*
+
+**Why use feature maps?** The quadratic feature map enables algorithms that operate via inner products (such as linear classifiers or regression) to capture quadratic decision boundaries in the input space. What appears as a nonlinear pattern in $\mathbb{R}^2$ becomes a linear pattern in $\mathbb{R}^3$.
+
+### 1.4 The computational challenge
+
+While feature maps provide a principled way to define similarity, they introduce a computational problem: the feature space $\mathcal{F}$ may be very high-dimensional, or even infinite-dimensional. Computing $\phi(x)$ explicitly can be expensive or impossible.
+
+For instance, a polynomial feature map of degree $q$ in $d$ dimensions has feature space dimensionality:
+
+$$
+\dim(\mathcal{F}) = \binom{d + q}{q}
+$$
+
+which grows rapidly with both $d$ and $q$. For $d = 100$ and $q = 3$, this yields over 176,000 dimensions. Explicitly computing and storing $\phi(x)$ for each data point becomes prohibitively expensive. Even more dramatically, some kernels, such as the Gaussian RBF kernel, correspond to infinite-dimensional feature spaces, making explicit feature computation impossible in principle.
+
+This observation motivates the central insight of kernel methods, which Section 3 explores: ***if an algorithm can be expressed entirely in terms of inner products $\langle \phi(x), \phi(x') \rangle_{\mathcal{F}}$, $\phi(x)$ never needs to be computed explicitly. Instead, the kernel function $k(x, x')$ is computed directly in the input space, bypassing the feature space entirely while achieving the same result***.
+
+**Remark 23.1.** *The kernel function* $k(x, x')$ *serves as an implicit representation of a potentially very complex feature map* $\phi$*. This implicit representation is what makes kernel methods both computationally practical and theoretically elegant: one can work in rich, high-dimensional spaces without ever constructing them explicitly.*
+
+## 2. Kernel functions
+
+A *kernel function* provides a principled way to measure alignment between data points in a feature space, which can informally be thought of as the similarity between data points. Formally, a kernel is a symmetric function $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ that satisfies certain mathematical properties, i.e. symmetry and positive semi-definiteness of the corresponding kernel (or Gram) matrices. Given any $N \in \mathbb{N}$ and points $\{x_i\}_{i=1}^N$, the Gram matrix $K \in \mathbb{R}^{N \times N}$ with $K_{ij} = k(x_i, x_j)$ must be positive semidefinite.
+
+### 2.1 Positive semi-definite kernels
+
+**Definition 23.1** (Positive semi-definite kernel). *A function* $k(\cdot, \cdot) : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ *is a* positive semi-definite *(psd) kernel if it is symmetric, i.e.,* $k(x, x') = k(x', x)$ *for all* $x, x' \in \mathcal{X}$*, and for any finite set of points* $\{x_1, \dots, x_N\} \subset \mathcal{X}$ *and any* $\boldsymbol{\alpha} \in \mathbb{R}^N$*,*
+
+$$
+\sum_{i=1}^{N} \sum_{j=1}^{N} \alpha_i \alpha_j k(x_i, x_j) = \boldsymbol{\alpha}^\top K \boldsymbol{\alpha} \geq 0, \tag{23.4}
+$$
+
+*where* $K \in \mathbb{R}^{N \times N}$ *is the Gram matrix with entries* $K_{ij} = k(x_i, x_j)$*. A kernel is called* strictly positive definite *if the inequality is strict for all* $\boldsymbol{\alpha} \neq \mathbf{0}$ *whenever the points* $x_1, \dots, x_N$ *are distinct.*
+
+In the literature, psd kernels are often simply called "positive definite kernels." The positive semi-definiteness of $K$ guarantees that the kernel corresponds to an inner product in some (possibly infinite-dimensional) feature space, enabling geometric reasoning about similarity, a connection explored in detail in Section 3. Most commonly used kernels (e.g., the squared exponential) are in fact strictly positive definite, but the psd condition suffices for the theory developed here.
+
+**Common Examples**
+
+- **Linear kernel:** $k(x, x') = x^\top x'$; when used in GP regression, this is equivalent to Bayesian linear regression with a Gaussian prior.
+- **Polynomial kernel:** $k(x, x') = (x^\top x' + c)^d$ with $c \geq 0$, $d \in \mathbb{N}$.
+- **Squared Exponential (Gaussian/RBF):**
+
+  $$
+  k(x, x') = \exp\left(-\frac{\|x - x'\|^2}{2\ell^2}\right),
+  $$
+
+  where the length-scale parameter $\ell > 0$ controls smoothness (larger $\ell$ means smoother functions).
+- **Matérn kernel:** A family of kernels parameterized by smoothness $\nu > 0$:
+
+  $$
+  k_\nu(x, x') = \frac{2^{1-\nu}}{\Gamma(\nu)} \left(\sqrt{2\nu}\,\frac{r}{\ell}\right)^{\nu} K_\nu\left(\sqrt{2\nu}\,\frac{r}{\ell}\right)
+  $$
+
+  where $r = \|x - x'\|$, $\ell > 0$ is the length-scale, and $K_\nu$ is the modified Bessel function of the second kind. Common special cases include Matérn-1/2, Matérn-3/2, and Matérn-5/2.
+- **Laplacian Kernel:**
+
+  $$
+  k(x, x') = \exp(-\gamma \|x - x'\|_1),
+  $$
+
+  where $\|x - x'\|_1$ is the Manhattan distance (or L1 norm) between the vectors (the L2 norm can also be used) and $\gamma$ is a tuning parameter that controls the width or "spread" of the kernel. A small $\gamma$ gives a broad, smooth kernel, while a large $\gamma$ creates a sharper, more localized kernel.
+- **Indicator Kernel:**
+
+  $$
+  k(x, x') = \mathbf{1}(x = x'),
+  $$
+
+  where $\mathbf{1}(\cdot)$ is the indicator function.
+- **Arc-cos kernel:** Used in neural network GP limits ([Chapter 26](/blog/deep-kernel-processes-and-machines)):
+
+  $$
+  k(x, x') = \sigma_b^2 + \frac{\sigma_w^2}{\pi} \sqrt{k_{11} k_{22}} \left(\sin\theta + (\pi - \theta)\cos\theta\right)
+  $$
+
+  where $\theta = \arccos\left(k_{12}/\sqrt{k_{11} k_{22}}\right)$ with $k_{ij} = x_i^\top x_j / N_0$.
+- **Periodic kernel:** $k(x, x') = \exp[-2 \sin^2(\pi \|x - x'\|/p)/\ell^2]$.
+
+### 2.2 Kernel as a similarity measure
+
+Having defined several kernel families above, this subsection now makes explicit the role that the kernel value plays as a notion of similarity. A kernel value $k(x, x')$ measures similarity between two inputs $x$ and $x'$. In later sections where a function $f$ is modeled with this kernel, $k(x, x')$ will play the role of the expected covariance between the function evaluations $f(x)$ and $f(x')$. Large values imply that function values at $x$ and $x'$ are likely similar, while small values indicate independence or dissimilarity. Hence, the kernel implicitly defines a notion of distance or correlation in the input space: the smaller the effective distance between $x$ and $x'$, the stronger their correlation.
+
+Different kernels correspond to different inductive biases about how similarity should behave:
+
+- The RBF (squared exponential) kernel corresponds to very smooth, globally correlated functions that vary slowly with input distance.
+- The Matérn family provides explicit control of smoothness and local variability through the parameter $\nu$, enabling rougher or smoother function priors.
+- Periodic kernels impose repeating structure, suitable for cyclic or seasonal patterns.
+
+The practitioner's choice of kernel thus amounts to specifying a *prior* over function behavior and determining what kinds of variation are expected in unseen regions of the input space.
+
+### 2.3 Kernel compositions and operations
+
+A powerful feature of kernels is that they can be combined to create more expressive similarity measures while preserving positive definiteness. Sums, products, and positive scalings of kernels preserve positive definiteness.
+
+**Proposition 23.1** (Kernel Operations). *If* $k_1$ *and* $k_2$ *are positive definite kernels, then so are:*
+
+1. *Sum:* $k(x, x') = k_1(x, x') + k_2(x, x')$
+2. *Product:* $k(x, x') = k_1(x, x') \cdot k_2(x, x')$
+3. *Scaling:* $k(x, x') = c \cdot k_1(x, x')$ *for* $c > 0$
+
+These composition rules enable practitioners to build complex kernels from simple building blocks, encoding structured prior knowledge. For example, a sum of periodic and SE kernels can model functions with both trend and seasonal components.
+
+### 2.4 Spectral perspective
+
+*This subsection can be skipped on a first reading.*
+
+For stationary kernels, i.e. those that depend only on the difference $\tau = x - x'$, it is often useful to describe them in terms of their frequency content rather than their shape in input space. *Bochner's theorem* provides this connection: a continuous, shift-invariant kernel $k(\tau)$ on $\mathbb{R}^d$ is positive definite if and only if it is the Fourier transform of a nonnegative measure $S(\omega)$:
+
+$$
+k(\tau) = \int_{\mathbb{R}^d} e^{i\omega^\top \tau} S(\omega)\, \mathrm{d}\omega. \tag{23.5}
+$$
+
+The function $S(\omega)$ is called the *spectral density* of the kernel and describes how much each frequency $\omega$ contributes to the covariance between inputs.
+
+This spectral view provides an intuitive link between a kernel's smoothness and its frequency content:
+
+- Smooth kernels (e.g., the RBF) have rapidly decaying $S(\omega)$, concentrating power at low frequencies and producing slowly varying functions.
+- Rougher kernels (e.g., Matérn) have heavier-tailed $S(\omega)$, reflecting higher-frequency variability and less smoothness.
+
+This spectral viewpoint motivates approximations like *random Fourier features*, which represent kernels through sampled frequencies $\omega \sim S(\omega)$. It also clarifies how kernel hyperparameters (e.g., the length-scale) determine the effective frequency range of the modeled functions.
+
+Finally, some kernels are called *universal* or *characteristic*, meaning they can approximate any continuous function on compact domains or uniquely represent probability distributions through their mean embeddings. These properties make them powerful tools for both regression and statistical testing.
+
+<Figure caption="Figure 23.1: The kernel trick. A nonlinear mapping ϕ(x) transforms data from the input space (left) to a high-dimensional feature space (right) where the classes become linearly separable. Although the feature space may be high- or infinite-dimensional, the kernel trick allows computation using only pairwise kernel evaluations k(x, x′) = ⟨ϕ(x), ϕ(x′)⟩, without explicitly constructing ϕ(x). (Schematic reproduction redrawn for this page.)">
+  <Bdl23KernelTrick />
+</Figure>
+
+## 3. The kernel trick
+
+The kernel trick is a computational technique that enables efficient operations in high-dimensional (even infinite-dimensional) feature spaces without explicitly computing the features themselves. This elegant idea underpins much of kernel methods' success.
+
+### 3.1 Feature maps and implicit representations
+
+Every positive definite kernel $k(\cdot, \cdot)$ corresponds to a feature map $\phi : \mathcal{X} \to \mathcal{H}$ into some Hilbert space $\mathcal{H}$ such that:
+
+$$
+k(x, x') = \langle \phi(x), \phi(x') \rangle_{\mathcal{H}} \tag{23.6}
+$$
+
+The key insight is that all computations can be performed using only kernel evaluations, without ever explicitly computing $\phi(x)$. In other words, Equation (23.6) shows that every positive definite kernel implicitly defines a mapping $\phi : \mathcal{X} \to \mathcal{H}$ such that the kernel value is simply the inner product between features in $\mathcal{H}$. The feature space $\mathcal{H}$ can be extremely high-dimensional or even infinite, but all computations depend only on the pairwise kernel evaluations $k(x, x')$.
+
+This observation means that any algorithm that can be expressed in terms of dot products can be *kernelized* by substituting $\langle x, x' \rangle \to k(x, x')$. This single substitution turns linear methods into nonlinear ones while preserving the same algebraic structure.
+
+As illustrated by the quadratic feature map in Example 23.1, computing $\phi(x)$ explicitly for $N_0$-dimensional input requires $O(N_0^2)$ operations, but evaluating the kernel directly takes only $O(N_0)$ operations. The kernel trick thus achieves the same geometric effect of projecting into a different feature space at a fraction of the computational cost. For some kernels like the squared exponential (SE), the corresponding feature space is infinite-dimensional, making explicit feature computation impossible. Yet the kernel can be evaluated efficiently in $O(N_0)$ time.
+
+### 3.2 Reproducing kernel Hilbert spaces
+
+The mathematical foundation underlying the kernel trick is the concept of a *Reproducing Kernel Hilbert Space* (RKHS). An RKHS provides the link between kernel functions and inner product spaces of functions, ensuring that evaluation at any point can be represented as an inner product.
+
+**Definition 23.2** (Reproducing Kernel Hilbert Space). *Let* $\mathcal{H}$ *be a Hilbert space of functions* $f : \mathcal{X} \to \mathbb{R}$*. Then* $\mathcal{H}$ *is said to be a* Reproducing Kernel Hilbert Space *if there exists a kernel function* $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ *satisfying:*
+
+1. *For every* $x \in \mathcal{X}$*, the function* $k(x, \cdot)$ *belongs to* $\mathcal{H}$*.*
+2. ***(Reproducing property)*** *For all* $f \in \mathcal{H}$ *and all* $x \in \mathcal{X}$*,*
+
+   $$
+   f(x) = \langle f, k(x, \cdot) \rangle_{\mathcal{H}}. \tag{23.7}
+   $$
+
+The reproducing property ensures that pointwise evaluation is a continuous linear functional in $\mathcal{H}$, a feature that distinguishes RKHSs from generic Hilbert spaces of functions. Each positive definite kernel $k(\cdot, \cdot)$ uniquely defines an RKHS $\mathcal{H}_k$, and conversely, every RKHS admits a unique reproducing kernel. This result is known as the **Moore-Aronszajn Theorem**.
+
+This duality establishes a one-to-one correspondence between kernels and function spaces: the choice of kernel implicitly determines the class of admissible functions and their smoothness. For instance, the RKHS associated with the SE kernel consists of infinitely differentiable functions, while that of the Matérn kernel contains functions with finite smoothness controlled by the parameter $\nu$.
+
+### 3.3 Computational advantage and the Representer theorem
+
+The computational power of the kernel trick becomes evident in regularized learning problems defined over a Reproducing Kernel Hilbert Space $\mathcal{H}$. Given a training set $\{(x_i, y_i)\}_{i=1}^P \subset \mathcal{X} \times \mathbb{R}$, consider the objective
+
+$$
+\min_{f \in \mathcal{H}} \sum_{i=1}^{P} \ell(y_i, f(x_i)) + \lambda \|f\|_{\mathcal{H}}^2, \tag{23.8}
+$$
+
+where $\ell(\cdot, \cdot)$ is a pointwise loss function (e.g., squared, hinge, or logistic loss) and $\lambda > 0$ is a regularization parameter controlling model complexity.
+
+The **Representer Theorem** states that any optimal solution to (23.8) can be expressed as a finite linear combination of kernel evaluations at the training points:
+
+$$
+f^*(x) = \sum_{i=1}^{P} \alpha_i k(x_i, x), \tag{23.9}
+$$
+
+for some coefficients $\alpha = [\alpha_1, \dots, \alpha_P]^\top \in \mathbb{R}^P$. This result implies that even though $\mathcal{H}$ may be infinite-dimensional, the optimization problem reduces to one over the coefficients $\alpha$, involving only the kernel (Gram) matrix $K$ with entries $K_{ij} = k(x_i, x_j)$. Predictions thus require only kernel evaluations $k(x_i, x)$ rather than explicit feature computations, providing the foundation for the efficiency of kernel methods.
+
+## 4. Gaussian processes
+
+Having introduced kernels as measures of similarity and as inner products in feature spaces, the next step is to use them as *covariance functions* that define distributions over functions. A Gaussian process (GP) can be thought of as the probabilistic analog of a kernel machine: where a kernel specifies how inputs are related, a GP interprets this as a statement about how function values co-vary across the input space. In this sense, GPs turn the geometry induced by a kernel into a fully Bayesian model of function learning. Frequentist kernel methods and GPs are closely related and share common mathematical foundations.
+
+GP extends the notion of a Gaussian distribution from finite-dimensional vectors to functions (thinking of functions as infinitely long vectors containing the value of the function at every input).
+
+**Definition 23.3** (Gaussian Process). *Let* $f : \mathcal{X} \to \mathbb{R}$ *be a real-valued function defined on an input space* $\mathcal{X}$*. Then* $f$ *is said to be a Gaussian Process, denoted*
+
+$$
+f \sim \mathcal{GP}(m(\cdot), k(\cdot, \cdot)),
+$$
+
+*if for any finite collection of inputs* $\mathbf{x} = [x_1, \dots, x_P]^\top$*, the random vector of function evaluations*
+
+$$
+\mathbf{f} = [f(x_1), \dots, f(x_P)]^\top
+$$
+
+*follows a multivariate normal distribution*
+
+$$
+\mathbf{f} \sim \mathcal{N}\big(\boldsymbol{\mu}, K_{\mathbf{x}\mathbf{x}}\big),
+$$
+
+*with mean* $\boldsymbol{\mu}_i = m(x_i)$ *and covariance* $[K_{\mathbf{x}\mathbf{x}}]_{ij} = k(x_i, x_j)$*.*
+
+The mean function $m(x) = \mathbb{E}[f(x)]$ describes the expected value of the process at $x$, while the kernel or covariance function $k(x, x') = \mathrm{Cov}[f(x), f(x')]$ encodes how function values co-vary across inputs. In practice, one often assumes $m(x) = 0$. This is reasonable when the data have been centered or when no specific prior knowledge about the function's mean behavior is available; the mean function can always be absorbed into the model by subtracting a prior estimate of the trend from the observations before fitting the GP.
+
+**Kernel Matrix.** For inputs $\mathbf{x} = [x_1, \dots, x_P]$, the kernel matrix is
+
+$$
+K_{\mathbf{x}\mathbf{x}} = \begin{bmatrix}
+k(x_1, x_1) & k(x_1, x_2) & \cdots & k(x_1, x_P) \\
+k(x_2, x_1) & k(x_2, x_2) & \cdots & k(x_2, x_P) \\
+\vdots & \vdots & \ddots & \vdots \\
+k(x_P, x_1) & k(x_P, x_2) & \cdots & k(x_P, x_P)
+\end{bmatrix}.
+$$
+
+As established in Definition 23.1, the kernel must be symmetric and positive semi-definite, which guarantees that $K_{\mathbf{x}\mathbf{x}}$ defines a valid covariance matrix.
+
+**Remark 23.2.** *The kernel function in a GP both defines the covariance structure of the process and determines the similarity measure for interpolation. This connection between the probabilistic and geometric views is fundamental to GP reasoning.*
+
+### 4.1 Posterior inference
+
+Given training data $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^P$, it is assumed that observations are noisy evaluations of an underlying latent function $f$:
+
+$$
+y_i = f(x_i) + \varepsilon_i, \qquad \varepsilon_i \sim \mathcal{N}(0, \sigma^2),
+$$
+
+where $\sigma^2$ denotes the noise variance.
+
+Let $\mathbf{y} = [y_1, \dots, y_P]^\top$ be the observed targets, and consider a new input $x_*$ with latent value $f_* = f(x_*)$. The joint prior over training and test outputs is
+
+$$
+\begin{bmatrix} \mathbf{y} \\ f_* \end{bmatrix} \sim \mathcal{N}\left( \begin{bmatrix} \mathbf{0} \\ 0 \end{bmatrix}, \begin{bmatrix} K_{\mathbf{x}\mathbf{x}} + \sigma^2 I & K_{\mathbf{x}x_*} \\ K_{x_*\mathbf{x}} & K_{x_*x_*} \end{bmatrix} \right),
+$$
+
+where $K_{\mathbf{x}x_*} = [k(x_1, x_*), \dots, k(x_P, x_*)]^\top$. The noise term $\sigma^2 I$ is added only to $K_{\mathbf{x}\mathbf{x}}$ because the training targets $\mathbf{y}$ are noisy observations, whereas $f_*$ denotes the latent (noise-free) function value at $x_*$.
+
+Conditioning on the observed data gives the posterior distribution:
+
+$$
+p(f_* | \mathbf{x}, \mathbf{y}, x_*) = \mathcal{N}\big(\mu_*, \sigma_*^2\big),
+$$
+
+with
+
+$$
+\mu_* = K_{x_*\mathbf{x}} [K_{\mathbf{x}\mathbf{x}} + \sigma^2 I]^{-1} \mathbf{y}, \qquad \sigma_*^2 = k(x_*, x_*) - K_{x_*\mathbf{x}} [K_{\mathbf{x}\mathbf{x}} + \sigma^2 I]^{-1} K_{\mathbf{x}x_*}.
+$$
+
+**Interpretation.** The posterior mean $\mu_*$ provides the predictive expectation of $f(x_*)$, while the variance $\sigma_*^2$ quantifies uncertainty. Near observed data points, $\sigma_*^2$ tends to be small, while it increases in regions far from the training data. This property makes GPs particularly useful for uncertainty-aware regression, Bayesian optimization, and active learning (see Chapter 53).
+
+## 5. Limitations
+
+Despite their elegance, standard GPs face several fundamental challenges that motivate the deep extensions explored in Chapters [25](/blog/deep-gaussian-processes)–[27](/blog/meta-learning-deep-kernel-gaussian-processes). These limitations concern both their *representational capacity* and their *computational scalability*.
+
+### 5.1 Fixed representations and expressiveness
+
+Standard kernel methods operate directly on raw input features, defining similarity through fixed metrics such as the Euclidean distance. However, this assumption often fails in modern high-dimensional or structured data domains.
+
+*Uninformative raw features.* In domains such as images, text, or graphs, the raw input coordinates lack semantic content and do not encode the relational or compositional structure necessary for generalization. Kernels defined over such features therefore fail to capture the meaningful invariances or dependencies that underlie the data.
+
+*High-dimensional inputs.* As the dimensionality of the input space grows, pairwise distances tend to concentrate, making commonly used stationary kernels, such as the RBF, nearly constant. This "distance concentration" effect diminishes the discriminative power of kernel similarity measures, rendering them ineffective in capturing local geometry or fine-grained variation within the data manifold.
+
+*Limited adaptability.* Once the functional form and hyperparameters of a kernel are fixed, its inductive bias becomes static. Consequently, standard kernels cannot learn task- or data-dependent notions of similarity, preventing them from adapting to complex, structured patterns. This lack of flexibility fundamentally restricts their expressiveness in modern representation learning settings, where adaptive, data-driven feature extraction is essential.
+
+### 5.2 Computational scalability
+
+For most practical applications, exact Gaussian process inference is computationally expensive: evaluating and inverting the $P \times P$ kernel matrix scales as $O(P^3)$, which limits standard GPs to data sets of a few thousand points.
+
+To make GPs tractable for large data sets and complex likelihoods, approximate inference schemes are employed:
+
+- **Variational inference:** introduces an approximate posterior distribution that can be optimized efficiently and supports non-Gaussian likelihoods (e.g., classification or count models).
+- **Sparse and inducing-point methods:** summarize the data set using a small set of representative inputs, reducing complexity to $O(P_i^3 + P_i^2 P)$ with $P_i \ll P$.
+
+These ideas are central to the deep kernel models discussed later. Each layer or GP component uses such approximations to remain scalable. Scalable GP methods are treated in depth in Chapter 38, and detailed derivations of deep kernel models appear in Chapters [24](/blog/deep-kernel-learning) and [27](/blog/meta-learning-deep-kernel-gaussian-processes).
+
+### 5.3 The path forward: deep and adaptive Gaussian processes
+
+The next chapters explore how to overcome these limitations by making *the kernel itself learnable, hierarchical, and data-adaptive*. This evolution parallels the transition from linear models to deep networks in standard machine learning.
+
+- **[Chapter 25](/blog/deep-gaussian-processes) (Deep Gaussian Processes):** Introduces hierarchical compositions of GPs, where the outputs of one GP feed into another. These deep GPs capture multiple levels of abstraction and non-stationarity, addressing the expressiveness gap of shallow kernels.
+- **[Chapter 24](/blog/deep-kernel-learning) (Deep Kernel Learning):** Combines the representation power of deep neural networks with the uncertainty quantification of GPs. Here, the kernel is learned from data via a neural network feature extractor, providing scalable, end-to-end trainable models.
+- **[Chapter 27](/blog/meta-learning-deep-kernel-gaussian-processes) (Meta-Learning and Function Priors):** Generalizes the concept further by learning priors over functions across tasks, enabling few-shot adaptation and transfer. These models tie together the Bayesian principles of GPs with the flexibility of meta-learning.
+
+Together, these developments trace the progression from classical kernel methods to modern *Bayesian deep learning in function space*. Each subsequent chapter builds directly on the probabilistic foundations established here, transforming GPs from elegant theoretical constructs into scalable, representation-learning engines.
+
+> **BDL Connection**
+>
+> **How kernel methods connect to Bayesian deep learning.**
+> Kernel methods are among the earliest approaches to Bayesian learning in function space. A *kernel* defines a covariance structure over functions, specifying how values at different inputs are expected to co-vary. In Gaussian processes, this covariance is combined with a Gaussian prior to produce full predictive distributions, capturing both predictions and their uncertainty.
+>
+> From the perspective of deep learning, kernel methods provide the *Bayesian limit of neural networks*: when a network's width tends to infinity, its outputs converge to a GP whose kernel is determined by the network architecture (e.g. the Neural Network Gaussian Process or Neural Tangent Kernel). Thus, every deep network implicitly defines a kernel and training it corresponds to learning that kernel's geometry.
+>
+> Modern *Bayesian deep learning* builds on this connection:
+>
+> - **Representation learning:** Deep kernel learning replaces the fixed input kernel by one computed from a learned deep representation.
+> - **Hierarchical function priors:** Deep Gaussian processes stack multiple GPs to model complex, non-stationary mappings.
+> - **Uncertainty calibration:** The probabilistic nature of GPs provides well-founded uncertainty estimates, a property extended in BDL models.
+>
+> Understanding kernels therefore clarifies the foundations on which deep Bayesian models are built: they describe *how functions are believed to behave* before data are seen, and how these beliefs evolve as models grow deeper.

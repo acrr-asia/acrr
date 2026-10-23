@@ -4484,3 +4484,976 @@ svg('Bdl22ImdbEnsembles', 640, 340, 'Accuracy of three ensembling strategies on 
     'Right panel: the optimized weights rho over 30 ensemble members (3 trials of 10 checkpoints). The first two checkpoints of each trial carry most of the weight, members 1, 2, 11, 12, 21 and 22 having weights between about 0.07 and 0.17, '
     'while the other members have weights below about 0.035. Members 1, 11 and 21, the checkpoints chosen by validation error, are drawn in a lighter fill.',
     b)
+
+
+# ---------- Chapter 23, Figure 23.1: the kernel trick ----------
+def bdl23_open(x, y, r=6):
+    return f'  <circle class="box" cx="{x:.1f}" cy="{y:.1f}" r="{r}" />\n'
+def bdl23_fill(x, y, r=6):
+    return f'  <circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{r}" />\n'
+def bdl23_kernel_trick():
+    b = ''
+    # Input space: a parallelogram seen in perspective
+    P = [(80, 60), (250, 60), (220, 190), (30, 190)]
+    b += f'  <path class="region" d="M{P[0][0]},{P[0][1]} L{P[1][0]},{P[1][1]} L{P[2][0]},{P[2][1]} L{P[3][0]},{P[3][1]} Z" />\n'
+    b += line(P + [P[0]])
+    # nonlinear (wavy) decision boundary in input space
+    pts = []
+    for i in range(0, 61):
+        t = i / 60
+        x = 48 + t * 182
+        y = 125 - 32 * math.sin(2 * math.pi * (t * 1.15 - 0.05)) * (0.6 + 0.4 * t) + 10 * t
+        pts.append((x, y))
+    b += line(pts)
+    # class A (open) above the curve, class B (filled) below it
+    def cy(x):
+        t = (x - 48) / 182
+        return 125 - 32 * math.sin(2 * math.pi * (t * 1.15 - 0.05)) * (0.6 + 0.4 * t) + 10 * t
+    for (x, d) in [(78, 26), (112, 22), (150, 22), (178, 34), (205, 20), (238, 18)]:
+        b += bdl23_open(x, cy(x) - d)
+    for (x, d) in [(88, 30), (122, 24), (150, 34), (188, 18), (205, 40)]:
+        b += bdl23_fill(x, cy(x) + d)
+    b += text(140, 222, 'Input Space', 'middle')
+    # curved arrow phi
+    b += '  <path class="ln" d="M258,150 Q300,40 372,92" marker-end="ARROW" />\n'
+    b += text(300, 70, var('ϕ'), 'middle')
+    # Feature space: a cube with hidden edges dashed
+    fx, fy, s, dx, dy = 400, 90, 150, 50, -48   # front face top-left, size, depth offset
+    F = [(fx, fy), (fx + s, fy), (fx + s, fy + s), (fx, fy + s)]
+    B = [(x + dx, y + dy) for (x, y) in F]
+    # hidden edges (back-left-bottom corner)
+    b += line([B[3], B[0]], 'region2')
+    b += line([B[3], B[2]], 'region2')
+    b += line([B[3], F[3]], 'region2')
+    # separating hyperplane (tilted plane inside the cube)
+    H = [(fx + 4, fy + 95), (fx + s - 4, fy + 50), (fx + s - 4 + dx * 0.9, fy + 50 + dy * 0.9), (fx + 4 + dx * 0.9, fy + 95 + dy * 0.9)]
+    b += f'  <path class="band" d="M{H[0][0]:.1f},{H[0][1]:.1f} L{H[1][0]:.1f},{H[1][1]:.1f} L{H[2][0]:.1f},{H[2][1]:.1f} L{H[3][0]:.1f},{H[3][1]:.1f} Z" />\n'
+    b += line(H + [H[0]], 'mut')
+    # visible edges
+    b += line(F + [F[0]])
+    b += line([F[0], B[0], B[1], F[1]])
+    b += line([B[1], B[2], F[2]])
+    # points: open above the plane, filled below
+    for (x, y) in [(422, 122), (470, 104), (512, 62), (562, 66), (520, 96), (585, 52)]:
+        b += bdl23_open(x, y)
+    for (x, y) in [(432, 215), (478, 196), (520, 222), (568, 182), (588, 140), (470, 170)]:
+        b += bdl23_fill(x, y)
+    b += text(fx + s / 2 + dx / 2, fy + s + 32, 'Feature Space', 'middle')
+    svg('Bdl23KernelTrick', 640, 280, 'The kernel trick: from input space to feature space',
+        'Left, the input space: open and filled points are separated only by a wavy, nonlinear curve. A curved arrow labelled phi maps them into the feature space on the right, drawn as a cube whose hidden edges are dashed. There a flat, tilted plane separates the open points above it from the filled points below it, so the two classes become linearly separable.',
+        b)
+bdl23_kernel_trick()
+
+
+# ---------- Chapter 24, Figure 24.1: standard RBF-kernel GP versus deep-kernel GP ----------
+# Schematic reproduction computed here: 60 noisy observations of f(x) = tanh(20(x - 0.5)) on [0, 1]
+# (noise standard deviation 0.05, fixed seed). Left: GP with an RBF kernel on x. Right: GP with the same
+# RBF kernel on a fixed two-dimensional feature map that stands in for a trained MLP (it saturates outside
+# the data). In both panels the kernel hyperparameters maximise the log marginal likelihood (24.5) over a grid.
+import random as bdl24_random
+
+def bdl24_chol(A):
+    n = len(A); L = [[0.0]*n for _ in range(n)]
+    for i in range(n):
+        for j in range(i+1):
+            s = A[i][j] - sum(L[i][k]*L[j][k] for k in range(j))
+            if i == j:
+                L[i][i] = math.sqrt(max(s, 1e-12))
+            else:
+                L[i][j] = s / L[j][j]
+    return L
+def bdl24_fwd(L, b):
+    n = len(L); x = [0.0]*n
+    for i in range(n):
+        x[i] = (b[i] - sum(L[i][k]*x[k] for k in range(i))) / L[i][i]
+    return x
+def bdl24_bwd(L, b):
+    n = len(L); x = [0.0]*n
+    for i in reversed(range(n)):
+        x[i] = (b[i] - sum(L[k][i]*x[k] for k in range(i+1, n))) / L[i][i]
+    return x
+def bdl24_k(a2, ell, u, v):
+    return a2*math.exp(-sum((p-q)**2 for p, q in zip(u, v))/(2*ell*ell))
+def bdl24_gp(feat, xs, ys, a2, ell, s2):
+    Z = [feat(x) for x in xs]
+    K = [[bdl24_k(a2, ell, Z[i], Z[j]) + (s2 if i == j else 0.0) for j in range(len(xs))] for i in range(len(xs))]
+    L = bdl24_chol(K)
+    alpha = bdl24_bwd(L, bdl24_fwd(L, ys))
+    lml = -0.5*sum(y*a for y, a in zip(ys, alpha)) - sum(math.log(L[i][i]) for i in range(len(xs))) - 0.5*len(xs)*math.log(2*math.pi)
+    def pred(x):
+        z = feat(x); kx = [bdl24_k(a2, ell, z, zi) for zi in Z]
+        mu = sum(k*a for k, a in zip(kx, alpha))
+        v = bdl24_fwd(L, kx)
+        var = a2 - sum(t*t for t in v)
+        return mu, max(var, 0.0) + s2
+    return lml, pred
+def bdl24_fit(feat, xs, ys, a2s, ells, s2s):
+    best = None
+    for a2 in a2s:
+        for ell in ells:
+            for s2 in s2s:
+                lml, pred = bdl24_gp(feat, xs, ys, a2, ell, s2)
+                if best is None or lml > best[0]:
+                    best = (lml, pred, (a2, ell, s2))
+    return best
+
+bdl24_rng = bdl24_random.Random(24)
+bdl24_xs = sorted(bdl24_rng.uniform(0.0, 1.0) for _ in range(60))
+bdl24_true = lambda x: math.tanh(20*(x - 0.5))
+bdl24_ys = [bdl24_true(x) + bdl24_rng.gauss(0.0, 0.05) for x in bdl24_xs]
+bdl24_feat_x = lambda x: (x,)
+bdl24_feat_mlp = lambda x: (0.6*math.tanh(2.2*(x - 0.5)), math.tanh(18*(x - 0.5)))
+bdl24_s2s = [0.0015, 0.0025, 0.004]
+bdl24_left = bdl24_fit(bdl24_feat_x, bdl24_xs, bdl24_ys, [0.5, 1.0, 2.0], [0.06, 0.08, 0.1, 0.12, 0.15, 0.2], bdl24_s2s)
+bdl24_right = bdl24_fit(bdl24_feat_mlp, bdl24_xs, bdl24_ys, [0.5, 1.0, 2.0], [0.1, 0.2, 0.3, 0.5, 0.8], bdl24_s2s)
+
+def bdl24_panel(P, pred, title, ylab):
+    o = text(P.x0 + P.w/2, 18, title, 'middle')
+    xt = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    for v in (-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0):
+        o += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid')
+        if ylab:
+            o += text(P.x0-6, P.Y(v)+4, f'{v:.1f}'.replace('-', '−'), 'end', 'small')
+    for v in xt:
+        o += line([(P.X(v), P.y0), (P.X(v), P.y0+P.h)], 'grid')
+        o += text(P.X(v), P.y0+P.h+16, f'{v:.1f}', 'middle', 'small')
+    n = 160
+    grid = [P.xr[0] + i*(P.xr[1]-P.xr[0])/n for i in range(n+1)]
+    pr = [pred(x) for x in grid]
+    clip = lambda v: min(max(v, P.yr[0]), P.yr[1])
+    up = [(P.X(x), P.Y(clip(m + 2*math.sqrt(v)))) for x, (m, v) in zip(grid, pr)]
+    lo = [(P.X(x), P.Y(clip(m - 2*math.sqrt(v)))) for x, (m, v) in zip(grid, pr)]
+    d = ' '.join(('M' if i == 0 else 'L') + f'{x:.1f},{y:.1f}' for i, (x, y) in enumerate(up + lo[::-1])) + ' Z'
+    o += f'  <path class="band" d="{d}" />\n'
+    o += P.curve(bdl24_true, n=n, cls='mut', extra=' stroke-dasharray="5 3"')
+    o += line([(P.X(x), P.Y(clip(m))) for x, (m, v) in zip(grid, pr)], 'ln')
+    o += ''.join(f'  <circle class="dot" cx="{P.X(x):.1f}" cy="{P.Y(y):.1f}" r="2.3" />\n' for x, y in zip(bdl24_xs, bdl24_ys))
+    o += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
+    o += text(P.x0 + P.w/2, P.y0+P.h+34, var('x'), 'middle', 'small')
+    return o
+
+b = ''
+PL = Plot(52, 34, 270, 210, (-0.12, 1.15), (-2.0, 2.0))
+PR = Plot(352, 34, 270, 210, (-0.12, 1.15), (-2.0, 2.0))
+b += bdl24_panel(PL, bdl24_left[1], 'Standard RBF-kernel GP', True)
+b += bdl24_panel(PR, bdl24_right[1], 'Deep-kernel GP (MLP feature map + RBF)', False)
+b += text(14, PL.y0 + PL.h/2, var('f') + '(' + var('x') + ')', 'middle', 'small').replace('<text', f'<text transform="rotate(-90 14 {PL.y0 + PL.h/2:.1f})"', 1)
+ly = 312
+lx = 60
+b += f'  <rect class="band" x="{lx}" y="{ly-6}" width="24" height="12" />\n'
+b += text(lx+30, ly+4, '±2' + var('σ'), 'start', 'small')
+lx = 150
+b += line([(lx, ly), (lx+24, ly)], 'mut', ' stroke-dasharray="5 3"')
+b += text(lx+30, ly+4, 'true function', 'start', 'small')
+lx = 280
+b += line([(lx, ly), (lx+24, ly)], 'ln')
+b += text(lx+30, ly+4, 'posterior mean', 'start', 'small')
+lx = 430
+b += f'  <circle class="dot" cx="{lx+12}" cy="{ly}" r="2.8" />\n'
+b += text(lx+30, ly+4, 'training data', 'start', 'small')
+svg('Bdl24DeepKernelRegression', 640, 330, 'Standard RBF-kernel GP versus a deep-kernel GP on a target with a sharp transition',
+    'Two panels share the same 60 noisy observations of f of x equal to tanh of 20 times (x minus 0.5) for x between 0 and 1, plotted for x from about minus 0.1 to 1.15 and f of x from minus 2 to 2. '
+    'Left: a GP with a stationary RBF kernel on x follows the step but wiggles slightly along the flat parts, and its plus or minus two standard deviation band is narrow inside the data and widens sharply outside the training range, to roughly plus or minus 1 below x equal to 0 and up to about 1.9 above x equal to 1. '
+    'Right: a GP with the same RBF kernel applied to a feature map that saturates away from the transition stays close to the target, and its band remains narrow everywhere, including outside the training range.',
+    b)
+
+
+# ---------- Chapter 25: Deep Gaussian processes ----------
+# All plots are schematic reproductions computed here (pure Python, fixed seeds): Gaussian process
+# samples are drawn with an exponentiated quadratic kernel through a Cholesky factorization.
+import random as bdl25_random
+
+def bdl25_chol(A):
+    n = len(A); L = [[0.0]*n for _ in range(n)]
+    for i in range(n):
+        Li = L[i]
+        for j in range(i+1):
+            Lj = L[j]
+            s = A[i][j] - sum(Li[k]*Lj[k] for k in range(j))
+            if i == j:
+                Li[i] = math.sqrt(max(s, 1e-12))
+            else:
+                Li[j] = s / Lj[j]
+    return L
+def bdl25_fwd(L, b):
+    n = len(L); x = [0.0]*n
+    for i in range(n):
+        x[i] = (b[i] - sum(L[i][k]*x[k] for k in range(i))) / L[i][i]
+    return x
+def bdl25_bwd(L, b):
+    n = len(L); x = [0.0]*n
+    for i in reversed(range(n)):
+        x[i] = (b[i] - sum(L[k][i]*x[k] for k in range(i+1, n))) / L[i][i]
+    return x
+def bdl25_k(a2, ell, u, v):
+    return a2*math.exp(-sum((p-q)**2 for p, q in zip(u, v))/(2*ell*ell))
+def bdl25_prior_samples(X, a2, ell, nout, rng, jitter=1e-5):
+    n = len(X)
+    K = [[bdl25_k(a2, ell, X[i], X[j]) + (jitter if i == j else 0.0) for j in range(n)] for i in range(n)]
+    L = bdl25_chol(K)
+    outs = []
+    for _ in range(nout):
+        z = [rng.gauss(0, 1) for _ in range(n)]
+        outs.append([sum(L[i][k]*z[k] for k in range(i+1)) for i in range(n)])
+    return outs
+def bdl25_post(xs, ys, grid, a2, ell, s2, mean0=0.0):
+    # Posterior mean and Cholesky factor of the posterior covariance on a 1-D grid.
+    n = len(xs)
+    K = [[bdl25_k(a2, ell, [xs[i]], [xs[j]]) + (s2 if i == j else 0.0) for j in range(n)] for i in range(n)]
+    L = bdl25_chol(K)
+    alpha = bdl25_bwd(L, bdl25_fwd(L, [y - mean0 for y in ys]))
+    Ks = [[bdl25_k(a2, ell, [g], [x]) for x in xs] for g in grid]
+    mu = [mean0 + sum(k*a for k, a in zip(row, alpha)) for row in Ks]
+    V = [bdl25_fwd(L, row) for row in Ks]
+    m = len(grid)
+    C = [[bdl25_k(a2, ell, [grid[i]], [grid[j]]) - sum(p*q for p, q in zip(V[i], V[j])) + (1e-5 if i == j else 0.0)
+          for j in range(m)] for i in range(m)]
+    return mu, bdl25_chol(C)
+def bdl25_draw(mu, Lc, rng):
+    z = [rng.gauss(0, 1) for _ in mu]
+    return [mu[i] + sum(Lc[i][k]*z[k] for k in range(i+1)) for i in range(len(mu))]
+def bdl25_sup(base, s, cls='var'):
+    return f'<tspan class="{cls}">{base}</tspan><tspan class="sub" dy="-6">{s}</tspan><tspan dy="6"> </tspan>'
+def bdl25_node(cx, cy, r, label, shaded=False):
+    o = f'  <circle class="box" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" />\n'
+    if shaded:
+        o += f'  <circle class="band" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" />\n'
+    o += text(cx, cy+5, label, 'middle')
+    return o
+def bdl25_edge(p, q, r1, r2):
+    dx, dy = q[0]-p[0], q[1]-p[1]; d = math.hypot(dx, dy)
+    return arrow([(p[0]+dx/d*r1, p[1]+dy/d*r1), (q[0]-dx/d*(r2+1), q[1]-dy/d*(r2+1))])
+def bdl25_cross(x, y, s=3):
+    return line([(x-s, y-s), (x+s, y+s)], 'ln', ' stroke-width="1"') + line([(x-s, y+s), (x+s, y-s)], 'ln', ' stroke-width="1"')
+def bdl25_poly(P, xsv, ysv, cls, extra=''):
+    return line([(P.X(a), P.Y(b)) for a, b in zip(xsv, ysv)], cls, extra)
+def bdl25_frame(P, xticks, yticks, xlabel=None, ylabel=None):
+    o = ''
+    for v in yticks:
+        o += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid')
+        o += text(P.x0-5, P.Y(v)+4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+    for v in xticks:
+        o += text(P.X(v), P.y0+P.h+14, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+    o += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
+    if xlabel:
+        o += text(P.x0+P.w-4, P.y0+P.h-6, xlabel, 'end', 'small')
+    if ylabel:
+        o += text(P.x0+4, P.y0+12, ylabel, 'start')
+    return o
+def bdl25_clip(v, lo, hi):
+    return max(lo, min(hi, v))
+
+# ---------- Figure 25.1: chain x -> h1 -> h2 -> y ----------
+b = ''
+cy = 62
+b += f'  <circle class="dot" cx="40" cy="{cy}" r="5" />\n' + text(22, cy+5, var('x'), 'middle')
+nodes = [(40, 5), (210, 22), (380, 22), (550, 22)]
+b += bdl25_node(210, cy, 22, bdl25_sup('h', '1'))
+b += bdl25_node(380, cy, 22, bdl25_sup('h', '2'))
+b += bdl25_node(550, cy, 22, var('y'), shaded=True)
+for k in range(3):
+    (xa, ra), (xb, rb) = nodes[k], nodes[k+1]
+    b += arrow([(xa+ra+1, cy), (xb-rb-2, cy)])
+    b += text((xa+xb)/2, cy-16, bdl25_sup('f', str(k+1)) + ' ~ GP', 'middle')
+svg('Bdl25DeepGpChain', 600, 100, 'A deep Gaussian process with two hidden layers',
+    'The input x is mapped by f1, drawn from a Gaussian process, to the hidden layer h1; f2 maps h1 to h2; f3 maps h2 to the observed output y, which is shaded.',
+    b)
+
+# ---------- Figure 25.2: a Gaussian density propagated through a nonlinear mapping ----------
+bdl25_f = lambda x: 3.5*math.sin(6*math.pi*x)
+bdl25_sn = 0.8
+bdl25_px = lambda x: math.exp(-(x-0.25)**2/(2*0.1**2))
+bdl25_lik = lambda y, x: math.exp(-(y-bdl25_f(x))**2/(2*bdl25_sn**2))
+bdl25_yhat = 1.5
+YLO, YHI = -4.8, 4.6
+def bdl25_surface(ox, oy, W, H, Dx, Dy, nsl, nu, val, hi_s=None):
+    # Oblique view: u runs left to right, s runs into the page, v is height. Slices drawn back to front.
+    o = ''
+    P = lambda u, s, v: (ox + u*W + s*Dx, oy - v*H - s*Dy)
+    o += line([P(0, 0, 0), P(1, 0, 0), P(1, 1, 0)], 'mut')
+    o += line([P(0, 0, 0), P(0, 1, 0), P(1, 1, 0)], 'grid')
+    o += line([P(0, 1, 0), P(0, 1, 1)], 'grid')
+    for i in range(nsl, -1, -1):
+        s = i/nsl
+        pts = [P(j/nu, s, val(j/nu, s)) for j in range(nu+1)]
+        poly = [P(0, s, 0)] + pts + [P(1, s, 0)]
+        d = ' '.join(('M' if k == 0 else 'L') + f'{x:.1f},{y:.1f}' for k, (x, y) in enumerate(poly)) + ' Z'
+        o += f'  <path class="box" d="{d}" stroke-width="0.6" />\n'
+    if hi_s is not None:
+        o += line([P(j/nu, hi_s, val(j/nu, hi_s)) for j in range(nu+1)], 'acc')
+    return o, P
+# (a) likelihood p(y|x): slices at fixed x (depth s), curves over y (u)
+b = ''
+oxa, oya, Wa, Ha, Dxa, Dya = 30, 250, 170, 120, 90, 90
+xhat = 0.3
+va = lambda u, s: bdl25_lik(YLO + u*(YHI-YLO), 0.5*s)
+o, P = bdl25_surface(oxa, oya, Wa, Ha, Dxa, Dya, 24, 60, va, hi_s=xhat/0.5)
+b += o
+for xv in (0, 0.2, 0.4):
+    px, py = P(1, xv/0.5, 0); b += text(px+8, py+4, f'{xv:g}', 'start', 'small')
+b += text(P(1, 0.5, 0)[0]+34, P(1, 0.5, 0)[1]+4, var('x'), 'start')
+for yv in (-4.8, -0.1, 4.6):
+    px, py = P((yv-YLO)/(YHI-YLO), 0, 0); b += text(px, py+16, f'{yv:g}'.replace('-', '−'), 'middle', 'small')
+b += text(P(0.5, 0, 0)[0], P(0.5, 0, 0)[1]+34, var('y'), 'middle')
+b += line([(40, 22), (64, 22)], 'acc') + text(70, 26, var('p') + '(' + var('y') + ' | ' + var('x') + ' = ' + var('x̂') + ')', 'start', 'small')
+b += text(150, 300, '(a) Likelihood', 'middle', 'small')
+# (b) unnormalized posterior p(y|x)p(x): slices at fixed y (depth s), curves over x (u)
+oxb = 345
+pmax = max(bdl25_lik(YLO + i*(YHI-YLO)/200, 0.5*j/200)*bdl25_px(0.5*j/200) for i in range(201) for j in range(201))
+vb = lambda u, s: bdl25_lik(YLO + s*(YHI-YLO), 0.5*u)*bdl25_px(0.5*u)/pmax
+o, P = bdl25_surface(oxb, oya, Wa, Ha, Dxa, Dya, 24, 60, vb, hi_s=(bdl25_yhat-YLO)/(YHI-YLO))
+b += o
+b += line([P(j/60, 1, bdl25_px(0.5*j/60)) for j in range(61)], 'thick')
+for xv in (0, 0.2, 0.4):
+    px, py = P(xv/0.5, 0, 0); b += text(px, py+16, f'{xv:g}', 'middle', 'small')
+b += text(P(0.5, 0, 0)[0], P(0.5, 0, 0)[1]+34, var('x'), 'middle')
+for yv in (-4.8, -0.1, 4.6):
+    px, py = P(1, (yv-YLO)/(YHI-YLO), 0); b += text(px+8, py+4, f'{yv:g}'.replace('-', '−'), 'start', 'small')
+b += text(P(1, 0.5, 0)[0]+40, P(1, 0.5, 0)[1]+4, var('y'), 'start')
+b += line([(355, 22), (379, 22)], 'thick') + text(385, 26, var('p') + '(' + var('x') + ')', 'start', 'small')
+b += line([(355, 40), (379, 40)], 'acc') + text(385, 44, var('p') + '(' + var('y') + ' = ' + var('ŷ') + ' | ' + var('x') + ')' + var('p') + '(' + var('x') + ')', 'start', 'small')
+b += text(470, 300, '(b) Unnormalized posterior', 'middle', 'small')
+# (c) the Gaussian p(x) and the multimodal p(y = yhat | x) p(x)
+Pl = Plot(70, 340, 190, 110, (0, 0.5), (0, 1.05))
+Pr = Plot(390, 340, 190, 110, (0, 0.5), (0, 1.05))
+xsg = [0.5*i/200 for i in range(201)]
+pl = [bdl25_px(x) for x in xsg]
+post = [bdl25_lik(bdl25_yhat, x)*bdl25_px(x) for x in xsg]
+pm = max(post); post = [v/pm for v in post]
+for P_, vals in ((Pl, pl), (Pr, post)):
+    pts = [(P_.X(x), P_.Y(v)) for x, v in zip(xsg, vals)]
+    d = f'M{P_.X(0):.1f},{P_.Y(0):.1f} ' + ' '.join(f'L{x:.1f},{y:.1f}' for x, y in pts) + f' L{P_.X(0.5):.1f},{P_.Y(0):.1f} Z'
+    b += f'  <path class="region" d="{d}" />\n'
+    b += line(pts, 'ln')
+    b += line([(P_.X(0), P_.Y(0)), (P_.X(0.5), P_.Y(0))], 'ln')
+b += text(Pl.X(0.25), 472, var('p') + '(' + var('x') + ')', 'middle')
+b += text(Pr.X(0.25), 472, var('p') + '(' + var('y') + ' = ' + var('ŷ') + ' | ' + var('x') + ')' + var('p') + '(' + var('x') + ')', 'middle')
+b += arrow([(285, 410), (365, 410)])
+b += text(325, 400, var('y') + ' = ' + var('f') + '(' + var('x') + ') + ' + var('ε'), 'middle', 'small')
+b += text(320, 500, '(c) Propagating the Gaussian density through a nonlinear mapping', 'middle', 'small')
+svg('Bdl25DensityPropagation', 640, 510, 'A Gaussian density propagated through a nonlinear mapping',
+    'Panel a shows the likelihood p(y given x) for y equal to a nonlinear function of x plus Gaussian noise, as a surface over x and y, with the slice at a fixed x highlighted. Panel b shows the unnormalized posterior p(y given x) times p(x), with the slice at a fixed y highlighted and the Gaussian p(x) drawn along the back. Panel c shows the unimodal Gaussian p(x) on the left and, after the nonlinear mapping, the multimodal p(y = y-hat given x) p(x) on the right, with three peaks.',
+    b)
+
+# ---------- Figure 25.3: successive warping of a two-dimensional loop ----------
+def bdl25_fit(pts, x0, y0, w, h):
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+    sx = (max(xs)-min(xs)) or 1; sy = (max(ys)-min(ys)) or 1
+    s = min(w/sx, h/sy)
+    cx = (max(xs)+min(xs))/2; cyy = (max(ys)+min(ys))/2
+    return [(x0 + w/2 + (x-cx)*s, y0 + h/2 - (y-cyy)*s) for x, y in pts]
+bdl25_th = [2*math.pi*i/120 for i in range(120)]
+circ = [[math.cos(t), math.sin(t)] for t in bdl25_th]
+rng = bdl25_random.Random(7)
+top = [circ]
+cur = circ
+for ell in (0.9, 1.0, 1.0):
+    f = bdl25_prior_samples(cur, 1.0, ell, 2, rng)
+    cur = [[f[0][i], f[1][i]] for i in range(len(cur))]
+    top.append(cur)
+rngl = bdl25_random.Random(3)
+bot = [circ]
+cur = circ
+for _ in range(3):
+    Wm = [[rngl.gauss(0, 1) for _ in range(2)] for _ in range(2)]
+    cur = [[Wm[0][0]*p[0]+Wm[0][1]*p[1], Wm[1][0]*p[0]+Wm[1][1]*p[1]] for p in cur]
+    bot.append(cur)
+b = ''
+for row, (shapes, y0) in enumerate(((top, 20), (bot, 175))):
+    for k, pts in enumerate(shapes):
+        x0 = 10 + k*160
+        sp = bdl25_fit(pts, x0+10, y0+8, 110, 110)
+        b += line(sp + [sp[0]], 'ln', ' stroke-width="1"')
+        for i in range(0, len(sp), 2):
+            b += f'  <circle class="dot" cx="{sp[i][0]:.1f}" cy="{sp[i][1]:.1f}" r="1.3" />\n'
+        if k == 0:
+            b += text(x0+4, y0+10, var('x') + '<tspan class="sub" dy="3">2</tspan>', 'start', 'small')
+            b += text(x0+70, y0+138, var('x') + '<tspan class="sub" dy="3">1</tspan>', 'start', 'small')
+        else:
+            b += text(x0+4, y0+10, var('f') + f'<tspan class="sub" dy="-6">{k}</tspan><tspan class="sub" dy="10">2</tspan>', 'start', 'small')
+            b += text(x0+118, y0+138, var('f') + f'<tspan class="sub" dy="-6">{k}</tspan><tspan class="sub" dy="10">1</tspan>', 'start', 'small')
+        if k < 3:
+            b += arrow([(x0+136, y0+64), (x0+166, y0+64)])
+svg('Bdl25FeatureWarping', 640, 335, 'Successive warping of a two-dimensional input loop by a deep GP',
+    'Top row: points on a circle in the input space x1, x2 are mapped through three successive Gaussian process layers with an exponentiated quadratic covariance function; the loop is folded and twisted, and the deformation created in the first layer is carried into the next layers and transformed further. Bottom row: the same circle mapped through three layers with a linear covariance function; each layer only stretches and rotates it into an ellipse, which flattens toward a line.',
+    b)
+
+# ---------- Figure 25.4: samples from a deep GP with three-dimensional hidden and output nodes ----------
+rng = bdl25_random.Random(11)
+xg = [i/120 for i in range(121)]
+l1 = bdl25_prior_samples([[x] for x in xg], 1.0, 0.18, 3, rng)
+h1 = [[l1[d][i] for d in range(3)] for i in range(len(xg))]
+l2 = bdl25_prior_samples(h1, 1.0, 0.9, 3, rng)
+h2 = [[l2[d][i] for d in range(3)] for i in range(len(xg))]
+l3 = bdl25_prior_samples(h2, 1.0, 0.5, 3, rng)
+b = ''
+styles = [('acc', ''), ('ln', ''), ('mut', ' stroke-dasharray="5 3"')]
+labels = [bdl25_sup('f', '1') + '(' + var('x') + ')', bdl25_sup('f', '2') + '(' + bdl25_sup('f', '1') + ')', bdl25_sup('f', '3') + '(' + bdl25_sup('f', '2') + ')']
+for r, layer in enumerate((l1, l2, l3)):
+    P = Plot(110, 18 + r*165, 500, 125, (0, 1), (-3, 3))
+    b += bdl25_frame(P, [0, 0.2, 0.4, 0.6, 0.8, 1.0], [-2, 0, 2])
+    for d in range(3):
+        b += bdl25_poly(P, xg, [bdl25_clip(v, -3, 3) for v in layer[d]], styles[d][0], styles[d][1])
+    b += text(10, P.y0 + 66, labels[r], 'start')
+b += text(610, 508, var('x'), 'end')
+svg('Bdl25DeepGpSamples', 640, 515, 'Samples from a deep GP with three-dimensional hidden and output nodes',
+    'Three stacked panels against the input x from 0 to 1. Top: the three outputs of the first hidden layer, smooth curves. Middle: the three outputs of the second hidden layer, which vary faster in some regions and flatten in others. Bottom: the three output-layer functions, with rapid variation in places and long flat stretches elsewhere.',
+    b)
+
+# ---------- Figure 25.5: graphical models with inducing variables ----------
+def bdl25_xu(k):
+    return '(' + var('x') + '<tspan class="sub" dy="3">u</tspan><tspan dy="-3">)</tspan>' + f'<tspan class="sub" dy="-6">{k}</tspan>'
+def bdl25_hi(k):
+    return var('h') + f'<tspan class="sub" dy="-6">{k}</tspan><tspan class="sub" dy="10">i,:</tspan>'
+def bdl25_gm(ox, supervised):
+    o = ''
+    R = 20
+    px = ox + 200
+    ytop = 30 if supervised else 60
+    o += f'  <rect class="region2" x="{px-38}" y="{ytop-22}" width="76" height="{370-ytop+22}" rx="8" />\n'
+    o += text(px, 384, var('i') + ' = 1 … ' + var('n'), 'middle', 'small')
+    yh1, yh2, yy = 110, 210, 310
+    if supervised:
+        o += f'  <circle class="mut" cx="{px}" cy="40" r="6" />\n' + text(px-12, 44, var('x') + '<tspan class="sub" dy="3">i,:</tspan>', 'end', 'small')
+        o += bdl25_edge((px, 40), (px, yh1), 6, R) + text(px+8, 78, bdl25_sup('f', '1'), 'start', 'small')
+    o += bdl25_node(px, yh1, R, bdl25_hi(1))
+    o += bdl25_node(px, yh2, R, bdl25_hi(2))
+    o += bdl25_node(px, yy, R, var('y') + '<tspan class="sub" dy="3">i,:</tspan>', shaded=True)
+    o += bdl25_edge((px, yh1), (px, yh2), R, R) + text(px+8, (yh1+yh2)/2+4, bdl25_sup('f', '2'), 'start', 'small')
+    o += bdl25_edge((px, yh2), (px, yy), R, R) + text(px+8, (yh2+yy)/2+4, bdl25_sup('f', '3'), 'start', 'small')
+    xu1, xu2 = (ox+40, 150), (ox+40, 250)
+    u2, u3 = (ox+110, 210), (ox+110, 310)
+    for (cx, cy), k in ((xu1, 1), (xu2, 2)):
+        o += f'  <circle class="dot" cx="{cx}" cy="{cy}" r="4" />\n'
+        o += text(cx-8, cy+4, bdl25_xu(k), 'end', 'small')
+    o += bdl25_node(u2[0], u2[1], 18, bdl25_sup('u', '2'))
+    o += bdl25_node(u3[0], u3[1], 18, bdl25_sup('u', '3'))
+    o += bdl25_edge(xu1, u2, 4, 18) + bdl25_edge(xu1, (px, yh2), 4, R)
+    o += bdl25_edge(xu2, u3, 4, 18) + bdl25_edge(xu2, (px, yy), 4, R)
+    o += bdl25_edge(u2, (px, yh2), 18, R) + bdl25_edge(u3, (px, yy), 18, R)
+    return o
+b = bdl25_gm(70, False) + bdl25_gm(370, True)
+b += text(170, 405, 'Unsupervised', 'middle', 'small') + text(470, 405, 'Supervised', 'middle', 'small')
+svg('Bdl25InducingGraphs', 640, 415, 'Graphical models of unsupervised and supervised deep GPs with inducing variables',
+    'Two graphical models with L = 2 hidden layers inside a plate over data points i = 1 to n. In both, h1 maps through f2 to h2, and h2 through f3 to the observed, shaded y. Inducing inputs (x_u)1 point to the inducing outputs u2 and to h2; inducing inputs (x_u)2 point to u3 and to y; u2 points to h2 and u3 points to y. The supervised model on the right adds an observed input x_i that maps through f1 to h1. Nodes on the same horizontal level belong to the same layer.',
+    b)
+
+# ---------- Figures 25.6 to 25.8: the step-function example ----------
+rng = bdl25_random.Random(25)
+bdl25_xs = [i/39 for i in range(40)]
+bdl25_ys = [(0.0 if x < 0.5 else 1.0) + rng.gauss(0, 0.02) for x in bdl25_xs]
+bdl25_grid = [-1 + 3*i/119 for i in range(120)]
+# standard GP posterior
+mu_s, L_s = bdl25_post(bdl25_xs, bdl25_ys, bdl25_grid, 0.12, 0.12, 0.1**2, mean0=0.5)
+# latent layer of the deep GP: posterior of a GP fitted to targets -1.5 / +1.5
+mu_h, L_h = bdl25_post(bdl25_xs, [-1.5 if x < 0.5 else 1.5 for x in bdl25_xs], bdl25_grid, 1.5**2, 0.3, 0.3**2)
+sig = lambda z: 1/(1+math.exp(-z))
+def bdl25_chain(h, r):
+    # sigmoidal warping layers (Figure 25.8); r holds the per-sample slopes
+    f2 = [2*math.tanh(r[0]*v) for v in h]
+    f3 = [2.5*math.tanh(r[1]*v) for v in f2]
+    y = [sig(r[2]*v) for v in f3]
+    return f2, f3, y
+ns = 30
+std_paths = [bdl25_draw(mu_s, L_s, rng) for _ in range(ns)]
+one_paths, deep_paths = [], []
+for _ in range(ns):
+    h = bdl25_draw(mu_h, L_h, rng)
+    one_paths.append([sig(3.5*v) + rng.gauss(0, 0.02) for v in h])
+    r = (1.6*rng.uniform(0.8, 1.25), 0.9*rng.uniform(0.8, 1.25), 2.2*rng.uniform(0.8, 1.25))
+    deep_paths.append([v + rng.gauss(0, 0.02) for v in bdl25_chain(h, r)[2]])
+b = ''
+for k, paths in enumerate((std_paths, one_paths, deep_paths)):
+    P = Plot(70, 15 + k*170, 540, 130, (-1, 2), (-0.5, 1.5))
+    b += bdl25_frame(P, [-1, -0.5, 0, 0.5, 1, 1.5, 2] if k == 2 else [], [0, 0.5, 1])
+    for pth in paths:
+        b += bdl25_poly(P, bdl25_grid, [bdl25_clip(v, -0.5, 1.5) for v in pth], 'mut', ' stroke-opacity="0.3"')
+    for x, y in zip(bdl25_xs, bdl25_ys):
+        b += bdl25_cross(P.X(x), P.Y(y))
+    b += text(30, P.y0 + 70, var('y'), 'middle')
+    b += text(608, P.y0 + 14, ('standard GP', 'deep GP, 1 hidden layer', 'deep GP, 3 hidden layers')[k], 'end', 'small')
+b += text(610, 520, var('x'), 'end')
+svg('Bdl25StepPosterior', 640, 528, 'Posterior samples for the step-function data',
+    'Three panels over x from minus 1 to 2 with the 40 training points, near 0 for x below 0.5 and near 1 above. Top, standard GP: sample paths spread widely away from the data and pass smoothly through the jump. Middle, deep GP with one hidden layer: away from the data most paths sit near either 0 or 1, a bimodal regime, and the jump at 0.5 is sharp. Bottom, deep GP with three hidden layers: the same with even fewer paths between the two levels.',
+    b)
+
+# Figure 25.7: three sample paths through the layers, and standard GP sample paths
+rng = bdl25_random.Random(5)
+sp = []
+for _ in range(3):
+    h = bdl25_draw(mu_h, L_h, rng)
+    r = (1.6*rng.uniform(0.8, 1.25), 0.9*rng.uniform(0.8, 1.25), 2.2*rng.uniform(0.8, 1.25))
+    f2, f3, y = bdl25_chain(h, r)
+    sp.append((h, f2, f3, y, r))
+stdp = [bdl25_draw(mu_s, L_s, rng) for _ in range(3)]
+b = ''
+cls3 = [('acc', ''), ('ln', ''), ('mut', ' stroke-dasharray="5 3"')]
+pos = [(55, 20), (370, 20), (55, 215), (370, 215)]
+names = [bdl25_sup('f', '1') + ' = ' + bdl25_sup('f', '1') + '(' + var('x') + ')',
+         bdl25_sup('f', '2') + ' = ' + bdl25_sup('f', '2') + '(' + bdl25_sup('f', '1') + ')',
+         bdl25_sup('f', '3') + ' = ' + bdl25_sup('f', '3') + '(' + bdl25_sup('f', '2') + ')',
+         bdl25_sup('f', '4') + ' = ' + bdl25_sup('f', '4') + '(' + bdl25_sup('f', '3') + ')']
+yr = [(-3, 3.5), (-2.3, 2.6), (-2.8, 3.2), (-0.5, 1.5)]
+for k in range(4):
+    x0, y0 = pos[k]
+    P = Plot(x0, y0+18, 250, 115, (-1, 2), yr[k])
+    b += bdl25_frame(P, [-1, 0, 1, 2], [0, 0.5, 1] if k == 3 else [])
+    for j in range(3):
+        b += bdl25_poly(P, bdl25_grid, [bdl25_clip(v, *yr[k]) for v in sp[j][k]], cls3[j][0], cls3[j][1])
+    if k == 3:
+        for x, y in zip(bdl25_xs, bdl25_ys):
+            b += bdl25_cross(P.X(x), P.Y(y), 2.5)
+    b += text(x0+4, y0+10, names[k], 'start', 'small')
+b += arrow([(315, 95), (360, 95)])
+b += arrow([(375, 175), (320, 212)])
+b += arrow([(305, 290), (338, 290)])
+b += text(320, 388, '(a) Deep GP with three hidden plus one input-transformation layer', 'middle', 'small')
+P = Plot(370, 428, 250, 115, (-1, 2), (-1, 1.5))
+b += bdl25_frame(P, [-1, 0, 1, 2], [-1, -0.5, 0, 0.5, 1, 1.5])
+for j in range(3):
+    b += bdl25_poly(P, bdl25_grid, [bdl25_clip(v, -1, 1.5) for v in stdp[j]], cls3[j][0], cls3[j][1])
+for x, y in zip(bdl25_xs, bdl25_ys):
+    b += bdl25_cross(P.X(x), P.Y(y), 2.5)
+b += text(374, 420, var('f') + ' = ' + var('f') + '(' + var('x') + ')', 'start', 'small')
+b += text(495, 582, '(b) Standard GP', 'middle', 'small')
+svg('Bdl25StepWarping', 640, 590, 'Successive warping of deep GP sample paths compared with standard GP sample paths',
+    'Panel a: three sample paths plotted against the input x from minus 1 to 2 after each of four layers. After the first layer the paths are smooth and wavy; after the second they are squashed into flat high and low plateaus; after the third and fourth they jump almost vertically between two levels, matching the training data near 0 below x = 0.5 and near 1 above, and choosing one of the two levels away from the data. Panel b: three sample paths of a standard GP, which follow the data but oscillate widely away from it.',
+    b)
+
+# Figure 25.8: each layer's output versus its input, for the three sample paths of Figure 25.7
+b = ''
+rowlab = [('f', '1', 'x'), ('f', '2', 'f1'), ('f', '3', 'f2'), ('y', '', 'f3')]
+for c in range(3):
+    h, f2, f3, y, r = sp[c]
+    series = [(bdl25_grid, h), (h, f2), (f2, f3), (f3, y)]
+    for rr in range(4):
+        xin, yout = series[rr]
+        x0 = 50 + c*200; y0 = 12 + rr*125
+        xlo, xhi = min(xin), max(xin); ylo, yhi = min(yout), max(yout)
+        pad = 0.05*(yhi-ylo or 1)
+        P = Plot(x0, y0, 160, 85, (xlo, xhi), (ylo-pad, yhi+pad))
+        o = ''
+        xt = [v for v in range(math.ceil(xlo), math.floor(xhi)+1)]
+        yt = [0, 0.5, 1] if rr == 3 else [v for v in range(math.ceil(ylo), math.floor(yhi)+1)]
+        for v in xt:
+            o += line([(P.X(v), P.y0), (P.X(v), P.y0+P.h)], 'grid', ' stroke-dasharray="2 2"')
+            o += text(P.X(v), P.y0+P.h+13, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+        for v in yt:
+            o += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid', ' stroke-dasharray="2 2"')
+            o += text(P.x0-4, P.Y(v)+4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+        o += f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" fill="none" stroke-width="1" />\n'
+        if rr > 0:
+            wf = [lambda v: 2*math.tanh(r[0]*v), lambda v: 2.5*math.tanh(r[1]*v), lambda v: sig(r[2]*v)][rr-1]
+            o += P.curve(wf, n=80, cls='mut')
+        for i in range(0, len(xin), 2):
+            o += f'  <circle class="dot" cx="{P.X(xin[i]):.1f}" cy="{P.Y(yout[i]):.1f}" r="1.8" />\n'
+        bse, sup, xl = rowlab[rr]
+        o += text(x0-26, y0+12, bdl25_sup(bse, sup) if sup else var(bse), 'end', 'small')
+        o += text(P.x0+P.w-6, P.y0+P.h-8, var('x') if xl == 'x' else bdl25_sup('f', xl[1]), 'end', 'small')
+        b += o
+svg('Bdl25LayerMaps', 640, 512, 'Input versus output of every layer for three deep GP samples',
+    'A grid of twelve small plots, one column per sample propagated through the hierarchy. The first row shows f1 against x, a wavy function. The second, third and fourth rows show f2 against f1, f3 against f2 and y against f3: in every column each of these is a sigmoidal curve, rising from a low plateau to a high one, so the layers successively push the samples into two levels.',
+    b)
+
+
+# ---------- Bdl27: Chapter 27, meta-learning deep kernel Gaussian processes ----------
+
+def bdl27_sub(t):
+    return f'<tspan class="sub" dy="3">{t}</tspan><tspan dy="-3"> </tspan>'
+
+def bdl27_psi(s):
+    return var('ψ') + f'<tspan class="sub" dy="3">{s}</tspan><tspan dy="-3"></tspan>'
+
+def bdl27_cyl(cx, cy, label, w=40, h=34):
+    rx, ry = w / 2, 5
+    top, bot = cy - h / 2, cy + h / 2
+    o = f'  <path class="box" d="M{cx-rx:.1f},{top:.1f} L{cx-rx:.1f},{bot:.1f} A{rx:.1f},{ry} 0 0 0 {cx+rx:.1f},{bot:.1f} L{cx+rx:.1f},{top:.1f}" />\n'
+    o += f'  <ellipse class="box" cx="{cx:.1f}" cy="{top:.1f}" rx="{rx:.1f}" ry="{ry}" />\n'
+    o += text(cx, cy + 9, var('T') + f'<tspan class="sub" dy="3">{label}</tspan>', 'middle')
+    return o
+
+def bdl27_nn(x, y, s=1.0):
+    # small fully connected network icon: 3 inputs, 5 hidden, 1 output; (x, y) is the centre
+    L = [[-1, 0, 1], [-2, -1, 0, 1, 2], [0]]
+    xs = [x - 34 * s, x, x + 30 * s]
+    dy = 11 * s
+    pts = [[(xs[i], y + v * dy) for v in layer] for i, layer in enumerate(L)]
+    o = ''
+    for a in range(2):
+        for p in pts[a]:
+            for q in pts[a + 1]:
+                o += line([p, q], 'mut', ' style="stroke-width: 0.6"')
+    r = 4.2 * s
+    for layer in pts:
+        for (px, py) in layer:
+            o += f'  <circle class="box" cx="{px:.1f}" cy="{py:.1f}" r="{r:.1f}" style="stroke-width: 1" />\n'
+    return o
+
+def bdl27_gp(x, y, w, h, kind, frame=True):
+    # miniature GP posterior: mean curve with a shaded band; kind selects the shape
+    o = ''
+    if frame:
+        o += f'  <rect class="region2" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" style="stroke-width: 1; stroke-dasharray: 4 2 1 2" />\n'
+    n = 60
+    px0, pw = x + 5, w - 10
+    cy = y + h / 2
+    def f(t):
+        if kind == 1: return -0.35 * math.sin(2 * math.pi * 1.4 * t)
+        if kind == 2: return -0.6 * math.exp(-((t - 0.3) / 0.12) ** 2) + 0.35 * math.exp(-((t - 0.55) / 0.12) ** 2)
+        if kind == 3: return 0.25 - 0.45 * t
+        if kind == 4: return 0.0
+        if kind == 5: return -0.6 * math.exp(-((t - 0.3) / 0.08) ** 2) + 0.35 * math.exp(-((t - 0.45) / 0.08) ** 2)
+        return 0.0
+    def sd(t):
+        if kind == 1: return 0.08 + 0.12 * t
+        if kind == 2: return 0.05 + 0.35 * max(0, t - 0.45)
+        if kind == 3: return 0.2 + 0.1 * t
+        if kind == 4: return 0.42 * (0.4 + 0.6 * abs(math.sin(2 * math.pi * 3.2 * t)))
+        if kind == 5: return 0.05 + 0.9 * max(0, t - 0.5)
+        if kind == 6: return 0.44 if abs(t - 0.25) > 0.04 else 0.08
+        return 0.1
+    def F(t):
+        if kind == 4: return -0.3 * math.sin(2 * math.pi * 3.2 * t)
+        return f(t)
+    up = [(px0 + pw * i / n, cy + (F(i / n) - sd(i / n)) * h * 0.5) for i in range(n + 1)]
+    dn = [(px0 + pw * i / n, cy + (F(i / n) + sd(i / n)) * h * 0.5) for i in range(n + 1)]
+    up = [(a, max(y + 2, min(y + h - 2, b))) for a, b in up]
+    dn = [(a, max(y + 2, min(y + h - 2, b))) for a, b in dn]
+    d = 'M' + ' L'.join(f'{a:.1f},{b:.1f}' for a, b in up + dn[::-1]) + ' Z'
+    o += f'  <path class="band" d="{d}" style="fill: var(--ink-muted); fill-opacity: 0.35" />\n'
+    o += line([(px0 + pw * i / n, cy + F(i / n) * h * 0.5) for i in range(n + 1)], 'ln', ' style="stroke-width: 1"')
+    return o
+
+def bdl27_panel(x, y, w, h):
+    return f'  <rect class="ln" x="{x}" y="{y}" width="{w}" height="{h}" rx="16" />\n'
+
+def bdl27_training_diagram():
+    b = ''
+    # ---- (a) ADKF-IFT ----
+    y0 = 6
+    b += bdl27_panel(4, y0, 672, 236)
+    rows = [y0 + 62, y0 + 118, y0 + 174]
+    for i, ry in enumerate(rows):
+        b += bdl27_cyl(42, ry, str(i + 1))
+    ex0, ex1 = 104, 230
+    b += f'  <rect class="region2" x="{ex0}" y="{y0+36}" width="{ex1-ex0}" height="168" />\n'
+    b += bdl27_nn(166, y0 + 108, 1.15)
+    b += text(167, y0 + 192, bdl27_psi('meta') + ' = ' + var('ϕ'), 'middle')
+    for ry in rows:
+        b += arrow([(66, ry), (ex0 - 4, y0 + 120 + (ry - rows[1]) * 0.5)])
+    gx = 262
+    for i, ry in enumerate(rows):
+        b += arrow([(ex1 + 4, y0 + 120 + (ry - rows[1]) * 0.5), (gx - 4, ry)])
+        b += bdl27_gp(gx, ry - 21, 62, 42, (1, 2, 3)[i])
+        b += arrow([(gx + 66, ry), (352, ry)])
+        if i > 0:  # the book leaves the first row unlabeled
+            b += text(386, ry + 4, 'train loss', 'middle', 'small')
+        b += arrow([(420, ry), (510, ry)])
+        b += text(465, ry - 7, 'optimize ' + bdl27_psi('adapt'), 'middle', 'small')
+        b += bdl27_gp(512, ry - 21, 62, 42, (4, 5, 6)[i], frame=False)
+    vx = 630
+    b += text(vx, rows[1] - 12, 'Expected', 'middle', 'small')
+    b += text(vx, rows[1] + 4, 'validation', 'middle', 'small')
+    b += text(vx, rows[1] + 20, 'loss', 'middle', 'small')
+    b += arrow([(580, rows[0] + 4), (606, rows[1] - 26)])
+    b += arrow([(580, rows[1]), (598, rows[1])])
+    b += arrow([(580, rows[2] - 4), (606, rows[1] + 30)])
+    b += arrow([(vx, rows[1] - 28), (vx, y0 + 22), (167, y0 + 22), (167, y0 + 34)])
+    b += text(400, y0 + 17, 'update ' + bdl27_psi('meta') + ' using implicit function theorem', 'middle', 'small')
+    b += text(340, y0 + 228, '(a) Adaptive Deep Kernel Fitting with Implicit Function Theorem (ADKF-IFT)', 'middle')
+
+    # ---- (b) DKT ----
+    y0 = 252
+    b += bdl27_panel(4, y0, 332, 262)
+    rows = [y0 + 72, y0 + 128, y0 + 184]
+    for i, ry in enumerate(rows):
+        b += bdl27_cyl(38, ry, str(i + 1))
+    ex0, ex1 = 80, 248
+    b += f'  <rect class="region2" x="{ex0}" y="{y0+40}" width="{ex1-ex0}" height="190" />\n'
+    b += bdl27_nn(124, y0 + 124, 1.0)
+    for ry in rows:
+        b += arrow([(60, ry), (ex0 + 6, y0 + 128 + (ry - rows[1]) * 0.4)])
+    for i, ry in enumerate(rows):
+        b += arrow([(158, y0 + 124 + (ry - rows[1]) * 0.25), (176, ry)])
+        b += bdl27_gp(180, ry - 20, 62, 40, (1, 2, 3)[i], frame=False)
+    b += text(164, y0 + 222, bdl27_psi('meta') + ' = [' + var('θ') + ', ' + var('ϕ') + ']', 'middle')
+    vx = 292
+    b += text(vx, rows[1] - 12, 'Expected', 'middle', 'small')
+    b += text(vx, rows[1] + 4, 'validation', 'middle', 'small')
+    b += text(vx, rows[1] + 20, 'loss', 'middle', 'small')
+    b += arrow([(250, rows[0]), (276, rows[1] - 26)])
+    b += arrow([(250, rows[1]), (264, rows[1])])
+    b += arrow([(250, rows[2]), (276, rows[1] + 30)])
+    b += arrow([(vx, rows[1] - 28), (vx, y0 + 26), (164, y0 + 26), (164, y0 + 38)])
+    b += text(228, y0 + 20, 'optimize ' + bdl27_psi('meta'), 'middle', 'small')
+    b += text(170, y0 + 250, '(b) Deep Kernel Transfer (DKT)', 'middle')
+
+    # ---- (c) DKL ----
+    x0 = 344
+    b += bdl27_panel(x0, y0, 332, 262)
+    rows = [y0 + 54, y0 + 126, y0 + 198]
+    for i, ry in enumerate(rows):
+        b += bdl27_cyl(x0 + 32, ry, str(i + 1))
+        bx0 = x0 + 66
+        b += f'  <rect class="region2" x="{bx0}" y="{ry-20}" width="160" height="40" style="stroke-width: 1; stroke-dasharray: 4 2 1 2" />\n'
+        b += arrow([(x0 + 54, ry), (bx0 - 2, ry)])
+        b += bdl27_nn(bx0 + 40, ry, 0.62)
+        b += arrow([(bx0 + 64, ry), (bx0 + 84, ry)])
+        b += bdl27_gp(bx0 + 86, ry - 17, 70, 34, (4, 5, 6)[i], frame=False)
+        b += arrow([(bx0 + 162, ry), (bx0 + 186, ry)])
+        b += text(x0 + 292, ry + 4, 'train loss', 'middle', 'small')
+        b += arrow([(x0 + 292, ry - 10), (x0 + 292, ry - 30), (bx0 + 80, ry - 30), (bx0 + 80, ry - 22)])
+        b += text(x0 + 220, ry - 34, 'optimize ' + bdl27_psi('adapt'), 'middle', 'small')
+    b += text(x0 + 146, y0 + 234, bdl27_psi('adapt') + ' = [' + var('θ') + ', ' + var('ϕ') + ']', 'middle')
+    b += text(x0 + 166, y0 + 252, '(c) Deep Kernel Learning (DKL)', 'middle')
+    svg('Bdl27TrainingProcedures', 680, 520,
+        'Training procedures of ADKF-IFT, DKT and DKL',
+        'Panel a, ADKF-IFT: three tasks T1, T2 and T3 pass through one shared feature extractor whose parameters psi meta equal phi. Each task gets its own GP; its base kernel parameters psi adapt are optimized on that task\'s train loss, giving three differently adapted GP posteriors that feed an expected validation loss, and psi meta is updated using the implicit function theorem. Panel b, DKT: the three tasks share one feature extractor and one GP with psi meta equal to theta and phi; all parameters are optimized on the expected validation loss. Panel c, DKL: each task has its own network and GP, with psi adapt equal to theta and phi, optimized on that task\'s own train loss.',
+        b)
+
+# ---------- shared plotting helpers for Figures 27.2 and 27.3 ----------
+def bdl27_marker(shape, x, y, cls='box', r=3.0):
+    if shape == 'square':
+        return f'  <rect class="{cls}" x="{x-r:.1f}" y="{y-r:.1f}" width="{2*r:.1f}" height="{2*r:.1f}" style="stroke-width: 1" />\n'
+    if shape == 'circle':
+        return f'  <circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" style="stroke-width: 1" />\n'
+    if shape == 'ocircle':
+        return f'  <circle class="ln" cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" style="stroke-width: 1" />\n'
+    if shape in ('plus', 'x'):
+        k = r * 1.2
+        if shape == 'plus':
+            return line([(x - k, y), (x + k, y)], 'ln') + line([(x, y - k), (x, y + k)], 'ln')
+        k = r
+        return line([(x - k, y - k), (x + k, y + k)], 'ln') + line([(x - k, y + k), (x + k, y - k)], 'ln')
+    def poly(pts, c=cls):
+        return f'  <path class="{c}" d="M' + ' L'.join(f'{a:.1f},{b:.1f}' for a, b in pts) + ' Z" style="stroke-width: 1" />\n'
+    def ngon(n, rot, rr=r * 1.15):
+        return [(x + rr * math.cos(rot + 2 * math.pi * k / n), y + rr * math.sin(rot + 2 * math.pi * k / n)) for k in range(n)]
+    if shape == 'tri': return poly(ngon(3, -math.pi / 2, r * 1.35))
+    if shape == 'trid': return poly(ngon(3, math.pi / 2, r * 1.35))
+    if shape == 'tril': return poly(ngon(3, math.pi, r * 1.35))
+    if shape == 'trir': return poly(ngon(3, 0, r * 1.35))
+    if shape == 'diamond': return poly(ngon(4, 0, r * 1.35))
+    if shape == 'pent': return poly(ngon(5, -math.pi / 2))
+    if shape == 'hex': return poly(ngon(6, 0))
+    if shape == 'ohex': return poly(ngon(6, 0), 'ln')
+    if shape == 'star':
+        pts = []
+        for k in range(10):
+            rr = r * 1.4 if k % 2 == 0 else r * 0.6
+            a = -math.pi / 2 + math.pi * k / 5
+            pts.append((x + rr * math.cos(a), y + rr * math.sin(a)))
+        return poly(pts)
+    return ''
+
+def bdl27_series(P, pts, st, every=1):
+    cls, dash, shape = st
+    extra = f' stroke-dasharray="{dash}"' if dash else ''
+    if cls not in ('acc', 'thick'):
+        extra += ' style="stroke-width: 1.2"'
+    o = line([(P.X(a), P.Y(b)) for a, b in pts], cls, extra)
+    for i, (a, b) in enumerate(pts):
+        if i % every == 0 or i == len(pts) - 1:
+            o += bdl27_marker(shape, P.X(a), P.Y(b), 'dot' if cls == 'acc' else 'box')
+    return o
+
+def bdl27_legend_item(x, y, name, st):
+    cls, dash, shape = st
+    extra = f' stroke-dasharray="{dash}"' if dash else ''
+    if cls not in ('acc', 'thick'):
+        extra += ' style="stroke-width: 1.2"'
+    o = line([(x, y), (x + 26, y)], cls, extra)
+    o += bdl27_marker(shape, x + 13, y, 'dot' if cls == 'acc' else 'box')
+    o += text(x + 32, y + 4, name, 'start', 'small')
+    return o
+
+def bdl27_frame(P):
+    return f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" style="stroke-width: 1" />\n'
+
+def bdl27_vlabel(x, y, t):
+    return f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate({x:.1f} {y:.1f}) rotate(-90)">{t}</text>\n'
+
+# ---------- Figure 27.2: FS-Mol results ----------
+BDL27_ST = {
+    'ADKF-IFT': ('acc', '', 'square'),
+    'DKT': ('mut', '6 2 1.5 2', 'plus'),
+    'ProtoNet': ('mut', '3 2', 'star'),
+    'CNP': ('ln', '5 2 1.5 2', 'x'),
+    'GNN-MAML': ('ln', '4 3', 'tri'),
+    'GP-ST': ('mut', '7 3', 'circle'),
+    'GNN-MT': ('thick', '1.5 2.5', 'diamond'),
+    'RF': ('ln', '8 2 2 2', 'pent'),
+    'MAT': ('mut', '5 2 1.5 2 1.5 2', 'trid'),
+    'kNN': ('mut', '1.5 2', 'ohex'),
+    'GNN-ST': ('ln', '6 2 1.5 2', 'trir'),
+    'PAR': ('mut', '2 3', 'tril'),
+    'DKL': ('mut', '4 2 1.5 2', 'ocircle'),
+}
+BDL27_SIZES = [16, 32, 64, 128, 256]
+BDL27_CLS = [
+    ('ADKF-IFT', [0.230, 0.261, 0.285, 0.316, 0.334]),
+    ('DKT', [0.215, 0.245, 0.271, 0.302, 0.315]),
+    ('ProtoNet', [0.206, 0.243, 0.270, 0.301, 0.290]),
+    ('CNP', [0.185, 0.190, 0.193, 0.206, 0.199]),
+    ('GNN-MAML', [0.160, 0.167, 0.175, 0.192, 0.185]),
+    ('GP-ST', [0.093, 0.124, 0.171, 0.213, 0.255]),
+    ('GNN-MT', [0.112, 0.144, 0.176, 0.223, 0.237]),
+    ('RF', [0.095, 0.127, 0.165, 0.213, 0.260]),
+    ('MAT', [0.053, 0.069, 0.092, 0.130, 0.146]),
+    ('kNN', [0.105, 0.128, 0.151, 0.179, 0.173]),
+    ('GNN-ST', [0.021, 0.027, 0.031, 0.052, 0.056]),
+    ('PAR', [0.130, 0.140, 0.148, 0.162, 0.122]),
+    ('DKL', [0.052, 0.075, 0.102, 0.140, 0.199]),
+]
+BDL27_REG = [
+    ('ADKF-IFT', [0.170, 0.253, 0.340, 0.382, 0.460]),
+    ('DKT', [0.175, 0.250, 0.321, 0.359, 0.427]),
+    ('CNP', [0.085, 0.093, 0.097, 0.045, 0.095]),
+    ('GP-ST', [0.055, 0.112, 0.178, 0.230, 0.312]),
+    ('RF', [0.065, 0.115, 0.180, 0.226, 0.300]),
+    ('GNN-MT', [-0.060, -0.003, 0.067, 0.045, 0.212]),
+    ('MAT', [-0.163, -0.085, -0.024, -0.050, 0.085]),
+    ('DKL', [0.068, 0.077, 0.105, 0.017, 0.174]),
+]
+
+def bdl27_fsmol():
+    b = ''
+    PA = Plot(58, 16, 248, 230, (0, 272), (0.0, 0.36))
+    PB = Plot(398, 16, 248, 230, (0, 272), (-0.2, 0.5))
+    for P, yt, data, lab, sub in (
+        (PA, [0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35], BDL27_CLS, 'ΔAUPRC', '(a) Classification (157 tasks).'),
+        (PB, [-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], BDL27_REG, var('R') + '<tspan class="sub" dy="-6">2</tspan><tspan class="sub" dy="9">os</tspan>', '(b) Regression (111 tasks).')):
+        for v in yt:
+            b += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid')
+            b += text(P.x0 - 5, P.Y(v) + 4, f'{v:.2f}' if P is PA else f'{v:.1f}', 'end', 'small')
+        for s in BDL27_SIZES:
+            b += line([(P.X(s), P.y0), (P.X(s), P.y0 + P.h)], 'grid')
+            b += text(P.X(s) + (3 if s == 16 else -3 if s == 32 else 0), P.y0 + P.h + 15, str(s), {16: 'end', 32: 'start'}.get(s, 'middle'), 'small')
+        b += bdl27_frame(P)
+        b += text(P.x0 + P.w / 2, P.y0 + P.h + 32, 'Support set size', 'middle', 'small')
+        b += bdl27_vlabel(P.x0 - 44, P.y0 + P.h / 2, lab)
+        for name, vals in reversed(data):
+            b += bdl27_series(P, list(zip(BDL27_SIZES, vals)), BDL27_ST[name])
+        b += text(P.x0 + P.w / 2, P.y0 + P.h + 52, sub, 'middle', 'small')
+        # legend below the panel, two columns
+        ly = P.y0 + P.h + 74
+        for i, (name, _) in enumerate(data):
+            col, row = i % 2, i // 2
+            b += bdl27_legend_item(P.x0 - 20 + col * 140, ly + row * 19, name, BDL27_ST[name])
+    svg('Bdl27FsMolResults', 680, 440,
+        'Mean performance of each compared method on the FS-Mol test tasks',
+        'Two line plots against support set size 16, 32, 64, 128 and 256. Left, classification on 157 tasks, change in AUPRC: ADKF-IFT is highest at every size, rising from about 0.23 to about 0.33, followed by DKT and ProtoNet; CNP and GNN-MAML stay near 0.19; GP-ST, RF and GNN-MT rise from about 0.10 to about 0.25; kNN, PAR, DKL and MAT lie lower, and GNN-ST is lowest, near 0.02 to 0.06. Right, regression on 111 tasks, R squared out of sample: ADKF-IFT rises from about 0.17 to about 0.46 and DKT from about 0.17 to about 0.43; GP-ST and RF reach about 0.3; GNN-MT rises from about minus 0.06 to about 0.21; CNP, DKL and MAT stay low, MAT starting near minus 0.16.',
+        b)
+
+# ---------- Figure 27.3: Bayesian optimization on out-of-domain tasks ----------
+BDL27_BO_ST = {
+    'Fingerprint': ('mut', '7 3', 'diamond'),
+    'PAR': ('mut', '1.5 2', 'hex'),
+    'MAT': ('ln', '6 2 1.5 2', 'circle'),
+    'GNN-MT': ('ln', '2 2', 'tri'),
+    'CNP': ('thick', '5 2 1.5 2', 'x'),
+    'ProtoNet': ('mut', '8 2 2 2', 'star'),
+    'DKT': ('mut', '3 2 1 2', 'plus'),
+    'ADKF-IFT': ('acc', '', 'square'),
+}
+def bdl27_steps(d, xmax):
+    # d: dict x -> y for listed points; linear interpolation onto integers 0..xmax
+    ks = sorted(d)
+    out = []
+    for x in range(xmax + 1):
+        for i in range(len(ks) - 1):
+            if ks[i] <= x <= ks[i + 1]:
+                a, c = ks[i], ks[i + 1]
+                t = 0 if c == a else (x - a) / (c - a)
+                out.append((x, d[a] + t * (d[c] - d[a])))
+                break
+    return out
+
+def bdl27_r(xs, ys):
+    return dict(zip(xs, ys))
+
+R20 = list(range(21))
+BDL27_BO = {
+    'a': {
+        'Fingerprint': bdl27_r(R20, [-7.27, -7.75, -8.1, -8.6, -8.93, -9.23, -9.44, -9.8, -9.88, -10.1, -10.2, -10.28, -10.3, -10.5, -10.58, -10.58, -10.58, -10.8, -10.84, -10.93, -11.07]),
+        'PAR': {0: -7.27, 1: -11.67, 2: -11.83, 3: -11.85, 10: -11.87, 20: -11.9},
+        'MAT': bdl27_r(R20, [-7.27, -7.95, -9.4, -10.14, -10.3, -10.85, -11.0, -11.12, -11.23, -11.32, -11.5, -11.57, -11.58, -11.58, -11.58, -11.58, -11.6, -11.62, -11.7, -11.74, -11.76]),
+        'GNN-MT': bdl27_r(R20, [-7.27, -10.92, -11.35, -11.7, -11.82, -11.85, -11.88, -12.0, -12.02, -12.02, -12.02, -12.05, -12.15, -12.18, -12.2, -12.2, -12.22, -12.22, -12.22, -12.23, -12.24]),
+        'CNP': bdl27_r(R20, [-7.27, -7.35, -9.8, -9.8, -9.8, -9.8, -10.22, -10.85, -11.48, -11.48, -11.88] + [-11.9] * 10),
+        'ProtoNet': {0: -7.27, 1: -11.0, 2: -11.45, 3: -11.88, 10: -11.92, 15: -11.95, 20: -12.1},
+        'DKT': {0: -7.27, 1: -7.3, 2: -7.75, 3: -9.25, 4: -10.04, 5: -11.35, 6: -11.7, 7: -11.7, 8: -11.75, 9: -11.75, 10: -11.9, 12: -11.92, 14: -11.93, 16: -12.0, 18: -12.05, 19: -12.12, 20: -12.12},
+        'ADKF-IFT': {0: -7.27, 1: -7.38, 2: -9.48, 3: -11.16, 4: -11.88, 6: -11.88, 8: -11.9, 9: -11.92, 10: -11.95, 11: -12.05, 12: -12.2, 13: -12.28, 14: -12.3, 20: -12.31},
+    },
+    'b': {
+        'Fingerprint': bdl27_r(R20, [1.055, 0.69, 0.615, 0.575, 0.575, 0.575, 0.57, 0.56, 0.545, 0.52, 0.5, 0.43, 0.41, 0.375, 0.33, 0.305, 0.29, 0.258, 0.258, 0.24, 0.225]),
+        'PAR': bdl27_r(R20, [1.055, 0.648, 0.648, 0.648, 0.226, 0.198, 0.198, 0.138, 0.134, 0.134, 0.13, 0.104, 0.075, 0.07, 0.045] + [0.042] * 6),
+        'MAT': bdl27_r(R20, [1.055, 1.04, 0.99, 0.94, 0.915, 0.905, 0.9, 0.895, 0.882, 0.882, 0.875, 0.872, 0.82, 0.8, 0.795, 0.792, 0.79, 0.783, 0.783, 0.782, 0.765]),
+        'GNN-MT': bdl27_r(R20, [1.055, 1.03, 1.03, 0.92, 0.84, 0.728, 0.685, 0.643, 0.487, 0.48, 0.32, 0.283, 0.17, 0.07, 0.045] + [0.042] * 6),
+        'CNP': bdl27_r(R20, [1.055, 0.722, 0.66, 0.605, 0.6, 0.575, 0.56, 0.535, 0.515, 0.48, 0.413, 0.393, 0.385, 0.34, 0.34, 0.34, 0.29, 0.285, 0.28, 0.25, 0.23]),
+        'ProtoNet': {0: 1.055, 1: 0.68, 2: 0.65, 3: 0.64, 4: 0.41, 5: 0.08, 6: 0.045, 7: 0.042, 20: 0.042},
+        'DKT': {0: 1.055, 1: 1.05, 2: 0.65, 3: 0.648, 4: 0.648, 5: 0.648, 6: 0.62, 7: 0.588, 8: 0.52, 9: 0.238, 10: 0.14, 11: 0.08, 12: 0.075, 13: 0.075, 14: 0.075, 15: 0.045, 16: 0.042, 20: 0.042},
+        'ADKF-IFT': {0: 1.055, 1: 1.055, 2: 0.648, 3: 0.648, 4: 0.575, 5: 0.083, 6: 0.047, 7: 0.042, 20: 0.042},
+    },
+    'c': {
+        'Fingerprint': bdl27_r(list(range(31)), [4.18, 4.18, 4.18, 4.3, 4.98, 5.25, 5.67, 5.99, 6.28, 6.49, 6.76, 6.82, 6.95, 7.06, 7.05, 7.06, 7.06, 7.06, 7.1, 7.1, 7.11, 7.13, 7.15, 7.2, 7.22, 7.24, 7.26, 7.28, 7.3, 7.33, 7.33]),
+        'PAR': {0: 4.2, 9: 4.2, 10: 4.45, 11: 4.55, 12: 4.7, 13: 5.0, 14: 5.24, 15: 5.28, 16: 5.42, 17: 5.42, 18: 5.48, 19: 5.48, 20: 5.58, 21: 5.7, 22: 5.81, 23: 6.02, 24: 6.57, 25: 6.89, 26: 7.1, 27: 7.3, 28: 7.55, 29: 7.65, 30: 7.76},
+        'MAT': {0: 4.2, 2: 4.2, 3: 4.58, 4: 5.4, 5: 5.61, 6: 6.16, 7: 6.38, 8: 6.85, 9: 7.58, 10: 7.76, 11: 7.87, 12: 8.38, 13: 8.57, 30: 8.57},
+        'GNN-MT': {0: 4.2, 2: 4.2, 3: 4.53, 4: 4.7, 5: 5.78, 6: 6.64, 7: 7.12, 8: 7.58, 9: 7.78, 10: 7.8, 11: 8.03, 12: 8.13, 13: 8.35, 15: 8.38, 16: 8.4, 17: 8.45, 18: 8.5, 19: 8.52, 20: 8.53, 21: 8.55, 22: 8.57, 30: 8.57},
+        'CNP': {0: 4.2, 8: 4.2, 9: 4.3, 10: 4.58, 11: 4.95, 12: 5.63, 13: 6.18, 14: 6.45, 15: 6.6, 16: 6.9, 17: 7.24, 18: 7.41, 19: 7.42, 20: 7.47, 21: 7.53, 22: 7.61, 23: 7.78, 24: 7.92, 25: 7.97, 26: 8.1, 27: 8.15, 28: 8.15, 29: 8.17, 30: 8.2},
+        'ProtoNet': {0: 4.2, 8: 4.2, 9: 4.3, 10: 4.4, 11: 4.65, 12: 4.78, 13: 5.32, 14: 5.6, 15: 6.05, 16: 6.33, 17: 6.62, 18: 6.9, 19: 7.05, 20: 7.1, 22: 7.15, 24: 7.22, 26: 7.25, 28: 7.3, 30: 7.35},
+        'DKT': {0: 4.2, 8: 4.2, 9: 4.35, 10: 4.7, 11: 5.1, 12: 5.75, 13: 6.52, 14: 7.27, 15: 7.55, 16: 7.6, 17: 7.68, 30: 7.68},
+        'ADKF-IFT': {0: 4.23, 9: 4.23, 10: 4.4, 11: 4.95, 12: 5.5, 13: 5.8, 14: 6.63, 15: 7.13, 16: 7.4, 17: 7.55, 18: 7.73, 19: 8.18, 20: 8.22, 21: 8.31, 28: 8.31, 29: 8.35, 30: 8.37},
+    },
+    'd': {
+        'Fingerprint': {0: 2.75, 1: 4.8, 2: 5.4, 3: 6.05, 4: 6.5, 5: 6.7, 6: 6.85, 7: 7.3, 8: 7.55, 9: 8.25, 10: 8.62, 12: 8.75, 14: 9.4, 16: 9.7, 18: 9.9, 20: 10.0, 24: 10.15, 28: 10.3, 32: 10.45, 36: 10.55, 40: 10.65},
+        'PAR': {0: 2.75, 1: 8.48, 3: 8.48, 4: 8.6, 6: 8.6, 8: 8.62, 10: 8.65, 12: 8.7, 14: 8.8, 16: 9.0, 18: 9.3, 20: 9.5, 24: 9.85, 28: 10.25, 32: 10.45, 36: 10.55, 40: 10.6},
+        'MAT': {0: 2.75, 1: 4.3, 2: 5.0, 3: 6.85, 4: 7.03, 5: 7.1, 6: 7.4, 7: 7.55, 8: 7.57, 12: 7.57, 14: 7.95, 16: 8.75, 18: 8.9, 20: 9.25, 22: 9.5, 24: 9.6, 28: 9.7, 32: 9.95, 36: 10.25, 40: 10.45},
+        'GNN-MT': {0: 2.75, 1: 3.8, 2: 5.8, 3: 7.2, 4: 7.6, 5: 8.4, 6: 8.6, 8: 9.0, 10: 9.75, 12: 10.05, 14: 10.2, 16: 10.3, 20: 10.5, 24: 10.6, 28: 10.9, 40: 10.9},
+        'CNP': {0: 2.75, 1: 2.8, 2: 3.8, 3: 5.2, 4: 6.5, 5: 7.3, 6: 8.25, 7: 8.6, 8: 9.2, 12: 9.25, 14: 9.6, 16: 10.0, 20: 10.3, 22: 10.6, 34: 10.65, 40: 10.7},
+        'ProtoNet': {0: 2.75, 1: 5.1, 2: 6.5, 3: 7.25, 4: 7.95, 6: 8.4, 8: 8.65, 10: 8.85, 12: 9.1, 14: 9.6, 16: 9.8, 20: 10.0, 24: 10.2, 28: 10.4, 32: 10.5, 36: 10.55, 40: 10.6},
+        'DKT': {0: 2.75, 1: 3.4, 2: 4.9, 3: 5.9, 4: 6.5, 6: 7.6, 8: 8.6, 10: 9.0, 12: 9.3, 14: 9.5, 16: 9.8, 20: 9.95, 24: 10.1, 28: 10.25, 32: 10.4, 36: 10.5, 40: 10.6},
+        'ADKF-IFT': {0: 2.75, 1: 8.22, 2: 9.3, 3: 9.92, 4: 10.1, 5: 10.35, 6: 10.4, 8: 10.4, 10: 10.48, 12: 10.5, 14: 10.55, 16: 10.65, 18: 10.7, 20: 10.72, 24: 10.75, 28: 10.8, 32: 10.85, 36: 10.88, 40: 10.9},
+    },
+}
+
+def bdl27_bo():
+    b = ''
+    W, H = 240, 190
+    panels = [
+        ('a', Plot(78, 14, W, H, (0, 20), (-12.5, -7)), list(range(0, 21, 2)), [-12, -11, -10, -9, -8, -7], -12.3, 'Top-1 binding score (↓)', '(a) Molecular docking.', 20, 1),
+        ('b', Plot(418, 14, W, H, (0, 20), (0, 1.1)), list(range(0, 21, 2)), [0, 0.2, 0.4, 0.6, 0.8, 1.0], 0.042, 'Top-1 relative growth (↓)', '(b) Antibiotic discovery.', 20, 1),
+        ('c', Plot(78, 290, W, H, (0, 30), (4.0, 8.8)), list(range(0, 31, 3)), [4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5], 8.57, 'Top-1 pIC50 Fluorescence (↑)', '(c) Antiviral drug design.', 30, 2),
+        ('d', Plot(418, 290, W, H, (0, 40), (2, 11.5)), list(range(0, 41, 4)), [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 11.07, 'Top-1 power conversion efficiency (↑)', '(d) Material design.', 40, 2),
+    ]
+    for key, P, xt, yt, opt, ylab, sub, xmax, every in panels:
+        for v in yt:
+            b += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid')
+            b += text(P.x0 - 5, P.Y(v) + 4, f'{v:g}' if key != 'c' else f'{v:.1f}', 'end', 'small')
+        for v in xt:
+            b += text(P.X(v), P.y0 + P.h + 15, str(v), 'middle', 'small')
+        b += bdl27_frame(P)
+        b += line([(P.x0, P.Y(opt)), (P.x0 + P.w, P.Y(opt))], 'ln', ' stroke-dasharray="4 3" style="stroke-width: 1"')
+        b += text(P.x0 + P.w / 2, P.y0 + P.h + 32, 'The number of molecules queried', 'middle', 'small')
+        b += bdl27_vlabel(P.x0 - 42, P.y0 + P.h / 2, ylab)
+        for name in ['Fingerprint', 'PAR', 'MAT', 'GNN-MT', 'CNP', 'ProtoNet', 'DKT', 'ADKF-IFT']:
+            pts = bdl27_steps(BDL27_BO[key][name], xmax)
+            b += bdl27_series(P, pts, BDL27_BO_ST[name], every)
+        b += text(P.x0 + P.w / 2, P.y0 + P.h + 52, sub, 'middle', 'small')
+    ly = 556
+    names = ['Optimum', 'Fingerprint', 'PAR', 'MAT', 'GNN-MT', 'CNP', 'ProtoNet', 'DKT', 'ADKF-IFT']
+    for i, name in enumerate(names):
+        col, row = i % 3, i // 3
+        x, y = 40 + col * 215, ly + row * 20
+        if name == 'Optimum':
+            b += line([(x, y), (x + 26, y)], 'ln', ' stroke-dasharray="4 3" style="stroke-width: 1"')
+            b += text(x + 32, y + 4, 'Optimum', 'start', 'small')
+        else:
+            b += bdl27_legend_item(x, y, name + ' representation', BDL27_BO_ST[name])
+    svg('Bdl27BoOutOfDomain', 680, 608,
+        'Top-1 target value against the number of molecules queried on four out-of-domain tasks',
+        'Four panels, each with a dashed line at the optimum. (a) Molecular docking, binding score, lower is better: ADKF-IFT reaches the optimum near minus 12.3 after about 13 queries; GNN-MT, ProtoNet and PAR drop fast but level off near minus 11.9 to minus 12.2; the fingerprint representation improves slowest and ends near minus 11.1. (b) Antibiotic discovery, relative growth, lower is better: ADKF-IFT and ProtoNet reach the optimum near 0.04 after about 6 queries, DKT, PAR and GNN-MT after about 14, CNP and fingerprint end near 0.23 and MAT near 0.77. (c) Antiviral drug design, pIC50 fluorescence, higher is better: MAT and GNN-MT reach the optimum 8.57 after about 13 to 22 queries; ADKF-IFT reaches about 8.35, CNP about 8.2, DKT about 7.7 and fingerprint, ProtoNet and PAR about 7.3 to 7.8 after 30 queries. (d) Material design, power conversion efficiency, higher is better: ADKF-IFT rises fastest, above 10 after about 4 queries, and all representations approach about 10.5 to 10.9 by 40 queries, below the optimum 11.07.',
+        b)
+
+bdl27_training_diagram()
+bdl27_fsmol()
+bdl27_bo()

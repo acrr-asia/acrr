@@ -1,0 +1,848 @@
+---
+title: "Quá trình hàm nhân sâu và máy hàm nhân sâu"
+description: "Quá trình hàm nhân sâu và máy hàm nhân sâu: nền tảng quá trình Gauss, quá trình Wishart sâu, giới hạn học biểu diễn và DKM thưa."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - kernel methods
+  - deep kernel machines
+  - gaussian processes
+series: bayesian-deep-learning
+seriesOrder: 32
+---
+
+## 1. Giới thiệu
+
+Mạng nơ-ron đã trở thành lựa chọn mặc định cho các tác vụ phức tạp như thị giác máy tính và xử lý ngôn ngữ tự nhiên nhờ ưu thế hiệu năng vượt trội so với các phương pháp khác. Do bản chất hộp đen, việc thiết kế mạng nơ-ron gần như hoàn toàn dựa trên thử và sai, và một khi đã triển khai, rất khó xác định những yếu tố nào góp phần vào các quyết định của mạng; người ta thường phát hiện mạng nơ-ron dùng những đặc trưng bất ngờ và không liên quan để đưa ra dự đoán. Vấn đề còn trầm trọng hơn vì hiểu biết về lý thuyết học sâu hiện nay tụt hậu rất xa so với thực hành. Điều này dẫn đến những mô hình tuy mạnh nhưng tốn thời gian và khó tính khi thiết kế (ví dụ, hãy so sánh He và cộng sự với He và cộng sự, hoặc xét việc tìm kiếm kiến trúc mạng nơ-ron (neural architecture search) đã là cả một lĩnh vực nghiên cứu rộng lớn riêng), thường tốn kém tính toán hơn mức cần thiết, và có thể không phù hợp cho các ứng dụng đòi hỏi an toàn cao như y học và các hệ thống tự hành.
+
+Phương pháp hàm nhân (kernel method) là một lớp mô hình có tính diễn giải được cao, vì cách chúng hoạt động tính tường minh độ tương tự giữa các điểm dữ liệu. Hơn nữa, nhiều mô hình lý thuyết của mạng nơ-ron quy về phương pháp hàm nhân, cho phép phân tích gọn gàng hơn. Đáng tiếc là trên nhiều tác vụ học máy quan trọng, phương pháp hàm nhân phần lớn thua kém mạng nơ-ron về hiệu năng dự đoán.
+
+Những phát triển gần đây của phương pháp hàm nhân có khả năng khắc phục thiếu sót này. Đó là quá trình hàm nhân sâu (deep kernel process, DKP) và máy hàm nhân sâu (deep kernel machine, DKM).
+
+## 2. Kiến thức nền tảng
+
+Chương này cung cấp các kiến thức nền tảng cần thiết để hiểu DKP và DKM. Trước hết, chương nhắc lại quá trình Gauss, rồi giới thiệu các quá trình Gauss thưa xấp xỉ (dùng điểm cảm sinh) làm nền cho DKP/DKM, cùng với quá trình Gauss sâu (deep Gaussian process, DGP). Sau đó chương giới thiệu quá trình hàm nhân sâu, vốn là một góc nhìn "không đặc trưng" về DGP, và máy hàm nhân sâu, vốn là phiên bản độ rộng vô hạn của một DKP. Lưu ý rằng ký hiệu của chương này khác với ký hiệu của các chương khác.
+
+### 2.1 Quá trình Gauss
+
+Dù mạng nơ-ron đã cho thấy khả năng ấn tượng trong việc học đặc trưng và tổng quát hóa trên các tác vụ phức tạp, lý do chính xác khiến chúng hoạt động tốt đến vậy trong các bối cảnh này vẫn chưa được hiểu rõ, và trong nhiều tình huống, chẳng hạn khi có ít dữ liệu, mạng nơ-ron có thể gặp khó khăn so với các phương pháp truyền thống hơn. Vì vậy mục này nhắc lại quá trình Gauss (Gaussian process, GP) của thống kê Bayes, một loại phương pháp hàm nhân Bayes, và các mục sau sẽ khảo sát mối quan hệ giữa mạng nơ-ron và quá trình Gauss. Quá trình Gauss đã được giới thiệu trước đó ở [Chương 23](/vi/blog/introduction-to-kernel-methods).
+
+Một quá trình Gauss là một quá trình ngẫu nhiên (một tập hợp các biến ngẫu nhiên) trong đó mọi tập con hữu hạn đều có phân phối Gauss nhiều chiều. Một quá trình Gauss được xác định hoàn toàn bởi hàm trung bình $m(\cdot) \in \mathbb{R}^d \to \mathbb{R}$ và hàm hiệp phương sai / hàm nhân (kernel) xác định dương $k(\cdot, \cdot) \in \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$, và khi đó người ta viết
+
+$$
+f(\cdot) \sim \mathcal{GP}(m(\cdot), k(\cdot, \cdot)). \tag{26.1}
+$$
+
+Quá trình Gauss được dùng để biểu diễn các phân phối tiên nghiệm (prior) trên hàm. Cụ thể, nếu $\mathbf{x}, \mathbf{x}' \in \mathbb{R}^{N_0}$ là hai điểm dữ liệu có số chiều $N_0$, thì với một hàm $f(\cdot) \sim \mathcal{GP}(m(\cdot), k(\cdot, \cdot))$,
+
+$$
+\mathbb{E}[f(\mathbf{x})] = m(\mathbf{x}) \tag{26.2}
+$$
+
+$$
+\mathbb{E}[f(\mathbf{x}')] = m(\mathbf{x}') \tag{26.3}
+$$
+
+$$
+\operatorname{cov}(f(\mathbf{x}), f(\mathbf{x}')) = k(\mathbf{x}, \mathbf{x}'). \tag{26.4}
+$$
+
+Đặc biệt, cho $P$ điểm dữ liệu $\{\mathbf{x}_1, \dots, \mathbf{x}_P\}$, phân phối đồng thời của các giá trị hàm tại các điểm đó là Gauss nhiều chiều:
+
+$$
+\begin{pmatrix} f(\mathbf{x}_1) \\ \vdots \\ f(\mathbf{x}_P) \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} m(\mathbf{x}_1) \\ \vdots \\ m(\mathbf{x}_P) \end{pmatrix}, \begin{pmatrix} k(\mathbf{x}_1, \mathbf{x}_1) & \cdots & k(\mathbf{x}_1, \mathbf{x}_P) \\ \vdots & \ddots & \vdots \\ k(\mathbf{x}_P, \mathbf{x}_1) & \cdots & k(\mathbf{x}_P, \mathbf{x}_P) \end{pmatrix} \right). \tag{26.5}
+$$
+
+Do đó hàm trung bình $m(\cdot)$ cho biết giá trị trung bình / kỳ vọng của hàm tại một điểm đầu vào cụ thể, còn hàm nhân $k(\cdot, \cdot)$ cho biết giá trị hàm tại một điểm chịu ảnh hưởng thế nào bởi giá trị hàm tại các điểm lân cận. Có lẽ lớp hàm nhân trực quan nhất là các hàm nhân đẳng hướng (isotropic kernel), có thể tính như một hàm của khoảng cách giữa hai điểm, tức $k(\|\mathbf{x} - \mathbf{x}'\|)$. Một ví dụ rất phổ biến là hàm nhân mũ bình phương (squared exponential kernel),
+
+$$
+k(\mathbf{x}, \mathbf{x}') = \exp\left(-\frac{\|\mathbf{x} - \mathbf{x}'\|^2}{2l^2}\right), \tag{26.6}
+$$
+
+trong đó $l$ là một siêu tham số (hyperparameter) gọi là "thang độ dài" (lengthscale), điều khiển tốc độ suy giảm của hiệp phương sai theo khoảng cách (thang độ dài lớn hơn biểu diễn các hàm trơn hơn, nắm bắt các xu hướng rộng, còn thang độ dài nhỏ hơn biểu diễn các hàm biến thiên nhanh, nắm bắt thông tin cục bộ). Có nhiều loại hàm nhân khác, chẳng hạn hàm nhân tuần hoàn có hiệp phương sai dao động theo khoảng cách, cho các hàm tuần hoàn, nhưng chúng không được bàn ở đây. Trong nhiều trường hợp không có thông tin tiên nghiệm nào về giá trị trung bình của hàm, nên hàm trung bình $\mathbf{m}(\cdot)$ thường được đặt bằng hàm không $\mathbf{m}(\mathbf{x}) = \mathbf{0}$ với mọi $\mathbf{x} \in \mathbb{R}^{N_0}$.
+
+Giả sử có các giá trị đích $\{y_1, \dots, y_P\}$ và một hàm hợp lý $p(y_i \mid f(x_i))$, cùng một tiên nghiệm quá trình Gauss, thì có thể thực hiện suy luận Bayes cho bài toán xấp xỉ hàm **phi tham số** (non-parametric, hay "không gian hàm"). Điều này trái với các phương pháp **có tham số** (parametric) / không gian trọng số, vốn giả định một dạng tham số cho hàm, như $f(x_i) = w_1 x_i + w_2$ trong hồi quy tuyến tính Bayes, và tính phân phối hậu nghiệm (posterior) trên các trọng số $p(w_1, w_2 \mid \{x_1, \dots, x_P\}, \{y_1, \dots, y_P\})$ (phân phối này sau đó có thể được dùng để tính một phân phối dự đoán).
+
+Cụ thể, cho một tập điểm kiểm tra mới $\{\mathbf{x}_1^*, \dots, \mathbf{x}_{P_*}^*\}$, mục tiêu là tính phân phối hậu nghiệm $p(f(\mathbf{x}_1^*), \dots, f(\mathbf{x}_{P_*}^*) \mid \{x_1, \dots, x_{P_*}\}, \{y_1, \dots, y_P\})$ trên giá trị của hàm tại điểm kiểm tra mới. Trong một số trường hợp, điều này khả thi nhờ các công thức "Gauss phân khối" (partitioned Gaussian) ở dạng đóng. Giả sử có một vector ngẫu nhiên Gauss nhiều chiều được chia thành hai vector ngắn hơn $\mathbf{a}$ và $\mathbf{b}$ như sau:
+
+$$
+\begin{pmatrix} \mathbf{a} \\ \mathbf{b} \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \boldsymbol{\mu}_a \\ \boldsymbol{\mu}_b \end{pmatrix}, \begin{pmatrix} \boldsymbol{\Sigma}_{aa} & \boldsymbol{\Sigma}_{ab} \\ \boldsymbol{\Sigma}_{ba} & \boldsymbol{\Sigma}_{bb} \end{pmatrix} \right). \tag{26.7}
+$$
+
+Khi đó phân phối có điều kiện $p(\mathbf{b} \mid \mathbf{a})$ cũng là Gauss nhiều chiều, và có dạng
+
+$$
+\mathbf{b} \mid \mathbf{a} \sim \mathcal{N}\left(\boldsymbol{\mu}_b + \boldsymbol{\Sigma}_{ba}\boldsymbol{\Sigma}_{aa}^{-1}(\mathbf{a} - \boldsymbol{\mu}_a), \boldsymbol{\Sigma}_{bb} - \boldsymbol{\Sigma}_{ba}\boldsymbol{\Sigma}_{aa}^{-1}\boldsymbol{\Sigma}_{ab}\right). \tag{26.8}
+$$
+
+Giả sử các quan sát không có nhiễu $y_i = f(x_i)$ (tức các biến ẩn $\mathbf{f}$ được quan sát trực tiếp), có thể lập một tiên nghiệm Gauss nhiều chiều phân khối từ các điểm huấn luyện $\{f(\mathbf{x}_1), \dots, f(\mathbf{x}_P)\}$ và các điểm kiểm tra $\{f(\mathbf{x}_1^*), \dots, f(\mathbf{x}_{P_*}^*)\}$ như sau:
+
+$$
+\begin{pmatrix} \mathbf{f} \\ \mathbf{f}_* \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{m}(\mathbf{X}) \\ \mathbf{m}(\mathbf{X}_*) \end{pmatrix}, \begin{pmatrix} \mathbf{K}(\mathbf{X}, \mathbf{X}) & \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \\ \mathbf{K}(\mathbf{X}_*, \mathbf{X}) & \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) \end{pmatrix} \right) \tag{26.9}
+$$
+
+trong đó $\mathbf{X} \in \mathbb{R}^{P \times N_0}, \mathbf{X}_* \in \mathbb{R}^{P_* \times N_0}$ là các đầu vào xếp chồng theo chiều dọc, $\mathbf{f} \in \mathbb{R}^P, \mathbf{f}_* \in \mathbb{R}^{P_*}$ là các giá trị hàm tại các đầu vào đó xếp chồng theo chiều dọc, $\mathbf{m}(\mathbf{X}), \mathbf{m}(\mathbf{X}_*)$ là các giá trị trung bình tại các đầu vào đó xếp chồng theo chiều dọc, và $\mathbf{K}(\mathbf{X}, \mathbf{X}) \in \mathbb{R}^{P \times P}, \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \in \mathbb{R}^{P \times P_*}, \mathbf{K}(\mathbf{X}_*, \mathbf{X}) \in \mathbb{R}^{P_* \times P}, \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) \in \mathbb{R}^{P_* \times P_*}$ là các "ma trận hàm nhân" (kernel matrix), lập bằng cách áp dụng hàm nhân $k(\cdot, \cdot)$ cho mọi cặp điểm huấn luyện với huấn luyện, huấn luyện với kiểm tra, kiểm tra với huấn luyện và kiểm tra với kiểm tra, theo thứ tự đó. Lưu ý rằng vì $k(\cdot, \cdot)$ là một hàm đối xứng xác định dương nên $\mathbf{K}(\mathbf{X}, \mathbf{X})$ và $\mathbf{K}(\mathbf{X}_*, \mathbf{X}_*)$ là các ma trận đối xứng xác định dương, và $K(\mathbf{X}, \mathbf{X}_*) = K(\mathbf{X}_*, \mathbf{X})^T$.
+
+Áp dụng công thức Gauss phân khối cho phép tính phân phối dự đoán hậu nghiệm (posterior predictive) như sau:
+
+$$
+\mathbf{f}_* \mid \mathbf{f} \sim \mathcal{N}\left(\mathbf{m}_* + \mathbf{K}_*^T\mathbf{K}^{-1}(\mathbf{f} - \mathbf{m}), \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_*\right), \tag{26.10}
+$$
+
+trong đó dùng các ký hiệu viết tắt $\mathbf{m} = \mathbf{m}(\mathbf{X}), \mathbf{m}_* = \mathbf{m}(\mathbf{X}_*), \mathbf{K} = \mathbf{K}(\mathbf{X}, \mathbf{X}), \mathbf{K}_* = \mathbf{K}(\mathbf{X}, \mathbf{X}_*), \mathbf{K}_{**} = \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*)$. Cách viết này phổ biến trong tài liệu về quá trình Gauss. Như vậy có một nghiệm dạng đóng cho phân phối của các dự đoán kiểm tra $\mathbf{f}_*$. Lưu ý rằng người ta thường bỏ việc điều kiện hóa theo các đầu vào $\mathbf{X}$ khỏi ký hiệu.
+
+Cũng thu được nghiệm dạng đóng khi giả định dữ liệu có nhiễu Gauss, tức $y_i = f(\mathbf{x}_i) + \epsilon$ với $\epsilon \sim \mathcal{N}(0, \sigma^2), \sigma^2 \in \mathbb{R}^+$. Vì tổng của hai biến Gauss vẫn là Gauss, phân phối đồng thời trên các nhãn huấn luyện $\mathbf{y} = \mathbf{f} + \boldsymbol{\epsilon}$ và các nhãn kiểm tra $\mathbf{y}_* = \mathbf{f}_* + \boldsymbol{\epsilon}$ (trong đó $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \sigma^2\mathbf{I})$ trở thành
+
+$$
+\begin{pmatrix} \mathbf{y} \\ \mathbf{y}_* \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{m}(\mathbf{X}) \\ \mathbf{m}(\mathbf{X}_*) \end{pmatrix}, \begin{pmatrix} \mathbf{K}(\mathbf{X}, \mathbf{X}) + \sigma^2\mathbf{I} & \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \\ \mathbf{K}(\mathbf{X}_*, \mathbf{X}) & \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) + \sigma^2\mathbf{I} \end{pmatrix} \right). \tag{26.11}
+$$
+
+Từ đó có thể lập phân phối dự đoán hậu nghiệm
+
+$$
+\mathbf{y}_* \mid \mathbf{y} \sim \mathcal{N}\left(\mathbf{m}_* + \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}(\mathbf{y} - \mathbf{m}), \mathbf{K}_{**} - \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}\mathbf{K}_* + \sigma^2\mathbf{I}\right). \tag{26.12}
+$$
+
+Trong trường hợp đơn giản của hồi quy với nhiễu Gauss, không hiếm tài liệu trình bày "dự đoán" như việc dự đoán biến ẩn nền $\mathbf{f}_*$, nên thực ra phân phối đồng thời giữa $\mathbf{y}$ và $\mathbf{f}_*$ được lập:
+
+$$
+\begin{pmatrix} \mathbf{y} \\ \mathbf{f}_* \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{m}(\mathbf{X}) \\ \mathbf{m}(\mathbf{X}_*) \end{pmatrix}, \begin{pmatrix} \mathbf{K}(\mathbf{X}, \mathbf{X}) + \sigma^2\mathbf{I} & \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \\ \mathbf{K}(\mathbf{X}_*, \mathbf{X}) & \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) \end{pmatrix} \right), \tag{26.13}
+$$
+
+và do đó phân phối hậu nghiệm trên $\mathbf{f}_*$ có thể tính được là
+
+$$
+\mathbf{f}_* \mid \mathbf{y} \sim \mathcal{N}\left(\mathbf{m}_* + \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}(\mathbf{y} - \mathbf{m}), \mathbf{K}_{**} - \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}\mathbf{K}_*\right). \tag{26.14}
+$$
+
+Tóm lại, các giả định là một tiên nghiệm Gauss nhiều chiều $p(\mathbf{f})$ trên các biến ẩn và một hàm hợp lý Gauss $p(\mathbf{y} \mid \mathbf{f}) = \mathcal{N}(y_i; \mathbf{f}, \sigma^2\mathbf{I})$.
+
+Để đầy đủ và để tạo động cơ trực quan cho GP, có thể hình dung một GP như một phân phối Gauss nhiều chiều vô hạn chiều, trong đó các chiều biểu diễn giá trị hàm tại mọi điểm $\mathbf{x}$ có thể có trong không gian đầu vào. Cụ thể, nó giữ tính chất mọi phân phối biên và phân phối có điều kiện trên các tập con biến cũng là Gauss. Như vậy, tiên nghiệm tại một tập hữu hạn vị trí đầu vào $\mathbf{X}$ là một phân phối Gauss nhiều chiều hữu hạn chiều $p(\mathbf{f})$, và phân phối "tiên nghiệm có điều kiện" (prior conditional) tại một tập hữu hạn vị trí đầu vào $\mathbf{X}_*$ khi biết các giá trị hàm tại một tập đầu vào khác $\mathbf{X}$ là một phân phối Gauss nhiều chiều $p(\mathbf{f}_* \mid \mathbf{f})$, cho bởi các công thức Gauss có điều kiện trong Phương trình 26.8. Trong trường hợp hàm hợp lý Gauss, **quá trình hậu nghiệm cũng là một quá trình Gauss**, tức phân phối hậu nghiệm trên toàn bộ hàm $f(\cdot)$ có dạng
+
+$$
+f(\cdot) \mid X_{\text{data}}, y_{\text{data}} \sim \mathcal{GP}(m_{\text{post}}(\cdot), k_{\text{post}}(\cdot, \cdot)) \tag{26.15}
+$$
+
+trong đó
+
+$$
+m_{\text{post}}(x) = m(x) + k(x, X_{\text{data}})[K(X_{\text{data}}, X_{\text{data}}) + \sigma_n^2 I]^{-1}(y_{\text{data}} - m(X_{\text{data}})) \tag{26.16}
+$$
+
+$$
+k_{\text{post}}(x, x') = k(x, x') - k(x, X_{\text{data}})[K(X_{\text{data}}, X_{\text{data}}) + \sigma_n^2 I]^{-1}k(X_{\text{data}}, x'). \tag{26.17}
+$$
+
+Nghĩa là $m(\cdot), k(\cdot, \cdot)$ là hàm trung bình và hàm nhân tiên nghiệm, còn $m_{\text{post}}(\cdot), k_{\text{post}}(\cdot, \cdot)$ là hàm trung bình và hàm nhân hậu nghiệm. Đây là điều làm cho quá trình Gauss "phi tham số". Phân phối hậu nghiệm thực sự là trên quá trình Gauss vô hạn chiều, nhưng trong thực tế chỉ có thể thao tác với các biểu thức chứa các tập vị trí hữu hạn $\mathbf{X}$ và $\mathbf{X}_*$. Như mục tiếp theo cho thấy, quá trình hậu nghiệm chỉ là một quá trình Gauss trong trường hợp hàm hợp lý Gauss. Khi dùng một hàm hợp lý không Gauss (chẳng hạn cho bài toán phân loại), buộc phải dùng đến các phép xấp xỉ.
+
+### 2.2 Suy luận biến phân cho bài toán phân loại bằng quá trình Gauss
+
+Suy luận biến phân (variational inference, VI) được bàn kỹ ở [Chương 12](/vi/blog/introduction-to-variational-inference), nhưng ở đây có một phần nhắc lại tự đủ. Giả sử dữ liệu là $\mathbf{x}_i \in \mathbb{R}^{N_0}$, với nhãn nhị phân $y_i \in \{0, 1\}$. Một hàm hợp lý Gauss không phù hợp ở đây, vì các nhãn nhận giá trị rời rạc, trong khi phân phối Gauss có giá (support) liên tục và không bị chặn. Cách giải quyết là dùng một hàm logistic / sigmoid để lập một hàm hợp lý Bernoulli bằng cách biến đổi các biến ẩn,
+
+$$
+p(y_i = 1 \mid f_i) = \sigma(f_i) = \frac{1}{1 + \exp(-f_i)}. \tag{26.18}
+$$
+
+Tổng quát hơn, nếu $y_i \in \{0, \dots, K\}$ là các nhãn trong một tác vụ phân loại $K$ lớp, có thể dùng một hàm hợp lý phân phối Categorical (Categorical likelihood) với các xác suất softmax tính từ một biến ẩn vector $\mathbf{f}(\cdot) \in \mathbb{R}^K$,
+
+$$
+p(y_i = k \mid \mathbf{f}_i) = \operatorname{softmax}(\mathbf{f}_i)_k = \frac{\exp(f_{ik})}{\sum_{k'} \exp(f_{ik'})}. \tag{26.19}
+$$
+
+Một vấn đề xuất hiện ngay lập tức: với một tiên nghiệm Gauss nhiều chiều $p(\mathbf{f})$ trên các biến ẩn và một hàm hợp lý Bernoulli $p(\mathbf{y} \mid \mathbf{f})$, phân phối hậu nghiệm trên các biến ẩn $p(\mathbf{f})$ không có dạng đóng. Ngay cả khi nó có dạng đóng nhưng không phải Gauss, thì tích phân cần thiết để tính phân phối dự đoán $p(\mathbf{y}_* \mid \mathbf{y}) = \int p(\mathbf{y}_* \mid \mathbf{f}_*)p(\mathbf{f}_* \mid \mathbf{y})d\mathbf{f}_*$ gần như chắc chắn không có nghiệm dạng đóng.
+
+Vì vậy cần đến phép xấp xỉ. Có nhiều cách để làm điều này, nhưng ở đây suy luận biến phân được dùng để thu được một phân phối hậu nghiệm xấp xỉ $q(\mathbf{f}_*)$, rồi các mẫu $\mathbf{f}_{*,(m)}$ từ phân phối hậu nghiệm xấp xỉ này được dùng để tính trung bình Monte Carlo
+
+$$
+p(\mathbf{y}_* \mid \mathbf{y}) = \int p(\mathbf{y}_* \mid f_*)p(\mathbf{f}_* \mid \mathbf{y})d\mathbf{f}_* \approx \frac{1}{M}\sum_m^M \sigma\left(\mathbf{f}_{*,(m)}\right) \qquad \mathbf{f}_{*,(m)} \in \mathbb{R}^{P_*} \sim q(\mathbf{f}_*). \tag{26.20}
+$$
+
+Trong suy luận biến phân, mục tiêu là xấp xỉ một phân phối hậu nghiệm khó tính $p(\mathbf{f} \mid \mathbf{y})$ bằng một phân phối hậu nghiệm xấp xỉ $q(\mathbf{f})$ dễ thao tác và dễ lấy mẫu hơn. Một lựa chọn rất phổ biến là phân phối hậu nghiệm xấp xỉ Gauss nhiều chiều $q(\mathbf{f}) = \mathcal{N}(\mathbf{f}; \boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$, tham số hóa bởi vector trung bình và ma trận hiệp phương sai học được $\boldsymbol{\mu}_q \in \mathbb{R}^P, \boldsymbol{\Sigma}_q \in \mathbb{R}^{P \times P}$. Trong VI, $q$ được gọi là "phân phối hậu nghiệm xấp xỉ biến phân" (variational approximate posterior), còn $\boldsymbol{\mu}_q$ và $\boldsymbol{\Sigma}_q$ là các "tham số biến phân" (variational parameters). Lợi ích chính của phép xấp xỉ này là nó cho các biểu thức dạng đóng của phân phối dự đoán hậu nghiệm xấp xỉ $q(\mathbf{f}_*)$.
+
+Nếu $q(\mathbf{f}) = \mathcal{N}(\mathbf{f}; \boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$ là phân phối hậu nghiệm xấp xỉ trên các biến ẩn huấn luyện, thì một lựa chọn hợp lý cho phân phối hậu nghiệm xấp xỉ trên các biến ẩn kiểm tra $\mathbf{f}_*$ được cho bởi tích phân
+
+$$
+q(\mathbf{f}_*) = \int p(\mathbf{f}_* \mid \mathbf{f})q(\mathbf{f})d\mathbf{f}. \tag{26.21}
+$$
+
+Lựa chọn này hợp lý vì nó rất giống phân phối hậu nghiệm thật,
+
+$$
+p(\mathbf{f}_*) = \int p(\mathbf{f}_*, \mathbf{f})d\mathbf{f} = \int p(\mathbf{f}_* \mid \mathbf{f})p(\mathbf{f})d\mathbf{f}. \tag{26.22}
+$$
+
+Vì $p(\mathbf{f}_* \mid \mathbf{f}) = \mathcal{N}\left(\mathbf{f}_*; \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{f}, \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_*\right)$ và $q(\mathbf{f}) = \mathcal{N}(\mathbf{f}; \boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$ đều là Gauss, một kết quả chuẩn là tích phân của chúng cũng là Gauss, và giá trị trung bình cùng phương sai có thể tính bằng luật kỳ vọng toàn phần và luật phương sai toàn phần:
+
+$$
+\begin{aligned}
+\mathbb{E}_{q(\mathbf{f})}[\mathbf{f}_*] &= \mathbb{E}_{q(\mathbf{f})}\left[\mathbb{E}[\mathbf{f}_* \mid \mathbf{f}]\right] && (26.23) \\
+&= \mathbb{E}_{q(\mathbf{f})}[\mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{f}] && (26.24) \\
+&= \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\mu}_q && (26.25) \\
+\operatorname{Var}_{q(\mathbf{f})}[\mathbf{f}_*] &= \mathbb{E}_{q(\mathbf{f})}\left[\operatorname{Var}[\mathbf{f}_* \mid \mathbf{f}]\right] + \operatorname{Var}_{q(\mathbf{f})}\left[\mathbb{E}[\mathbf{f}_* \mid \mathbf{f}]\right] && (26.26) \\
+&= \mathbb{E}_{q(\mathbf{f})}\left[\mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_*\right] + \operatorname{Var}_{q(\mathbf{f})}\left[\mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{f}\right] && (26.27) \\
+&= \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_* + \mathbf{K}_*^T\mathbf{K}^{-1}\operatorname{Var}_{q(\mathbf{f})}[\mathbf{f}]\,\mathbf{K}^{-1}\mathbf{K}_* && (26.28) \\
+&= \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_* + \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\Sigma}_q\mathbf{K}^{-1}\mathbf{K}_*. && (26.29)
+\end{aligned}
+$$
+
+Lưu ý rằng để rõ ràng, chỉ số dưới $q(\mathbf{f})$ được dùng trong các kỳ vọng và phương sai lấy tích phân theo phân phối hậu nghiệm xấp xỉ, và chỉ số dưới được bỏ đi trong các biểu thức chỉ liên quan đến tiên nghiệm $p(\mathbf{f}* \mid \mathbf{f})$. Như vậy, khi biết giá trị của $\boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q$, có thể sinh mẫu từ phân phối dự đoán xấp xỉ
+
+$$
+q(\mathbf{f}_*) = \mathcal{N}\left(\mathbf{f}_*; \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\mu}_q, \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_* + \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\Sigma}_q\mathbf{K}^{-1}\mathbf{K}_*\right) \tag{26.30}
+$$
+
+rồi tính các dự đoán lấy trung bình Monte Carlo cho $p(\mathbf{y}_* \mid \mathbf{y})$ như trong Phương trình (26.20).
+
+Việc còn lại là xác định các giá trị $\boldsymbol{\mu}_q \in \mathbb{R}^P, \boldsymbol{\Sigma}_q \in \mathbb{R}^{P \times P}$ làm cho phân phối hậu nghiệm xấp xỉ $q(\mathbf{f})$ gần với phân phối hậu nghiệm thật $p(\mathbf{f} \mid \mathbf{y})$ nhất có thể. Trong suy luận biến phân, thước đo "độ gần" được chọn là độ phân kỳ Kullback–Leibler (KL):
+
+$$
+\boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q = \operatorname*{arg\,min}_{\boldsymbol{\mu}, \boldsymbol{\Sigma}} \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y})) = \operatorname*{arg\,min}_{\boldsymbol{\mu}, \boldsymbol{\Sigma}} \int q(\mathbf{f}) \log\frac{q(\mathbf{f})}{p(\mathbf{f} \mid \mathbf{y})}d\mathbf{f}. \tag{26.31}
+$$
+
+Thoạt nhìn, việc này có vẻ khó vì phân phối hậu nghiệm thật $p(\mathbf{f} \mid \mathbf{y})$ chưa biết. Tuy nhiên, có thể dùng một thủ thuật khá phổ biến là viết lại độ phân kỳ theo ELBO (cận dưới của bằng chứng, Evidence Lower Bound Objective),
+
+$$
+\begin{aligned}
+&\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y})) && (26.32\text{a}) \\
+&= \int q(\mathbf{f}) \log\frac{q(\mathbf{f})}{p(\mathbf{f} \mid \mathbf{y})}d\mathbf{f} && (26.32\text{b}) \\
+&= \int q(\mathbf{f}) \log q(\mathbf{f})d\mathbf{f} - \int q(\mathbf{f}) \log p(\mathbf{f} \mid \mathbf{y})d\mathbf{f} && (26.32\text{c}) \\
+&= \int q(\mathbf{f}) \log q(\mathbf{f})d\mathbf{f} - \int q(\mathbf{f}) \log\frac{p(\mathbf{y} \mid \mathbf{f})p(\mathbf{f})}{p(\mathbf{y})}d\mathbf{f} && (26.32\text{d}) \\
+&= \int q(\mathbf{f})\left[\log q(\mathbf{f}) - \log p(\mathbf{f})\right]d\mathbf{f} - \int q(\mathbf{f}) \log p(\mathbf{y} \mid \mathbf{f})d\mathbf{f} + \int q(\mathbf{f}) \log p(\mathbf{y})d\mathbf{f} && (26.32\text{e}) \\
+&= \int q(\mathbf{f}) \log\frac{q(\mathbf{f})}{p(\mathbf{f})}d\mathbf{f} - \int q(\mathbf{f}) \log p(\mathbf{y} \mid \mathbf{f})d\mathbf{f} + \log p(\mathbf{y}) \int q(\mathbf{f})d\mathbf{f} && (26.32\text{f}) \\
+&= \underbrace{\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f})) - \mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y} \mid \mathbf{f})]}_{\text{Negative ELBO}} + \underbrace{\log p(\mathbf{y})}_{\text{Evidence}}. && (26.32\text{g})
+\end{aligned}
+$$
+
+Sắp xếp lại theo bằng chứng (evidence),
+
+$$
+\log p(\mathbf{y}) = \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y})) + \underbrace{\mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y} \mid \mathbf{f})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f}))}_{\text{ELBO}}. \tag{26.33}
+$$
+
+Độ phân kỳ giữa phân phối hậu nghiệm xấp xỉ và phân phối hậu nghiệm thật, $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y}))$, luôn dương, nên ELBO đóng vai trò một cận dưới của bằng chứng của mô hình. Khi dữ liệu và mô hình cố định, bằng chứng là hằng số, nên cực đại hóa ELBO đồng thời cực tiểu hóa độ phân kỳ KL giữa phân phối hậu nghiệm xấp xỉ và phân phối hậu nghiệm thật, đó chính là mục tiêu chung. Để xem ELBO có thể được tối ưu hay không, viết
+
+$$
+\text{ELBO} = \underbrace{\mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y} \mid \mathbf{f})]}_{\text{Expected Log Likelihood (under } q)} - \underbrace{\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f}))}_{\text{KL between approx. post. and prior}}. \tag{26.34}
+$$
+
+Có thể thấy số hạng thứ nhất là kỳ vọng của log hàm hợp lý theo phân phối hậu nghiệm xấp xỉ $q(\mathbf{f})$. Như đã gợi ý ở trên, số hạng này có thể được ước lượng bằng cách lấy mẫu từ $q(\mathbf{f})$. Vì ELBO cần được lấy đạo hàm để cực đại hóa bằng leo gradient (gradient ascent), thủ thuật tái tham số hóa (reparametrization trick) được dùng để tách quá trình lấy mẫu ngẫu nhiên khỏi đồ thị tính toán. Nghĩa là mẫu Gauss ngẫu nhiên $\mathbf{f}$ được viết dưới dạng một phép biến đổi của một mẫu Gauss chuẩn, sao cho mọi tham số học được nằm trong phép biến đổi tất định chứ không nằm trong các biến ngẫu nhiên,
+
+$$
+\mathbf{f} = \boldsymbol{\mu}_q + \mathbf{L}\mathbf{z} \qquad \text{where } \mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}) \text{ and } \boldsymbol{\Sigma} = \mathbf{L}\mathbf{L}^T. \tag{26.35}
+$$
+
+Số hạng thứ hai là độ phân kỳ KL giữa phân phối hậu nghiệm xấp xỉ và tiên nghiệm trên $\mathbf{f}$. Vì cả hai đều là Gauss ($p(\mathbf{f}) = \mathcal{N}(\mathbf{0}, \mathbf{K})$ và $q(\mathbf{f}) = \mathcal{N}(\boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$), số hạng này có thể tính ở dạng đóng:
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f})) = \frac{1}{2}\left[\log\frac{|\mathbf{K}|}{|\boldsymbol{\Sigma}_q|} - P + \boldsymbol{\mu}_q\mathbf{K}^{-1}\boldsymbol{\mu}_q^T + \operatorname{tr}\left(\mathbf{K}^{-1}\boldsymbol{\Sigma}_q\right)\right] \tag{26.36}
+$$
+
+trong đó $|\mathbf{A}|$ ký hiệu định thức của ma trận $\mathbf{A}$, $\operatorname{tr}(\mathbf{A})$ ký hiệu vết, và cần nhớ rằng $P$ là số điểm dữ liệu huấn luyện, quyết định kích thước của $\mathbf{K} \in \mathbb{R}^{P \times P}$.
+
+Một điểm cuối cùng: vì ELBO là một cận dưới của bằng chứng của mô hình, người ta thường tối ưu các siêu tham số của mô hình (tức các siêu tham số của tiên nghiệm $p(\mathbf{f})$) bằng cách cực đại hóa ELBO như một đại lượng thay thế cho bằng chứng của mô hình.
+
+Sau khi đã thấy suy luận biến phân có thể được dùng cho bài toán phân loại bằng GP như thế nào, hãy xét xem cách làm này thực tế đến đâu (hay đúng hơn là thiếu thực tế đến đâu). Vấn đề then chốt là sự phụ thuộc vào kích thước tập dữ liệu $P$. Ma trận hàm nhân $\mathbf{K} \in \mathbb{R}^{P \times P}$ và ma trận hiệp phương sai hậu nghiệm xấp xỉ $\boldsymbol{\Sigma}_q \in \mathbb{R}^{P \times P}$ đều có $P^2$ phần tử, trong đó $P$ là số điểm dữ liệu huấn luyện. Để lưu $\boldsymbol{\Sigma}_q$ trong bộ nhớ cho một tập dữ liệu cỡ vừa phải với $P = 10^6$ điểm dữ liệu bằng số dấu phẩy động 32 bit sẽ cần $(10^6)^2 \times 4$ byte, tương đương khoảng 3 725GB bộ nhớ. Ngay cả khi bộ nhớ không phải là vấn đề, vẫn phải thực hiện những phép toán tốn kém trên ma trận hàm nhân, như nghịch đảo $\mathbf{K}^{-1}$ và định thức $|\mathbf{K}|$ của nó. Cả hai phép toán này đều rất tốn kém và không khả thi khi $P$ lớn.
+
+Mục tiếp theo giới thiệu các quá trình Gauss biến phân "thưa" (sparse), thay $P$ điểm huấn luyện bằng $P_\text{i}$ "điểm cảm sinh" (inducing points) nhằm tóm tắt các điểm dữ liệu, nhưng với $P_\text{i} \ll P$ để các phép toán trở thành $\mathcal{O}(P_\text{i}^3)$, khả thi trong thực tế.
+
+### 2.3 Quá trình Gauss biến phân thưa
+
+Quá trình Gauss thưa tìm cách giảm độ phức tạp bộ nhớ $\mathcal{O}(P^2)$ và độ phức tạp thời gian $\mathcal{O}(P^3)$ của quá trình Gauss (trong đó $P$ là số điểm huấn luyện) bằng cách thay các điểm huấn luyện bằng một tập nhỏ gồm $P_\text{i} \ll P$ "điểm cảm sinh" bằng cách nào đó tóm tắt được tập dữ liệu. Các điểm cảm sinh này có thể đơn giản là một tập con của dữ liệu huấn luyện ban đầu, hoặc là các tham số học được, tối ưu theo một cách nào đó. Ở đây áp dụng cách tiếp cận điểm cảm sinh biến phân do Titsias đề xuất và được Hensman và cộng sự hoàn thiện, trong đó các điểm cảm sinh được đưa vào thông qua phân phối hậu nghiệm xấp xỉ.
+
+Cụ thể, gọi $\mathbf{X}_\text{i} \in \mathbb{R}^{P_\text{i} \times N_0}$ là một tập "đầu vào cảm sinh" (inducing inputs), tức một tập $P_\text{i}$ điểm dữ liệu đầu vào, và gọi $\mathbf{f}_\text{i} \in \mathbb{R}^{P_\text{i}}$ là các "giá trị cảm sinh" (inducing values), tức các giá trị hàm tại các đầu vào cảm sinh đó. Ngoài ra, để hoàn toàn rõ ràng, một ký hiệu mới $\mathbf{f}_\text{t} \in \mathbb{R}^{P_\text{t}}$ được đưa vào cho tập $P_\text{t}$ điểm huấn luyện.
+
+Như mọi khi, phân phối đồng thời giữa các giá trị hàm là Gauss nhiều chiều do tiên nghiệm quá trình Gauss. Điều này có nghĩa là tiên nghiệm đồng thời trên các điểm cảm sinh $\mathbf{f}_\text{i}$ và các điểm huấn luyện $\mathbf{f}_\text{t}$ là Gauss nhiều chiều:
+
+$$
+\mathbf{f} = \begin{pmatrix} \mathbf{f}_\text{i} \\ \mathbf{f}_\text{t} \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{0} \\ \mathbf{0} \end{pmatrix}, \begin{pmatrix} \mathbf{K}_\text{ii} & \mathbf{K}_\text{it} \\ \mathbf{K}_\text{ti} & \mathbf{K}_\text{tt} \end{pmatrix} \right). \tag{26.37}
+$$
+
+Ở đây $\mathbf{f} \in \mathbb{R}^{P_\text{i} + P_\text{t}}$ ký hiệu phép ghép nối các điểm cảm sinh và các điểm huấn luyện, $\mathbf{K}_\text{ii} = \mathbf{K}(\mathbf{X}_\text{i}, \mathbf{X}_\text{i}) \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$ là ma trận hàm nhân lập bằng cách áp dụng hàm nhân cho mọi cặp điểm cảm sinh, $\mathbf{K}_\text{ti} = \mathbf{K}_\text{it}^T = \mathbf{K}(\mathbf{X}_\text{t}, \mathbf{X}_\text{i}) \in \mathbb{R}^{P_\text{t} \times P_\text{i}}$ là ma trận hàm nhân lập bằng cách áp dụng hàm nhân cho mọi cặp điểm huấn luyện với điểm cảm sinh, và $\mathbf{K}_\text{tt} = \mathbf{K}(\mathbf{X}_\text{t}, \mathbf{X}_\text{t}) \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$ là ma trận hàm nhân lập bằng cách áp dụng hàm nhân cho mọi cặp điểm huấn luyện.
+
+Phân phối hậu nghiệm xấp xỉ được giả định phân tích thành tích như sau,
+
+$$
+q(\mathbf{f}) = q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) = p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i}), \qquad q(\mathbf{f}_\text{i}) = \mathcal{N}(\boldsymbol{\mu}_\text{i}, \boldsymbol{\Sigma}_\text{ii}). \tag{26.38}
+$$
+
+Nói cách khác, một phân phối hậu nghiệm xấp xỉ $q(\mathbf{f}_\text{i})$ chỉ được mô hình hóa trên các điểm cảm sinh, và tiên nghiệm có điều kiện $p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})$ được dùng để cho phân phối ngầm định trên các điểm huấn luyện. Lưu ý rằng, khác với chương trước, phân phối hậu nghiệm xấp xỉ không còn chỉ trên các biến ẩn huấn luyện mà còn trên cả các biến ẩn cảm sinh $\mathbf{f}_\text{i}$. Phân phối hậu nghiệm xấp xỉ ngầm định chỉ trên các biến ẩn huấn luyện $\mathbf{f}_\text{t}$ thu được bằng cách lấy biên theo các điểm cảm sinh,
+
+$$
+q(\mathbf{f}_\text{t}) = \int p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})d\mathbf{f}_\text{i}. \tag{26.39}
+$$
+
+Vì đây là một tích phân Gauss, nó có nghiệm dạng đóng, về cơ bản giống hệt Phương trình (26.30), tức là
+
+$$
+q(\mathbf{f}_\text{t}) = \mathcal{N}\left(\mathbf{f}_\text{t}; \mathbf{K}_\text{ti}^T\mathbf{K}_\text{ii}^{-1}\boldsymbol{\mu}_\text{i}, \mathbf{K}_\text{tt} - \mathbf{K}_\text{ti}^T\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{it} + \mathbf{K}_\text{ti}^T\mathbf{K}_\text{ii}^{-1}\boldsymbol{\Sigma}_\text{ii}\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{it}\right) \tag{26.40}
+$$
+
+và do đó ELBO thu được khi thực hiện suy luận biến phân chỉ trên các biến ẩn huấn luyện, như trong mục trước, là
+
+$$
+\text{ELBO} = \mathbb{E}_{q(\mathbf{f}_\text{t})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t})) \tag{26.41}
+$$
+
+với $p(\mathbf{f}_\text{t}) = \mathcal{N}(\mathbf{f}_\text{t}; \mathbf{0}, \mathbf{K}_\text{tt})$ là tiên nghiệm trên các biến ẩn huấn luyện.
+
+Tuy nhiên, ELBO này có một vấn đề. Độ phân kỳ KL đòi hỏi nghịch đảo ma trận $\mathbf{K}_\text{tt} \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$, một phép toán rất tốn kém; lược đồ điểm cảm sinh được đưa ra chính là để tránh những phép toán như vậy.
+
+Titsias đề xuất một ELBO khác, bằng cách thực hiện suy luận biến phân trực tiếp trên các phân phối đồng thời $q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})$ và $p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})$. Kết quả là
+
+$$
+\begin{aligned}
+\text{ELBO}_{\text{Titsias}} &= \mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) && (26.42) \\
+&= \mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i})) && (26.43)
+\end{aligned}
+$$
+
+trong đó đẳng thức thứ hai đúng vì
+
+$$
+\begin{aligned}
+\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) &= \mathrm{D}_{\mathrm{KL}}(p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})p(\mathbf{f}_\text{i})) && (26.44) \\
+&= \mathbb{E}_{q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})}\left[\log\frac{p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})p(\mathbf{f}_\text{i})}\right] && (26.45) \\
+&= \mathbb{E}_{q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})}\left[\log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}\right] && (26.46) \\
+&= \int\int p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i}) \log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}d\mathbf{f}_\text{t}d\mathbf{f}_\text{i} && (26.47) \\
+&= \int q(\mathbf{f}_\text{i}) \log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}\left(\int p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})d\mathbf{f}_\text{t}\right)d\mathbf{f}_\text{i} && (26.48) \\
+&= \int q(\mathbf{f}_\text{i}) \log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}d\mathbf{f}_\text{i} && (26.49) \\
+&= \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i})). && (26.50)
+\end{aligned}
+$$
+
+Điều then chốt là khi suy luận biến phân được thực hiện trên quá trình đồng thời, độ phân kỳ KL được đơn giản hóa chỉ còn chứa các phân phối của điểm cảm sinh, vốn có ma trận hiệp phương sai kích thước $P_\text{i}$, dẫn tới các phép tính $\mathcal{O}(P_\text{i}^3)$ dễ xử lý hơn nhiều so với $\mathcal{O}(P_\text{t}^3)$.
+
+Hơn nữa, như Hensman và cộng sự đã chỉ ra, một hàm hợp lý i.i.d. có nghĩa là số hạng kỳ vọng của log hàm hợp lý phân tích thành một tổng theo các điểm dữ liệu huấn luyện,
+
+$$
+\begin{aligned}
+\mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] &= \sum_{p=1}^{P_\text{t}} \mathbb{E}_{q(\mathbf{f})}\left[\log p(y_p^\text{t} \mid f_p^\text{t})\right] && (26.51) \\
+&= \sum_{p=1}^{P_\text{t}} \mathbb{E}_{p(f_p^\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})}\left[\log p(y_p^\text{t} \mid f_p^\text{t})\right], && (26.52)
+\end{aligned}
+$$
+
+trong đó $f_p^\text{t}$ ký hiệu biến ẩn huấn luyện thứ $p$. Đẳng thức thứ hai chỉ ra rằng mỗi số hạng kỳ vọng không phụ thuộc vào phân phối đồng thời $q(\mathbf{f}) = p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})$ trên mọi điểm huấn luyện mà chỉ phụ thuộc vào phân phối biên $p(f_p^\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})$ trên một điểm huấn luyện duy nhất (có thể thu được bằng một quá trình lấy biên tương tự Phương trình (26.39)). Nói cách khác, khi dùng điểm cảm sinh, các biến ẩn huấn luyện độc lập có điều kiện khi biết các biến ẩn cảm sinh, khác với phân phối hậu nghiệm xấp xỉ không thưa ở Mục 2.2, nơi các biến ẩn huấn luyện phụ thuộc có điều kiện vào mọi biến ẩn huấn luyện khác. Điều cốt yếu là mỗi số hạng trong tổng có thể được ước lượng độc lập với mọi điểm dữ liệu khác, và do đó kỳ vọng của log hàm hợp lý có thể được ước lượng bằng các lô nhỏ (mini-batch) dữ liệu. Điều này tương tự việc dùng lô nhỏ trong mạng nơ-ron, cho phép huấn luyện trên các tập dữ liệu rất lớn mà không vượt quá bộ nhớ thiết bị hoặc phải dùng toàn bộ tập dữ liệu cho một bước hạ gradient.
+
+Tóm lại, ngay cả khi dùng cùng một dạng phân phối hậu nghiệm xấp xỉ (Phương trình 26.38), vẫn có lựa chọn về hàm mục tiêu (tức ELBO nào) dùng để tối ưu nó. Việc lấy biên theo các điểm cảm sinh trước rồi cực tiểu hóa độ phân kỳ KL $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t} \mid \mathbf{y}_\text{t}))$ giữa phân phối hậu nghiệm xấp xỉ và phân phối hậu nghiệm thật trên các biến ẩn huấn luyện có thể viết lại thành một ELBO đòi hỏi tính độ phân kỳ KL $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t}))$ giữa phân phối hậu nghiệm xấp xỉ đã lấy biên và tiên nghiệm trên các biến ẩn huấn luyện, một phép toán $\mathcal{O}(P_\text{t}^3)$. Cách tiếp cận do Titsias đưa ra thì đề xuất cực tiểu hóa độ phân kỳ KL $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}, \mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t} \mid \mathbf{y}_\text{t}))$ giữa phân phối hậu nghiệm xấp xỉ và phân phối hậu nghiệm thật trên các biến ẩn cảm sinh và huấn luyện đồng thời (và lấy biên theo các điểm cảm sinh sau), dẫn tới một ELBO dễ xử lý hơn vì độ phân kỳ KL giữa phân phối hậu nghiệm xấp xỉ và tiên nghiệm đồng thời được đơn giản hóa thành $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) = \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i}))$, một phép toán $\mathcal{O}(P_\text{i}^3)$ rẻ hơn nhiều. Số hạng kỳ vọng của log hàm hợp lý là như nhau trong cả hai cách tiếp cận và có thể được ước lượng bằng lô nhỏ. Do đó khác biệt duy nhất là độ phân kỳ KL dùng trong ELBO. Để đầy đủ, lưu ý rằng theo bất đẳng thức xử lý dữ liệu (data processing inequality), $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t})) \le \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) = \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i}))$, nên cận đưa ra trong Phương trình 26.42 có thể là một cận lỏng hơn của bằng chứng / hàm hợp lý biên (marginal likelihood) của mô hình so với cận trong Phương trình 26.41. Tuy nhiên, các tài liệu cho thấy cận này hoạt động tốt trong thực tế.
+
+### 2.4 Quá trình Gauss sâu
+
+Quá trình Gauss sâu (DGP) đã được giới thiệu chi tiết ở [Chương 25](/vi/blog/deep-gaussian-processes); ở đây chỉ nhắc lại những điểm cốt yếu. Máy hàm nhân sâu (DKM) và quá trình hàm nhân sâu (DKP) giới thiệu ở phần sau đều dựa trên chúng. Một DGP ánh xạ các đầu vào $\mathbf{X} \in \mathbb{R}^{P \times N_0}$ tới các đầu ra $\mathbf{Y} \in \mathbb{R}^{P \times N_{L+1}}$ thông qua $L$ lớp đặc trưng trung gian $\mathbf{F}^\ell \in \mathbb{R}^{P \times N_\ell}$. Ở đây $P$ là số điểm đầu vào, và $N_\ell$ là số đặc trưng ở lớp $\ell$, nên $N_0$ là số đặc trưng đầu vào và $N_{L+1}$ là số đặc trưng đầu ra. Viết $\mathbf{F}^\ell$ và $\mathbf{Y}$ dưới dạng các vector xếp cạnh nhau,
+
+$$
+\mathbf{F}^\ell = \begin{pmatrix} \mathbf{f}_1^\ell & \mathbf{f}_2^\ell & \cdots & \mathbf{f}_{N_\ell}^\ell \end{pmatrix} \in \mathbb{R}^{P \times N_\ell} \tag{26.53a}
+$$
+
+$$
+\mathbf{Y} = \begin{pmatrix} \mathbf{y}_1 & \mathbf{y}_2 & \cdots & \mathbf{y}_{N_{L+1}} \end{pmatrix} \in \mathbb{R}^{P \times N_{L+1}}, \tag{26.53b}
+$$
+
+trong đó $\mathbf{f}_\lambda^\ell \in \mathbb{R}^P$ cho giá trị của một đặc trưng cụ thể $\lambda$ ở lớp $\ell$ tại mọi điểm trong $P$ điểm đầu vào, và $\mathbf{y}_\lambda \in \mathbb{R}^P$ cho giá trị của một đầu ra cụ thể $\lambda$ tại mọi điểm trong $P$ điểm đầu vào. Các đặc trưng $\mathbf{F}^1, \dots, \mathbf{F}^L$ có các tiên nghiệm quá trình Gauss i.i.d. với hiệp phương sai phụ thuộc vào các đặc trưng của lớp trước,
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}) = \prod_{\lambda=1}^{N_\ell} \mathcal{N}(\mathbf{f}_\lambda^\ell; \mathbf{0}, \mathbf{K}(\mathbf{F}^{\ell-1})). \tag{26.54}
+$$
+
+Với bài toán hồi quy, các đầu ra cũng được lấy mẫu từ một quá trình Gauss,
+
+$$
+p(\mathbf{Y} \mid \mathbf{F}^L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\mathbf{y}_\lambda; \mathbf{0}, \mathbf{K}(\mathbf{F}^L) + \sigma^2\mathbf{I}). \tag{26.55}
+$$
+
+Cũng có thể dùng các hàm hợp lý khác. Chẳng hạn, Milsom và cộng sự dùng một hàm hợp lý Categorical với các xác suất softmax, như trong Phương trình (26.19).
+
+## 3. Quá trình hàm nhân sâu
+
+DGP định nghĩa như trên lần lượt luân phiên giữa (a) xây dựng một hàm nhân từ các đặc trưng của lớp trước và (b) lấy mẫu các đặc trưng mới từ hàm nhân đó. Đáng chú ý là với một số hàm nhân $\mathbf{K}(\cdot)$, DGP có thể được phát biểu lại thành một quá trình trên các *ma trận hàm nhân* (còn gọi là ma trận Gram, Gram matrix). Đây được gọi là một quá trình hàm nhân sâu (DKP). Trong các lớp trung gian của một DKP không có đặc trưng nào: chỉ hiệp phương sai giữa các điểm dữ liệu là có ý nghĩa.
+
+Vì DKP tương đương với DGP, có thể thắc mắc vì sao lại phải bận tâm đến việc thay các đặc trưng bằng ma trận hàm nhân/ma trận Gram. Một động cơ lớn là số lượng lớn các đối xứng xuất hiện khi mô hình hóa phân phối hậu nghiệm trên các đặc trưng. Thủ phạm chính là số lượng lớn các đối xứng hoán vị (permutation symmetry): nếu thứ tự các đặc trưng trong một mạng nơ-ron (NN) (hoặc một DGP) bị hoán đổi, phân phối đầu ra của mô hình vẫn y hệt, và vì thế phân phối hậu nghiệm trên các đặc trưng phải tính đến điều này bằng cách gán mật độ xác suất bằng nhau cho cả hai hoán vị đặc trưng. DKP né hoàn toàn vấn đề này bằng cách mô hình hóa phân phối hậu nghiệm trên các ma trận Gram, vốn bất biến với các hoán vị đặc trưng. Để thấy vì sao, gọi $\mathbf{G}$ là ma trận Gram lập từ các đặc trưng $\mathbf{F}$, khi đó
+
+$$
+\mathbf{G} = \mathbf{F}\mathbf{F}^T. \tag{26.56}
+$$
+
+Các đặc trưng có thể bị hoán vị, thậm chí bị quay và phản xạ, mà ma trận Gram vẫn không đổi. Lý do là các phép toán này tương đương với việc nhân các đặc trưng với một ma trận trực giao $\mathbf{O}$, tức $\mathbf{F}' = \mathbf{F}\mathbf{O}$, trong đó $\mathbf{O}^T\mathbf{O} = \mathbf{O}\mathbf{O}^T = \mathbf{I}$,
+
+$$
+\mathbf{F}'(\mathbf{F}')^T = \mathbf{F}\mathbf{O}\mathbf{O}^T\mathbf{F}^T = \mathbf{F}\mathbf{F}^T = \mathbf{G}. \tag{26.57}
+$$
+
+Suy luận Bayes đầy đủ vẫn khó tính đối với DKP (giống như đối với DGP), nhưng bất kỳ phân phối hậu nghiệm xấp xỉ nào được chọn cũng mặc nhiên tính đến vô số đối xứng của mô hình. Để hình dung, chỉ xét riêng việc loại bỏ các đối xứng hoán vị, cách phát biểu lại theo hàm nhân đã loại bỏ $N!$ đối xứng khỏi phân phối hậu nghiệm xấp xỉ, trong đó $N$ là số đặc trưng. Ngay cả với các mạng có kích thước khiêm tốn, con số này cũng lớn *khủng khiếp*. Một thảo luận chi tiết hơn về đối xứng trong học máy Bayes có ở Chương 32.
+
+### 3.1 Xây dựng một quá trình hàm nhân sâu
+
+Nhắc lại DGP ở trên, trong đó tại mỗi lớp $\ell$, các vector đặc trưng $\mathbf{f}_\lambda^\ell \in \mathbb{R}^P$ được lấy mẫu i.i.d. từ hàm nhân $\mathbf{K}(\mathbf{F}^{\ell-1})$,
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}) = \prod_{\lambda=1}^{N_\ell} \mathcal{N}(\mathbf{f}_\lambda^\ell; \mathbf{0}, \mathbf{K}(\mathbf{F}^{\ell-1})). \tag{26.58}
+$$
+
+Phần sau đây chứng minh cụ thể rằng DGP có thể được viết thành một quá trình hàm nhân. Định nghĩa ma trận Gram đã co giãn cho mỗi lớp $\mathbf{G}^\ell = \nu_\ell^{-1}\mathbf{F}^\ell(\mathbf{F}^\ell)^T$. Phép co giãn bảo đảm $\mathbb{E}[\mathbf{G}^\ell] = \mathbf{K}(\mathbf{F}^{\ell-1})$. Giả sử hàm nhân được chọn là hàm nhân hàm cơ sở bán kính (radial basis function, RBF), tức $\mathbf{K}(\mathbf{F})_{ij} = \exp(-(2\sigma^2)^{-1}\|\mathbf{f}_i - \mathbf{f}_j\|_2^2)$. Đáng chú ý là hàm nhân ở mỗi lớp của DGP có thể được tính chỉ từ ma trận Gram $\mathbf{G}^\ell$, vì khoảng cách giữa các điểm dữ liệu $i$ và $j$ có thể được viết theo $\mathbf{G}^\ell$,
+
+$$
+\begin{aligned}
+R_{ij}^\ell := \nu_\ell^{-1}\|\mathbf{f}_i^\ell - \mathbf{f}_j^\ell\|_2^2 &= \nu_\ell^{-1}\sum_{\lambda=1}^{\nu_\ell}\left(F_{i\lambda}^\ell - F_{j\lambda}^\ell\right)^2 = \nu_\ell^{-1}\sum_{\lambda=1}^{\nu_\ell}\left((F_{i\lambda}^\ell)^2 + (F_{j\lambda}^\ell)^2 - 2F_{i\lambda}^\ell F_{j\lambda}^\ell\right) && (26.59) \\
+&= G_{ii}^\ell + G_{jj}^\ell - 2G_{ij}^\ell. && (26.60)
+\end{aligned}
+$$
+
+Do đó DGP tương đương với
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{G}^{\ell-1}) = \prod_{\lambda=1}^{\nu_\ell} \mathcal{N}(\mathbf{f}_\lambda^\ell; \mathbf{0}, \mathbf{K}_{\mathbf{G}}(\mathbf{G}^{\ell-1})). \tag{26.61}
+$$
+
+trong đó
+
+$$
+\mathbf{K}_{\mathbf{G}}(\mathbf{G}^{\ell-1})_{ij} = \exp\left(-\frac{1}{2\sigma^2}\left(G_{ii}^{\ell-1} + G_{jj}^{\ell-1} - 2G_{ij}^{\ell-1}\right)\right). \tag{26.62}
+$$
+
+Lưu ý rằng tính chất được dùng ở trên là tính *đẳng hướng* của hàm nhân RBF, và cùng ý tưởng này có thể áp dụng cho các hàm nhân đẳng hướng khác, như hàm nhân Matern (và cả hàm nhân ReLU khi số đặc trưng lớn). Cũng lưu ý chỉ số dưới trong $\mathbf{K}_{\mathbf{G}}$ được dùng để chỉ rằng đây là một hàm nhân lập từ ma trận Gram chứ không phải từ các đặc trưng; tuy nhiên, ngữ cảnh luôn cho thấy rõ hàm nhân được lập từ ma trận Gram hay từ đặc trưng, nên từ đây chỉ số dưới được bỏ đi.
+
+Bước cuối cùng là nhận thấy rằng ma trận Gram $\mathbf{G}^\ell$ có thể được lấy mẫu trực tiếp mà không cần tính các đặc trưng $\mathbf{F}^\ell$, vì ma trận Gram có phân phối Wishart (Wishart distribution). Điều này đúng theo định nghĩa, vì một ma trận $\mathbf{S} \sim \mathcal{W}(\mathbf{V}, N)$ được gọi là có phân phối Wishart với ma trận co giãn (scale matrix) xác định dương $\mathbf{V}$ và $N$ bậc tự do nếu
+
+$$
+\mathbf{x}_1, \dots, \mathbf{x}_N \sim_{\text{i.i.d.}} \mathcal{N}(\mathbf{0}, \mathbf{V}), \tag{26.63}
+$$
+
+$$
+\sum_{i=1}^N \mathbf{x}_i\mathbf{x}_i^T = \mathbf{S} \sim \mathcal{W}(\mathbf{V}, N). \tag{26.64}
+$$
+
+Cần cẩn thận khi viết hàm mật độ xác suất Wishart. Trong trường hợp $N < \operatorname{rank}(\mathbf{V})$, ma trận $\mathbf{S}$ có hạng thấp, và phải dùng đến phân phối Wishart *suy biến* (singular Wishart).
+
+Ma trận Gram được cho bởi $\mathbf{G}^\ell = \nu_\ell^{-1}\sum_{i=1}^{\nu_\ell}\mathbf{f}_i^\ell(\mathbf{f}_i^\ell)^T$, trong đó $\mathbf{f}_i^\ell \sim \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))$. Như vậy, tiên nghiệm DGP cho các lớp trung gian tương đương với
+
+$$
+p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}) \sim \mathcal{W}(\mathbf{G}^\ell; \mathbf{K}(\mathbf{G}^{\ell-1})/\nu_\ell, \nu_\ell). \tag{26.65}
+$$
+
+Vì phân phối trên các ma trận Gram là Wishart, Phương trình (26.65) được gọi là một quá trình Wishart sâu (deep Wishart process, DWP). Dù phân phối Wishart rất tự nhiên do mối liên hệ với DGP, có thể hình dung việc đặt các phân phối khác lên các ma trận Gram để thu được các quá trình hàm nhân khác. Chẳng hạn, dùng phân phối Wishart nghịch đảo cho một "quá trình Wishart nghịch đảo sâu" (deep inverse Wishart process, DIWP). Ràng buộc là phân phối phải được đặt trên các ma trận Gram nửa xác định dương.
+
+Ở lớp trên cùng, các ma trận Gram trung gian cần được ánh xạ trở lại dữ liệu. Chẳng hạn, nếu dữ liệu là Gauss thì tiên nghiệm sau là một lựa chọn khả dĩ:
+
+$$
+p(\mathbf{Y} \mid \mathbf{G}^L) = \prod_{\lambda=1}^{\nu_{L+1}} \mathcal{N}(\mathbf{y}_\lambda; \mathbf{0}, \mathbf{K}(\mathbf{G}^L) + \sigma^2\mathbf{I}). \tag{26.66}
+$$
+
+Lưu ý rằng tiên nghiệm này tương tự tiên nghiệm ở lớp trên cùng của DGP, Phương trình (26.55), nhưng viết theo ma trận Gram thay vì đặc trưng.
+
+### 3.2 Suy luận Bayes trong một quá trình Wishart sâu
+
+Tương tự cách có thể dùng suy luận biến phân (VI) trong một DGP, Ober và Aitchison đưa ra một lược đồ suy luận biến phân cho quá trình Wishart sâu. Trong các tài liệu, đã có những phân phối hậu nghiệm xấp xỉ được đề xuất cho cả DWP lẫn DIWP, nhưng chương này tập trung vào DWP và một phân phối hậu nghiệm xấp xỉ Wishart tổng quát.
+
+**Bảng 26.1:** (Theo Ober và Aitchison) ELBO và log hàm hợp lý (log-likelihood, LL) trên các bộ dữ liệu UCI cho một mạng năm lớp. Các kết quả tốt hơn một cách có ý nghĩa (trong cùng nhóm ELBO hoặc LL) được in đậm.
+
+| Bộ dữ liệu | ELBO của DWP | ELBO của DGP | LL của DWP | LL của DGP |
+| --- | :-: | :-: | :-: | :-: |
+| boston | **−0.38 ± 0.01** | −0.45 ± 0.01 | −2.39 ± 0.04 | −2.44 ± 0.04 |
+| concrete | **−0.49 ± 0.00** | −0.50 ± 0.00 | −3.13 ± 0.01 | −3.14 ± 0.02 |
+| energy | **1.41 ± 0.00** | 1.39 ± 0.00 | −0.70 ± 0.03 | −0.70 ± 0.03 |
+| kin8nm | −0.14 ± 0.00 | **−0.13 ± 0.00** | **1.40 ± 0.00** | 1.38 ± 0.01 |
+| naval | 3.65 ± 0.07 | **3.91 ± 0.10** | 8.21 ± 0.05 | 8.31 ± 0.07 |
+| power | **0.03 ± 0.00** | 0.02 ± 0.00 | −2.77 ± 0.01 | −2.78 ± 0.01 |
+| protein | −1.01 ± 0.00 | **−1.00 ± 0.00** | −2.73 ± 0.00 | −2.73 ± 0.00 |
+| wine | −1.19 ± 0.00 | −1.19 ± 0.00 | −0.96 ± 0.01 | −0.96 ± 0.01 |
+| yacht | **1.65 ± 0.01** | 1.37 ± 0.03 | **−0.43 ± 0.10** | −0.88 ± 0.08 |
+
+Mục tiêu là thực hiện suy luận Bayes trên các ma trận Gram $\mathbf{G}^\ell$ trong một DWP,
+
+$$
+p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}) \sim \mathcal{W}(\mathbf{G}^\ell; \mathbf{K}_{\mathbf{G}}(\mathbf{G}^{\ell-1})/\nu_\ell, \nu_\ell). \tag{26.67}
+$$
+
+Như vậy cần một phân phối linh hoạt trên các ma trận nửa xác định dương $\mathbf{G}^\ell$ để làm phân phối hậu nghiệm xấp xỉ. Điều này rất khác thường, và khác biệt đáng kể so với các phân phối hậu nghiệm xấp xỉ Gauss quen thuộc hơn trên các đặc trưng. Đã có nhiều phân phối hậu nghiệm xấp xỉ khả dĩ được đề xuất cho các ma trận Gram $\mathbf{G}$, nhưng ở đây giới thiệu phân phối *Wishart suy biến tổng quát* (Generalized Singular Wishart). Ý tưởng là tham số hóa $\mathbf{G}$ dưới dạng
+
+$$
+\mathbf{G} = \mathbf{L}\mathbf{A}\mathbf{A}^T\mathbf{L}^T. \tag{26.68}
+$$
+
+Ở đây $\mathbf{L}$ là phân tích Cholesky của một ma trận co giãn xác định dương $\mathbf{V} = \mathbf{L}\mathbf{L}^T$, còn $\mathbf{A}$ là một ma trận gồm các biến ngẫu nhiên Gamma độc lập,
+
+$$
+\mathbf{A} = \begin{pmatrix} A_{11} & \cdots & 0 \\ \vdots & \ddots & \vdots \\ A_{\nu 1} & \cdots & A_{\nu\nu} \\ \vdots & \vdots & \vdots \\ A_{P1} & \cdots & A_{P\nu} \end{pmatrix}, \tag{26.69a}
+$$
+
+$$
+p\left(A_{jj}^2\right) = \operatorname{Gamma}\left(A_{jj}^2; \alpha_{jj}, \beta_{jj}\right), \quad p(A_{i>j}) = \mathcal{N}(A_{ij}; \mu_{ij}, \sigma_{ij}^2). \tag{26.69b}
+$$
+
+Khi $\mathbf{A}$ là một ma trận cao và hẹp, $\mathbf{A}\mathbf{A}^T$ suy biến, và vì vậy phân phối có giá trên các ma trận nửa xác định dương nhưng không phải xác định dương; do đó có tên "Wishart *suy biến* tổng quát".
+
+Để thực sự dùng phân phối Wishart suy biến tổng quát cho VI, cần có khả năng (a) lấy mẫu từ nó và (b) tính mật độ của nó. Việc lấy mẫu rất đơn giản; trước hết lấy mẫu $\mathbf{A}$ theo các Phương trình (26.69), rồi dùng Phương trình (26.68) để tính $\mathbf{G}$. Việc tính mật độ thì hoàn toàn không hiển nhiên, nhưng đã có chứng minh rằng $\mathbf{G}$ có mật độ sau,
+
+$$
+\mathcal{GSW}(\boldsymbol{G} \mid \boldsymbol{\alpha}, \boldsymbol{\beta}, \boldsymbol{\mu}, \boldsymbol{\sigma}) = \left(\prod_{j=1}^P \frac{1}{L_{jj}^{\min(j,\nu)}}\right) \prod_{j=1}^{\min(P,\nu)} \frac{\operatorname{Gamma}\left(A_{jj}^2; \alpha_{jj}, \beta_{jj}\right)}{A_{jj}^{P-j}L_{jj}^{P-j+1}} \prod_{i=j+1}^P \mathcal{N}(A_{ij}; \mu_{ij}, \sigma_{ij}^2). \tag{26.70}
+$$
+
+Bằng cách dùng một phiên bản có điểm cảm sinh của phân phối hậu nghiệm xấp xỉ này, các tác giả đã chứng tỏ được cải thiện về hiệu năng so với các mô hình DGP tương tự (xem Bảng 26.1)
+
+## 4. Máy hàm nhân sâu
+
+Mục này giới thiệu máy hàm nhân sâu (DKM), một lớp mô hình học có giám sát có nhiều lớp ma trận hàm nhân được học. Để xây dựng một DKM, bắt đầu với chính tiên nghiệm Wishart đã dùng cho DKP. Tuy nhiên, thay vì tiến hành VI ngay, điều có thể trở nên phức tạp vì đòi hỏi một phân phối hậu nghiệm xấp xỉ trên các ma trận Gram ẩn, trước hết người ta lấy một giới hạn độ rộng vô hạn đặc biệt gọi là giới hạn học biểu diễn Bayes (Bayesian Representation Learning Limit, BRLL). BRLL hóa ra là đáng mong muốn vì phân phối hậu nghiệm trên các ma trận Gram trở thành một phân phối delta Dirac, nghĩa là các ma trận Gram tối ưu có thể được mô hình hóa như hằng số, và cuối cùng chúng được học bằng hạ gradient.
+
+Trước khi giới thiệu BRLL và DKM, phần sau đây bàn trước về các mạng nơ-ron độ rộng vô hạn tiêu chuẩn, tức NNGP.
+
+### 4.1 Các giới hạn độ rộng vô hạn của mạng nơ-ron
+
+Mạng nơ-ron có vô hạn đặc trưng, với tiên nghiệm Gauss trên các trọng số, tương đương với quá trình Gauss có những hàm nhân cụ thể. Mục này điểm lại giới hạn được gọi là "quá trình Gauss của mạng nơ-ron" (Neural Network Gaussian Process, NNGP) của mạng nơ-ron để giúp hiểu BRLL. Sự tương ứng độ rộng vô hạn / NNGP cũng được bàn ngắn gọn ở Chương 31.
+
+Xét một mạng nơ-ron $L$ lớp với $N_\ell = N \cdot \nu_\ell$ đặc trưng ẩn ở lớp $\ell$ và các trọng số $\mathbf{W}^\ell \in \mathbb{R}^{N_\ell \times N_{\ell-1}}$. Các độ chệch (bias) được bỏ qua cho gọn. Các tiền kích hoạt (preactivation) và hậu kích hoạt (postactivation) được cho bởi
+
+$$
+F_{i\lambda}^\ell = \sum_{\mu=1}^{N_\ell - 1} W_{\lambda\mu}^\ell H_{i\mu}^{\ell-1}, \qquad H_{i\lambda}^\ell = \phi\left(F_{i\lambda}^\ell\right), \qquad H_{i\lambda}^0 = X_{i\lambda}. \tag{26.71}
+$$
+
+Giả định các trọng số được khởi tạo ngẫu nhiên i.i.d. với trung bình bằng không và phương sai $\sigma_w^2/N_\ell$. Bắt đầu từ lớp thứ nhất, định lý giới hạn trung tâm khẳng định rằng trong giới hạn có vô hạn đặc trưng $N_1 \to \infty$, các tiền kích hoạt $\mathbf{F}^1$ sẽ có phân phối Gauss. Lee và cộng sự hình thức hóa lập luận này bằng quy nạp để mở rộng nó cho mọi lớp của mạng, còn de G. Matthews và cộng sự đưa ra một lập luận khác trong đó mọi lớp được đưa tới giới hạn độ rộng vô hạn đồng thời chứ không lần lượt. Các chi tiết được bỏ qua ở đây, nhưng kết quả là các tiền kích hoạt $\mathbf{f}_\lambda^\ell$ có phân phối Gauss nhiều chiều $\mathbf{f}_\lambda^\ell \sim \mathcal{N}(\mathbf{0}, \mathbf{K}^\ell)$, trong đó ma trận hiệp phương sai $\mathbf{K}^\ell \in \mathbb{R}^{P \times P}$ được cho bởi hệ thức truy hồi
+
+$$
+K_{ij}^\ell = \sigma_w^2\,\mathbb{E}_{\mathbf{f}_\lambda^{\ell-1} \sim \mathcal{N}(0, K^{\ell-1})}\left[\phi(F_{i\lambda}^{\ell-1})\phi(F_{j\lambda}^{\ell-1})\right]. \tag{26.72}
+$$
+
+hệ thức này phụ thuộc vào lựa chọn hàm phi tuyến $\phi$ và phương sai khởi tạo của các trọng số $\sigma_w^2/N^\ell$. Khi $\phi$ là hàm phi tuyến ReLU, hệ thức truy hồi có biểu thức dạng đóng, đó là hàm nhân arccos:
+
+$$
+K_{ij}^\ell = \frac{\sigma_w^2}{2\pi}\sqrt{K_{ii}^{\ell-1}K_{jj}^{\ell-1}}\left(\sin\theta_{ij}^{\ell-1} + (\pi - \theta_{ij}^{\ell-1})\cos\theta_{ij}^{\ell-1}\right) \tag{26.73}
+$$
+
+$$
+\theta_{ij}^{\ell-1} = \arccos\left(\frac{K_{ij}^{\ell-1}}{\sqrt{K_{ii}^{\ell-1}K_{jj}^{\ell-1}}}\right). \tag{26.74}
+$$
+
+Bất kể lựa chọn hàm phi tuyến, trường hợp cơ sở là các điểm dữ liệu $\mathbf{x}_i \in \mathbb{R}^{N_0}$ ở đầu mạng, với phương sai trọng số $\sigma_w^2/N_0$, cho ma trận hiệp phương sai
+
+$$
+K_{ij}^0 = \sigma_w^2\left(\frac{\mathbf{x}_i \cdot \mathbf{x}_j}{N_0}\right). \tag{26.75}
+$$
+
+Như vậy, suy luận Bayes với tiên nghiệm mạng nơ-ron độ rộng vô hạn có thể được thực hiện bằng cách tính đệ quy các hiệp phương sai $\mathbf{K}^\ell$, rồi dùng một tiên nghiệm quá trình Gauss với ma trận hiệp phương sai $\mathbf{K}^L$ để suy luận trên các điểm dữ liệu. Đây được gọi là giới hạn "quá trình Gauss của mạng nơ-ron" (NNGP), và các hàm nhân tương ứng được gọi là hàm nhân NNGP.
+
+NNGP hữu ích vì chúng đặt mạng nơ-ron vào thế tương đương với phương pháp hàm nhân, vốn có nhiều tính chất lý thuyết đã được hiểu rõ (ví dụ tính chất hội tụ, cận tổng quát hóa, v.v.). Tuy nhiên, như sẽ thấy ở phần sau, việc chúng quy về những hàm nhân cố định có nghĩa là chúng không thực hiện học biểu diễn (representation learning), một thế mạnh then chốt của học sâu, và vì vậy các kết luận lý thuyết dựa trên NNGP có thể không chuyển được sang các mạng thực tế. Do đó, mục tiếp theo sửa đổi giới hạn NNGP sao cho các mô hình thu được (máy hàm nhân sâu) có thể học biểu diễn.
+
+### 4.2 Giới hạn độ rộng vô hạn tiêu chuẩn
+
+Bây giờ xét phiên bản DGP của giới hạn độ rộng vô hạn NNGP tiêu chuẩn, tức các lớp trung gian được cho có độ rộng vô hạn / vô hạn đặc trưng $\mathbf{F}^\ell \in \mathbb{R}^{P \times N_\ell}$:
+
+$$
+N_\ell = N\nu_\ell \quad \text{for} \quad \ell \in \{1, \dots, L\} \quad \text{with} \quad N \to \infty. \tag{26.76}
+$$
+
+Logarit hậu nghiệm (tức logarit phân phối đồng thời cộng một hằng số chuẩn hóa) của DGP viết theo các ma trận Gram là
+
+$$
+\log p\left(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \mathbf{Y}\right) = \log p(\mathbf{Y} \mid \mathbf{G}^L) + \sum_{\ell=1}^L \log p\left(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}\right) + \text{const}, \tag{26.77}
+$$
+
+trong đó cần nhấn mạnh rằng $\mathbf{G}^1, \dots, \mathbf{G}^L$ là các đối số ma trận $P \times P$ được chọn để chỉ định nơi logarit hậu nghiệm được tính giá trị, nên chúng không bị ảnh hưởng bởi bất kỳ giới hạn độ rộng vô hạn nào được lấy. Dù vậy, giá trị thực của $\log p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1})$ thì chịu ảnh hưởng của giới hạn. Cụ thể, trong giới hạn vô hạn chỉ định ở Phương trình (26.76), số hạng logarit tiên nghiệm $\log p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1})$ (Phương trình 26.65) tăng theo tỉ lệ với $N_\ell$ và do đó với $N$, nên phải chia nó cho $N$ để thu được một giới hạn hữu hạn:
+
+$$
+\begin{aligned}
+\lim_{N \to \infty} \tfrac{1}{N}\log p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}) &= \tfrac{\nu_\ell}{2}\log\left|\mathbf{K}(\mathbf{G}^{\ell-1})^{-1}\mathbf{G}^\ell\right| - \tfrac{\nu_\ell}{2}\operatorname{Tr}\left(\mathbf{K}(\mathbf{G}^{\ell-1})^{-1}\mathbf{G}^\ell\right) + \lim_{N \to \infty}\tfrac{\alpha_\ell}{N} \\
+&= -\nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))) + \text{const}.
+\end{aligned} \tag{26.78}
+$$
+
+trong đó $\lim_{N \to \infty}\alpha_\ell/N$ được chứng minh là hội tụ về một hằng số trong Yang và cộng sự. Lưu ý rằng giới hạn này đã được viết dưới dạng một độ phân kỳ KL giữa hai phân phối Gauss. Ngược lại, số hạng log hàm hợp lý $\log p(\mathbf{Y} \mid \mathbf{G}^L)$ là hằng số đối với $N$, nên sẽ triệt tiêu nếu chia cho $N$ trong giới hạn. Gộp tất cả lại, logarit hậu nghiệm giới hạn (chia cho $N$ để vẫn hữu hạn) là
+
+$$
+\lim_{N \to \infty}\tfrac{1}{N}\log p(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \mathbf{Y}) = -\sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))) + \text{const}. \tag{26.79}
+$$
+
+Bây giờ, vì logarit hậu nghiệm tăng theo tỉ lệ với $N$, bản thân phân phối hậu nghiệm hội tụ về một phân phối điểm tại cực đại toàn cục của nó $(\mathbf{G}^1)^*, \dots, (\mathbf{G}^L)^*$ (xem Yang và cộng sự để có thảo luận chặt chẽ hơn về hội tụ yếu),
+
+$$
+\lim_{N \to \infty} p(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \mathbf{Y}) = \prod_{\ell=1}^L \delta(\mathbf{G}^\ell - (\mathbf{G}^\ell)^*). \tag{26.80}
+$$
+
+Từ Phương trình (26.79) có thể thấy rõ rằng cực đại toàn cục duy nhất đạt được khi $(\mathbf{G}^\ell)^* = \mathbf{K}((\mathbf{G}^{\ell-1})^*)$, vì điều này cực tiểu hóa độ phân kỳ KL. Nói cách khác, các ma trận Gram hậu nghiệm cực đại (maximum a posteriori, MAP) có thể được tính đệ quy bằng cách áp dụng hàm nhân lặp lại:
+
+$$
+\mathbf{G}^\ell = \mathbf{K}(\mathbf{G}^{\ell-1}) = \underbrace{\mathbf{K}(\mathbf{K}(\cdots\mathbf{K}(\mathbf{G}^0)))}_{\ell \text{ times}}, \qquad \mathbf{G}^0 = \frac{1}{N_0}\mathbf{X}\mathbf{X}^T. \tag{26.81}
+$$
+
+Điều quan trọng là phân phối hậu nghiệm giới hạn khi đó không phụ thuộc vào $\mathbf{Y}$, các giá trị đích huấn luyện, nên việc học biểu diễn không thể xảy ra. Đây là một vấn đề lớn, vì thành công của học sâu hiện đại dựa trên khả năng học linh hoạt các biểu diễn tốt từ dữ liệu.
+
+### 4.3 Giới hạn học biểu diễn Bayes và DKM
+
+Việc học biểu diễn bị mất vì số hạng hàm hợp lý trong phân phối hậu nghiệm đã chuẩn hóa triệt tiêu trong giới hạn vô hạn, còn số hạng tiên nghiệm thì không. Giới hạn học biểu diễn Bayes giữ lại việc học biểu diễn bằng cách cho số đặc trưng đầu ra tiến tới vô hạn, bên cạnh các đặc trưng trung gian:
+
+$$
+N_\ell = N\nu_\ell \quad \text{for} \quad \ell \in \{1, \dots, L+1\} \quad \text{with} \quad N \to \infty. \tag{26.82}
+$$
+
+Lưu ý rằng khác biệt duy nhất giữa giới hạn này và Phương trình (26.76) là lớp $L + 1$ (lớp đầu ra) được đưa vào giới hạn. Để xử lý một lớp đầu ra rộng vô hạn, tiên nghiệm sau được dùng (một tiên nghiệm tương tự có thể dùng cho bài toán phân loại),
+
+$$
+p(\tilde{\mathbf{Y}} \mid \mathbf{G}^L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{y}}_\lambda; \mathbf{0}, \mathbf{K}(\mathbf{G}^L) + \sigma^2\mathbf{I}). \tag{26.83}
+$$
+
+trong đó $\tilde{\mathbf{Y}} \in \mathbb{R}^{P \times N_{L+1}}$. Vì đang lấy giới hạn $N_{L+1} \to \infty$, có thể thắc mắc tìm đâu ra dữ liệu có vô hạn đặc trưng. Để áp dụng DKM cho dữ liệu độ rộng hữu hạn $\mathbf{Y} \in \mathbb{R}^{P \times \nu_{L+1}}$, $\tilde{\mathbf{Y}}$ được lập từ $N$ bản sao của $\mathbf{Y}$ ghép nối với nhau, tức là
+
+$$
+\tilde{\mathbf{Y}} = \begin{pmatrix} \mathbf{Y} & \cdots & \mathbf{Y} \end{pmatrix}. \tag{26.84}
+$$
+
+Lưu ý rằng vì mỗi đầu ra được giả định là i.i.d. nhưng lại được gán các bản sao của nhãn dữ liệu, đây là một trường hợp đặc tả sai mô hình Bayes (Bayesian model mismatch), và vì vậy việc định lượng độ bất định của máy hàm nhân sâu có thể không tối ưu. Tuy nhiên, cho mục đích khảo sát việc học biểu diễn trong các mô hình sâu, phép xấp xỉ này là đủ tốt. Vì các kênh đầu ra được giả định là i.i.d. (Phương trình 26.83), log hàm hợp lý giờ tăng theo tỉ lệ với $N$:
+
+$$
+\log p(\tilde{\mathbf{Y}} \mid \mathbf{G}^L) = N\log p(\mathbf{Y} \mid \mathbf{G}^L). \tag{26.85}
+$$
+
+Do đó, tính logarit hậu nghiệm như trước cho thấy hàm hợp lý không còn triệt tiêu trong giới hạn vô hạn, nhờ đó cho phép học biểu diễn:
+
+$$
+\begin{aligned}
+\mathcal{L}(\mathbf{G}^1, \dots, \mathbf{G}^L) &= \lim_{N \to \infty}\tfrac{1}{N}\log p(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \tilde{\mathbf{Y}}) + \text{const}, \\
+&= \log p(\mathbf{Y} \mid \mathbf{G}^L) - \sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))).
+\end{aligned} \tag{26.86}
+$$
+
+Logarit hậu nghiệm đã chuẩn hóa giới hạn, $\mathcal{L}(\mathbf{G}^1, \dots, \mathbf{G}^L)$, tạo thành "hàm mục tiêu DKM" (DKM objective), được gọi như vậy vì nó được dùng để tối ưu các ma trận Gram $\mathbf{G}^\ell$ trong một máy hàm nhân sâu. Số hạng thứ nhất khuyến khích dự đoán tốt bằng cách cực đại hóa log hàm hợp lý của dữ liệu huấn luyện $\mathbf{Y}$, còn các số hạng độ phân kỳ KL còn lại tạo thành một số hạng chính quy hóa (regularizer) khuyến khích $\mathbf{G}^\ell$ ở gần $\mathbf{K}(\mathbf{G}^{\ell-1})$. Mô hình quy về giới hạn độ rộng vô hạn tiêu chuẩn (Phương trình 26.81) khi không quan sát dữ liệu nào (tương đương, khi $\nu_\ell = \infty$ với mọi $\ell$), vì độ phân kỳ KL được cực tiểu hóa bằng cách đặt $\mathbf{G}^\ell = \mathbf{K}(\mathbf{G}^{\ell-1})$. Giả sử cực đại toàn cục của biểu thức này là duy nhất, thì phân phối hậu nghiệm là một phân phối điểm tại cực đại đó (Phương trình 26.80). Tuy nhiên, khác với trường hợp NNGP, cực đại không thể tính đơn giản bằng cách áp dụng đệ quy hàm nhân lên dữ liệu, vì giờ đây cực đại còn phụ thuộc vào số hạng hàm hợp lý. Thay vào đó, các ma trận Gram phải được tối ưu bằng, chẳng hạn, leo gradient. Đáng chú ý là với một tập ma trận Gram tối ưu $(\mathbf{G}^1)^*, \dots, (\mathbf{G}^L)^*$, Yang và cộng sự đã chỉ ra rằng phân phối hậu nghiệm trên các đặc trưng là Gauss nhiều chiều với trung bình bằng không (giả sử cực đại toàn cục của các ma trận Gram là duy nhất),
+
+$$
+p(\mathbf{f}_\lambda^\ell \mid \mathbf{X}, \mathbf{Y}) = \mathcal{N}\left(\mathbf{f}_\lambda^\ell; \mathbf{0}, (\mathbf{G}^\ell)^*\right). \tag{26.87}
+$$
+
+Sự kiện này cho phép xây dựng DKM *thưa* với suy luận biến phân, vì một phân phối hậu nghiệm xấp xỉ Gauss có thể nắm bắt được phân phối hậu nghiệm thật. Mục tiếp theo bàn về DKM thưa, mở rộng khuôn khổ điểm cảm sinh từ các tài liệu về GP sang DKM. Khi áp dụng BRLL cho mạng nơ-ron thay vì DGP, phân phối hậu nghiệm không phải Gauss, và Yang và cộng sự đã phải dùng luồng chuẩn hóa (normalizing flow) để xấp xỉ chính xác phân phối hậu nghiệm, điều này làm tăng đáng kể độ phức tạp, và cũng không rõ cách tích hợp điểm cảm sinh vào. Vì vậy, trọng tâm ở đây vẫn là các DKM được suy ra từ DGP.
+
+Sau khi các ma trận Gram đã được tối ưu theo hàm mục tiêu DKM bằng dữ liệu huấn luyện, có thể thực hiện suy luận trên các điểm kiểm tra bằng một phương pháp tương tự như trong DGP. Toàn bộ quy trình dự đoán cho DKM thưa được trình bày chi tiết ở mục tiếp theo, còn chi tiết cho DKM hạng đầy đủ, vốn rất giống trường hợp DKM thưa, được bỏ qua.
+
+### 4.4 DKM thưa
+
+Như với mọi phương pháp hàm nhân ngây thơ, việc tính trực tiếp hàm mục tiêu DKM cho toàn bộ dữ liệu tốn $\mathcal{O}(P_\text{t}^3)$, trong đó $P_\text{t}$ là số điểm dữ liệu, điều thường không khả thi. Vì một DKM rốt cuộc là một DGP độ rộng vô hạn được tham số hóa bằng ma trận Gram thay vì đặc trưng, Yang và cộng sự đã phát triển một lược đồ điểm cảm sinh lấy cảm hứng từ khuôn khổ điểm cảm sinh ngẫu nhiên kép (doubly stochastic) cho DGP để giảm độ phức tạp tính toán của hàm mục tiêu DKM. Trước hết trình bày một cái nhìn tổng quan về lược đồ này, rồi mới đến suy dẫn đầy đủ của hàm mục tiêu DKM thưa, bám sát suy dẫn gốc trong Yang và cộng sự.
+
+Trong DGP, mỗi lớp là một GP, nên mỗi lớp học một tập điểm cảm sinh. Khi dùng điểm cảm sinh, các đặc trưng ở mỗi lớp được chia thành các điểm cảm sinh $\mathbf{F}_\text{i}^\ell$ và các điểm huấn luyện $\mathbf{F}_\text{t}^\ell$. Tương tự, ma trận hàm nhân được chia thành các khối ứng với điểm cảm sinh và điểm huấn luyện. Trong một DKM, $\mathbf{G}^\ell$ được chia khối tương tự,
+
+$$
+\mathbf{G}^\ell = \begin{pmatrix} \mathbf{G}_\text{ii}^\ell & \mathbf{G}_\text{it}^\ell \\ \mathbf{G}_\text{ti}^\ell & \mathbf{G}_\text{tt}^\ell \end{pmatrix} \qquad \mathbf{K}(\mathbf{G}^\ell) = \begin{pmatrix} \mathbf{K}_\text{ii}(\mathbf{G}_\text{ii}^\ell) & \mathbf{K}_\text{it}(\mathbf{G}^\ell) \\ \mathbf{K}_\text{ti}(\mathbf{G}^\ell) & \mathbf{K}_\text{tt}(\mathbf{G}_\text{tt}^\ell) \end{pmatrix}, \tag{26.88}
+$$
+
+với $\mathbf{G}_\text{ii}^\ell \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$, $\mathbf{G}_\text{ti}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{i}}$ và $\mathbf{G}_\text{tt}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$. Ở mỗi lớp $\ell$, $\mathbf{G}_\text{ii}^\ell$ được học, còn $\mathbf{G}_\text{ti}^\ell$ và $\mathbf{G}_\text{tt}^\ell$ được dự đoán từ $\mathbf{G}_\text{ii}^\ell$, $\mathbf{K}(\mathbf{G}^{\ell-1})$ và các tính chất của các phân phối hậu nghiệm xấp xỉ Gauss được giả định. Kết quả là hàm mục tiêu DKM thưa,
+
+$$
+\mathcal{L}_{\text{ind}}(\mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L) = \text{GP-ELBO}(\mathbf{Y}_\text{t}; \mathbf{G}_\text{ii}^L, \mathbf{G}_\text{ti}^L, \mathbf{G}_\text{tt}^L) - \sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}_\text{ii}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^{\ell-1}))) \tag{26.89}
+$$
+
+trong đó $\text{GP-ELBO}\left(\mathbf{Y}_\text{t}; \mathbf{G}_\text{ii}^L, \mathbf{G}_\text{ti}^L, \mathbf{G}_\text{tt}^L\right)$ là ELBO của một GP thưa (tức Phương trình 26.42) với dữ liệu $\mathbf{Y}_\text{t}$ và hàm nhân $\mathbf{K}(\mathbf{G}^L)$, bao gồm một số hạng hàm hợp lý đo hiệu năng của mô hình trên dữ liệu huấn luyện. Do đó hàm mục tiêu DKM thưa có cấu trúc rất giống hàm mục tiêu DKM hạng đầy đủ (Phương trình 26.86). Lược đồ này hiệu quả, với độ phức tạp thời gian $\mathcal{O}(L(P_\text{i}^3 + P_\text{i}^2P_\text{t}))$, vì các số hạng KL trong hàm mục tiêu DKM thưa chỉ phụ thuộc vào $\mathbf{G}_\text{ii} \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$ (không phụ thuộc vào $\mathbf{G}_\text{tt} \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$). Hơn nữa, việc đưa ra dự đoán và tính số hạng kỳ vọng của log hàm hợp lý trong hàm mục tiêu DKM thưa chỉ cần đường chéo của $\mathbf{G}_\text{tt}^\ell$. Vì dùng một hàm hợp lý i.i.d., mọi hiệp phương sai $\mathbf{K}_\text{tt}$ và $\mathbf{G}_\text{tt}$ giữa các điểm huấn luyện / kiểm tra trong lô không ảnh hưởng đến dự đoán cuối cùng (hiệp phương sai giữa các điểm dữ liệu thay vào đó được mã hóa ngầm qua các điểm cảm sinh $\mathbf{G}_\text{ii}$), nên chỉ cần tính đường chéo trong các khối huấn luyện / kiểm tra.
+
+Sau đây là suy dẫn đầy đủ của hàm mục tiêu DKM thưa, ban đầu dựa trên lược đồ "suy luận biến phân ngẫu nhiên kép cho quá trình Gauss sâu" (Doubly Stochastic Variational Inference for Deep Gaussian Processes) của Salimbeni và Deisenroth. Phần lớn suy dẫn này là bản tái hiện có sửa đổi của Phụ lục M (DKM có điểm cảm sinh) trong Yang và cộng sự, với sửa đổi chính đáng lưu ý là một phân phối hậu nghiệm xấp xỉ trên các đặc trưng lớp trên cùng $\tilde{\mathbf{F}}_{L+1}$ được mô hình hóa tường minh, trong khi Yang và cộng sự chỉ coi chúng là các tham số biến phân tất định.
+
+Để thực hiện suy luận biến phân với điểm cảm sinh, các đặc trưng lớp trên cùng $\mathbf{F}^{L+1} \in \mathbb{R}^{P \times \nu_{L+1}}$ được đưa vào một cách tường minh và hàm hợp lý được tính từ các đặc trưng đó. Một cách hình thức, mỗi đặc trưng $\mathbf{f}_1^{L+1}, \dots, \mathbf{f}_{\nu_{L+1}}^{L+1}$ là i.i.d. khi điều kiện theo $\mathbf{F}^L$,
+
+$$
+p(\mathbf{F}^{L+1} \mid \mathbf{F}^L) = \prod_{\lambda=1}^{\nu_{L+1}} \mathcal{N}(\mathbf{f}_\lambda^{L+1}; \mathbf{0}, \mathbf{K}(\mathbf{G}(\mathbf{F}^L))), \tag{26.90a}
+$$
+
+$$
+p(\mathbf{Y} \mid \mathbf{F}^{L+1}) = \prod_{\lambda=1}^{\nu_{L+1}} \mathcal{N}(\mathbf{y}_\lambda; \mathbf{f}_\lambda^{L+1}, \sigma^2\mathbf{I}), \tag{26.90b}
+$$
+
+trong đó để đơn giản, hàm hợp lý cho bài toán hồi quy được đưa ra, nhưng cũng có thể dùng các hàm hợp lý khác (chẳng hạn cho bài toán phân loại). Vì DKM dùng các đầu ra độ rộng vô hạn, các đặc trưng được nhân bản $N$ lần, $\tilde{\mathbf{F}}^{L+1} \in \mathbb{R}^{P \times N_{L+1}}$, cũng được dùng; chúng trông giống hệt các đặc trưng ở các lớp trước, nhưng có $N_{L+1} = N\nu_{L+1}$ đặc trưng, trong đó $N$ là số bản sao của dữ liệu dùng để xấp xỉ giới hạn độ rộng vô hạn:
+
+$$
+p(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}_L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{f}}_\lambda^{L+1}; \mathbf{0}, \mathbf{K}(\mathbf{G}(\mathbf{F}^L))), \tag{26.91a}
+$$
+
+$$
+p(\tilde{\mathbf{Y}} \mid \tilde{\mathbf{F}}^{L+1}) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{y}}_\lambda; \tilde{\mathbf{f}}_\lambda^{L+1}, \sigma^2\mathbf{I}), \tag{26.91b}
+$$
+
+Ngoài ra, tổng số điểm $P$ được coi là gồm $P_\text{i}$ điểm cảm sinh và $P_\text{t}$ điểm kiểm tra/huấn luyện, sao cho $P = P_\text{i} + P_\text{t}$. Như vậy, mọi đặc trưng $\mathbf{F}^\ell \in \mathbb{R}^{P \times N_\ell}$ có thể được tách thành các đặc trưng cảm sinh $\mathbf{F}_\text{i}^\ell \in \mathbb{R}^{P_\text{i} \times N_\ell}$ và các đặc trưng kiểm tra/huấn luyện $\mathbf{F}_\text{t}^\ell \in \mathbb{R}^{P_\text{t} \times N_\ell}$. Tương tự, các đầu vào $\mathbf{X}$ và đầu ra $\mathbf{Y}$ được tách thành các đầu vào cảm sinh (có thể được huấn luyện) $\mathbf{X}_\text{i}$ và các đầu ra cảm sinh được huấn luyện $\mathbf{Y}_\text{i}$, cùng với các đầu vào kiểm tra/huấn luyện thật $\mathbf{X}_\text{t}$ và đầu ra $\mathbf{Y}_\text{t}$,
+
+$$
+\mathbf{F}^\ell = \begin{pmatrix} \mathbf{F}_\text{i}^\ell \\ \mathbf{F}_\text{t}^\ell \end{pmatrix} \qquad \tilde{\mathbf{F}}^{L+1} = \begin{pmatrix} \tilde{\mathbf{F}}_\text{i}^{L+1} \\ \tilde{\mathbf{F}}_\text{t}^{L+1} \end{pmatrix} \qquad \mathbf{X} = \begin{pmatrix} \mathbf{X}_\text{i} \\ \mathbf{X}_\text{t} \end{pmatrix} \qquad \mathbf{Y} = \begin{pmatrix} \mathbf{Y}_\text{i} \\ \mathbf{Y}_\text{t} \end{pmatrix} \qquad \tilde{\mathbf{Y}} = \begin{pmatrix} \tilde{\mathbf{Y}}_\text{i} \\ \tilde{\mathbf{Y}}_\text{t} \end{pmatrix} \tag{26.92}
+$$
+
+Cách tiếp cận điểm cảm sinh ngẫu nhiên kép thông thường cho DGP được áp dụng. Cụ thể, mọi đặc trưng ở các lớp trung gian $\mathbf{F}^1, \dots, \mathbf{F}^L$ và các đặc trưng lớp trên cùng $\tilde{\mathbf{F}}^{L+1}$ được coi là biến ẩn. Tiên nghiệm và phân phối hậu nghiệm xấp xỉ trên $\mathbf{F}^1, \dots, \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1}$ được cho bởi
+
+$$
+q\left(\mathbf{F}^1, \dots, \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X}\right) = q\left(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L\right)\prod_{\ell=1}^L q\left(\mathbf{F}^\ell \mid \mathbf{F}_{\ell-1}\right), \tag{26.93a}
+$$
+
+$$
+p(\mathbf{F}^1, \dots, \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X}) = p(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L)\prod_{\ell=1}^L p(\mathbf{F}^\ell \mid \mathbf{F}_{\ell-1}), \tag{26.93b}
+$$
+
+và $\mathbf{F}^0 = \mathbf{X}$. Tiên nghiệm và phân phối hậu nghiệm xấp xỉ ở mỗi lớp phân tích thành tích của một phân phối trên các điểm cảm sinh và một phân phối trên các điểm kiểm tra/huấn luyện,
+
+$$
+q\left(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}\right) = p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})q\left(\mathbf{F}_\text{i}^\ell\right), \tag{26.94a}
+$$
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}) = p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1}). \tag{26.94b}
+$$
+
+Tương tự, với các đặc trưng lớp trên cùng,
+
+$$
+q\left(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L\right) = p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L)q\left(\tilde{\mathbf{F}}_\text{i}^{L+1}\right), \tag{26.95a}
+$$
+
+$$
+p(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L) = p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L)p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \mathbf{F}_\text{i}^L) \tag{26.95b}
+$$
+
+Điều then chốt là phân phối hậu nghiệm xấp xỉ cho các điểm kiểm tra/huấn luyện chính là tiên nghiệm có điều kiện $p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})$, điều sẽ dẫn tới sự triệt tiêu khi tính ELBO. Tương tự, phân phối hậu nghiệm xấp xỉ trên $\tilde{\mathbf{F}}_\text{t}^{L+1}$ là tiên nghiệm có điều kiện,
+
+$$
+q\left(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L\right) = p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L). \tag{26.96}
+$$
+
+Cụ thể, các phân phối hậu nghiệm xấp xỉ và tiên nghiệm trên các điểm cảm sinh ở các lớp trung gian được cho bởi
+
+$$
+q\left(\mathbf{F}_\text{i}^\ell\right) = \prod_\lambda^{N_\ell} \mathcal{N}(\mathbf{f}_{\text{i};\lambda}^\ell; \mathbf{0}, \mathbf{G}_\text{ii}^\ell), \tag{26.97a}
+$$
+
+$$
+p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1}) = \prod_\lambda^{N_\ell} \mathcal{N}(\mathbf{f}_{\text{i};\lambda}^\ell; \mathbf{0}, \mathbf{K}(\mathbf{G}(\mathbf{F}_\text{i}^{\ell-1}))) \tag{26.97b}
+$$
+
+và ở lớp trên cùng, phân phối hậu nghiệm xấp xỉ trên $\mathbf{F}_\text{i}^{L+1} \in \mathbb{R}^{P_\text{i} \times \nu_{L+1}}$ được phép học một giá trị trung bình riêng cho mỗi kênh (thường dùng cùng một ma trận hiệp phương sai cho mọi kênh để tiết kiệm bộ nhớ), và phân phối hậu nghiệm xấp xỉ trên vô hạn bản sao $\tilde{\mathbf{F}}_\text{i}^{L+1} \in \mathbb{R}^{P_\text{i} \times N_{L+1}}$ được định nghĩa bằng cách "sao chép" phân phối hậu nghiệm xấp xỉ của mỗi kênh cụ thể $N$ lần, trong khi tiên nghiệm giả định rằng vô hạn bản sao là i.i.d. (một lần nữa, đây là một cách làm hơi lạ, nhưng nó cho phép dùng DKM để học biểu diễn từ dữ liệu độ rộng hữu hạn, như đã bàn ở Mục 4.3):
+
+$$
+q\left(\mathbf{F}_\text{i}^{L+1}\right) = \prod_\lambda^{\nu_{L+1}} \mathcal{N}(\mathbf{f}_{\text{i};\lambda}^{L+1}; \boldsymbol{\mu}_\lambda, \mathbf{A}) \tag{26.98a}
+$$
+
+$$
+q\left(\tilde{\mathbf{F}}_\text{i}^{L+1}\right) = q\left(\mathbf{F}_\text{i}^{L+1}\right)^N \tag{26.98b}
+$$
+
+$$
+p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{f}}_{\text{i};\lambda}^{L+1}; \mathbf{0}, \mathbf{K}(\mathbf{G}(\tilde{\mathbf{F}}_\text{i}^L))). \tag{26.98c}
+$$
+
+Bây giờ ELBO (ở dạng kỳ vọng của log hàm hợp lý trừ độ phân kỳ KL giữa phân phối hậu nghiệm xấp xỉ và tiên nghiệm thật, như trong Phương trình 26.42) được tính theo các tham số biến phân
+
+$$
+\text{ELBO}(\mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L, \boldsymbol{\mu}_1, \dots, \boldsymbol{\mu}_{N_{L+1}}, \mathbf{A}) = \mathbb{E}_q\left[\log p(\tilde{\mathbf{Y}}_\text{t} \mid \tilde{\mathbf{F}}_\text{t}^{L+1}) + \log\frac{p(\mathbf{F}^1, \dots \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X})}{q(\mathbf{F}^1, \dots \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X})}\right] \tag{26.99}
+$$
+
+Thay Phương trình (26.93–26.96) vào và triệt tiêu các số hạng $p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})$ và $p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L)$ trong phân thức, thu được
+
+$$
+\text{ELBO}(\dots) = \mathbb{E}_q\left[\log p(\tilde{\mathbf{Y}}_\text{t} \mid \tilde{\mathbf{F}}_\text{t}^{L+1}) + \log\frac{p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \mathbf{F}_\text{i}^L)}{q(\tilde{\mathbf{F}}_\text{i}^{L+1})} + \sum_{\ell=1}^L \log\frac{p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1})}{q(\mathbf{F}_\text{i}^\ell)}\right]. \tag{26.100}
+$$
+
+Trong một DGP, $\mathbf{F}_\text{i}^\ell$ chỉ phụ thuộc vào $\mathbf{F}_\text{i}^{\ell-1}$ thông qua $\mathbf{G}_\text{ii}^{\ell-1}$, và tiên nghiệm cùng phân phối hậu nghiệm xấp xỉ phân tích thành tích theo các đặc trưng $\lambda$ (Phương trình 26.97). Như vậy, trong giới hạn vô hạn, từng số hạng trong ELBO có thể được viết thành
+
+$$
+\begin{aligned}
+\lim_{N \to \infty}\mathbb{E}_q\left[\log\frac{p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1})}{q(\mathbf{F}_\text{i}^\ell)}\right] &= N\nu_\ell\,\mathbb{E}_q\left[\log\frac{p(\mathbf{f}_{\text{i};\lambda}^\ell \mid \mathbf{G}_\text{ii}^{\ell-1})}{q(\mathbf{f}_{\text{i};\lambda}^\ell)}\right] && (26.101) \\
+&= -N\nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}_\text{ii}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^{\ell-1}))), && (26.102)
+\end{aligned}
+$$
+
+trong đó đẳng thức cuối cùng có được khi nhận thấy kỳ vọng có thể viết thành một độ phân kỳ KL mang dấu âm. Tương tự, với các đặc trưng lớp trên cùng, nhắc lại Phương trình 26.98, có
+
+$$
+\begin{aligned}
+\lim_{N \to \infty}\mathbb{E}_q\left[\log\frac{p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \mathbf{F}_\text{i}^L)}{q(\tilde{\mathbf{F}}_\text{i}^{L+1})}\right] &= N\sum_{\lambda=1}^{\nu_{L+1}}\mathbb{E}_q\left[\log\frac{p(\mathbf{f}_{\text{i};\lambda}^{L+1} \mid \mathbf{G}_\text{ii}^L)}{q(\mathbf{f}_{\text{i};\lambda}^{L+1})}\right] && (26.103) \\
+&= -N\sum_{\lambda=1}^{\nu_{L+1}}\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\boldsymbol{\mu}_\lambda, \mathbf{A}) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^L))). && (26.104)
+\end{aligned}
+$$
+
+Lưu ý rằng với lớp trên cùng có một tổng gồm $\nu_\ell$ số hạng thay vì chỉ một thừa số $\nu_\ell$ như trong các số hạng của lớp trung gian, vì phân phối hậu nghiệm xấp xỉ có một $\mu_\lambda$ riêng cho mỗi đặc trưng $\lambda$. Cuối cùng, lưu ý rằng vì các nhãn dữ liệu $\tilde{\mathbf{Y}}_\text{t}$ được nhân bản $N$ lần, và các đặc trưng lớp trên cùng $\tilde{\mathbf{F}}_\text{t}^{L+1}$ cũng được nhân bản $N$ lần theo cùng cách, số hạng kỳ vọng của log hàm hợp lý có thể được viết thành
+
+$$
+\mathbb{E}_q\left[\log p(\tilde{\mathbf{Y}}_\text{t} \mid \tilde{\mathbf{F}}_\text{t}^{L+1})\right] = N\mathbb{E}_q\left[\log p(\mathbf{Y}_\text{t} \mid \mathbf{F}_\text{t}^{L+1})\right] \tag{26.105}
+$$
+
+Hàm mục tiêu DKM có điểm cảm sinh $\mathcal{L}_{\text{ind}}$, tức ELBO chia cho N để bảo đảm nó vẫn hữu hạn trong giới hạn vô hạn, do đó có thể được viết thành
+
+$$
+\begin{aligned}
+&\mathcal{L}_{\text{ind}}(\mathbf{F}_\text{i}^{L+1}, \mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L) \\
+&= \lim_{N \to \infty}\tfrac{1}{N}\text{ELBO}(\mathbf{F}_\text{i}^{L+1}, \mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L) \\
+&= \underbrace{\mathbb{E}_q\left[\log p(\mathbf{Y}_\text{t} \mid \mathbf{F}_\text{t}^{L+1})\right] - \sum_{\lambda=1}^{N_{L+1}}\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\boldsymbol{\mu}_\lambda, \mathbf{A}_\lambda) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^L)))}_{\text{Sparse GP ELBO}} \\
+&\quad \underbrace{- \sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}_\text{ii}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^{\ell-1})))}_{\text{DKM Regularization Terms}}.
+\end{aligned} \tag{26.106}
+$$
+
+Lưu ý rằng hàm mục tiêu này có dạng gần như giống hệt hàm mục tiêu DKM tiêu chuẩn cho DGP (Phương trình 26.89). Cụ thể, số hạng thứ nhất là một số hạng "hiệu năng", ở đây phụ thuộc vào chất lượng của các dự đoán khi biết các điểm cảm sinh, còn số hạng thứ hai và thứ ba là một chuỗi các độ phân kỳ KL, với khác biệt duy nhất là các độ phân kỳ KL này chỉ áp dụng cho các điểm cảm sinh, và lớp trên cùng phải được xử lý riêng do phân phối hậu nghiệm xấp xỉ.
+
+Giờ đây khi đã có một dạng đơn giản của ELBO, cần tính kỳ vọng của hàm hợp lý $\mathbb{E}_q\left[\log p(\mathbf{Y}_\text{t} \mid \mathbf{F}_\text{t}^{L+1})\right]$. Vì lớp trên cùng là một GP thưa, việc tính số hạng kỳ vọng của log hàm hợp lý trong hàm mục tiêu DKM thưa tương tự Mục 2.3. Với hàm hợp lý Gauss, kỳ vọng của log hàm hợp lý có thể được tính mà không cần ước lượng Monte Carlo, cùng với công thức cụ thể được dùng cho hàm hợp lý Categorical. Việc này dựa vào việc có ma trận Gram đầy đủ cuối cùng $\mathbf{G}^L$, vốn phụ thuộc vào các lớp trước, và do đó đòi hỏi tính các ma trận Gram đầy đủ, kể cả các khối điểm kiểm tra/huấn luyện, có điều kiện theo các ma trận Gram cảm sinh đã tối ưu $\mathbf{G}_\text{ii}^\ell$ ở mọi lớp. Khi đã có ma trận Gram đầy đủ cuối cùng $\mathbf{G}^L$, kỳ vọng của log hàm hợp lý có thể được tính như trong một GP thưa.
+
+Bắt đầu bằng việc nhắc lại định nghĩa của ma trận Gram đầy đủ,
+
+$$
+\mathbf{G}^\ell = \begin{pmatrix} \mathbf{G}_\text{ii}^\ell & \mathbf{G}_\text{it}^\ell \\ \mathbf{G}_\text{ti}^\ell & \mathbf{G}_\text{tt}^\ell \end{pmatrix} \tag{26.107}
+$$
+
+cho cả các điểm cảm sinh (gắn nhãn 'i') lẫn các điểm kiểm tra/huấn luyện (gắn nhãn 't'). Để rõ ràng, $\mathbf{G}^\ell \in \mathbb{R}^{P \times P}$, $\mathbf{G}_\text{ii}^\ell \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$, $\mathbf{G}_\text{ti}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{i}}$, $\mathbf{G}_\text{tt}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$, trong đó $P_\text{i}$ là số điểm cảm sinh, $P_\text{t}$ là số điểm huấn luyện/kiểm tra và $P = P_\text{i} + P_\text{t}$ là tổng số điểm cảm sinh và điểm huấn luyện/kiểm tra.
+
+Phân phối có điều kiện trên $\mathbf{F}_\text{t}^\ell$ khi biết $\mathbf{F}_\text{i}^\ell$ là
+
+$$
+p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{G}_{\ell-1}) = \prod_{\lambda=1}^{\nu_\ell} \mathcal{N}(\mathbf{f}_{\text{t};\lambda}^\ell; \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{f}_{\text{i};\lambda}^\ell, \mathbf{K}_{\text{tt}\cdot\text{i}}) \tag{26.108}
+$$
+
+trong đó $\mathbf{f}_{\text{t};\lambda}^\ell$ là đặc trưng thứ $\lambda$ của mọi điểm huấn luyện/kiểm tra, $\mathbf{f}_{\text{i};\lambda}^\ell$ là đặc trưng thứ $\lambda$ của mọi điểm cảm sinh, và
+
+$$
+\begin{pmatrix} \mathbf{K}_\text{ii} & \mathbf{K}_\text{ti}^T \\ \mathbf{K}_\text{ti} & \mathbf{K}_\text{tt} \end{pmatrix} = \mathbf{K}\left(\tfrac{1}{N_{\ell-1}}\mathbf{F}^{\ell-1}(\mathbf{F}^{\ell-1})^T\right) = \mathbf{K}(\mathbf{G}_{\ell-1}) \tag{26.109}
+$$
+
+$$
+\mathbf{K}_{\text{tt}\cdot\text{i}} = \mathbf{K}_\text{tt} - \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{ti}^T. \tag{26.110}
+$$
+
+**Thuật toán 27** Dự đoán của DKM
+
+```text
+Inputs : parameters {ν_ℓ}_{ℓ=1}^{L}; optimized Gram matrices {G_ii^ℓ}_{ℓ=1}^{L}; inducing and train/test inputs
+         X_i ∈ R^{P_i × ν_0}, X_t ∈ R^{P_t × ν_0}; inducing output means μ_1, ..., μ_{N_{L+1}} ∈ R^{P_i} and covariance
+         A ∈ R^{P_i × P_i}
+Outputs: predicted outputs F_t^{L+1}
+// Initialize full Gram matrix
+[ G_ii^0   G_ti^{0;T} ]          [ X_i X_i^T   X_i X_t^T ]
+[ G_ti^0   G_tt^0     ] = (1/ν_0) [ X_t X_i^T   X_t X_t^T ]
+// Propagate full Gram matrix
+for ℓ = 1 to L do
+    [ K_ii   K_ti^T ]     ( [ G_ii^{ℓ-1}   (G_ti^{ℓ-1})^T ] )
+    [ K_ti   K_tt   ] = K ( [ G_ti^{ℓ-1}    G_tt^{ℓ-1}     ] )
+    K_tt·i ← K_tt − K_ti K_ii^{-1} K_ti^T
+    G_ti^ℓ ← K_ti K_ii^{-1} G_ii^ℓ
+    G_tt^ℓ ← K_ti K_ii^{-1} G_ii^ℓ K_ii^{-1} K_ti^T + K_tt·i
+// Final prediction using Gaussian process expressions
+[ K_ii   K_ti^T ]     ( [ G_ii^L   (G_ti^L)^T ] )
+[ K_ti   K_tt   ] = K ( [ G_ti^L    G_tt^L    ] )
+f_{t;λ}^{L+1} ~ N(K_ti K_ii^{-1} μ_λ, K_tt − K_ti K_ii^{-1} K_it + K_ti K_ii^{-1} A K_ii^{-1} K_it)
+```
+
+Trong giới hạn vô hạn, các ma trận Gram của lớp trung gian trở thành tất định theo luật số lớn:
+
+$$
+\lim_{N \to \infty}\mathbf{G}^\ell = \lim_{N \to \infty}\tfrac{1}{N_\ell}\mathbf{F}^\ell(\mathbf{F}^\ell)^T = \lim_{N \to \infty}\tfrac{1}{N_\ell}\sum_{\lambda=1}^{N_\ell}\mathbf{f}_\lambda^\ell(\mathbf{f}_\lambda^\ell)^T = \mathbb{E}_q\left[\mathbf{f}_\lambda^\ell(\mathbf{f}_\lambda^\ell)^T\right] \tag{26.111}
+$$
+
+(trong đó đẳng thức thứ ba có được vì đang lấy trung bình của vô hạn số hạng i.i.d., và $q$ được định nghĩa như trong Phương trình 26.93 và Phương trình 26.97) và do đó $\mathbf{G}_\text{it}$ và $\mathbf{G}_\text{tt}$ trở thành tất định và bằng giá trị kỳ vọng của chúng. Dùng Phương trình (26.108), có thể viết
+
+$$
+\mathbf{F}_\text{t}^\ell = \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{F}_\text{i}^\ell + \mathbf{K}_{\text{tt}\cdot\text{i}}^{1/2}\mathbf{Z}_\text{i}. \tag{26.112}
+$$
+
+trong đó $\mathbf{Z}_\text{i}$ là một ma trận có các phần tử Gauss chuẩn i.i.d. Do đó $\mathbf{G}_\text{it}$ và $\mathbf{G}_\text{tt}$ có thể được viết thành
+
+$$
+\begin{aligned}
+\mathbf{G}_\text{ti}^\ell &= \tfrac{1}{N_\ell}\mathbb{E}\left[\mathbf{F}_\text{t}^\ell(\mathbf{F}_\text{i}^\ell)^T\right] && (26.113) \\
+&= \tfrac{1}{N_\ell}\mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbb{E}\left[\mathbf{F}_\text{i}^\ell(\mathbf{F}_\text{i}^\ell)^T\right] && (26.114) \\
+&= \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{G}_\text{ii}^\ell && (26.115)
+\end{aligned}
+$$
+
+và
+
+$$
+\begin{aligned}
+\mathbf{G}_\text{tt}^\ell &= \tfrac{1}{N_\ell}\mathbb{E}\left[\mathbf{F}_\text{t}^\ell(\mathbf{F}_\text{t}^\ell)^T\right] && (26.116) \\
+&= \tfrac{1}{N_\ell}\mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbb{E}\left[\mathbf{F}_\text{i}^\ell(\mathbf{F}_\text{i}^\ell)^T\right]\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{ti}^T + \tfrac{1}{N_\ell}\mathbf{K}_{\text{tt}\cdot\text{i}}^{1/2}\mathbb{E}\left[\mathbf{Z}_\text{i}\mathbf{Z}_\text{i}^T\right]\mathbf{K}_{\text{tt}\cdot\text{i}}^{1/2} && (26.117) \\
+&= \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{G}_\text{ii}\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{ti}^T + \mathbf{K}_{\text{tt}\cdot\text{i}} && (26.118)
+\end{aligned}
+$$
+
+Về toàn bộ thuật toán dự đoán, xem Thuật toán 27.

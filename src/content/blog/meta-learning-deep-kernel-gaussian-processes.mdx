@@ -1,0 +1,249 @@
+---
+title: "Meta-Learning Deep Kernel Gaussian Processes"
+description: "ADKF-IFT meta-learns a deep kernel feature extractor across tasks and adapts GP base kernel parameters per task, with results on molecular tasks."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - gaussian processes
+  - meta-learning
+  - deep kernel learning
+  - few-shot learning
+series: bayesian-deep-learning
+seriesOrder: 33
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl27TrainingProcedures from '../../components/diagrams/Bdl27TrainingProcedures.astro';
+import Bdl27FsMolResults from '../../components/diagrams/Bdl27FsMolResults.astro';
+import Bdl27BoOutOfDomain from '../../components/diagrams/Bdl27BoOutOfDomain.astro';
+
+Although the deep kernel learning method introduced in [Chapter 24](/blog/deep-kernel-learning) regularizes deep kernels with type-II maximum likelihood estimation, it still tends to overfit to small data sets. This chapter introduces *Adaptive Deep Kernel Fitting with Implicit Function Theorem* (ADKF-IFT), a general framework for learning deep kernel Gaussian processes on low-data tasks by interpolating between meta-learning and conventional deep kernel learning. ADKF-IFT employs a bilevel optimization objective where generally useful feature representations are meta-learned across tasks, such that task-specific Gaussian process models estimated on top of such features achieve the lowest possible predictive loss on average. The resulting nested optimization problem is solved using the implicit function theorem. The ADKF-IFT framework provably contains Deep Kernel Learning and Deep Kernel Transfer as special cases. Although ADKF-IFT is a completely general method, it is especially well-suited for drug discovery problems due to their low-data nature, significantly outperforming previous state-of-the-art methods on a variety of real-world few-shot molecular property prediction tasks and out-of-domain molecular property prediction and optimization tasks.
+
+## 1. Introduction
+
+Many real-world applications require machine learning algorithms to make robust predictions with well-calibrated uncertainty given very limited training data. One important example is drug discovery, where practitioners not only want models to accurately predict biochemical and physicochemical properties of molecules, but also want to use models to guide the search for novel molecules with desirable properties, leveraging techniques such as Bayesian optimization (BO) which heavily rely on accurate uncertainty estimates. Despite the meteoric rise of neural networks over the past decade, their notoriously overconfident and unreliable uncertainty estimates make them generally ineffective surrogate models for BO. Instead, most contemporary BO implementations use Gaussian processes (GPs) as surrogate models due to their analytically tractable and generally reliable uncertainty estimates, even on small data sets.
+
+Traditionally, GPs are fit on hand-engineered features (e.g., molecular fingerprints), which can limit their predictive performance on complex, structured, high-dimensional data such as molecules where designing informative features is challenging. Naturally, a number of works have proposed to improve performance by instead fitting GPs on features learned by a deep neural network, a family of models generally called Deep Kernel GPs as introduced in [Chapter 24](/blog/deep-kernel-learning). However, there is no clear consensus about how to train these models on low-data tasks: maximizing the GP marginal likelihood has been shown to overfit on small data sets, while meta-learning and fully-Bayesian approaches avoid this at the cost of making strong, often unrealistic assumptions.
+
+This chapter presents a general framework called *Adaptive Deep Kernel Fitting with Implicit Function Theorem* (ADKF-IFT) for training deep kernel GPs, which is especially well-suited to small data sets. ADKF-IFT essentially trains a subset of the model parameters with a meta-learning loss, and separately adapts the remaining parameters on each task using maximum marginal likelihood estimation. In contrast to previous methods which use a single loss for all parameters, ADKF-IFT is able to utilize the implicit regularization of meta-learning to prevent overfitting while avoiding the strong assumptions of a pure meta-learning approach which may lead to underfitting.
+
+The structure of this chapter is as follows. Section 3.1 presents the general ADKF-IFT framework and its natural formulation as a bilevel optimization problem. Section 3.2 explains how the implicit function theorem (IFT) can be used to efficiently solve the bilevel optimization problem with gradient-based methods in a few-shot learning setting. Section 3.3 shows how ADKF-IFT can be viewed as a *generalization* and *unification* of previous approaches based purely on single-task learning or purely on meta-learning for training deep kernel GPs. This chapter will focus on a specific practical instantiation of ADKF-IFT wherein all feature extractor parameters are meta-learned, which has a clear interpretation and obviates the need for any Hessian approximations. Section 3.4 argues why this particular instantiation is well-suited to retain the best properties of previously proposed methods. Motivated by the general demand for better GP models in chemistry, Section 5 presents an extensive empirical evaluation of ADKF-IFT on several chemical tasks, finding that it significantly improves upon previous state-of-the-art methods.
+
+## 2. Preliminaries
+
+### 2.1 Meta-learning and few-shot learning
+
+Few-shot learning refers to learning on many related tasks when each task has few labeled examples. It requires learning algorithms to be able to adapt to unseen tasks given few labeled examples. Few-shot learning algorithms often benefit from knowledge transfer among related low-data tasks, whereas single-task learning algorithms can easily overfit or underfit in this setting. In the few-shot learning setup, one is given a set of training tasks $\mathcal{D} = \{\mathcal{T}_t\}_{t=1}^{T}$ (a *meta-dataset*) and some unseen test tasks $\mathcal{D}_* = \{\mathcal{T}_*\}$. Each task $\mathcal{T} = \{(x_i, y_i)\}_{i=1}^{N_\mathcal{T}}$ is a set of points in the domain $\mathcal{X}$ (e.g., space of molecules) with corresponding labels (continuous, categorical, etc.), and is partitioned into a *support set* $\mathcal{S}_\mathcal{T} \subseteq \mathcal{T}$ for meta-training and a *query set* $\mathcal{Q}_\mathcal{T} = \mathcal{T} \setminus \mathcal{S}_\mathcal{T}$ for meta-testing. Typically, the total number of training tasks $|\mathcal{D}|$ is large, while the size of each support set $|\mathcal{S}_\mathcal{T}|$ is small. Models for few-shot learning are typically trained to accurately predict unseen examples in the query set $\mathcal{Q}_\mathcal{T}$ given labeled examples in the support set $\mathcal{S}_\mathcal{T}$ for all tasks $\mathcal{T} \in \mathcal{D}$ during a *meta-training* phase, then evaluated by their prediction error on $\mathcal{Q}_{\mathcal{T}_*}$ given $\mathcal{S}_{\mathcal{T}_*}$ for unseen test tasks $\mathcal{T}_* \in \mathcal{D}_*$ during a *meta-testing* phase.
+
+### 2.2 Deep kernel Gaussian processes
+
+As introduced in [Chapter 24](/blog/deep-kernel-learning), *Deep kernel* Gaussian processes are GPs whose covariance function is constructed by first using a neural network *feature extractor* $f_\phi$ with parameters $\phi \in \Phi$ to create feature representations $h = f_\phi(x)$, $h' = f_\phi(x')$ of the input points $x, x'$, then feeding these feature representations into a standard *base kernel* $c_\theta(h, h')$ (e.g., an RBF kernel). The complete covariance function is therefore $k_\psi(x, x') := c_\theta(f_\phi(x), f_\phi(x'))$ with learnable parameters $\psi := (\theta, \phi)$. Deep kernel GPs can be viewed as performing Bayesian inference for the last linear layer of a neural network in the function space.
+
+The *Deep Kernel Learning* (DKL) method introduced in [Chapter 24](/blog/deep-kernel-learning) is a single-task method for fitting a deep kernel to a data set. DKL jointly fits both the feature extractor parameters $\phi$ and base kernel parameters $\theta$ by maximizing the GP marginal likelihood on a single data set (i.e., DKL essentially fits a neural network with a GP "head" to a data set). It is well known that neural networks will easily overfit to small data sets. This overfitting also happens in DKL, despite the fact that it fits the neural network parameters using a type-II maximum likelihood approach: although early DKL papers suggested that the "model complexity" term (as measured by the log determinant of the kernel matrix) in the GP marginal likelihood objective would prevent this overfitting from happening, recent follow-up work showed that this is not the case as a deep-kernel GP can simultaneously overfit to the training data and appear to have a low "model complexity".
+
+*Deep Kernel Transfer* (DKT) is a meta-learning method for fitting a deep kernel to a distribution of data sets. DKT jointly fits both the feature extractor parameters $\phi$ and base kernel parameters $\theta$ by maximizing the expected GP marginal likelihood over a distribution of data sets (i.e., a meta-dataset). To mitigate the overfitting issue of DKL using meta-learning, DKT makes a very strong assumption that different tasks in the task distribution are drawn from an identical GP prior over functions. Explicitly, this means that the data generating process is assumed to have the same noise level, same amplitude, and same "characteristic lengthscale" for every task in the meta-dataset, which is a very restrictive assumption violated by most real-world problems. Taking drug discovery as an example, the drug properties in different data sets in a meta-dataset may have (1) highly varying noise levels, so modeling all tasks with the same amount of observation noise will not be realistic; (2) different output ranges and units for regression: for example, one task might have data in the range 1-20 µM, while another might have 0-100% inhibition, meaning that a single signal variance (kernel amplitude) will not model the data well; (3) different "characteristic lengthscales": for some tasks, structurally similar molecules have very strongly correlated output labels, while for other tasks it is much weaker (i.e., there is much more variation in the labels of very similar molecules), suggesting that the "characteristic lengthscale" will be different. Inevitably, trying to fit such a mis-specified model will result in a set of compromised base kernel parameters $\theta$ which fit all data sets fine on average but do not fit each individual data set very well. This is the underfitting issue of DKT.
+
+## 3. Adaptive deep kernel fitting with implicit function theorem
+
+Let $\Theta$ and $\Phi$ respectively be the sets of base kernel and feature extractor parameters for a deep kernel GP. Denote the set of all parameters by $\Psi \equiv \Theta \times \Phi$.
+
+### 3.1 The general ADKF-IFT framework with bilevel optimization
+
+The key idea of the general ADKF-IFT framework is to partition the parameters into two disjoint subsets $\Psi = \Psi_{\text{adapt}} \times \Psi_{\text{meta}}$, where only a subset of the parameters $\psi_{\text{adapt}} \in \Psi_{\text{adapt}}$ will be adapted to each individual task by minimizing a train loss $\mathcal{L}_T$, with the remaining set of parameters $\psi_{\text{meta}} \in \Psi_{\text{meta}}$ meta-learned during a *meta-training* phase to yield the best possible validation loss $\mathcal{L}_V$ *on average* over many related training tasks (*after* $\psi_{\text{meta}}$ is separately adapted to each of these tasks). This can be naturally formalized as the following *bilevel optimization* problem:
+
+$$
+\psi_{\text{meta}}^{*} = \operatorname*{arg\,min}_{\psi_{\text{meta}}} \; \mathbb{E}_{p(\mathcal{T})}\big[\mathcal{L}_V(\psi_{\text{meta}}, \psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T}), \mathcal{T})\big], \tag{27.1}
+$$
+
+$$
+\text{such that} \quad \psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T}) = \operatorname*{arg\,min}_{\psi_{\text{adapt}}} \; \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_\mathcal{T}). \tag{27.2}
+$$
+
+Equations 27.1 and 27.2 are most easily understood by separately considering the meta-learned parameters $\psi_{\text{meta}}$ and the task-specific parameters $\psi_{\text{adapt}}$. For a given task $\mathcal{T}$ and an arbitrary value for the meta-learned parameters $\psi_{\text{meta}}$, in Equation 27.2 the task-specific parameters $\psi_{\text{adapt}}$ are chosen to minimize the *train loss* $\mathcal{L}_T$ evaluated on the task's support set $\mathcal{S}_\mathcal{T}$. That is, $\psi_{\text{adapt}}$ is *adapted* to the support set $\mathcal{S}_\mathcal{T}$ of the task $\mathcal{T}$, with the aim of producing the best possible model on $\mathcal{S}_\mathcal{T}$ for the given value of $\psi_{\text{meta}}$. The result is a model with optimal task-specific parameters $\psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T})$ for the given meta-learned parameters $\psi_{\text{meta}}$ and task $\mathcal{T}$. The remaining question is how to choose a value for the meta-learned parameters $\psi_{\text{meta}}$, knowing that $\psi_{\text{adapt}}$ will be adapted separately to each task. In Equation 27.1, the optimal meta-learned parameters $\psi_{\text{meta}}^{*}$ is obtained by minimizing the expected *validation loss* $\mathcal{L}_V$ over a distribution of training tasks $p(\mathcal{T})$. There are two reasons for this choice as follows:
+
+1. On any given task $\mathcal{T}$, the validation loss usually reflects the performance metric of interest on the query set $\mathcal{Q}_\mathcal{T}$ of $\mathcal{T}$ (e.g., the prediction error).
+2. Since the same value of $\psi_{\text{meta}}$ will be used for all tasks, it makes sense to choose a value whose *expected performance* is good across many tasks drawn from $p(\mathcal{T})$. That is, $\psi_{\text{meta}}$ is chosen such that a GP achieves the lowest possible average validation loss on the query set $\mathcal{Q}_\mathcal{T}$ of a random training task $\mathcal{T} \sim p(\mathcal{T})$ after $\psi_{\text{adapt}}$ is adapted to the task's support set $\mathcal{S}_\mathcal{T}$.
+
+In practice, $\psi_{\text{meta}}$ would be optimized during a *meta-training* phase using a set of training tasks $\mathcal{D}$ to approximate Equation 27.1. After meta-training (i.e., at meta-test time), the joint GP posterior predictive distribution is used to make predictions for each unseen test task $\mathcal{T}_*$ with optimal parameters $\psi_{\text{meta}}^{*}$ and $\psi_{\text{adapt}}^{*}(\psi_{\text{meta}}^{*}, \mathcal{S}_{\mathcal{T}_*})$:
+
+$$
+p(\mathcal{Q}^{y}_{\mathcal{T}_*} \mid \mathcal{Q}^{x}_{\mathcal{T}_*}, \mathcal{S}_{\mathcal{T}_*}, \psi_{\text{meta}}^{*}, \psi_{\text{adapt}}^{*}(\psi_{\text{meta}}^{*}, \mathcal{S}_{\mathcal{T}_*})). \tag{27.3}
+$$
+
+Note that the description above does not specify a particular choice of $\Psi_{\text{meta}}, \Psi_{\text{adapt}}, \mathcal{L}_T, \mathcal{L}_V$. This is intentional, as there are many reasonable choices for these quantities. Because of this, ADKF-IFT should be considered a *general framework*, with a particular choice for these being an *instantiation* of the ADKF-IFT framework. Examples of this are provided in Sections 3.3 and 3.4.
+
+### 3.2 Efficient meta-training algorithm for ADKF-IFT
+
+In general, optimizing bilevel optimization objectives such as Equation 27.1 is computationally complex, mainly because each evaluation of the objective requires solving a separate inner optimization problem (Equation 27.2).
+
+**Algorithm 28** Exact hypergradient computation in ADKF-IFT
+
+```text
+Input : training task T′; current meta-learned parameters ψ′_meta
+Output: hypergradient dL_V/dψ_meta for T′ evaluated at ψ′_meta
+solve Equation 27.2 to obtain ψ′_adapt = ψ*_adapt(ψ′_meta, S_T′)
+compute g1 = ∂L_V(ψ_meta, ψ_adapt, T′)/∂ψ_meta |(ψ′_meta, ψ′_adapt) and g2 = ∂L_V(ψ_meta, ψ_adapt, T′)/∂ψ_adapt |(ψ′_meta, ψ′_adapt)
+compute Hessian H = ∂²L_T(ψ_meta, ψ_adapt, S_T′)/(∂ψ_adapt ∂ψ_adapt^⊤) |(ψ′_meta, ψ′_adapt)
+solve the linear system vH = g2 for v
+compute mixed partial derivatives P = ∂²L_T(ψ_meta, ψ_adapt, S_T′)/(∂ψ_adapt ∂ψ_meta^⊤) |(ψ′_meta, ψ′_adapt)
+compute hypergradient dL_V/dψ_meta = g1 − vP
+```
+
+Although calculating the *hypergradient* (i.e., total derivative) of the validation loss $\mathcal{L}_V$ with respect to the meta-learned parameters $\psi_{\text{meta}}$ would allow Equation 27.1 to be solved with gradient-based optimization:
+
+$$
+\frac{\mathrm{d}\mathcal{L}_V}{\mathrm{d}\psi_{\text{meta}}} = \frac{\partial \mathcal{L}_V}{\partial \psi_{\text{meta}}} + \frac{\partial \mathcal{L}_V}{\partial \psi_{\text{adapt}}^{*}} \frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}, \tag{27.4}
+$$
+
+Equation 27.4 reveals that this requires calculating $\frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}$, i.e., how the optimal task-specific parameters $\psi_{\text{adapt}}^{*}(\psi_{\text{meta}}, \mathcal{S}_\mathcal{T})$ change with respect to the meta-learned parameters $\psi_{\text{meta}}$. Calculating this naively with automatic differentiation platforms would require tracking the gradient through many iterations of the inner optimization (Equation 27.2), which in practice requires too much memory to be feasible. Fortunately, because $\psi_{\text{adapt}}^{*}$ is an optimum of the train loss $\mathcal{L}_T$, Cauchy's *Implicit Function Theorem* (IFT) provides a formula for calculating $\frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}$ for an arbitrary value of the meta-learned parameters $\psi'_{\text{meta}}$ and a given task $\mathcal{T}'$:
+
+$$
+\left.\frac{\partial \psi_{\text{adapt}}^{*}}{\partial \psi_{\text{meta}}}\right|_{\psi'_{\text{meta}}} = -\left(\frac{\partial^2 \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_{\mathcal{T}'})}{\partial \psi_{\text{adapt}}\, \partial \psi_{\text{adapt}}^{\top}}\right)^{-1} \left.\frac{\partial^2 \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_{\mathcal{T}'})}{\partial \psi_{\text{adapt}}\, \partial \psi_{\text{meta}}^{\top}}\right|_{\psi'_{\text{meta}}, \psi'_{\text{adapt}}}, \tag{27.5}
+$$
+
+where $\psi'_{\text{adapt}} = \psi_{\text{adapt}}^{*}(\psi'_{\text{meta}}, \mathcal{S}_{\mathcal{T}'})$. The only potential problem with Equation 27.5 is the computation and inversion of the Hessian matrix $\frac{\partial^2 \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_\mathcal{T})}{\partial \psi_{\text{adapt}}\, \partial \psi_{\text{adapt}}^{\top}}$. This computation can be done exactly if $|\Psi_{\text{adapt}}|$ is small, which is the case considered in this chapter (as will be discussed in Section 3.4). Otherwise, an approximation to the inverse Hessian (e.g., Neumann approximation) could be used, which reduces both the memory and computational complexities to $\mathcal{O}(|\Psi|)$. Combining Equations 27.4 and 27.5, Algorithm 28 summarizes a recipe for computing the hypergradient $\frac{\mathrm{d}\mathcal{L}_V}{\mathrm{d}\psi_{\text{meta}}}$ exactly for a single task. The meta-learned parameters $\psi_{\text{meta}}$ can then be updated with the expected hypergradient over $p(\mathcal{T})$.
+
+### 3.3 ADKF-IFT as a unification framework
+
+The most common method used to train deep kernel GPs is to minimize the negative log marginal likelihood (NLML) on a single data set (optionally with extra regularization terms as will be discussed in Section 4.1). This is commonly referred to as *Deep Kernel Learning* (DKL) and introduced in [Chapter 24](/blog/deep-kernel-learning):
+
+$$
+\psi^{*} = \operatorname*{arg\,min}_{\psi} \; \operatorname{NLML}(\psi, \mathcal{S}_\mathcal{T}). \tag{27.6}
+$$
+
+The most notable departure from DKL is *Deep Kernel Transfer* (DKT), which instead proposes to train deep kernel GPs entirely using meta-learning, minimizing the *expected* NLML over a distribution of training tasks:
+
+$$
+\psi^{*} = \operatorname*{arg\,min}_{\psi} \; \mathbb{E}_{p(\mathcal{T})}[\operatorname{NLML}(\psi, \mathcal{T})]. \tag{27.7}
+$$
+
+Interestingly, both DKL and DKT can be viewed as *special cases* of the general ADKF-IFT framework. It is easy to see that choosing the partition to be $\Psi_{\text{meta}} = \varnothing$, $\Psi_{\text{adapt}} = \Psi$ and the train loss $\mathcal{L}_T$ to be the NLML in Equations 27.1 and 27.2 yields Equation 27.6: DKL is just ADKF-IFT if no parameters are meta-learned. Similarly, choosing the partition to be $\Psi_{\text{meta}} = \Psi$, $\Psi_{\text{adapt}} = \varnothing$ and the validation loss $\mathcal{L}_V$ to be the NLML in Equations 27.1 and 27.2 yields Equation 27.7: DKT is just ADKF-IFT if all parameters are meta-learned. This makes ADKF-IFT *strictly more general* than these two previous methods.
+
+### 3.4 Highlighted instantiation of ADKF-IFT
+
+Among the many possible variations of ADKF-IFT, the following instantiation is highlighted.
+
+- $\Psi_{\text{meta}} = \Phi$, i.e., all feature extractor parameters $\phi$ are meta-learned across tasks.
+- $\Psi_{\text{adapt}} = \Theta$, i.e., all base kernel parameters $\theta$ (e.g., noise variance, lengthscales, amplitude) are adapted to each task.
+- The train loss $\mathcal{L}_T$ is chosen to be the negative log GP marginal likelihood evaluated on the support set $\mathcal{S}_\mathcal{T}$, as is common practice for choosing GP base kernel parameters:
+
+  $$
+  \begin{aligned}
+  \mathcal{L}_T(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{S}_\mathcal{T}) &= -\log p(\mathcal{S}^{y}_\mathcal{T} \mid \mathcal{S}^{x}_\mathcal{T}, \psi_{\text{meta}}, \psi_{\text{adapt}}) \\
+  &= \frac{1}{2} (\mathcal{S}^{y}_\mathcal{T})^{\top} K_{\mathcal{S}_\mathcal{T}}^{-1} \mathcal{S}^{y}_\mathcal{T} + \frac{1}{2} \log\det(K_{\mathcal{S}_\mathcal{T}}) + \frac{N_{\mathcal{S}_\mathcal{T}}}{2} \log(2\pi),
+  \end{aligned} \tag{27.8}
+  $$
+
+  where $K_{\mathcal{S}_\mathcal{T}} := k_{\psi_{\text{meta}}, \psi_{\text{adapt}}}(\mathcal{S}^{x}_\mathcal{T}, \mathcal{S}^{x}_\mathcal{T}) + \sigma^2 I_{N_{\mathcal{S}_\mathcal{T}}}$.
+- The validation loss $\mathcal{L}_V$ is chosen to be the negative log joint GP predictive posterior evaluated on the query set $\mathcal{Q}_\mathcal{T}$ given the support set $\mathcal{S}_\mathcal{T}$, also due to its common usage for making predictions with GPs:
+
+  $$
+  \begin{aligned}
+  \mathcal{L}_V(\psi_{\text{meta}}, \psi_{\text{adapt}}, \mathcal{T}) &= -\log p(\mathcal{Q}^{y}_\mathcal{T} \mid \mathcal{Q}^{x}_\mathcal{T}, \mathcal{S}_\mathcal{T}, \psi_{\text{meta}}, \psi_{\text{adapt}}) \\
+  &= -\log \mathcal{N}(\mathcal{Q}^{y}_\mathcal{T} \mid K_{\mathcal{Q}_\mathcal{T} \mathcal{S}_\mathcal{T}} K_{\mathcal{S}_\mathcal{T}}^{-1} \mathcal{S}^{y}_\mathcal{T},\; K_{\mathcal{Q}_\mathcal{T}} - K_{\mathcal{S}_\mathcal{T} \mathcal{Q}_\mathcal{T}}^{\top} K_{\mathcal{S}_\mathcal{T}}^{-1} K_{\mathcal{S}_\mathcal{T} \mathcal{Q}_\mathcal{T}}),
+  \end{aligned} \tag{27.9}
+  $$
+
+  where $K_{\mathcal{Q}_\mathcal{T}} := k_{\psi_{\text{meta}}, \psi_{\text{adapt}}}(\mathcal{Q}^{x}_\mathcal{T}, \mathcal{Q}^{x}_\mathcal{T}) + \sigma^2 I_{N_{\mathcal{Q}_\mathcal{T}}}$ and $K_{\mathcal{S}_\mathcal{T} \mathcal{Q}_\mathcal{T}} := k_{\psi_{\text{meta}}, \psi_{\text{adapt}}}(\mathcal{S}^{x}_\mathcal{T}, \mathcal{Q}^{x}_\mathcal{T})$.
+
+There are several benefits to this choice as detailed below.
+
+1. This particular choice of loss functions has the advantage that the prediction procedure during meta-testing as defined in Equation 27.3 exactly matches the meta-training procedure, thereby closely following the principle of *learning to learn*.
+2. The partition of parameters can be intuitively understood as meta-learning a generally useful feature extractor $f_\phi$ such that it is possible on average to fit a low-loss GP to the feature representations extracted by $f_\phi$ for each individual task. This is very similar to previous transfer learning approaches.
+3. Since most GP base kernels have only a handful of parameters, the Hessian in Equation 27.5 can be computed and inverted exactly during meta-training using Algorithm 28; this removes any need for Hessian approximations.
+4. The inner optimization (Equation 27.2) for $\psi_{\text{adapt}}$ is computationally efficient, as it does not require back-propagating through the feature extractor $f_\phi$.
+
+More generally, ADKF-IFT combines DKL and DKT in a way that can potentially inherit the strengths of both methods and the weaknesses of neither. By adapting the base kernel parameters $\theta$ specifically to each task, it prevents underfitting due to varying ranges, lengthscales, or noise levels between data sets. By meta-learning the feature extractor on many data sets, it prevents overfitting as observed by Ober et al. This advantage is both *theoretically principled* (by solving a bilevel optimization objective using the implicit function theorem) and *empirically observable* (as will be shown in Section 5).
+
+The relationship between these methods is visualized in Figure 27.1. Panel (c) shows DKL, which trains a separate deep kernel GP for each task. It is not hard to imagine that this can lead to severe overfitting for small data sets, which has been observed empirically by Ober et al. Panel (b) shows DKT, which prevents overfitting by fitting one deep kernel GP for all tasks. However, this implicitly makes a strong assumption that all tasks come from an identical distribution over functions, including the same noise level, same amplitude, and same characteristic lengthscales, which is unlikely to hold in practice. Panel (a) shows ADKF-IFT, which allows these important parameters to be adapted, while still regularizing the feature extractor with meta-learning. The choice of this specific instantiation is based on the assumption that adapting the base kernel parameters is more appropriate given the expected differences between tasks: two related tasks are more likely to have different noise levels or characteristic lengthscales than to require substantially different feature representations (as discussed in Section 2.2).
+
+<Figure caption="Figure 27.1: A diagram contrasting the training procedures of ADKF-IFT, DKT and DKL. (a) ADKF-IFT meta-learns the feature extractor parameters ϕ across all tasks and adapts the base kernel parameters θ to each task under a bilevel optimization framework. (b) DKT meta-learns all parameters across all tasks. (c) DKL adapts all parameters to each task. (Redrawn as a schematic; the miniature GP posteriors are illustrative sketches, and the label of panel (c) is taken from this caption.)">
+  <Bdl27TrainingProcedures />
+</Figure>
+
+## 4. Connection to other methods
+
+### 4.1 Deep kernel Gaussian processes
+
+ADKF-IFT is part of a growing body of literature of techniques to train deep kernel GPs. As discussed in Section 3.3, ADKF-IFT *generalizes* DKL and DKT, which exclusively use single-task learning and meta-learning, respectively. Liu et al. and van Amersfoort et al. propose adding regularization terms to the loss of DKL in order to mitigate overfitting. These works are better viewed as *complementary* to ADKF-IFT rather than *alternatives*: their respective regularization terms could easily be added to $\mathcal{L}_T$ in Equation 27.2 to improve performance. However, the regularization strategies in both of these papers are designed for continuous inputs only, limiting their applicability to structured data like molecules.
+
+The preprint of Tossou et al. proposes an alternative way to meta-train adaptive deep kernel GPs called ADKL-GP, where adaptation is performed by conditioning the feature extractor on an embedding of the entire support set rather than adjusting a subset of the kernel parameters as in ADKF-IFT. In general, this method is very prone to overfitting. This is because the training objective for ADKL-GP is equivalent to the objective for DKT with an added contrastive loss, weighted by a sensitive hyperparameter $\gamma$, which can be interpreted as balancing the degree of regularization between two extremes. For this method to be useful it would appear that $\gamma$ would need to be carefully tuned to balance between these extremes. However, empirical results suggest that there is no consistent trend besides $\gamma > 0$ being slightly helpful, although the differences in performance were small. This suggests that the method may be difficult to use in practice. ADKF-IFT however has no such tunable hyperparameters, which is a significant strength. Instead, the balance between DKL and DKT is controlled by selecting which parameters are adapted and meta-learned, which is much more interpretable and makes it easier to use in practice.
+
+### 4.2 Meta-learning
+
+ADKF-IFT can also be viewed as a meta-learning algorithm comparable to many previously-proposed methods. One distinguishing feature of ADKF-IFT is that it is specially designed for deep kernel GPs, whereas most methods from computer vision are designed exclusively for neural network models, which as previously stated are unsuitable when reliable uncertainty estimates are required. Furthermore, many of these algorithms such as ProtoNet are designed principally or exclusively for classification, while ADKF-IFT is suited to both regression and classification. Compared to model-agnostic frameworks like MAML which meta-learn a common initialization for adaptation of all parameters, ADKF-IFT meta-learns a subset of parameters across tasks and adapts the rest of parameters to each task.
+
+### 4.3 Multi-task Gaussian processes
+
+ADKF-IFT can be considered as a method to learn multi-task GPs. The dominant approach to this problem in prior works is to learn a shared kernel for all data points across all tasks, transmitting information by explicitly modeling the covariance between data from different tasks. The main difference between methods in this family is the exact form of the kernel, which is typically assumed to have a particular structure (e.g., Kronecker product or weighted sum of simpler kernels). ADKF-IFT cannot be naturally viewed in this way because the covariance between data points from separate tasks is always zero; information is instead transmitted across tasks via a shared set of model parameters. Therefore, ADKF-IFT is a significant departure from the dominant paradigm in GP transfer learning.
+
+### 4.4 Implicit function theorem in machine learning
+
+The implicit function theorem employed in ADKF-IFT has been used in many previous machine learning papers in various contexts, e.g., neural architecture search, hyperparameter-tuning, and meta-learning.
+
+One challenge of applying implicit function theorem is the computation of the inverse Hessian. While earlier work compute this explicitly as in ADKF-IFT, recent work employ various approximation techniques such as Neumann approximation, conjugate gradient, and the identity matrix to retain computational tractability.
+
+## 5. Empirical evaluation
+
+This section presents empirical evaluation results for the specific instantiation of ADKF-IFT from Section 3.4. The experiments are chosen to focus exclusively on molecular property prediction and optimization tasks, because this application would benefit greatly from better GP models: firstly because many existing methods struggle on small data sets of size $\sim 10^2$ which are ubiquitous in chemistry, and secondly because many tasks in chemistry require high-quality uncertainty estimates. Specifically, ADKF-IFT is evaluated on a larger-scale molecular property prediction benchmark named FS-Mol. Empirical results confirm that ADKF-IFT is the best-performing method (Section 5.1), supporting the hypothesis from Section 3.4 that ADKF-IFT achieves a better balance between overfitting and underfitting than DKL and DKT. Moreover, additional Bayesian optimization results demonstrate that the ADKF-IFT feature representation is transferable to out-of-domain (OOD) molecular property prediction and optimization tasks (Section 5.2).
+
+### 5.1 Few-shot molecular property prediction on FS-Mol
+
+The empirical evaluation is conducted on the FS-Mol benchmark, which contains a carefully constructed set of few-shot learning tasks for molecular property prediction. FS-Mol contains over 5,000 tasks with 233,786 unique compounds from ChEMBL27, split into training (4,938 tasks), validation (40 tasks), and test (157 tasks) sets. Each task is associated with a protein target. The original benchmark only considers binary classification of active/inactive compounds. Nevertheless, the regression task for the actual numeric activity target IC50 or EC50 is included in this evaluation, as it is a desired and more preferred task to do in real-world drug discovery projects.
+
+<Figure caption="Figure 27.2: Mean performance with standard error of each compared method on all FS-Mol test tasks. (a) Classification (157 tasks). (b) Regression (111 tasks). (Schematic reproduction: the means are read off the published figure, not taken from the measured data, and the standard-error bars are omitted.)">
+  <Bdl27FsMolResults />
+</Figure>
+
+**ADKF-IFT** is compared with four categories of baselines: (1) *Single-task learning methods*: random forest (**RF**), k-nearest neighbors (**kNN**), single-task GP with Tanimoto kernel (**GP-ST**), single-task GNN (**GNN-ST**), deep kernel learning (**DKL**); (2) *Multi-task pretraining method*: multi-task GNN (**GNN-MT**); (3) *Self-supervised pretraining method*: molecule attention transformer (**MAT**); (4) *Meta-learning methods*: property-aware relation networks (**PAR**), prototypical network with Mahalanobis distance (**ProtoNet**), model-agnostic meta-learning (**GNN-MAML**), conditional neural process (**CNP**), deep kernel transfer (**DKT**).
+
+The GNN feature extractor architecture $f_\phi$ used for DKL, PAR, CNP, DKT, and ADKF-IFT is the same as that used for ProtoNet, GNN-ST, GNN-MT, and GNN-MAML in Stanley et al. All multi-task and meta-learning methods are trained from scratch on FS-Mol training tasks. MAT is pretrained on 2 million molecules sampled from the ZINC15 data set. The classification results for RF, kNN, GNN-ST, GNN-MT, MAT, ProtoNet, and GNN-MAML are reproduced according to Stanley et al.
+
+The task-level metrics for binary classification and regression are $\Delta$AUPRC (change in area under the precision-recall curve) and $R^2_{os}$ (predictive/out-of-sample coefficient of determination), respectively. The evaluation procedure is the same as that in Stanley et al., where the averaged performance over ten different stratified support/query random splits of every test task is reported for each compared method. This evaluation process is performed for five different support set sizes 16, 32, 64, 128, and 256. Note that unlike MoleculeNet, the support sets are generally unbalanced for the classification task in FS-Mol, which is natural as the majority of the candidate molecules are inactive in drug discovery.
+
+Figure 27.2 shows the overall test performance of all compared methods aggregated over all tasks. Note that RF is a strong baseline method, as it is widely used in real-world drug discovery projects and has comparable performance to many pretraining methods. The results indicate that ADKF-IFT outperforms all the other compared methods at all considered support set sizes for the classification task. For the regression task, the performance gains of ADKF-IFT over the second best method, namely DKT, get larger as the support set size increases.
+
+### 5.2 Out-of-domain molecular property prediction and optimization
+
+This section further demonstrates that the feature representation learned by ADKF-IFT is useful not only for in-domain molecular property prediction tasks but also for out-of-domain (OOD) molecular property prediction and optimization tasks. For this, experiments are performed to find molecules with best desired target properties within given OOD data sets using Bayesian optimization (BO) with a GP surrogate model operating on top of compared feature representations. These representations are evaluated on four representative molecular design tasks outside of FS-Mol, as summarized in Table 27.1. For the GP surrogate model, the Tanimoto kernel is used for the fingerprint representation (with radius 2 and 2,048 bits based on count simulation). All the other compared feature representations employ Matérn-5/2 kernel without automatic relevance determination (ARD) but with a log-normal prior over the lengthscale centered at the median heuristic initialization. For BO, the expected improvement (EI) acquisition function is employed with a query-batch size 1. The base kernel parameters are re-fit at the beginning of each BO iteration using all available data points. All compared feature representations are extracted using the models trained on the FS-Mol data set from scratch in Section 5.1, except for the pretrained MAT representation and the fixed fingerprint representation. Each BO experiment is repeated 20 times, each time starting from 16 randomly sampled molecules from the worst $\sim 700$ molecules within the data set. Figure 27.3 shows that the ADKF-IFT representation enables fastest discovery of top performing molecules for the molecular docking, antibiotic discovery, and material design tasks. For the antiviral drug design task, although the ADKF-IFT representation underperforms the MAT and GNN-MT representations, it still achieves competitive performance compared to other baselines.
+
+<Figure caption="Figure 27.3: Mean top-1 target value with standard error as a function of the number of molecules queried for each compared feature representation on four out-of-domain molecular optimization tasks. (a) Molecular docking. (b) Antibiotic discovery. (c) Antiviral drug design. (d) Material design. (Schematic reproduction: the curves are read off the published figure, not taken from the measured data, and the standard-error bands are omitted.)">
+  <Bdl27BoOutOfDomain />
+</Figure>
+
+**Table 27.1:** Descriptions of four out-of-domain molecular design tasks. The data sets for the molecular docking and material design tasks are sub-sampled from the much larger data sets provided in DockString and Harvard Clean Energy Project, respectively. The data sets for the antibiotic discovery and antiviral drug design tasks are taken from the antibiotic training set and the COVID Moonshot data set provided in Stokes et al. and The COVID Moonshot Consortium, respectively.
+
+| Molecular design task | Data source | #compounds | Target |
+| --- | --- | --- | --- |
+| Docking (ESR2) | DockString training set | 2,312 | binding score |
+| Antibiotic (E. coli BW25113) | Antibiotic training set | 2,335 | relative growth |
+| Antiviral (SARS-CoV-2) | COVID Moonshot | 1,926 | pIC50 Fluorescence |
+| Material (OPV) | Harvard Clean Energy Project | 2,012 | power conversion efficiency |
+
+**Table 27.2:** Mean predictive performance (test NLL) with standard error of a GP operating on top of each feature representations on the four out-of-domain molecular design tasks.
+
+<table>
+  <thead>
+    <tr><th rowspan="2">Feature</th><th colspan="4">Out-of-domain molecular design task</th></tr>
+    <tr><th>Molecular docking</th><th>Antibiotic discovery</th><th>Antiviral drug design</th><th>Material design</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Fingerprint</td><td><u>1.138 ± 0.014</u></td><td>1.669 ± 0.075</td><td><strong>4.601 ± 0.086</strong></td><td>1.091 ± 0.011</td></tr>
+    <tr><td>PAR</td><td>1.270 ± 0.019</td><td>2.185 ± 0.115</td><td>4.840 ± 0.086</td><td>1.283 ± 0.017</td></tr>
+    <tr><td>MAT</td><td>1.528 ± 0.028</td><td>2.390 ± 0.104</td><td>4.797 ± 0.088</td><td>2.198 ± 0.063</td></tr>
+    <tr><td>GNN-MT</td><td>1.994 ± 0.050</td><td>3.692 ± 0.225</td><td>6.399 ± 0.181</td><td>7.254 ± 0.217</td></tr>
+    <tr><td>CNP</td><td>1.493 ± 0.028</td><td>2.537 ± 0.162</td><td>5.005 ± 0.086</td><td>1.741 ± 0.043</td></tr>
+    <tr><td>ProtoNet</td><td>1.147 ± 0.013</td><td>1.615 ± 0.094</td><td>5.060 ± 0.086</td><td>1.032 ± 0.009</td></tr>
+    <tr><td>DKT</td><td>1.167 ± 0.012</td><td><u>1.602 ± 0.073</u></td><td>4.975 ± 0.092</td><td><u>1.026 ± 0.009</u></td></tr>
+    <tr><td>ADKF-IFT</td><td><strong>1.137 ± 0.011</strong></td><td><strong>1.496 ± 0.043</strong></td><td><u>4.781 ± 0.087</u></td><td><strong>0.996 ± 0.007</strong></td></tr>
+  </tbody>
+</table>
+
+Table 27.2 explicitly reports the regression predictive performance of a GP operating on top of each compared feature representation for these four out-of-domain molecular design tasks. The configuration of the GP is the same as that in the BO experiments. The test negative log likelihood (NLL) averaged over 200 support/query random splits (100 for each of the support set sizes 32 and 64) is reported. The results show that the ADKF-IFT representation has the best test NLL on the molecular docking, antibiotic discovery, and material design tasks, and ranks second on the antiviral drug design task.
+
+## 6. Summary
+
+This chapter presented Adaptive Deep Kernel Fitting with Implicit Function Theorem (ADKF-IFT), a general framework for fitting deep kernels that interpolates between meta-learning and conventional deep kernel learning. ADKF-IFT meta-learns a feature extractor across tasks such that the task-specific GP models estimated on top of the extracted feature representations can achieve the lowest possible prediction error on average. ADKF-IFT is implemented by solving a bilevel optimization objective via implicit differentiation, which results in a unifying framework containing DKL and DKT as special cases. The empirical results demonstrated that ADKF-IFT learns generally useful feature representations, achieving state-of-the-art performance on a variety of real-world few-shot molecular property prediction tasks and on out-of-domain molecular property prediction and optimization tasks, outperforming a wide range of single-task, multi-task, pre-training, and meta-learning methods. ADKF-IFT could potentially be an important method to produce well-calibrated models for fully-automated high-throughput experimentation in the future.
+
+Having said that, one potential factor that could limit the use case of ADKF-IFT is that it requires a meta-dataset of many related tasks for meta-training the feature extractor, which is not always available in practice. Furthermore, the inner optimization procedure is a major bottleneck in ADKF-IFT since it needs to be performed until convergence in every training and inference step.

@@ -1,0 +1,423 @@
+---
+title: "Quá trình Gauss sâu"
+description: "Quá trình Gauss sâu hợp thành các lớp GP ra sao, vì sao khó suy luận và cách các phương pháp biến phân, ngẫu nhiên kép, EP, đặc trưng ngẫu nhiên và lấy mẫu vận hành."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - gaussian processes
+  - deep gaussian processes
+  - variational inference
+series: bayesian-deep-learning
+seriesOrder: 31
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl25DeepGpChain from '../../../components/diagrams/Bdl25DeepGpChain.astro';
+import Bdl25DensityPropagation from '../../../components/diagrams/Bdl25DensityPropagation.astro';
+import Bdl25FeatureWarping from '../../../components/diagrams/Bdl25FeatureWarping.astro';
+import Bdl25DeepGpSamples from '../../../components/diagrams/Bdl25DeepGpSamples.astro';
+import Bdl25InducingGraphs from '../../../components/diagrams/Bdl25InducingGraphs.astro';
+import Bdl25StepPosterior from '../../../components/diagrams/Bdl25StepPosterior.astro';
+import Bdl25StepWarping from '../../../components/diagrams/Bdl25StepWarping.astro';
+import Bdl25LayerMaps from '../../../components/diagrams/Bdl25LayerMaps.astro';
+
+Học sâu Bayes (Bayesian deep learning) hướng tới kết hợp sức mạnh biểu đạt của các mô hình sâu với việc định lượng độ bất định theo cách Bayes. Bằng cách đặt các phân phối lên những đại lượng chưa biết, có thể lan truyền độ bất định đến các dự đoán và hiện thực hóa dao cạo Occam (Occam's razor). Như [Chương 23](/vi/blog/introduction-to-kernel-methods) đã cho thấy, các mô hình quá trình Gauss (Gaussian process, GP) cũng cung cấp một cách xử lý Bayes đối với các đại lượng chưa biết, và dự đoán của chúng tự nhiên bao hàm cả độ khớp dữ liệu lẫn độ bất định nhận thức (epistemic uncertainty). Khác với mạng nơ-ron sâu, GP hoạt động trực tiếp trong *không gian hàm* (function space). Bằng cách đặc tả các phân phối trên hàm thay vì trên tham số, chúng cung cấp những cách tiếp cận linh hoạt, phi tham số và xác suất cho bài toán ước lượng hàm theo cách tính được bằng giải tích.
+
+Các mô hình quá trình Gauss truyền thống đã được mở rộng thành những biến thể có sức biểu đạt cao hơn, chẳng hạn bằng cách xét các hàm hiệp phương sai (covariance function) phức tạp hoặc bằng cách nhúng GP vào những cấu trúc xác suất phức tạp hơn có khả năng học các biểu diễn mạnh hơn của dữ liệu. Đi xa hơn nữa, cộng đồng nghiên cứu đã tìm kiếm những cách tiếp cận kết hợp ưu điểm của GP với khả năng học đặc trưng phân cấp của các kiến trúc học sâu, chẳng hạn học hàm nhân sâu (deep kernel learning), đã được thảo luận ở [chương trước](/vi/blog/deep-kernel-learning).
+
+Chương này thảo luận một cách tiếp cận khác để kết hợp GP với học đặc trưng sâu: quá trình Gauss sâu (deep Gaussian process, deep GP). GP sâu là các kiến trúc sâu hợp thành các hàm được rút ra từ những tiên nghiệm GP. Cụ thể, chương này xét các cấu trúc trong đó đầu ra của một lớp là đầu vào của lớp tiếp theo như sau:
+
+$$
+\begin{aligned}
+\mathbf{f}^{1:L}(\mathbf{x}) &= \mathbf{f}^{L}(\mathbf{f}^{L-1}(\dots \mathbf{f}^{1}(\mathbf{x}))\dots), \\
+\text{where: } f^{\ell} &\sim \mathcal{GP}\left(0, k_j^{\ell}(\cdot, \cdot)\right).
+\end{aligned}
+\tag{25.1}
+$$
+
+Ở đây, $\mathbf{f}$ ký hiệu một hàm nhận giá trị vector và $L$ là tổng số lớp trong cấu trúc GP sâu. Điều cốt yếu là quá trình tổng thể *không còn là Gauss*, do sự uốn (warping) phi tuyến mà mỗi lớp gây ra, và mô hình có thể học những tương tác phức tạp hơn nhiều giữa các dữ liệu.
+
+## 1. Hợp thành hàm và hợp thành quá trình
+
+### 1.1 Hợp thành hàm trong học sâu
+
+Các hàm kích hoạt dùng trong mạng nơ-ron là những hàm nhận giá trị vector $\boldsymbol{\phi}(\cdot)$ của một cơ sở điều chỉnh được, được điều khiển bởi một ma trận tham số $\mathbf{U}$. Tương tự như các mô hình tuyến tính tổng quát hóa, kích hoạt cuối cùng $\mathbf{g}(\mathbf{x})$ của một mạng nơ-ron một lớp với đầu vào $\mathbf{x}$ thu được bằng cách lấy tổ hợp tuyến tính có trọng số của các hàm cơ sở bằng một ma trận $\mathbf{V}$:
+
+$$
+\mathbf{g}(\mathbf{x}) = \mathbf{V}^{T}\boldsymbol{\phi}(\mathbf{U}\mathbf{x}).
+\tag{25.2}
+$$
+
+Khi đó mạng nơ-ron sâu có dạng một phép hợp thành hàm của các hàm cơ sở,
+
+$$
+\mathbf{g}(\mathbf{x}) = (\mathbf{V}^{L})^{T}\boldsymbol{\phi}^{L}(\mathbf{U}^{L}\mathbf{g}^{L-1}(\dots \mathbf{U}^{2}\mathbf{g}^{1}(\mathbf{x}))),
+\tag{25.3}
+$$
+
+trong đó $L$ ký hiệu tổng số lớp và phép hợp thành tổng thể được biểu diễn bằng ký hiệu không chỉ số $\mathbf{g}(\cdot)$. Biểu thức trên cũng có thể được viết lại bằng cách dùng Phương trình (25.2) để thay thế mọi số hạng $\mathbf{g}^{\ell}(\cdot)$:
+
+$$
+\mathbf{g}(\mathbf{x}) = (\mathbf{V}^{L})^{T}\boldsymbol{\phi}^{L}(\mathbf{W}^{L}\boldsymbol{\phi}^{L-1}(\dots \mathbf{W}^{2}\boldsymbol{\phi}^{1}(\mathbf{U}^{1}\mathbf{x}))),
+\tag{25.4}
+$$
+
+trong đó $\mathbf{W}^{\ell}$ là ma trận ánh xạ giữa hai tập hàm cơ sở liên tiếp và thường được xem là một tham số cần học. Một thách thức nghiêm trọng đối với mạng sâu khi được huấn luyện theo kiểu truyền thẳng (feed-forward) là quá khớp (overfitting). Khi số lớp và số hàm cơ sở trong mỗi lớp tăng lên, một biểu diễn rất mạnh nhưng cũng có rất nhiều tham số được hình thành. Ma trận $\mathbf{W}^{\ell}$ có kích thước $d^{\ell} \times d^{\ell-1}$, trong đó $d^{\ell}$ là số hàm cơ sở ở lớp thứ $\ell$.
+
+### 1.2 Phân tích ma trận trọng số
+
+Một cách để xử lý số lượng lớn tham số chứa trong các ma trận $\mathbf{W}^{\ell}$ là thay chúng bằng một dạng hạng thấp hơn. Cách này lấy cảm hứng từ cách phát biểu hợp thành hàm đầu tiên ở Phương trình (25.3), nhưng giờ phép phân tích hạng thấp được làm tường minh và rõ ràng. Chọn $r^{\ell} < d^{\ell}, d^{\ell-1}$ để thu được:
+
+$$
+\mathbf{W}^{\ell} = \mathbf{U}^{\ell}(\mathbf{V}^{\ell-1})^{\top},
+$$
+
+trong đó $\mathbf{U}^{\ell} \in \mathbb{R}^{d^{\ell} \times r^{\ell}}$ và $\mathbf{V}^{\ell-1} \in \mathbb{R}^{d^{\ell-1} \times r^{\ell}}$.
+
+Denil và cộng sự đã chỉ ra bằng thực nghiệm rằng các mạng nơ-ron đã huấn luyện có thể được xấp xỉ tốt bằng các ma trận hạng thấp, bằng chứng là khả năng dự đoán một phần của ma trận trọng số khi biết phần còn lại. Kỹ thuật "dropout" cũng được áp dụng rộng rãi để kiểm soát độ phức tạp của mô hình, điều hàm ý rằng các mô hình có quá nhiều tham số. Thay dạng hạng thấp vào cấu trúc hợp thành của mạng sâu, thu được
+
+$$
+\mathbf{g}(\mathbf{x}) = (\mathbf{V}^{L})^{\top}\boldsymbol{\phi}^{L}(\mathbf{U}^{L}(\mathbf{V}^{L-1})^{\top}\boldsymbol{\phi}^{L-1}(\dots \mathbf{U}^{2}(\mathbf{V}^{1})^{T}\boldsymbol{\phi}^{1}(\mathbf{U}^{1}\mathbf{x}))).
+$$
+
+Giờ có thể nhận ra dạng sau bên trong phép phân rã hàm,
+
+$$
+\mathbf{g}^{\ell}(\mathbf{z}) = (\mathbf{V}^{\ell})^{\top}\boldsymbol{\phi}^{\ell}(\mathbf{U}^{\ell}\mathbf{z})
+\tag{25.5}
+$$
+
+và một lần nữa thu được một phép hợp thành hàm,
+
+$$
+\mathbf{g}(\mathbf{x}) = \mathbf{f}^{L}(\mathbf{f}^{L-1}(\dots \mathbf{f}^{1}(\mathbf{x}))).
+\tag{25.6}
+$$
+
+Mạng sâu tiêu chuẩn được khôi phục khi $r^{\ell} = \min(d^{\ell}, d^{\ell-1})$.
+
+### 1.3 Hợp thành quá trình với biến ẩn
+
+Để thu được một quá trình Gauss sâu, xét một cấu trúc lồng nhau như đã trình bày ở trên với Phương trình (25.6). Quá trình Gauss sâu được khôi phục bằng cách giữ $r^{\ell}$ hữu hạn và cho $d^{\ell} \to \infty$ ở mọi lớp. Tất nhiên, các ánh xạ trong quá trình Gauss được xử lý theo cách xác suất và được lấy tích phân để loại bỏ[^1] thay vì được tối ưu hóa, nên dù kích thước lớp tăng, số tham số trong mô hình thu được vẫn ít hơn nhiều lần so với một mạng nơ-ron sâu tiêu chuẩn. Ngoài ra, Duvenaud và cộng sự còn phân tích tác dụng của dropout trong giới hạn GP, cho thấy nó tạo ra các tiên nghiệm *spike-and-slab* trên thang độ dài (lengthscale).
+
+Cấu trúc biến ẩn (latent variable) ở trên không phải con đường duy nhất dẫn đến một GP sâu. Các cách phát biểu khác bao gồm xem phép hợp thành như một phương trình vi phân ngẫu nhiên (stochastic differential equation) mà các lớp của nó trở nên liên tục, biểu diễn GP sâu như một mô hình không gian trạng thái (state-space model) thích hợp với phép lọc tuần tự, hoặc mô tả nó thông qua các toán tử hiệp phương sai (covariance operator) được hợp thành với nhau. Các góc nhìn này được thảo luận thêm ở phần dưới.
+
+Ý tưởng hợp thành cũng đặt GP sâu vào một bức tranh rộng hơn của các mô hình. GP uốn (warped GP) là một tiền thân một lớp, trong đó đầu ra của một GP được biến đổi qua một hàm đơn điệu có tham số (hàm này cũng có thể nhận một tiên nghiệm GP), còn các luồng chuẩn hóa (normalizing flow) cũng xây dựng những phân phối linh hoạt bằng cách hợp thành các phép biến đổi phi tuyến, mặc dù thông qua các ánh xạ có tham số, tất định và khả nghịch thay vì các mẫu rút từ tiên nghiệm hàm phi tham số.
+
+Để tổng quát hóa một quá trình Gauss sang miền sâu, thay vì giả định rằng một quan sát dữ liệu $\mathbf{y}$ là một mẫu rút từ một tiên nghiệm quá trình Gauss bị nhiễu, một phép hợp thành hàm được dùng,
+
+$$
+\begin{aligned}
+\mathbf{y} &= \mathbf{f}^{1:L} + \boldsymbol{\epsilon} \\
+&= \mathbf{f}^{L}(\mathbf{f}^{L-1}(\dots \mathbf{f}^{1}(\mathbf{x}))) + \boldsymbol{\epsilon}.
+\end{aligned}
+\tag{25.7}
+$$
+
+Đây là cùng dạng với mạng nơ-ron tiêu chuẩn, như trong Phương trình (25.6), nhưng giờ mỗi hàm trong phép hợp thành, $\mathbf{f}^{\ell}(\cdot)$, là một mẫu rút từ một quá trình Gauss. Tuy nhiên, tiên nghiệm tổng thể $\mathbf{f}^{1:L}$ không còn là một quá trình Gauss. Trong phương trình trên, $\boldsymbol{\epsilon}$ biểu diễn nhiễu, và nhiễu Gauss có thể được đưa vào ở mọi lớp. Trong trường hợp này, các giá trị cụ thể của hàm bị nhiễu (ứng với $n$ điểm dữ liệu) có thể được gom thành một vector cho mỗi lớp, cho định nghĩa đệ quy sau:
+
+$$
+\mathbf{h}^{\ell} = \mathbf{f}^{\ell}(\mathbf{h}^{\ell-1}) + \boldsymbol{\epsilon}^{\ell}.
+\tag{25.8}
+$$
+
+Từ định nghĩa đệ quy này, toàn bộ cấu trúc phân cấp thu được bằng cách ký hiệu $\mathbf{x} \triangleq \mathbf{h}^{0}$ và xem $\mathbf{y}$ là lớp cuối cùng. Mô hình đồ thị (graphical model) tương ứng của một quá trình Gauss sâu được minh họa ở Hình 25.1.
+
+<Figure caption="Hình 25.1: Một quá trình Gauss sâu với hai lớp ẩn.">
+  <Bdl25DeepGpChain />
+</Figure>
+
+Như có thể thấy, thủ tục sinh được định nghĩa bởi hàm $\mathbf{f}^{1:L}$ có thể được biểu diễn trong một mô hình đồ thị như một kiến trúc sâu, trong đó mỗi lớp tương ứng với một thủ tục sinh gắn với một hàm $\mathbf{f}^{\ell}$.
+
+Từ Phương trình (25.7), rõ ràng chương này xây dựng một mô hình xác suất đầy đủ thông qua *hợp thành quá trình* (process composition). Hợp thành quá trình có một tính chất hấp dẫn là giữ lại các phẩm chất lý thuyết của quá trình ngẫu nhiên nền tảng (chẳng hạn tính nhất quán Kolmogorov) đồng thời cung cấp một lớp tiên nghiệm quá trình phong phú hơn. Ví dụ, với quá trình Gauss sâu, người ta đã chỉ ra rằng với những giả định cụ thể về tham số của hàm hiệp phương sai, đạo hàm của các hàm được lấy mẫu từ quá trình có phân phối biên với đuôi nặng hơn phân phối Gauss. Ngược lại, đã biết rằng trong một quá trình Gauss tiêu chuẩn, đạo hàm của các hàm được lấy mẫu từ quá trình có phân phối Gauss đồng thời với hàm ban đầu. Mục tiếp theo so sánh các tính chất của quá trình Gauss sâu với các tính chất của các phương pháp học sâu truyền thống.
+
+### 1.4 Các thách thức suy luận và sức biểu đạt
+
+Phần thảo luận đến đây tập trung vào một cấu trúc GP sâu với một hệ phân cấp các biến ẩn trung gian. Để làm nổi bật các thách thức suy luận và sức biểu đạt của mô hình, sẽ hữu ích khi so sánh cấu trúc này với cách tiếp cận học sâu sinh (generative) chiếm ưu thế vào thời điểm GP sâu lần đầu được giới thiệu: các máy Boltzmann giới hạn (restricted Boltzmann machine, RBM), được xếp chồng để tạo thành các mạng niềm tin sâu (deep belief network). Từ đó đến nay, mạng niềm tin sâu đã bị thay thế ở vai trò công cụ chủ lực của mô hình hóa sinh sâu, trước hết bởi các bộ tự mã hóa biến phân (variational autoencoder) và gần đây hơn bởi các mô hình khuếch tán (diffusion model) (Chương 50), nhưng phép so sánh vẫn có giá trị: giống như GP sâu, một mạng niềm tin sâu là một hệ phân cấp các biến ẩn mà việc huấn luyện đòi hỏi lấy biên (marginalize) các lớp trung gian, và sự tương phản này cho thấy rõ điều gì thay đổi khi mỗi lớp là một hàm phi tham số thay vì một ánh xạ có tham số.
+
+Nhiều kỹ thuật suy luận xấp xỉ (chẳng hạn phân kỳ tương phản (contrastive divergence)) được dùng để ước lượng tham số mô hình trong RBM. Sau đó cần một khối lượng công việc đáng kể với lấy mẫu quan trọng có ủ nhiệt (annealed importance sampling) thì mới ước lượng được dù chỉ là *hàm hợp lý*[^2] của một tập dữ liệu dưới mô hình RBM. Khi xét các hệ phân cấp sâu hơn, ước lượng thu được chỉ là một cận dưới của hàm hợp lý dữ liệu. Bằng cách xét các hàm kích hoạt sigmoid, $\sigma(z) = (1 + \exp(-z))^{-1}$, xác suất có điều kiện của một đơn vị ẩn trong mạng niềm tin sâu khi biết các nút cha của nó thu được là
+
+$$
+p(y|\mathbf{x}) = \sigma(\mathbf{U}\mathbf{x})^{y}(1 - \sigma(\mathbf{U}\mathbf{x}))^{(1-y)}.
+$$
+
+Mật độ có điều kiện của đầu ra $y$ chỉ phụ thuộc vào một tổng tuyến tính có trọng số của các đầu vào $\mathbf{x}$. Năng lực biểu diễn của một quá trình Gauss ở cùng vai trò đó lớn hơn đáng kể so với RBM. Với GP, hàm hợp lý tương ứng là trên một biến liên tục, nhưng nó là một hàm phi tuyến của các đầu vào,
+
+$$
+p(y|\mathbf{x}) = \mathcal{N}(y|f(\mathbf{x}), \beta^{-1}).
+$$
+
+Trong trường hợp này hàm hợp lý phụ thuộc vào một hàm ánh xạ $f(\cdot)$ thay vì một tập tham số trung gian $\mathbf{U}$. Bằng cách đặt một tiên nghiệm GP lên $f$, có thể lấy tích phân giải tích để loại bỏ các ánh xạ. Ngược lại, trong RBM, hàm hợp lý của mô hình được ước lượng và cực đại hóa theo các tham số $\mathbf{U}$. Với RBM, việc lấy biên $\mathbf{U}$ không tính được bằng giải tích. Lưu ý rằng có thể kết hợp hai cách tiếp cận nếu
+
+$$
+p(y|\mathbf{x}) = \sigma(f(\mathbf{x}))^{y}(1 - \sigma(f(\mathbf{x})))^{(1-y)},
+$$
+
+điều này khôi phục một mô hình phân loại GP. Tuy nhiên, khi đó không còn lấy tích phân giải tích được nữa, và một cách tiếp cận phổ biến cho suy luận xấp xỉ là thuật toán lan truyền kỳ vọng (Expectation Propagation). Lan truyền kỳ vọng cũng đã được áp dụng cho GP sâu; cách này và các cách tiếp cận suy luận khác được thảo luận ở Mục 4. Trọng tâm ở đây là xấp xỉ biến phân.
+
+<Figure caption="Hình 25.2: Một phân phối Gauss được lan truyền qua một ánh xạ phi tuyến. Hình a và b lần lượt cho thấy hàm hợp lý và phân phối hậu nghiệm chưa chuẩn hóa. Mật độ hậu nghiệm (được vẽ cho dữ liệu cho trước bằng một đường mờ ở hình b và ở bên phải trong hình c) là đa mode và khó chuẩn hóa. (a) Hàm hợp lý được vẽ như một hàm của y và x. y thu được qua một hàm phi tuyến cộng nhiễu. Đường mờ tương ứng với việc cố định x tại một giá trị x̂ nào đó. (b) Phân phối hậu nghiệm chưa chuẩn hóa được vẽ như một hàm của x và y. Đường mờ tương ứng với một y cố định và đường đậm hơn cho thấy p(x). (c) Lan truyền mật độ Gauss p(x) qua một ánh xạ phi tuyến. Bản tái hiện dạng sơ đồ: f(x) = 3.5 sin(6πx), độ lệch chuẩn của nhiễu 0.8, p(x) là phân phối Gauss với trung bình 0.25 và độ lệch chuẩn 0.1, ŷ = 1.5 và x̂ = 0.3; các bề mặt ở khung a và b được vẽ thành một loạt lát cắt, và lát cắt được làm nổi bật (mờ trong bản gốc) được vẽ bằng màu nhấn.">
+  <Bdl25DensityPropagation />
+</Figure>
+
+Suy luận trong các mô hình sâu đòi hỏi lấy biên các không gian đầu vào xếp chồng, ký hiệu là $\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}$ trong Phương trình (25.8). Các không gian *trung gian* này thường được xem là các biến *ẩn*[^3], mà trong trường hợp RBM là các biến nhị phân. Số số hạng trong tổng tăng theo hàm mũ với số chiều đầu vào, khiến nó không tính được với mọi mô hình trừ những mô hình nhỏ nhất. Trong thực tế, lấy mẫu, và đặc biệt là thuật toán phân kỳ tương phản, được dùng để huấn luyện. Tương tự, việc lấy biên các không gian ẩn trung gian trong GP sâu không tính được bằng giải tích: mặc dù mật độ Gauss đơn giản, việc lan truyền nó qua các ánh xạ phi tuyến là khó khăn. Điều này được minh họa ở Hình 25.2.
+
+Vì lý do này, GP-LVM phân cấp (hierarchical GP-LVM), cách tiếp cận đầu tiên xếp chồng các GP, được định nghĩa trong một khuôn khổ hậu nghiệm cực đại (maximum a posteriori, MAP), trong đó các biến ẩn được cực đại hóa thay vì được lấy biên. Tuy nhiên, để cách tiếp cận MAP này hoạt động, cần một tiên nghiệm mạnh ở mức trên cùng của hệ phân cấp. Hơn nữa, học MAP không cho phép lựa chọn mô hình (model selection) vì không có ước lượng nào của hàm hợp lý biên (marginal likelihood).
+
+Phần lớn các thuật toán sâu đòi hỏi lượng dữ liệu lớn để học. Việc khớp các mô hình như vậy với những tập dữ liệu nhỏ hơn và dùng các cách tiếp cận Bayes để xử lý độ phức tạp có vẻ hoàn toàn vô vọng khi phải đối mặt với những khó khăn tính toán đi kèm. Tuy nhiên, đã biết rằng con người có khả năng lập luận quy nạp (tương đương với khái quát hóa khái niệm) chỉ với một vài ví dụ. Điều này đặt ra câu hỏi liệu có thể xây dựng cấu trúc sâu và học cấu trúc trừu tượng trên những tập dữ liệu *nhỏ hơn* hay không. Với các tập dữ liệu nhỏ hơn, các câu hỏi về khả năng khái quát hóa nảy sinh: để chứng tỏ các cấu trúc như vậy là hợp lý, cần có một thước đo khách quan về khả năng áp dụng của mô hình. Chương này cho thấy khả năng của quá trình Gauss sâu học được ngay cả từ các tập huấn luyện nhỏ. Tính chất này có thể được quy cho bản chất Bayes hoàn toàn của chúng.
+
+<Figure caption="Hình 25.3: Các mẫu từ một GP sâu cho thấy quá trình tạo ra đặc trưng. Đồ thị phía trên cho thấy sự uốn phi tuyến liên tiếp của một không gian đầu vào hai chiều. Các hình tròn tương ứng với những vị trí cụ thể trong không gian đầu vào mà tại đó một đặc trưng (một “vòng lặp”) được tạo ra ở lớp 1. Như có thể thấy, khi đi dọc hệ phân cấp về phía bên phải, đặc trưng này được duy trì ở các lớp tiếp theo và có thể tiếp tục bị biến đổi. Đồ thị phía dưới tương tự đồ thị phía trên, nhưng dùng một hàm hiệp phương sai tuyến tính (tương đương với thực hiện phân tích thành phần chính (PCA) xếp chồng để huấn luyện khi có dữ liệu quan sát). Như có thể thấy, các phép biến đổi tuyến tính có vẻ vô nghĩa trong bối cảnh này, vì nhân một đầu vào với hai ma trận (hai phép biến đổi tuyến tính) tương đương với nhân đầu vào đó với một ma trận gộp duy nhất (một phép biến đổi tuyến tính). Bản tái hiện dạng sơ đồ: 120 điểm trên một đường tròn được đẩy qua ba lớp GP hai đầu ra được rút mới với một hàm hiệp phương sai mũ bình phương, tức exponentiated quadratic (phía trên), và qua ba ánh xạ tuyến tính ngẫu nhiên, là các mẫu rút từ một GP với hàm hiệp phương sai tuyến tính (phía dưới); các điểm được vẽ thành chấm.">
+  <Bdl25FeatureWarping />
+</Figure>
+
+### 1.5 Đặc điểm của GP sâu với vai trò tiên nghiệm
+
+GP sâu hợp thành các ánh xạ phi tuyến để tạo ra những lớp hàm tiên nghiệm phong phú hơn nhiều so với GP một lớp. Trước hết, một GP một lớp định nghĩa một phân phối trên các hàm có dạng Gauss: mọi tập hữu hạn các giá trị hàm có phân phối Gauss nhiều chiều đồng thời. Tính Gauss này áp đặt một số giới hạn lên sức biểu đạt. Chẳng hạn, đạo hàm của hàm trong một GP cũng có phân phối Gauss, nghĩa là những thay đổi rất đột ngột hoặc những bước nhảy lớn trong không gian hàm là khó xảy ra một cách tiên nghiệm dưới một GP. Mặt khác, đầu ra của một GP sâu nói chung không có phân phối Gauss; ngay cả khi mỗi lớp là một GP, phân phối biên $p(y|x)$ được mô hình hóa bởi $y = \mathcal{DGP}(x)$, trong đó $\mathcal{DGP}$ ký hiệu ánh xạ GP sâu tổng hợp, là một tích phân của các phân phối Gauss trên các đầu vào ngẫu nhiên, và tích phân này có thể tạo ra đuôi nặng, độ lệch (skewness) hoặc tính đa mode. Tổng quát hơn, khi số lớp tăng, phân phối của đầu ra khi biết đầu vào có thể hình thành những hình dạng ngày càng không tầm thường, như Duvenaud và cộng sự đã thảo luận, đồng thời các tác giả này cũng phân tích những điểm cần thận trọng liên quan đến đặc điểm này.
+
+Hơn nữa, với vai trò một tiên nghiệm hàm, GP sâu có thể tạo ra tính không dừng (non-stationarity) và sự uốn đầu vào (input warping). Bằng cách hợp thành nhiều GP, hàm hiệp phương sai hiệu dụng của ánh xạ đầu vào – đầu ra trở nên phụ thuộc vào đầu vào. Chẳng hạn, một GP đơn lẻ với hàm nhân dừng (stationary kernel), chẳng hạn hàm nhân mũ bình phương, bị giới hạn ở chỗ nó chỉ có một thang độ dài tương quan toàn cục duy nhất. Một GP sâu có thể *học* các thang độ dài thay đổi theo vị trí: lớp GP thứ nhất có thể uốn đầu vào $x$ sang một không gian mới $h^1$, kéo giãn hoặc co các vùng theo những mức khác nhau. Lớp thứ hai sau đó hoạt động trên $h^1$, và cứ thế tiếp tục. Kết quả là hàm cuối cùng có thể thể hiện hành vi không dừng, ngay cả khi mỗi lớp dùng các hàm nhân dừng. Chẳng hạn, một phần của không gian đầu vào có thể được phóng đại một cách hiệu dụng (dẫn đến đầu ra biến thiên nhanh ở thang chi tiết), trong khi một phần khác bị co lại (đầu ra biến thiên chậm hơn), vì biến ẩn $h^1$ đã học được rằng một số đầu vào cần nhiều chi tiết hơn. Điều này được minh họa ở các Hình 25.3, 25.4 và 25.7.
+
+Một góc nhìn khác là xét xem GP sâu hàm ý hàm hiệp phương sai nào cho quan hệ trực tiếp giữa đầu vào và đầu ra. Trong một số trường hợp, chẳng hạn các phép hợp thành tuyến tính đơn giản hoặc những tương tự với mạng nơ-ron rộng vô hạn, có thể suy ra bằng giải tích một hàm hiệp phương sai tương đương cho hàm hợp. Các kết quả kinh điển của Neal và Williams đã chỉ ra rằng một mạng nơ-ron Bayes (Bayesian neural network) một lớp với vô hạn đơn vị ẩn hội tụ về một GP với hàm hiệp phương sai dạng đóng đối với một số hàm kích hoạt. Tuy nhiên, với một GP sâu tổng quát có hiệp phương sai phi tuyến ở mỗi lớp, nói chung không có hàm nhân dạng đóng cho toàn bộ ánh xạ hợp.
+
+Một hướng nghiên cứu quan trọng đã mở rộng giới hạn GP một lớp sang các mạng sâu. Dutordoir và cộng sự đã chỉ ra rằng một mạng nơ-ron Bayes kết nối đầy đủ có độ sâu cố định, với các tiên nghiệm trọng số i.i.d., hội tụ về một GP duy nhất khi độ rộng các lớp lần lượt được cho tiến ra vô hạn. Hàm nhân giới hạn $\mathbf{K}^{\ell}$ thu được bằng một phép đệ quy tất định: mỗi lớp áp dụng một ánh xạ lên hàm nhân của lớp trước, ánh xạ này được xác định bởi hàm kích hoạt và các phương sai của trọng số và độ chệch (bias). de G. Matthews và cộng sự đã làm cho kết quả này chặt chẽ trong trường hợp độ rộng của mọi lớp tăng đồng thời, giải quyết trở ngại kỹ thuật then chốt là định lý giới hạn trung tâm (central limit theorem) tiêu chuẩn không còn áp dụng được trong các kiến trúc sâu (vì các giả định độc lập cần thiết không còn đúng), bằng cách phát biểu lại các tổng theo từng lớp thành những dãy khả hoán (exchangeable) và dùng một định lý giới hạn trung tâm cho các mảng khả hoán. Điều cốt yếu là trong cả hai trường hợp, giới hạn là một GP duy nhất, không phải một GP sâu: độ sâu chỉ xuất hiện thông qua phép đệ quy hàm nhân, và hệ phân cấp sụp xuống thành một hàm nhân cố định, tất định. Đối tượng giới hạn này đôi khi được gọi là quá trình Gauss của mạng nơ-ron (neural network GP, NNGP) và nên được hiểu là một *GP với hàm nhân sâu* (deep kernel GP) hơn là một GP sâu theo nghĩa của Damianou và Lawrence. Mối quan hệ với học hàm nhân sâu, trong đó một mạng nơ-ron được dùng để tham số hóa hàm nhân của một GP (một lớp), được thảo luận ở [Chương 24](/vi/blog/deep-kernel-learning).
+
+Agrawal và cộng sự giải quyết sự tách rời bề ngoài giữa các giới hạn GP này và GP sâu. Các tác giả thống nhất góc nhìn NNGP và góc nhìn GP sâu bằng cách chỉ ra rằng khi một số lớp ẩn được giữ ở độ rộng hữu hạn (các nút cổ chai, bottleneck) trong khi các lớp khác tiến ra vô hạn, mạng hội tụ về một phép hợp thành các quá trình Gauss, tức là một quá trình Gauss sâu. Các lớp nút cổ chai này đưa vào những biểu diễn ẩn dùng chung, tạo ra sự phụ thuộc giữa các đầu ra và bảo toàn cấu trúc phân biệt qua độ sâu. Ngược lại, khi mọi lớp được cho rộng vô hạn, mô hình rút gọn thành một quá trình Gauss duy nhất. Theo chiều ngược lại, Pleiss và Cunningham chứng tỏ rằng độ rộng và độ sâu có tác dụng trái ngược nhau trong các mô hình phân cấp: trong khi độ sâu làm nổi bật tính phi Gauss, việc tăng số chiều đầu ra của các lớp trung gian khiến một GP sâu hội tụ về một GP tiêu chuẩn. Vì GP sâu vốn đã là phi tham số, sự sụp đổ này không thể quy cho việc tăng năng lực; nó là một hệ quả cấu trúc của chính độ rộng, củng cố tầm quan trọng của các lớp nút cổ chai hẹp đối với việc bảo toàn cấu trúc phân cấp. Vì mạng nơ-ron Bayes tạo thành một lớp con của GP sâu với các lớp suy biến, năng lực hữu hạn, những phát hiện cấu trúc này cũng mở rộng sang các kiến trúc mạng nơ-ron tiêu chuẩn.
+
+Kết nối theo chiều ngược lại, Dutordoir và cộng sự xây dựng các mô hình GP thưa sâu (deep sparse GP) mà phép lan truyền trung bình theo từng lớp khớp với lượt truyền xuôi (forward pass) của một mạng nơ-ron tiêu chuẩn, thông qua các cấu trúc đặc trưng cảm sinh liên miền (interdomain inducing feature). Điều này tạo ra một cầu nối thực tiễn: mạng nơ-ron có thể đóng vai trò ước lượng điểm cho suy luận GP sâu, và một mạng nơ-ron đã huấn luyện có thể được dùng để khởi tạo một GP sâu.
+
+Góc nhìn hàm hiệp phương sai kết nối với một lớp rộng hơn các cấu trúc quá trình Gauss sâu, bao gồm các cách phát biểu dựa trên toán tử hiệp phương sai và phép tích chập. Dunlop và cộng sự đặt các cách tiếp cận này vào một khuôn khổ thống nhất, trong đó dãy các hàm qua các lớp tạo thành một xích Markov, và phân tích các tính chất ergodic của nó để đặc trưng hóa một độ sâu hiệu dụng: trong các trường hợp ergodic, quá trình có một phân phối dừng và các lớp bổ sung mang lại rất ít lợi ích thêm vượt quá thời gian trộn (mixing time), trong khi ở các trường hợp không ergodic, hành vi có thể vẫn không tầm thường hoặc không ổn định khi độ sâu tăng. Từ góc nhìn thống kê, Finocchio và Schmidt-Hieber bổ sung cho quan điểm này bằng cách chỉ ra rằng các tiên nghiệm quá trình Gauss sâu có thể đạt tốc độ co hậu nghiệm (posterior contraction rate) (gần) minimax cho các hàm hồi quy có cấu trúc hợp thành, chứng tỏ rằng độ sâu có thể có lợi trong những bối cảnh như vậy.
+
+Một mối lo ngại thực tiễn liên quan đến độ sâu là hiện tượng bệnh lý (pathology) được Duvenaud và cộng sự xác định, theo đó các bậc tự do biểu đạt của tiên nghiệm có thể sụp đổ khi số lớp tăng. Trong bối cảnh suy luận biến phân (variational inference), điều này có thể biểu hiện thành sụp đổ lớp (layer collapse): các xấp xỉ trường trung bình (mean-field) có thể khiến các lớp trung gian bị 'tắt' trên thực tế, với đóng góp của chúng giảm dần khi tỉ số tín hiệu trên nhiễu tiến về không. Tuy nhiên, bệnh lý này không phải là nội tại: như mục sau thảo luận, các thay đổi kiến trúc ở các lớp nút cổ chai có thể làm giảm nhẹ nó.
+
+### 1.6 Mô hình hóa các lớp nút cổ chai
+
+Mục trước đã xác lập rằng các lớp nút cổ chai (các lớp trung gian hẹp) là thành phần cấu trúc chịu lực của một GP sâu. Mục này chuyển sang câu hỏi bổ sung: các lớp nút cổ chai này có thể được mô hình hóa như thế nào. Trước hết mục này thảo luận các lựa chọn kiến trúc nhằm bảo toàn đóng góp của các lớp trung gian, giải quyết trực tiếp hiện tượng bệnh lý vừa nêu, rồi chuyển sang một trục mô hình hóa sâu hơn: nút cổ chai được biểu diễn như một biến ẩn tường minh trong mô hình sinh, hay được để ngầm trong phép hợp thành.
+
+Để giảm nhẹ hiện tượng bệnh lý mà Duvenaud và cộng sự đã nêu và được thảo luận ở mục trước, các tác giả này đề xuất những kiến trúc nối đầu vào trực tiếp với mỗi lớp, còn Salimbeni và Deisenroth đưa ra một thay đổi có liên quan chặt chẽ trong bối cảnh GP sâu bằng cách trang bị cho mỗi lớp một hàm trung bình tuyến tính $m(\mathbf{x}) = \mathbf{W}\mathbf{x}$. Hàm này đóng vai trò một kết nối tắt (residual connection): ngay cả khi thành phần ngẫu nhiên của một lớp đóng góp ít, đầu vào vẫn có thể lan truyền qua hàm trung bình tuyến tính. Thay đổi này đã được chỉ ra là làm giảm nhẹ các hiện tượng suy biến mà Duvenaud và cộng sự xác định, và nhất quán với phân tích về tiên nghiệm GP sâu trong Salimbeni và Deisenroth. Gần đây hơn, de Souza và cộng sự đề xuất các kiến trúc *mỏng và sâu* (thin and deep) kết hợp các biểu diễn ẩn ít chiều với những cách tham số hóa hàm nhân dễ diễn giải ở mỗi lớp, giải quyết các bệnh lý này thông qua thiết kế kiến trúc đồng thời bảo toàn lợi ích của độ sâu.
+
+Ngoài các thay đổi kiến trúc, bản thân lớp nút cổ chai thừa nhận hai cách xử lý mô hình hóa khác nhau về căn bản, phân biệt bởi việc nó được biểu diễn như một biến ẩn tường minh trong mô hình sinh hay chỉ một cách ngầm định thông qua phép hợp thành. Trong góc nhìn biến ẩn tường minh, mà Damianou và Lawrence theo đuổi, mỗi nút cổ chai là một biến ngẫu nhiên $\mathbf{h}^{\ell} = f^{\ell}(\mathbf{h}^{\ell-1}) + \boldsymbol{\epsilon}^{\ell}$, khác với các giá trị hàm GP, với nhiễu Gauss $\boldsymbol{\epsilon}^{\ell}$ được đưa vào giữa mọi cặp lớp. Khi đó mỗi lớp có dạng cấu trúc của một GP-LVM, và suy luận bao gồm việc ước lượng $p(\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}|\text{Data})$, phân phối hậu nghiệm trên các nút cổ chai trung gian. Trong góc nhìn biến ẩn ngầm định, mà Salimbeni và Deisenroth theo đuổi, nhiễu giữa các lớp được hấp thụ vào hàm hiệp phương sai và không có biến nút cổ chai được đặt tên riêng: trạng thái ở lớp $\ell$ chính là giá trị hàm GP $\mathbf{f}^{\ell}$, và mối quan tâm chính là quá trình biên được cảm sinh $y(x) = \mathcal{DGP}(x)$, trong đó các $\mathbf{f}^{\ell}$ trung gian được xem là công cụ thay vì là đối tượng của suy luận.
+
+Sự phân biệt này trông có vẻ nhỏ, vì nó chỉ quy về việc có đưa nhiễu vào giữa các lớp hay không, nhưng hệ quả của nó là đáng kể. Góc nhìn biến ẩn tường minh làm cho mỗi lớp là một GP-LVM và do đó đặt mô hình vững chắc vào dòng phát triển của học biểu diễn (representation learning): các nút cổ chai trung gian được suy luận là những tương tự của các vector nhúng thu được từ các lớp trung gian của mạng sâu, và cách diễn giải sinh dễ dàng bao quát học có giám sát, không giám sát và bán giám sát, cũng như việc mô hình hóa dữ liệu nhiều chiều. Ngược lại, góc nhìn biến ẩn ngầm định nhấn mạnh hàm được cảm sinh $y(x) = \mathcal{DGP}(x)$ và các tính chất của nó thay vì các biểu diễn bên trong đã học, khiến việc học hàm trở thành khung tự nhiên; sự chuyển hướng này cũng thúc đẩy những lược đồ suy luận khác, có khả năng mở rộng tốt hơn cho tình huống học có giám sát. Cuối cùng, góc nhìn biến ẩn ngầm định đôi khi được hiểu là bao gồm cả các mô hình GP lồng nhau, trong đó một tiên nghiệm GP được đặt lên các tham số của một GP như trong Zhao và cộng sự.
+
+### 1.7 Dàn ý cho phần còn lại của chương
+
+Sau khi xác lập các lựa chọn mô hình hóa khác nhau này cho các lớp nút cổ chai của GP sâu, chương này tiếp tục đi sâu vào hai họ cách tiếp cận đặc biệt có giá trị minh họa. Thứ nhất, chương thảo luận góc nhìn biến ẩn tường minh; đây là lần giới thiệu đầu tiên của GP sâu với suy luận Bayes biến phân bởi Damianou và Lawrence, và tạo thành một mô tả trực quan về mô hình sinh và mối quan hệ của nó với học sâu Bayes (BDL). Góc nhìn này cũng thích hợp với nhiều lược đồ suy luận, kể cả suy luận biến phân đã được thảo luận trong cuốn sách này. Thứ hai, chương thảo luận các cách tiếp cận như của Salimbeni và Deisenroth, trong đó việc ước lượng phân phối của các biến ẩn trung gian không phải là trọng tâm chính, điều này càng thúc đẩy việc nới lỏng yêu cầu rằng các kỳ vọng bên trong phải được tính bằng giải tích. Đến lượt mình, điều này dẫn đến một xấp xỉ Monte Carlo của phân phối hậu nghiệm (xấp xỉ) dự đoán, mở ra cả khả năng mở rộng lẫn tính ổn định.
+
+Nhìn chung, bằng cách trình bày chi tiết hai cách tiếp cận trên, các trọng tâm khác nhau của chúng và cách các lược đồ suy luận biến phân gắn với chúng liên hệ sâu sắc với nhau, hy vọng người đọc sẽ có một hiểu biết toàn diện về GP sâu, với sự hỗ trợ thêm từ phần thảo luận trước đó về các cấu trúc GP sâu khác nhau.
+
+Các lược đồ suy luận dựa trên VI dùng trong những cách tiếp cận này được giải thích chi tiết để người đọc thấy được chính xác các phép xấp xỉ được thực hiện; điều này quan trọng vì thách thức kỹ thuật trung tâm của GP sâu là suy luận. Thực vậy, GP sâu đã được xác lập là các mô hình BDL hoạt động trực tiếp trong không gian hàm, mang lại lợi ích kết hợp của: (a) suy luận trong không gian hàm, (b) xử lý Bayes hoàn toàn và (c) các ánh xạ phi tuyến; tuy nhiên, chính yêu cầu phát sinh từ đó là phải lan truyền mật độ qua các phép phi tuyến khiến các phương pháp luận tính được bằng giải tích của GP nông không còn áp dụng được, và các kỹ thuật tối ưu hóa của học sâu, vốn hoạt động trong không gian tham số, cũng không thể được dùng trực tiếp (chúng không cần lan truyền mật độ). Các khó khăn tính toán bên trong mỗi lớp cũng như giữa các lớp khiến suy luận biến phân tiêu chuẩn cũng thất bại. Do đó, các đánh đổi và thách thức thực tiễn khi xây dựng và sử dụng GP sâu phụ thuộc chủ yếu vào suy luận. Phần thảo luận kỹ lưỡng về các lược đồ VI được bổ sung bằng việc thảo luận thêm các lược đồ suy luận khác ngoài suy luận biến phân. Cuối cùng, chương kết thúc bằng một ví dụ minh họa.
+
+## 2. Quá trình Gauss sâu với biến ẩn
+
+Mục này mô tả chi tiết hơn khuôn khổ GP sâu, bắt đầu với định nghĩa xác suất rồi xây dựng phương pháp luận suy luận biến phân dùng để huấn luyện.
+
+<Figure caption="Hình 25.4: Các mẫu từ một quá trình Gauss sâu với các nút ẩn và nút đầu ra ba chiều. Một đầu vào tuyến tính x (không được vẽ) được lan truyền qua hai lớp ẩn (đồ thị trên cùng và ở giữa) đến lớp đầu ra (đồ thị dưới cùng). Bản tái hiện dạng sơ đồ: mỗi lớp một mẫu rút từ các tiên nghiệm GP với hàm hiệp phương sai mũ bình phương (thang độ dài 0.18, 0.9 và 0.5); ba kiểu đường là ba chiều của mỗi lớp, và các giá trị vượt quá ±3 bị cắt.">
+  <Bdl25DeepGpSamples />
+</Figure>
+
+### 2.1 Định nghĩa xác suất
+
+Lớp mô hình xác suất quá trình Gauss sâu giờ được mô tả một cách hình thức. Để làm điều đó, các biến một chiều sẽ lại được xét, mặc dù cần nhấn mạnh rằng điều này chỉ nhằm đơn giản và không làm mất tính tổng quát đối với các mô hình có các chiều đầu ra độc lập có điều kiện. Hơn nữa, phân tích được thực hiện bằng cách trước hết xét tình huống học không giám sát, trong đó một hệ phân cấp các không gian ẩn được giả định là sinh ra các đầu ra quan sát được.
+
+GP sâu gồm một chuỗi $L$ lớp ẩn các biến ẩn, $\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}$, với các đầu ra quan sát được đặt ở các lá của hệ phân cấp. Một nút trung gian $\mathbf{h}^{\ell} \in \mathbb{R}^{n}$ gắn với lớp $\ell$ tạo thành đầu ra của lớp đó và đóng vai trò đầu vào cho thủ tục sinh của lớp kế tiếp, $\ell + 1$. Các quá trình Gauss chi phối các ánh xạ giữa các lớp. Mỗi ánh xạ tương ứng với một GP riêng, có hàm hiệp phương sai $k^{\ell}$ và siêu tham số (hyperparameter) $\boldsymbol{\theta}^{\ell}$. Hơn nữa, mỗi tập biến ẩn $\mathbf{h}^{\ell}$ thu được từ đầu ra hàm của lớp trước cộng thêm nhiễu Gauss $\boldsymbol{\epsilon}^{\ell} \sim \mathcal{N}(\mathbf{0}, (\beta^{\ell})^{-1}\mathbf{I})$. Do đó, một lớp đơn lẻ của GP sâu thực chất là một GP-LVM, cũng như một lớp đơn lẻ của mạng niềm tin sâu là một RBM. Phân phối đồng thời của một mô hình GP sâu với $L$ lớp ẩn có thể được viết là:
+
+$$
+p(\mathbf{y}, \{\mathbf{h}^{\ell}\}_{\ell=1}^{L}) = p(\mathbf{y}|\mathbf{h}^{L})p(\mathbf{h}^{L}|\mathbf{h}^{L-1}) \cdots p(\mathbf{h}^{2}|\mathbf{h}^{1})p(\mathbf{h}^{1}),
+\tag{25.9}
+$$
+
+trong đó $p(\mathbf{h}^{1}) = \mathcal{N}(\mathbf{h}^{1}|\mathbf{0}, \mathbf{I})$. Còn các xác suất có điều kiện có thể được khai triển thành:
+
+$$
+p(\mathbf{h}^{\ell}|\mathbf{h}^{\ell-1}) = \int p(\mathbf{h}^{\ell}|\mathbf{f}^{\ell})p(\mathbf{f}^{\ell}|\mathbf{h}^{\ell-1})\mathrm{d}\mathbf{f}^{\ell},
+\tag{25.10}
+$$
+
+trong đó bên trong tích phân là hàm hợp lý $p(\mathbf{h}^{\ell}|\mathbf{f}^{\ell}) \sim \mathcal{N}(\mathbf{f}^{\ell}, (\beta^{\ell})^{-1}\mathbf{I})$ và phân phối có điều kiện $p(\mathbf{f}^{\ell}|\mathbf{h}^{\ell-1}) \sim \mathcal{N}(\mathbf{0}, \mathbf{K}_{f^{\ell-1}f^{\ell-1}})$. Lưu ý rằng ma trận hiệp phương sai của mỗi lớp được tính bằng hàm hiệp phương sai tương ứng tại các đầu vào của lớp trước, tức là $\mathbf{K}_{f^{\ell-1}f^{\ell-1}} = k^{\ell}(\mathbf{h}^{\ell-1}, \mathbf{h}^{\ell-1})$. Các quan sát được đưa vào cách phát biểu đệ quy này bằng cách dùng ký hiệu đặc biệt $\mathbf{h}^{L+1} \triangleq \mathbf{y}$.
+
+Hình 25.4 cho thấy các ví dụ về mẫu được rút từ kiến trúc GP sâu, trong đó lớp trên cùng được chọn một cách tất định. Hình này làm rõ rằng GP sâu tạo thành những tiên nghiệm mạnh hơn nhiều so với GP truyền thống (chẳng hạn, hãy quan sát các tương quan tầm xa trong các mẫu). Tuy nhiên, mặc dù lấy mẫu từ một GP sâu là dễ, việc huấn luyện nó lại khó. Tối ưu hóa MAP cho $\{\mathbf{h}^{\ell}\}_{\ell=1}^{L}$ biến mọi nút ẩn thành các tham số mô hình bổ sung, gây ra một vấn đề chính quy hóa nghiêm trọng. Thay vào đó, trọng tâm ở đây là lấy biên mọi lớp ẩn trong một mô thức Bayes, điều này giảm mạnh số tham số (mỗi lớp chủ yếu đóng góp các tham số biến phân thay vì tham số mô hình) và cho phép tự động phát hiện cấu trúc thông qua bằng chứng (evidence) của mô hình và xác định mức liên quan tự động (automatic relevance determination, ARD).
+
+Tuy nhiên, các tính phi tuyến do hàm hiệp phương sai của GP đưa vào khiến việc xử lý Bayes cho mô hình này trở nên khó khăn. Để thấy điều này, xét một GP sâu với hai lớp ẩn. Khi đó, hàm hợp lý biên có thể được viết là:
+
+$$
+p(\mathbf{y}) = \int p(\mathbf{y}|\mathbf{h}^{2})\left(\int p(\mathbf{h}^{2}|\mathbf{h}^{1})p(\mathbf{h}^{1})\mathrm{d}\mathbf{h}^{1}\right)\mathrm{d}\mathbf{h}^{2}.
+\tag{25.11}
+$$
+
+Tích phân lồng có thể được viết theo Phương trình (25.10) là:
+
+$$
+p(\mathbf{h}^{2}) = \int p(\mathbf{h}^{2}|\mathbf{f}^{2})p(\mathbf{f}^{2}|\mathbf{h}^{1})p(\mathbf{h}^{1})\mathrm{d}\mathbf{h}^{1}\mathrm{d}\mathbf{f}^{2} = \left\langle p(\mathbf{h}^{2}|\mathbf{h}^{1})\right\rangle_{p(\mathbf{h}^{1})}
+\tag{25.12}
+$$
+
+trong đó $\langle\cdot\rangle_{p}$ ký hiệu kỳ vọng theo $p$; tích phân trên không tính được, vì mật độ $p(\mathbf{h}^{1})$ không thể được lan truyền qua hàm $p(\mathbf{f}^{2}|\mathbf{h}^{1})$, vốn được xây dựng bởi một hàm hiệp phương sai phi tuyến $k^{2}(\mathbf{h}^{1}, \mathbf{h}^{1})$. Tình huống tương tự xảy ra ở mọi lớp khi dùng các kiến trúc sâu hơn. Tức là, nếu có thêm một lớp, sẽ phải tính kỳ vọng $\left\langle p(\mathbf{h}^{3}|\mathbf{h}^{2})\right\rangle_{\tilde{p}(\mathbf{h}^{2})}$, trong đó $\tilde{p}(\mathbf{h}^{2}) = \left\langle p(\mathbf{h}^{2}|\mathbf{h}^{1})\right\rangle_{p(\mathbf{h}^{1})}$ đến từ Phương trình (25.12). Do đó, vấn đề có thể được hình thức hóa bằng cách viết định nghĩa đệ quy
+
+$$
+\tilde{p}(\mathbf{h}^{\ell}) = \left\langle p(\mathbf{h}^{\ell}|\mathbf{h}^{\ell-1})\right\rangle_{\tilde{p}(\mathbf{h}^{\ell-1})}
+$$
+
+của các mật độ cần cho việc tính hàm hợp lý biên, và nhận thấy rằng mọi kỳ vọng cần thiết đều không tính được, như đã chứng tỏ cho kiến trúc hai lớp ẩn ở trên. Mục tiếp theo xây dựng các phương pháp luận biến phân giải quyết khó khăn tính toán này.
+
+### 2.2 Suy luận biến phân
+
+**Biến cảm sinh và phân phối có điều kiện của GP thưa.** Mục này trình bày khuôn khổ biến phân mà Damianou và Lawrence dùng để đưa ra các GP sâu tính toán được. Người đọc cũng có thể tham khảo [Chương 12](/vi/blog/introduction-to-variational-inference) và các chương tiếp theo để biết thêm về suy luận biến phân. Trước hết, theo khuôn khổ GP biến phân thưa, không gian xác suất của mỗi lớp được mở rộng với $m$ giá trị hàm cảm sinh (inducing function value) $\mathbf{u}^{\ell}$ tính tại các đầu vào giả (pseudo-input) $\mathbf{x}_{u}^{\ell}$ (Hình 25.5), được trình bày chuyên sâu ở Chương 38. Các đầu vào cảm sinh sẽ được lược khỏi các biểu thức, vì chúng luôn xuất hiện trong tập điều kiện của mọi xác suất có liên quan đến $\mathbf{u}$. Với các lớp có đầu vào ẩn ($\ell \geq 2$ trong cách phát biểu không giám sát), các đầu vào cảm sinh $\mathbf{x_u}^{\ell}$ phải được đặt trong cùng không gian ẩn với $\mathbf{h}^{\ell-1}$, mà bản thân hình học của nó cũng đang được học; cả hai được tối ưu hóa đồng thời, và sự phối hợp kém giữa chúng có thể làm suy giảm chất lượng của xấp xỉ thưa.
+
+Với các biến cảm sinh này, phép phân tích GP thưa tiêu chuẩn cho phân phối có điều kiện của các giá trị hàm ẩn ở lớp $\ell$:
+
+$$
+p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1}) = \mathcal{N}(\mathbf{f}^{\ell}|\mathbf{a}^{\ell}, \widetilde{\mathbf{K}}^{\ell}),
+\tag{25.13}
+$$
+
+trong đó:
+
+$$
+\begin{aligned}
+\mathbf{a}^{\ell} &= \mathbf{K}_{f^{\ell-1}u^{\ell-1}}\mathbf{K}_{u^{\ell-1}u^{\ell-1}}^{-1}\mathbf{u}^{\ell} \\
+\widetilde{\mathbf{K}}^{\ell} &= \mathbf{K}_{f^{\ell-1}f^{\ell-1}} - \mathbf{K}_{f^{\ell-1}u^{\ell-1}}\mathbf{K}_{u^{\ell-1}u^{\ell-1}}^{-1}\mathbf{K}_{u^{\ell-1}f^{\ell-1}}.
+\end{aligned}
+\tag{25.14}
+$$
+
+**Nén biến phân bên trong mỗi lớp.** Ngay cả với khai triển điểm cảm sinh, một mật độ của $\mathbf{h}^{\ell-1}$ vẫn không thể được lan truyền qua $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ phi tuyến. Theo Titsias, Titsias và Lawrence, đặt $q(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ bằng $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$, điều này cho một cận tính toán được; cận này trở nên chặt trong giới hạn khi $u^{\ell}$ là một thống kê đủ (sufficient statistic) của $f^{\ell}$. Áp dụng bất đẳng thức Jensen bên trong mỗi lớp khi đó cho một đóng góp theo từng lớp vào cận:
+
+$$
+\mathcal{L}^{\ell} = \log\mathcal{N}(\mathbf{h}^{\ell}|\mathbf{a}^{\ell}, (\beta^{\ell})^{-1}\mathbf{I}) - \frac{\beta^{\ell}}{2}\operatorname{tr}\widetilde{\mathbf{K}}^{\ell}.
+\tag{25.15}
+$$
+
+Phương trình (25.15) là một cận dưới của $\log p(\mathbf{h}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$: phân phối Gauss chỉ dùng hiệp phương sai nhiễu $(\beta^{\ell})^{-1}\mathbf{I}$ thay cho $\widetilde{\mathbf{K}}^{\ell} + (\beta^{\ell})^{-1}\mathbf{I}$ đầy đủ, trong khi số hạng vết phạt phần phương sai GP còn dư mà các biến cảm sinh không nắm bắt được. Khi lấy điều kiện theo $\mathbf{u}$, cận theo từng lớp này phân tích thành tích theo các điểm dữ liệu.
+
+**Lấy tích phân loại bỏ các biến ẩn và các đầu ra cảm sinh.** Còn lại việc lấy biên các biến ẩn $\{\mathbf{h}^{\ell}\}$ *qua các lớp* và các giá trị hàm cảm sinh $\{\mathbf{u}^{\ell}\}$. Để làm điều này, đưa vào một phân phối biến phân
+
+$$
+\mathcal{Q} = \prod_{\ell=1}^{L} q(\mathbf{u}^{\ell+1})q(\mathbf{h}^{\ell}).
+\tag{25.16}
+$$
+
+trong đó cả $q(\mathbf{h}^{\ell})$ lẫn $q(\mathbf{u}^{\ell})$ đều được chọn là Gauss, với $q(\mathbf{h}^{\ell})$ phân tích thành tích theo các điểm dữ liệu (hiệp phương sai đường chéo cho mỗi điểm dữ liệu) và $q(\mathbf{u}^{\ell})$ có hiệp phương sai đầy đủ. Lưu ý rằng việc phân tích $q(\{\mathbf{h}^{\ell}\})$ thành tích theo các lớp là một xấp xỉ trường trung bình (không tối ưu).
+
+<Figure caption="Hình 25.5: Biểu diễn mô hình đồ thị của: cấu trúc GP sâu không giám sát (trái) và có giám sát (phải) với các biến cảm sinh và L = 2 lớp ẩn. Các nút được xếp theo hàng ngang thuộc cùng một lớp.">
+  <Bdl25InducingGraphs />
+</Figure>
+
+Áp dụng bất đẳng thức Jensen với $\mathcal{Q}$ này và thay các cận theo từng lớp từ Phương trình (25.15), thu được cận dưới biến phân $\mathcal{F} \leq \log p(\mathbf{y})$ (xem Damianou, Damianou và Lawrence để có phép suy dẫn đầy đủ):
+
+$$
+\begin{aligned}
+\mathcal{F}(q\{\mathbf{H}^{\ell}\}, q\{\mathbf{U}^{\ell}\}) = {} & \sum_{\ell=2}^{L+1}\left(\left\langle \log\mathcal{N}(\mathbf{h}^{\ell}|\mathbf{a}^{\ell}, (\beta^{\ell})^{-1}\mathbf{I})\right\rangle_{q(\mathbf{h}^{\ell-1})q(\mathbf{h}^{\ell})q(\mathbf{u}^{\ell})} - \frac{\beta^{\ell}}{2}\left\langle \operatorname{tr}\widetilde{\mathbf{K}}^{\ell}\right\rangle_{q(\mathbf{h}^{\ell-1})}\right) \\
+& - \mathrm{D}_{\mathrm{KL}}\big(q(\mathbf{h}^{1})\,\big\|\,p(\mathbf{h}^{1})\big) - \sum_{\ell=2}^{L+1}\mathrm{D}_{\mathrm{KL}}\big(q(\mathbf{u}^{\ell})\,\big\|\,p(\mathbf{u}^{\ell})\big) + \sum_{\ell=2}^{L}\mathcal{H}q(\mathbf{h}^{\ell}),
+\end{aligned}
+\tag{25.17}
+$$
+
+trong đó $\mathbf{h}^{L+1} \triangleq \mathbf{y}$ và $\mathcal{H}\cdot$ ký hiệu entropy. Lưu ý rằng trong cận dưới của bằng chứng (evidence lower bound, ELBO) được suy ra bằng $\mathcal{Q}' = \prod_{\ell} p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})\, q(\mathbf{u}^{\ell})\, q(\mathbf{h}^{\ell})$, số hạng theo từng lớp $\mathcal{L}^{\ell}$ xuất hiện như một phép tính chính xác (các số hạng $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ triệt tiêu giữa mô hình và phân phối biến phân), và độ lỏng so với $\log p(\mathbf{h}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ là hệ quả của việc dùng phân phối có điều kiện tiên nghiệm $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1})$ thay vì phân phối hậu nghiệm $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}, \mathbf{h}^{\ell-1}, \mathbf{h}^{\ell})$, một lựa chọn nhằm đảm bảo khả năng tính toán.
+
+Do đó, mọi số hạng đều tính được: các số hạng độ phân kỳ Kullback–Leibler (KL) và entropy là những đại lượng Gauss tiêu chuẩn, còn các kỳ vọng có chứa ma trận hiệp phương sai đòi hỏi hàm nhân được chọn phải tích chập được một cách khả thi với các mật độ Gauss, điều này giới hạn lựa chọn ở những hàm nhân như hàm nhân mũ bình phương và hàm nhân tuyến tính. Cận phân tích thành tổng theo các điểm dữ liệu, và được cực đại hóa theo các tham số mô hình $\{\beta^{\ell}, \boldsymbol{\theta}_{f}^{\ell}\}$ và các tham số biến phân (variational parameters) $\{\mathbf{x}_{u}^{\ell}, \mathbf{m}^{\ell}, \operatorname{diag}(\mathbf{S}_{i}^{\ell}), \boldsymbol{\mu}^{\ell+1}, \boldsymbol{\Sigma}^{\ell+1}\}$. Lưu ý rằng số tham số biến phân của $q(\mathbf{h}^{\ell})$ tăng theo $\mathcal{O}(n)$ ở mỗi lớp.
+
+**Cận thu gọn.** Ngoài ra, có thể xác định $q(\mathbf{u}^{\ell})$ tối ưu bằng giải tích rồi thay ngược trở lại, thu được một cận *thu gọn* (collapsed) chỉ phụ thuộc vào $q(\{\mathbf{H}^{\ell}\})$. Cách này cho một xấp xỉ chặt hơn, nhưng việc lấy biên $q(\mathbf{u}^{\ell})$ đưa trở lại sự ràng buộc giữa các điểm dữ liệu: hàm mục tiêu thu gọn không còn phân tích được theo $n$, khiến không thể huấn luyện theo lô nhỏ (minibatch). Với các tập dữ liệu nhỏ hơn (khi xử lý đồng thời mọi điểm dữ liệu là khả thi), cận thu gọn có thể được ưu tiên vì độ chặt của nó; với các tập dữ liệu lớn hơn, cận không thu gọn, phân tích được là cần thiết, và các phương pháp suy luận biến phân ngẫu nhiên trở nên thiết yếu (Mục 3).
+
+### 2.3 Học có giám sát với các lớp nút cổ chai có nhiễu
+
+Đến đây, khuôn khổ biến phân đã được trình bày cho tình huống tổng quát trong đó mọi đầu vào đều gắn với một mật độ, chẳng hạn như trong một tình huống học không giám sát. Tuy nhiên, trong các ứng dụng học có giám sát điển hình, các đầu vào của lớp trên cùng là quan sát được và tất định. Do đó, suy luận cho lớp đó đơn giản hơn, vì không có vấn đề lan truyền mật độ khó tính; các tương quan trong không gian đầu vào được mô hình hóa tường minh thông qua phân phối hậu nghiệm xấp xỉ $q(\mathbf{h}^{1})$, mà trong trường hợp này là một phân phối biến phân $q$ dạng Gauss với ma trận hiệp phương sai *đầy đủ* (thay vì đường chéo). Viết dạng nhiều chiều tổng quát, gọi $\mathbf{h}_{j}^{\ell}$ là chiều đầu ra thứ $j$ trên toàn bộ $n$ điểm dữ liệu (một cột của $\mathbf{H}^{\ell}$) và $\mathbf{h}_{i,:}^{\ell}$ là điểm dữ liệu thứ $i$ trên mọi chiều (một hàng của $\mathbf{H}^{\ell}$). Khi đó phân phối trên không gian ẩn sẽ phân tích thành tích như sau:
+
+$$
+q(\{\mathbf{H}^{\ell}\}) = \prod_{j=1}^{d^{1}}\mathcal{N}(\mathbf{h}_{j}^{1}|\mathbf{m}_{j}^{1}, \mathbf{S}_{j}^{1})\prod_{\ell=2}^{L}\prod_{i=1}^{n}\mathcal{N}(\mathbf{h}_{i,:}^{\ell}|\mathbf{m}_{i,:}^{\ell}, \mathbf{S}_{i}^{\ell}),
+\tag{25.18}
+$$
+
+trong đó $\mathbf{S}_{j}^{1}$ là một ma trận $n \times n$ *đầy đủ*, như trong Damianou và cộng sự.
+
+## 3. GP sâu có khả năng mở rộng
+
+Mục 2.2 đã thảo luận hai phiên bản của cận dưới biến phân: thu gọn và không thu gọn. Với các tập huấn luyện nhỏ hơn, cách thu gọn có thể được ưu tiên vì cận chặt hơn và số tham số giảm. Tuy nhiên, với các tập huấn luyện lớn hơn, cách này trở nên không khả thi vì mọi điểm dữ liệu cần được xét cùng lúc khi tối ưu hóa các tham số. Để giải quyết vấn đề này, Dai và cộng sự, Gal và cộng sự đã xây dựng các chế độ huấn luyện song song, còn Dai và cộng sự tiến thêm một bước bằng cách khấu hao (amortize) cả các phân phối biến phân $q(\mathbf{h})$, sao cho các tham số biến phân của chúng không tăng theo từng điểm dữ liệu mà thay vào đó được xác định bởi một tập cố định các biến mạng nơ-ron do người dùng chọn; về bản chất, một perceptron nhiều lớp (multilayer perceptron, MLP) được huấn luyện để xuất ra các biến này (xem thêm Meng và Zhang để có một trình bày gần đây).
+
+Để mở rộng sang các tập dữ liệu lớn trong thực tế, các nhà nghiên cứu đã phát triển thêm những phương pháp luận cho suy luận biến phân ngẫu nhiên (stochastic variational inference, SVI), cho phép cận dưới biến phân xử lý dữ liệu huấn luyện theo từng lô. Các phương pháp luận này dùng phiên bản phân tích được, không thu gọn của cận biến phân, theo mô thức do Hensman và cộng sự phát triển cho GP một lớp. Thật vậy, vì hàm hợp lý phân tích thành tích theo các điểm dữ liệu, cận chỉ liên quan đến phân phối có điều kiện của GP thưa thông qua các phân phối biên theo từng điểm dữ liệu $p(f_n|\mathbf{u})$, với $f_n = f(x_n)$; do đó cận phân rã thành một tổng theo các điểm dữ liệu, trong đó mọi sự phụ thuộc giữa các điểm dữ liệu đều được truyền qua các biến toàn cục $\mathbf{u}$. Lưu ý rằng chính cấu trúc của cận, chứ không phải của mô hình, tách rời các điểm dữ liệu: bản thân phân phối có điều kiện chính xác $p(\mathbf{f}|\mathbf{u})$ vẫn tương quan giữa các điểm dữ liệu thông qua hiệp phương sai dư $\widetilde{\mathbf{K}}$ của Phương trình (25.14). Tiến thêm một bước, Hensman và Lawrence loại bỏ hoàn toàn phân phối biến phân cho các lớp nút cổ chai bằng cách lấy biên thông qua nén theo từng lớp. Điều này cho phép tối ưu hóa theo lô nhỏ, thu nhỏ không gian tham số biến phân, cũng như đưa vào các "thông điệp" (dưới dạng các mô-men Gauss thu được từ các kỳ vọng của $q(\mathbf{h})$ đã được lấy biên) được truyền qua các lớp.
+
+Salimbeni và Deisenroth đề xuất *suy luận biến phân ngẫu nhiên kép* (doubly stochastic variational inference, DSVI), một cách tiếp cận trong đó không có phân phối $q(\mathbf{h}^{\ell})$ tường minh nào xuất hiện. Thay vì lan truyền các thông điệp Gauss qua các lớp, DSVI giữ lại phân phối có điều kiện chính xác của mô hình bên trong phân phối hậu nghiệm xấp xỉ và xử lý các khó khăn tính toán phát sinh bằng lấy mẫu Monte Carlo. Một điểm khác biệt then chốt so với khuôn khổ của Mục 2.2 nằm ở cách các lớp được kết nối. Trước đây, mỗi lớp đưa vào một nút cổ chai bị nhiễu $\mathbf{h}^{\ell} = \mathbf{f}^{\ell}(\mathbf{h}^{\ell-1}) + \boldsymbol{\epsilon}^{\ell}$, và suy luận đòi hỏi ước lượng phân phối trên các biểu diễn có nhiễu này. Trong DSVI, nhiễu giữa các lớp được hấp thụ vào hàm hiệp phương sai, nên các giá trị hàm GP $\mathbf{f}^{\ell}$ trực tiếp đóng vai trò đầu ra của lớp $\ell$ và đầu vào của lớp $\ell + 1$. Cụ thể, điều này có nghĩa là hàm nhân GP ở mỗi lớp có một thành phần nhiễu $\sigma_{\ell}^{2}\delta_{ij}$, nhưng không có biến ẩn riêng $\mathbf{h}^{\ell}$ nào được đưa vào. Do đó, sự phân biệt giữa các giá trị hàm $\mathbf{f}^{\ell}$ và các giá trị cụ thể của hàm ẩn có nhiễu $\mathbf{h}^{\ell}$ biến mất, và không có $q(\mathbf{h}^{\ell})$ riêng nào cần ước lượng.
+
+Xét một GP sâu với $L$ lớp, đầu vào $\mathbf{f}^{0} = \mathbf{x}$, và mỗi lớp được mở rộng với các biến cảm sinh $(\mathbf{u}^{\ell}, (\mathbf{x}_{u})^{\ell})$. Phân phối hậu nghiệm xấp xỉ là:
+
+$$
+\mathcal{Q}_{\text{DSVI}} = \prod_{\ell=1}^{L} p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}; \mathbf{f}^{\ell-1})\, q(\mathbf{u}^{\ell}),
+\tag{25.19}
+$$
+
+trong đó $q(\mathbf{u}^{\ell}) = \mathcal{N}(\mathbf{u}^{\ell}|\boldsymbol{\mu}^{\ell}, \boldsymbol{\Sigma}^{\ell})$ và $p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}; \mathbf{f}^{\ell-1})$ là phân phối có điều kiện chính xác của GP thưa trong mô hình. Vì phân phối có điều kiện này phụ thuộc vào $\mathbf{f}^{\ell-1}$ (đầu ra thực sự của lớp trước, không phải một xấp xỉ biến phân của nó), các phụ thuộc giữa các lớp được bảo toàn. Vì cả hai thừa số đều là Gauss, có thể lấy biên $\mathbf{u}^{\ell}$ bằng giải tích để thu được:
+
+$$
+q(\mathbf{f}^{\ell} \mid \mathbf{f}^{\ell-1}) = \int p(\mathbf{f}^{\ell}|\mathbf{u}^{\ell}; \mathbf{f}^{\ell-1})\, q(\mathbf{u}^{\ell})\, \mathrm{d}\mathbf{u}^{\ell} = \mathcal{N}(\mathbf{f}^{\ell}|\tilde{\boldsymbol{\mu}}^{\ell}, \tilde{\mathbf{K}}_{q}^{\ell}),
+\tag{25.20}
+$$
+
+trong đó $\tilde{\boldsymbol{\mu}}^{\ell}$ và $\tilde{\mathbf{K}}_{q}^{\ell}$ có cùng dạng cấu trúc như $\mathbf{a}^{\ell}$ và $\widetilde{\mathbf{K}}^{\ell}$ trong Phương trình (25.14), nhưng với $\mathbf{u}^{\ell}$ được thay bằng trung bình biến phân $\boldsymbol{\mu}^{\ell}$ và hiệp phương sai được điều chỉnh để bao gồm $\boldsymbol{\Sigma}^{\ell}$. Phân phối biên thứ $i$ của phân phối Gauss này chỉ phụ thuộc vào $f_{i,:}^{\ell-1}$, vì cả trung bình lẫn phương sai của nó chỉ liên quan đến các giá trị hàm nhân tính tại đầu vào của lớp ở đúng điểm đó (cùng với các đầu vào cảm sinh); vì cận dưới đây chỉ cần các phân phối biên này, mỗi điểm dữ liệu có thể được lan truyền qua hệ phân cấp một cách độc lập.
+
+Trong ELBO, các phân phối có điều kiện của mô hình triệt tiêu giữa tử số và mẫu số, cho:
+
+$$
+\mathcal{F}_{\text{DSVI}} = \sum_{i=1}^{n}\mathbb{E}_{q(f_{i,:}^{L})}\left[\log p(y_{i,:}|f_{i,:}^{L})\right] - \sum_{\ell=1}^{L}\mathrm{D}_{\mathrm{KL}}\big(q(\mathbf{u}^{\ell})\,\big\|\,p(\mathbf{u}^{\ell})\big).
+\tag{25.21}
+$$
+
+Các số hạng KL tính được bằng giải tích. Kỳ vọng của logarit hàm hợp lý đòi hỏi lan truyền mỗi đầu vào $x_{i,:}$ qua $L$ lớp của các phân phối có điều kiện ngẫu nhiên (25.20), một phép hợp thành các biến đổi phi tuyến không tính được ở dạng đóng. Điều này được xử lý thông qua hai nguồn ngẫu nhiên (do đó có tên gọi như vậy): thứ nhất, lấy mẫu Monte Carlo qua các lớp bằng thủ thuật tái tham số hóa (reparameterization trick); thứ hai, lấy mẫu con theo lô nhỏ trên các điểm dữ liệu. Kết hợp lại, chúng cho các ước lượng gradient không chệch của $\mathcal{F}_{\text{DSVI}}$.
+
+So với cận của Phương trình (25.17), cách phát biểu DSVI khác ở ba điểm chính. Thứ nhất, các tham số biến phân duy nhất là các phân phối cảm sinh $q(\mathbf{u}^{\ell})$, tăng theo $\mathcal{O}(m^{2})$ ở mỗi lớp bất kể $n$; các tham số $\mathcal{O}(n)$ của $q(\mathbf{h}^{\ell})$ không còn. Việc giảm số tham số phải trả giá bằng việc không duy trì một phân phối hậu nghiệm biến ẩn tường minh trên các biểu diễn trung gian, điều mà cận của Phương trình (25.17) có cung cấp. Thứ hai, không xuất hiện số hạng phạt vết $\frac{\beta^{\ell}}{2}\langle\operatorname{tr}(\widetilde{\mathbf{K}}^{\ell})\rangle$. Khác với các cách tiếp cận trước đó dựa vào các kỳ vọng giải tích của hàm nhân dưới đầu vào Gauss, cách phát biểu này tránh các kỳ vọng như vậy và do đó không áp đặt các hạn chế tương ứng lên việc chọn hàm hiệp phương sai. Thứ ba, các tương quan giữa các lớp được giữ lại: các giá trị hàm của mỗi lớp được lấy điều kiện theo các đầu ra được lấy mẫu của lớp trước thay vì bị tách rời bởi một phép phân tích trường trung bình theo các lớp. Điều này làm giảm sự đánh giá thấp phương sai vốn điển hình của các xấp xỉ trường trung bình, với cái giá là mất khả năng tính toán giải tích và cận dạng đóng theo từng lớp mà phép phân tích thành tích mang lại. Hai khác biệt đầu tiên phản ánh cả cấu trúc mô hình (không có các biến nhiễu riêng) lẫn phương pháp suy luận (Monte Carlo thay vì kỳ vọng giải tích); khác biệt thứ ba chỉ phản ánh phương pháp suy luận.
+
+Tuy nhiên, một giả định trường trung bình vẫn còn ở mức các phân phối cảm sinh $q(\mathbf{u}^{\ell})$, vốn được xem là độc lập giữa các lớp; phép phân tích này có thể buộc các lớp trung gian sụp đổ thành những phép biến đổi gần như tất định, làm mất độ bất định của phép hợp thành. Trên các bộ dữ liệu chuẩn (benchmark) về hồi quy và phân loại có giám sát, Salimbeni và Deisenroth đã chứng tỏ rằng GP sâu được huấn luyện bằng DSVI nhất quán đạt bằng hoặc vượt hiệu năng của GP một lớp, với mức cải thiện lớn nhất trên các tập dữ liệu lớn (mở rộng đến một minh họa trên hơn một tỉ điểm).
+
+## 4. Các cách tiếp cận suy luận khác
+
+Mục 2.2 và Mục 3 đã xây dựng chi tiết hai khuôn khổ suy luận biến phân: cách tiếp cận trường trung bình của Damianou và Lawrence và cách phát biểu ngẫu nhiên kép của Salimbeni và Deisenroth. Đây không phải là những con đường duy nhất dẫn đến suy luận xấp xỉ trong GP sâu. Mục này điểm qua ba cách tiếp cận bổ sung, mỗi cách giải quyết những hạn chế khác nhau của các lược đồ biến phân ở trên. Gộp lại, chúng minh họa các đánh đổi giữa chất lượng xấp xỉ, chi phí tính toán và các giả định mô hình hóa, những yếu tố định hình các lựa chọn thực tiễn.
+
+### 4.1 Lan truyền kỳ vọng
+
+Bui và cộng sự đề xuất một phương án thay thế cho suy luận biến phân trong GP sâu dựa trên lan truyền kỳ vọng (expectation propagation, EP) xấp xỉ. Trong khi các phương pháp biến phân tối ưu hóa một cận dưới của hàm hợp lý biên, EP xấp xỉ phân phối hậu nghiệm bằng cách lặp lại việc khớp mô-men (moment matching) của các thừa số cục bộ. Kết hợp với các biểu diễn điểm cảm sinh và EP *ngẫu nhiên* (stochastic EP, phương pháp ràng buộc các thừa số cục bộ giữa các điểm dữ liệu để có khả năng mở rộng), nó lan truyền các xấp xỉ Gauss qua các lớp liên tiếp thay vì duy trì một phân phối biến phân tường minh trên các biến ẩn. Trên mười một bộ dữ liệu chuẩn về hồi quy, Bui và cộng sự báo cáo rằng phương pháp của họ nhất quán vượt trội hồi quy GP một lớp và cạnh tranh được với các phương pháp cơ sở mạng nơ-ron Bayes, đồng thời cung cấp các ước lượng độ bất định được hiệu chuẩn tốt. Một hạn chế là EP đòi hỏi tính các mô-men dưới phân phối hậu nghiệm xấp xỉ, điều này giới hạn lựa chọn hàm nhân, tương tự các yêu cầu về thống kê psi (psi-statistics) của khuôn khổ của Damianou và của Titsias và Lawrence. Xem thêm Hernández-Muñoz và cộng sự về một mở rộng gần đây hơn kết hợp EP với lấy mẫu Monte Carlo.
+
+### 4.2 Xấp xỉ bằng đặc trưng ngẫu nhiên
+
+Một chiến lược khác là xấp xỉ mỗi lớp GP bằng một khai triển đặc trưng hữu hạn chiều, biến GP sâu thành một dạng mạng nơ-ron Bayes. Cutajar và cộng sự hiện thực điều này ở mỗi lớp bằng các khai triển đặc trưng ngẫu nhiên (random feature expansion), sao cho phép hợp thành GP sâu có dạng theo từng lớp:
+
+$$
+\mathbf{F}^{\ell+1} = \boldsymbol{\Phi}^{\ell}\mathbf{W}^{\ell}, \qquad \boldsymbol{\Phi}^{\ell} = \gamma^{\ell}(\mathbf{F}^{\ell}\boldsymbol{\Omega}^{\ell}),
+\tag{25.22}
+$$
+
+sai khác hệ số co giãn tiêu chuẩn của đặc trưng ngẫu nhiên, được lược bỏ cho rõ ràng; ở trên, $\mathbf{F}^{\ell}$ là ma trận các đầu ra của lớp $\ell$, $\mathbf{W}^{\ell}$ là các trọng số tuyến tính Bayes, các cột của $\boldsymbol{\Omega}^{\ell}$ là các tần số ngẫu nhiên được lấy mẫu từ một độ đo đặc thù cho hàm nhân, và $\gamma^{\ell}$ là một hàm phi tuyến đặc thù cho hàm nhân.
+
+Thay mỗi lớp GP bằng xấp xỉ này biến GP sâu thành một mạng sâu với các đặc trưng ngẫu nhiên cố định và các trọng số tuyến tính Bayes, trên đó có thể thực hiện suy luận biến phân ngẫu nhiên theo cách tiêu chuẩn trong không gian trọng số. Cách tiếp cận này được trình bày là có khả năng mở rộng tốt hơn đáng kể so với các cách tiếp cận dựa trên điểm cảm sinh và được minh họa trên các tập dữ liệu với hơn 8 triệu quan sát. Cái giá phải trả là phân phối hậu nghiệm GP ở mỗi lớp không còn được biểu diễn tường minh trong không gian hàm mà thông qua phân phối trọng số, và khai triển đặc trưng bị giới hạn ở những hàm nhân có biểu diễn đặc trưng ngẫu nhiên tính toán được; Cutajar và cộng sự suy ra các khai triển cho hàm nhân mũ bình phương (squared exponential) (thông qua định lý Bochner, cho các đặc trưng lượng giác) và cho hàm nhân arc-cosine (thông qua biểu diễn tích phân của Cho và Saul, cho các đặc trưng ReLU).
+
+Ở đây có một sự đối xứng khái niệm hấp dẫn với các cấu trúc của Mục 1: chương này đã bắt đầu bằng việc suy ra GP sâu từ mạng nơ-ron sâu thông qua giới hạn độ rộng vô hạn; các phương pháp đặc trưng ngẫu nhiên đảo ngược điều này bằng cách xấp xỉ mỗi lớp GP bằng một lớp mạng nơ-ron có độ rộng hữu hạn, quay trở lại không gian trọng số để có thể tính toán được.
+
+### 4.3 Suy luận dựa trên lấy mẫu và suy luận biến phân có cấu trúc
+
+Các phương pháp biến phân đã thảo luận đến đây, dù dựa trên điểm cảm sinh hay đặc trưng ngẫu nhiên, đều dùng phân phối hậu nghiệm xấp xỉ dạng Gauss. Havasi và cộng sự lập luận rằng đây có thể là một "xấp xỉ đơn mode có khả năng kém của phân phối hậu nghiệm vốn nói chung là đa mode" và đề xuất bỏ qua hoàn toàn giả định Gauss bằng cách áp dụng Monte Carlo Hamilton gradient ngẫu nhiên (stochastic gradient Hamiltonian Monte Carlo, SGHMC) (xem [Chương 2](/vi/blog/stochastic-gradient-mcmc)) để lấy mẫu từ phân phối hậu nghiệm trên các đầu ra cảm sinh. Làm việc trong khuôn khổ điểm cảm sinh của Mục 3, các tác giả xen kẽ các mẫu SGHMC này với việc tối ưu hóa siêu tham số thông qua một thuật toán EM Monte Carlo cửa sổ trượt (moving window Monte Carlo EM) mới. Phương pháp thu được đạt hiệu năng dự đoán tốt hơn đáng kể với chi phí tính toán thấp hơn so với suy luận biến phân trên một số bộ dữ liệu chuẩn về hồi quy, và quan trọng là cung cấp bằng chứng thực nghiệm cho bản chất phi Gauss của phân phối hậu nghiệm GP sâu (xem thêm Rossi và cộng sự, những người mở rộng cách tiếp cận này để lấy mẫu đồng thời các đầu vào cảm sinh và siêu tham số). Từ một góc độ khác, Dunlop và cộng sự đề xuất một bộ lấy mẫu Metropolis trong Gibbs (Metropolis-within-Gibbs) qua các mức của hệ phân cấp. Bộ lấy mẫu này được minh họa trên các bài toán ngược Bayes (Bayesian inverse problem) trong không gian hàm, dùng một cấu trúc GP sâu dựa trên toán tử hiệp phương sai (khác với các GP sâu dạng hợp thành là trọng tâm của chương). Mặc dù chưa bộ lấy mẫu nào được minh họa ở những quy mô lớn nhất mà các phương pháp biến phân ở trên đạt tới, chúng thiết lập những chuẩn mực chất lượng làm lộ ra các hạn chế căn bản của xấp xỉ biến phân Gauss.
+
+Ngoài việc chuyển đổi mô thức suy luận, một số công trình đã tìm cách cải thiện độ trung thực của chính họ biến phân (variational family). Ustyuzhaninov và cộng sự chỉ ra rằng xấp xỉ trường trung bình tiêu chuẩn khiến các lớp GP sâu sụp đổ về những phép biến đổi gần như tất định, hạn chế nghiêm trọng việc định lượng độ bất định; các tác giả đề xuất một phân phối biến phân có cấu trúc bảo toàn các tương quan giữa các lớp. Gần đây hơn, Xu và cộng sự thay họ biến phân Gauss bằng các phân phối hậu nghiệm dựa trên khuếch tán được học thông qua một quá trình khử nhiễu (xem Chương 50), chuyển mô thức từ chọn một họ có tham số với dạng cố định sang học một họ linh hoạt.
+
+Trong thực hành, DSVI vẫn là một phương pháp suy luận được dùng rộng rãi, với các cài đặt có sẵn trong những framework như GPflux và GPyTorch. Các phương án thay thế được điểm qua ở đây có những điểm mạnh bổ sung: EP thay việc tối ưu hóa ELBO biến phân bằng việc tối ưu hóa một hàm năng lượng EP thông qua khớp mô-men, đặc trưng ngẫu nhiên cho phép suy luận trong không gian trọng số mà không cần phân tích ma trận, còn các phương pháp lấy mẫu và các họ biến phân phong phú hơn nới lỏng chính giả định hậu nghiệm Gauss.
+
+## 5. Minh họa
+
+Để minh họa thêm các tính chất và hành vi của GP sâu, xét một ví dụ đơn giản, cụ thể là cố gắng khớp hàm bậc thang mô phỏng; ví dụ này theo thiết lập thí nghiệm của Calandra và cộng sự, Hensman và Lawrence. $n = 40$ đầu vào huấn luyện cách đều $\{x_{i,:}\}_{i=1}^{n}$ được sinh trong khoảng $[0, 1]$. Còn các đầu ra được đặt là $y_{i,:} = 1$ nếu $x_{i,:} < 0.5$ và $0$ trong trường hợp ngược lại, cộng thêm nhiễu Gauss với độ lệch chuẩn $0.02$. Do đó, không gian đầu ra rất "phẳng" nhưng bị phá vỡ bởi một gián đoạn lớn (bước nhảy), khiến việc áp dụng một GP tiêu chuẩn rất khó khăn. Ngược lại, một GP sâu với tư cách một mô hình sinh có thể nắm bắt tính không dừng cực đoan và tính hai mode này bằng cách tận dụng các lớp trung gian sẵn có, vốn dần dần "đẩy" các điểm về hai cực trị. Các kết quả trình bày dưới đây xác nhận điều này, và chúng rất giống với kết quả của Hensman và Lawrence, những người đã dùng một biến thể GP sâu với nén biến phân lồng nhau.
+
+<Figure caption="Hình 25.6: Các mẫu được rút từ phân phối hậu nghiệm của một GP tiêu chuẩn (trên cùng), một GP sâu với 1 lớp ẩn (ở giữa) và một GP sâu với ba lớp ẩn (dưới cùng). Như trong Hensman và Lawrence, để trực quan hơn, các điểm được lấy mẫu được vẽ thành những ô vuông nhỏ, mờ, bán trong suốt, còn các điểm huấn luyện được vẽ thành các dấu x đậm, không trong suốt. Bản tái hiện dạng sơ đồ, không phải đầu ra của các GP sâu đã huấn luyện: 30 đường mẫu mờ cho mỗi khung trên một lưới 120 điểm thay cho các ô vuông. Dữ liệu theo hình gốc (y gần 0 khi x dưới 0.5 và gần 1 khi x trên 0.5, độ lệch chuẩn của nhiễu 0.02), ngược với quy tắc được nêu trong văn bản của mục này; khung trên cùng là hồi quy GP chính xác với hàm hiệp phương sai mũ bình phương, còn các khung GP sâu đưa các mẫu hậu nghiệm của một GP ẩn qua các phép uốn dạng sigmoid cố định, được chọn thủ công, thuộc loại được minh họa ở Hình 25.8 (một phép uốn cho khung ở giữa, ba phép uốn cho khung dưới cùng).">
+  <Bdl25StepPosterior />
+</Figure>
+
+Thật vậy, Hình 25.6 cho thấy 300 đường mẫu từ phân phối hậu nghiệm thu được bởi một GP tiêu chuẩn với hàm hiệp phương sai mũ bình phương (khung trên cùng) và một GP sâu với một (khung ở giữa) và ba (khung dưới cùng) lớp ẩn. Mỗi đường tương ứng với việc rời rạc hóa khoảng $[-1, 2]$ thành 500 điểm. Hình cho thấy ngay cả một GP sâu với 1 lớp ẩn cũng có thể dễ dàng hoạt động trong một chế độ có vẻ hai mode. Một kiến trúc sâu hơn (khung dưới cùng) khớp với chế độ này còn tốt hơn, với ít mẫu rơi vào giữa hai cực trị hơn. Thật thú vị khi xem xét vị trí của các mẫu này: chúng dường như phủ đều và rất thưa vùng giữa các "mode". Hơn nữa, các mẫu như vậy chỉ xuất hiện ở xa khoảng $[0, 1]$, cho thấy một "bước nhảy" được kỳ vọng xảy ra (dù với xác suất cực thấp) ở những vùng xa dữ liệu. Mặt khác, ở xa dữ liệu, GP tiêu chuẩn tạo ra nhiều mẫu ứng với các giá trị $y$ quá xa các điểm huấn luyện. Hơn nữa, GP thậm chí bị buộc phải chưa khớp (underfitting) dữ liệu; không có mẫu nào rơi vào vùng gần "bước nhảy" mặc dù có hai điểm huấn luyện (một ở trên và một ở dưới) tại đó, trong khi đồng thời phương sai quanh dữ liệu huấn luyện lại quá lớn.
+
+<Figure caption="Hình 25.7: (a) Sự uốn liên tiếp của các đường mẫu rút từ một GP sâu, dần dần “đẩy” chúng về một chế độ hai mode. (b) Các đường mẫu rút từ một GP tiêu chuẩn. Trong hình này, mỗi mẫu được vẽ theo đầu vào ban đầu x. Ngược lại, Hình 25.8 vẽ tín hiệu đầu ra của mỗi lớp theo tín hiệu đầu vào của nó. Bản tái hiện dạng sơ đồ được xây dựng theo cùng cách như Hình 25.6, không phải đầu ra của một GP sâu đã huấn luyện: ba mẫu hậu nghiệm của lớp ẩn thứ nhất được đưa qua ba phép uốn dạng sigmoid (khung a, dữ liệu được vẽ thành dấu chữ thập ở lớp cuối), và ba mẫu của phân phối hậu nghiệm GP tiêu chuẩn (khung b).">
+  <Bdl25StepWarping />
+</Figure>
+
+Để xác nhận các trực giác trên, cũng như rút ra thêm kết luận, Hình 25.7 vẽ toàn bộ các đường mẫu từ GP sâu và GP tiêu chuẩn. Với GP sâu, Hình 25.7(a) cho thấy sự uốn liên tiếp của các mẫu qua hệ phân cấp sâu, dần dần "đẩy" chúng về chế độ hai mode. Như có thể thấy, các mẫu (đặc biệt ở các lớp giữa) trơn, và được gán một cách xác suất vào một trong hai mode. Các bước nhảy có thể xảy ra nhưng hiếm, có lẽ vì chỉ có một bước nhảy trong dữ liệu huấn luyện. Phép nội suy gợi ý rằng GP sâu diễn giải sự khác biệt giữa các điểm *bên trong* mỗi cụm chủ yếu là nhiễu, điều khớp với cách sinh dữ liệu đồ chơi thực tế. Cuối cùng, Hình 25.8 cũng mô tả các đường mẫu, nhưng ở đó mỗi đồ thị cho thấy tín hiệu đầu ra của mẫu ở mỗi lớp theo *tín hiệu đầu vào* tương ứng của nó, khác với Hình 25.7, nơi trục $x$ là đầu vào $\mathbf{x}$. Như có thể thấy ở Hình 25.8, hàm uốn của mỗi lớp được học để có dạng sigmoid, nhằm liên tiếp "đẩy" các mẫu của lớp trên cùng vào chế độ hai mode.
+
+<Figure caption="Hình 25.8: Vẽ tín hiệu mẫu đầu vào theo tín hiệu mẫu đầu ra của mọi lớp trong GP sâu. Điều này làm lộ ra các hàm uốn dạng sigmoid liên tiếp “đẩy” các mẫu của lớp trên cùng vào chế độ hai mode. Trong nhãn trục, chỉ số trên ký hiệu số thứ tự lớp; mỗi cột tương ứng với một mẫu đơn lẻ được lan truyền qua hệ phân cấp. Bản tái hiện dạng sơ đồ cho ba mẫu của Hình 25.7 (a), không phải đầu ra của một GP sâu đã huấn luyện: các chấm là giá trị mẫu tại mỗi điểm lưới thứ hai, và đường mảnh là hàm uốn dạng sigmoid cố định, được chọn thủ công (không phải được học) của lớp đó.">
+  <Bdl25LayerMaps />
+</Figure>
+
+[^1]: Nếu thay vào đó các ánh xạ được cố định, thì thu được một GP tiêu chuẩn (nông) với một hàm hiệp phương sai phân cấp, như Duvenaud và cộng sự đã ghi nhận và nghiên cứu.
+
+[^2]: Chữ nghiêng được dùng để làm rõ rằng ý muốn nói là hàm hợp lý của mô hình, không phải hàm hợp lý biên cần cho lựa chọn mô hình Bayes.
+
+[^3]: Một số biến cũng có thể được xem là quan sát được, chẳng hạn ở lớp trên cùng của hệ phân cấp, nơi có thể đưa vào nhãn dữ liệu hoặc các đầu vào cho hồi quy.

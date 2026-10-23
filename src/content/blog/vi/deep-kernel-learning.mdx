@@ -1,0 +1,193 @@
+---
+title: "Học hàm nhân sâu"
+description: "Học hàm nhân sâu: quá trình Gauss trên đặc trưng của mạng nơ-ron, DKL biến phân ngẫu nhiên, các chiến lược ước lượng hàm nhân và công cụ thực hành."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - gaussian processes
+  - deep kernel learning
+  - kernel methods
+series: bayesian-deep-learning
+seriesOrder: 30
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl24DeepKernelRegression from '../../../components/diagrams/Bdl24DeepKernelRegression.astro';
+
+Trong lịch sử, mạng nơ-ron và các phương pháp hàm nhân (kernel methods) thường được xem là những cách tiếp cận cạnh tranh nhau. Học hàm nhân sâu (deep kernel learning, DKL) kết hợp một bộ trích xuất đặc trưng (feature extractor) tất định là mạng nơ-ron với một phương pháp hàm nhân, phổ biến nhất là một quá trình Gauss (Gaussian process, GP). Khi dự đoán, DKL tiêu chuẩn tính bộ trích xuất đặc trưng một lần cho mỗi đầu vào kiểm tra rồi thực hiện dự đoán GP trong không gian đặc trưng đã học. Điều này tránh được các lượt truyền ngẫu nhiên lặp lại qua mạng nơ-ron mà một số phép xấp xỉ mạng nơ-ron Bayes (Bayesian neural network) đòi hỏi, nhưng dự đoán GP vẫn cần các phép tính hàm nhân với các đặc trưng huấn luyện hoặc đặc trưng điểm cảm sinh (inducing points) đã lưu.
+
+Học hàm nhân sâu biến đổi các đầu vào của một hàm nhân cơ sở, chẳng hạn hàm nhân hàm cơ sở bán kính (radial basis function, RBF), thông qua một mạng nơ-ron. *Hàm nhân sâu* (deep kernel) thu được có các siêu tham số (hyperparameter) từ cả hàm nhân cơ sở lẫn ánh xạ đặc trưng (feature map) của mạng nơ-ron. Với hồi quy có hàm hợp lý Gauss, phân phối dự đoán của GP và hàm hợp lý biên (marginal likelihood) có dạng đóng với mọi giá trị cố định của các siêu tham số này. Việc học các siêu tham số vẫn cần tối ưu hóa số, còn bài toán phân loại hoặc các hàm hợp lý không Gauss khác cần suy luận xấp xỉ (approximate inference). Hơn nữa, DKL tiêu chuẩn là một cấu trúc Bayes thực nghiệm (empirical Bayes, loại II): nó lấy tích phân theo các giá trị hàm của GP nhưng ước lượng điểm các tham số của mạng nơ-ron và hàm nhân thay vì đặt một phân phối hậu nghiệm (posterior) lên chúng.
+
+Phần còn lại của chương ôn lại quá trình Gauss (Mục 1), giới thiệu cấu trúc hàm nhân sâu (Mục 2), mô tả học hàm nhân sâu biến phân ngẫu nhiên (Mục 3), thảo luận các lựa chọn ước lượng (Mục 4) và kết thúc với các tài nguyên thực hành (Mục 5).
+
+Các ứng dụng và khảo sát liên quan đến DKL hoặc các mô hình lai GP – mạng nơ-ron có quan hệ gần trải rộng trên thiết kế chuỗi sinh học, học máy có thông tin vật lý (physics-informed machine learning), khoa học vật liệu, hóa học tính toán, xe tự hành, học bán giám sát, học với ít mẫu (few-shot learning), chăm sóc sức khỏe và sinh học vũ trụ. Cũng tồn tại các phương pháp lai liên quan và các mở rộng của DKL. DKL cũng đã được dùng trong tối ưu hóa Bayes (Bayesian optimization), nơi độ bất định dự đoán định hướng sự đánh đổi giữa khám phá và khai thác (exploration–exploitation); tuy nhiên, điều gì được coi là "xa dữ liệu" lại do biểu diễn đã học quyết định.
+
+## 1. Ôn lại quá trình Gauss
+
+Mặc dù hàm nhân sâu có thể được dùng với các phương pháp hàm nhân khác, chương này tập trung vào quá trình Gauss vì chúng cung cấp cả phân phối dự đoán lẫn một hàm mục tiêu hàm hợp lý biên để ước lượng siêu tham số.
+
+Để có một trình bày đầy đủ, xem Rasmussen và Williams. Một *quá trình Gauss* là một phân phối trên các hàm mà mọi phân phối biên hữu hạn chiều đều là Gauss. Viết $f \sim \mathcal{GP}(m, k)$ khi, với mọi tập đầu vào hữu hạn $X = \{x_1, \ldots, x_n\}$,
+
+$$
+\big(f(x_1), \ldots, f(x_n)\big)^\top \sim \mathcal{N}(m_X, K_{XX}), \tag{24.1}
+$$
+
+trong đó $(m_X)_i = m(x_i)$ và $(K_{XX})_{ij} = k(x_i, x_j)$.
+
+Để đơn giản, giả định $m(x) = 0$ trừ khi có nói khác. Khi đó hàm nhân giữ vai trò trung tâm trong việc xác định hiệp phương sai và các tính chất tổng quát hóa của quá trình. Một lựa chọn chuẩn là hàm nhân RBF
+
+$$
+k_{\mathrm{RBF}}(x_i, x_j) = a^2 \exp\left(-\frac{\|x_i - x_j\|^2}{2\ell^2}\right), \tag{24.2}
+$$
+
+trong đó biên độ $a^2$ điều khiển phương sai tín hiệu và thang độ dài (length-scale) $\ell$ điều khiển tốc độ suy giảm của tương quan theo khoảng cách. Thang độ dài lớn hơn tạo ra các hàm biến thiên chậm hơn, còn thang độ dài ngắn hơn cho phép các hàm biến thiên nhanh hơn. Chẳng hạn, trong dự báo, $\ell$ có thể được diễn giải là khoảng thời gian mà trong đó các quan sát quá khứ vẫn còn tương quan đáng kể với một giá trị dự báo.
+
+Với hồi quy có hàm hợp lý Gauss, giả định
+
+$$
+y_i = f(x_i) + \epsilon_i, \qquad \epsilon_i \overset{\text{iid}}{\sim} \mathcal{N}(0, \sigma^2),
+$$
+
+với nhiễu độc lập với $f$. Cho các đầu vào huấn luyện $X = \{x_i\}_{i=1}^N$ và các quan sát $\boldsymbol{y} = (y_1, \ldots, y_N)^\top$, phân phối dự đoán của hàm ẩn tại $x_*$ là
+
+$$
+\begin{aligned}
+p(f_* \mid \boldsymbol{y}, x_*, X) &= \mathcal{N}(f_* \mid \mu_*, v_*), \\
+\mu_* &= k_{*X}\big(K_{XX} + \sigma^2 \mathbf{I}_N\big)^{-1} \boldsymbol{y}, \\
+v_* &= k_{**} - k_{*X}\big(K_{XX} + \sigma^2 \mathbf{I}_N\big)^{-1} k_{X*}.
+\end{aligned} \tag{24.3}
+$$
+
+Phân phối dự đoán cho một quan sát có nhiễu $y_*$ có cùng trung bình và phương sai $v_* + \sigma^2$.
+
+Viết $\boldsymbol{f} = (f(x_1), \ldots, f(x_N))^\top$, hàm hợp lý biên là
+
+$$
+p(\boldsymbol{y} \mid \theta, \sigma^2, X) = \int p(\boldsymbol{y} \mid \boldsymbol{f}, \sigma^2)\, p(\boldsymbol{f} \mid \theta, X)\, \mathrm{d}\boldsymbol{f}. \tag{24.4}
+$$
+
+Với hồi quy có hàm hợp lý Gauss,
+
+$$
+\log p(\boldsymbol{y} \mid \theta, \sigma^2, X) = -\frac{1}{2}\boldsymbol{y}^\top \big(K_\theta + \sigma^2 \mathbf{I}_N\big)^{-1} \boldsymbol{y} - \frac{1}{2}\log\big|K_\theta + \sigma^2 \mathbf{I}_N\big| + \text{const}. \tag{24.5}
+$$
+
+Số hạng thứ nhất đo mức khớp dữ liệu, còn số hạng log định thức đóng vai trò một hình phạt độ phức tạp và liên hệ với nguyên lý độ dài mô tả tối thiểu (minimum description length). Do đó hàm hợp lý biên có thể được dùng để ước lượng các siêu tham số của hàm nhân và phương sai nhiễu quan sát.
+
+## 2. Học hàm nhân sâu
+
+Cho $k_\theta$ là một hàm nhân cơ sở với các siêu tham số $\theta$, và $g_w$ là một ánh xạ đặc trưng dạng mạng nơ-ron với các trọng số $w$. Hàm nhân sâu thu được là
+
+$$
+k_\gamma(x, x') := k_\theta\big(g_w(x), g_w(x')\big), \qquad \gamma = (\theta, w). \tag{24.6}
+$$
+
+Phép hợp thành với một ánh xạ đặc trưng tất định bảo toàn tính nửa xác định dương, nên $k_\gamma$ là một hàm nhân hợp lệ mỗi khi $k_\theta$ là hàm nhân hợp lệ. Về mặt cấu trúc, điều này đặt một GP lên các đặc trưng do mạng nơ-ron tạo ra.
+
+Hàm nhân cơ sở cung cấp một mô hình hiệp phương sai, còn mạng nơ-ron học một biểu diễn thích nghi theo tác vụ, trong đó mô hình hiệp phương sai đó được áp dụng. Với hồi quy có hàm hợp lý Gauss và $\gamma$ cố định, dự đoán cần một lượt truyền xuôi (forward pass) qua $g_w$ cho mỗi đầu vào kiểm tra, sau đó là dự đoán GP dùng các hiệp phương sai chéo với các đặc trưng huấn luyện hoặc đặc trưng điểm cảm sinh đã lưu. Khi $\gamma$ được học bằng cách cực đại hóa hàm hợp lý biên, cấu trúc DKL thông thường là Bayes thực nghiệm: $w$ và $\theta$ được ước lượng điểm thay vì bị lấy tích phân.
+
+Sau khi được xây dựng, $k_\gamma$ có thể được dùng như mọi hàm nhân khác. Các chiến lược ước lượng chính được thảo luận ở Mục 4.
+
+Hồi quy GP dày đặc cần thời gian $\mathcal{O}(N^3)$ và bộ nhớ $\mathcal{O}(N^2)$. Nội suy hàm nhân có cấu trúc (structured kernel interpolation, SKI, còn được biết đến là KISS-GP) đưa vào một lưới điểm cảm sinh có cấu trúc và phép nội suy cục bộ thưa. Trong các chế độ thuận lợi, điều này cho các tích ma trận – vector nhanh và suy luận lặp có chi phí có thể gần tuyến tính theo $N$, với phụ thuộc bổ sung vào số lượng và cấu trúc của các điểm cảm sinh. SKI là một phép xấp xỉ chứ không phải suy luận GP chính xác, và hiệu quả nhất trong các không gian ít chiều; một ánh xạ đặc trưng nơ-ron có thể cung cấp một không gian như vậy.
+
+Các cách tiếp cận GP có khả năng mở rộng khác cũng có thể được kết hợp với DKL. Các phép giải bằng gradient liên hợp (conjugate gradient) tăng tốc trên GPU và các ước lượng ngẫu nhiên của log định thức hiệu quả trong thực hành, nhưng sai số cho phép hữu hạn của phép giải và các bộ ước lượng ngẫu nhiên vẫn là các phép xấp xỉ số, trong khi các phương pháp điểm cảm sinh và phương pháp biến phân đưa vào thêm các phép xấp xỉ thống kê.
+
+Một hàm nhân RBF dừng (stationary) đo độ tương tự qua khoảng cách Euclid trong không gian đầu vào của nó. Khoảng cách đó có thể phù hợp trong ít chiều nhưng có thể khớp kém với tác vụ dự đoán khi đầu vào nhiều chiều. Chẳng hạn, hai ảnh khuôn mặt có thể cách xa nhau trong không gian điểm ảnh trong khi có hướng quay mặt tương tự. Một ánh xạ đặc trưng đã học có thể làm cho khoảng cách Euclid liên quan hơn đến tác vụ, nên DKL học một hàm nhân thích nghi theo tác vụ chứ không phải hàm nhân "đúng" theo bất kỳ nghĩa tối ưu toàn cục nào. Hình 24.1 cho một minh họa một chiều được cách điệu hóa về cả lợi ích lẫn điểm cần thận trọng: việc uốn đặc trưng (feature warping) thay đổi đường khớp và độ bất định dự đoán, và khoảng cách đến dữ liệu huấn luyện được đo trong không gian đặc trưng đã học thay vì không gian đầu vào ban đầu.
+
+Hàm nhân RBF là một hàm nhân cơ sở phổ biến, nhưng không phải lựa chọn duy nhất. Chẳng hạn, một hàm nhân hỗn hợp phổ (spectral-mixture kernel) có thể mã hóa cấu trúc gần tuần hoàn, để lại cho ánh xạ đặc trưng nơ-ron việc nắm bắt các mẫu hình bổ sung.
+
+<Figure caption="Hình 24.1: Minh họa hồi quy bằng hàm nhân sâu cho một hàm đích có bước chuyển đột ngột, f(x) = tanh(20(x − 0.5)), được quan sát với nhiễu Gauss độc lập. Đường nét đứt là hàm đích, các chấm là cùng 60 quan sát huấn luyện ở cả hai khung, đường liền là trung bình dự đoán, và vùng tô bóng là trung bình cộng hoặc trừ hai độ lệch chuẩn dự đoán cho một quan sát có nhiễu trong tương lai. Trái: một GP với hàm nhân RBF dừng trong không gian đầu vào ban đầu. Phải: một GP với cùng hàm nhân cơ sở RBF được áp dụng sau một ánh xạ đặc trưng dạng perceptron nhiều lớp nhỏ, với mọi tham số được học bằng cách cực đại hóa hàm hợp lý biên. Trong lần chạy tối ưu hóa minh họa này, hàm nhân sâu cho các khoảng hẹp hơn nhiều, kể cả bên ngoài miền huấn luyện. Hình minh họa hành vi dự đoán phụ thuộc vào biểu diễn, không phải khả năng hiệu chuẩn vượt trội: khoảng hẹp hơn không tự động được hiệu chuẩn tốt hơn và có thể phản ánh sự quá tự tin khi ngoại suy. (Bản tái hiện dạng sơ đồ: các đường cong được tính lại từ 60 quan sát mô phỏng, và một ánh xạ đặc trưng hai chiều bão hòa cố định thay thế cho perceptron nhiều lớp đã huấn luyện; các siêu tham số của hàm nhân cực đại hóa logarit hàm hợp lý biên ở cả hai khung.)">
+  <Bdl24DeepKernelRegression />
+</Figure>
+
+## 3. Học hàm nhân sâu biến phân ngẫu nhiên
+
+Cho đến đây, chương đã xét DKL cho hồi quy có hàm hợp lý Gauss, trong đó phân phối dự đoán của GP và hàm hợp lý biên có dạng đóng khi các tham số của hàm nhân sâu cố định. Với bài toán phân loại và các hàm hợp lý không Gauss khác, việc dự đoán chính xác và tính hàm hợp lý biên là không thể thực hiện bằng giải tích. Các bài toán nhiều lớp còn cần một cấu trúc cho các đầu ra có tương quan.
+
+Wilson và cộng sự giải quyết các thách thức này bằng *học hàm nhân sâu biến phân ngẫu nhiên* (stochastic variational deep kernel learning, SVDKL), dựa trên các phương pháp GP biến phân thưa (sparse variational GP). SVDKL tối ưu hóa một cận dưới biến phân thay vì logarit hàm hợp lý biên chính xác, hỗ trợ gradient ngẫu nhiên trên lô nhỏ (mini-batch), và xử lý được các hàm hợp lý không Gauss cùng nhiều đầu ra. Vì những lý do này, nó cũng được dùng cho hồi quy quy mô lớn. Các cách xây dựng thay thế gồm công trình của Bradshaw và cộng sự.
+
+### 3.1 Chi tiết của SVDKL
+
+Mục này mô tả cấu trúc của Wilson và cộng sự; Mục 5 thảo luận các bản cài đặt không nhất thiết theo mọi chi tiết của cách xây dựng này. Cho
+
+$$
+\mathcal{D} = \{(\boldsymbol{x}_i, \boldsymbol{y}_i)\}_{i=1}^N, \qquad \boldsymbol{y}_i \in \{0, 1\}^C,
+$$
+
+trong đó $C$ là số lớp và $\boldsymbol{y}_i$ là một nhãn one-hot. Bộ trích xuất đặc trưng nơ-ron tạo ra $\boldsymbol{z}_i = g_w(\boldsymbol{x}_i) \in \mathbb{R}^Q$. Với mỗi $j = 1, \ldots, J$, gọi $\boldsymbol{z}_i^{(j)}$ là tập con hoặc phép chiếu của $\boldsymbol{z}_i$ được đưa vào GP ẩn $f_j$, và định nghĩa
+
+$$
+\boldsymbol{f}_i := \big(f_1(\boldsymbol{z}_i^{(1)}), \ldots, f_J(\boldsymbol{z}_i^{(J)})\big)^\top \in \mathbb{R}^J. \tag{24.7}
+$$
+
+Tập hợp các GP ẩn tạo thành một lớp GP cộng tính trên các tập con của các đặc trưng đã học. Các đầu ra của chúng được trộn qua $A \in \mathbb{R}^{C \times J}$, nên các logit của lớp là $A\boldsymbol{f}_i$. Phép trộn này cảm sinh tương quan giữa các đầu ra ngay cả khi các GP ẩn độc lập với nhau. Với một mô hình quan sát softmax,
+
+$$
+p(\boldsymbol{y}_i \mid \boldsymbol{f}_i, A) = \prod_{c=1}^{C} \left[\frac{\exp((A\boldsymbol{f}_i)_c)}{\sum_{c'=1}^{C} \exp((A\boldsymbol{f}_i)_{c'})}\right]^{y_{ic}}. \tag{24.8}
+$$
+
+Với GP thứ $j$, gọi $H_j = \{\boldsymbol{z}_i^{(j)}\}_{i=1}^N$ là các đầu vào huấn luyện đã biến đổi của nó, $Z_j$ chứa $m$ đầu vào cảm sinh, $\boldsymbol{f}_j$ tập hợp các giá trị ẩn của nó trên $H_j$, và $\boldsymbol{u}_j$ tập hợp các giá trị ẩn của nó trên $Z_j$. Phân phối có điều kiện chuẩn của GP thưa là
+
+$$
+\begin{aligned}
+p(\boldsymbol{f}_j \mid \boldsymbol{u}_j) &= \mathcal{N}\Big(\boldsymbol{f}_j \mid K^{(j)}_{H_j Z_j}\big(K^{(j)}_{Z_j Z_j}\big)^{-1} \boldsymbol{u}_j, \widetilde{K}_j\Big), \\
+\widetilde{K}_j &= K^{(j)}_{H_j H_j} - K^{(j)}_{H_j Z_j}\big(K^{(j)}_{Z_j Z_j}\big)^{-1} K^{(j)}_{Z_j H_j}.
+\end{aligned} \tag{24.9}
+$$
+
+Dưới phép xấp xỉ nội suy hàm nhân cục bộ của Wilson và Nickisch,
+
+$$
+K^{(j)}_{H_j Z_j} \approx M_j K^{(j)}_{Z_j Z_j}, \qquad K^{(j)}_{H_j H_j} \approx M_j K^{(j)}_{Z_j Z_j} M_j^\top, \tag{24.10}
+$$
+
+trong đó $M_j \in \mathbb{R}^{N \times m}$ là một ma trận nội suy cục bộ thưa. Thay các xấp xỉ này vào Phương trình (24.9) làm hiệp phương sai phần dư bằng không trong mô hình nội suy và cho $\boldsymbol{f}_j \approx M_j \boldsymbol{u}_j$. Quan hệ tất định này là một phép xấp xỉ do phép nội suy đưa vào, không phải một hệ quả chính xác của phân phối có điều kiện GP ban đầu.
+
+Gọi $\boldsymbol{u} = (\boldsymbol{u}_1^\top, \ldots, \boldsymbol{u}_J^\top)^\top$ và để $\boldsymbol{f}$ tập hợp mọi giá trị GP ẩn. SVDKL dùng một phân phối biến phân Gauss phân tích thành tích
+
+$$
+q(\boldsymbol{u}) = \prod_{j=1}^{J} \mathcal{N}(\boldsymbol{u}_j \mid \boldsymbol{\mu}_j, \boldsymbol{S}_j). \tag{24.11}
+$$
+
+Viết $\boldsymbol{y} = (\boldsymbol{y}_1^\top, \ldots, \boldsymbol{y}_N^\top)^\top$, bất đẳng thức Jensen cho cận dưới của bằng chứng (evidence lower bound, ELBO)
+
+$$
+\mathcal{L}(q; \gamma, A) := \mathbb{E}_{q(\boldsymbol{u})p(\boldsymbol{f} \mid \boldsymbol{u})}\big[\log p(\boldsymbol{y} \mid \boldsymbol{f}, A)\big] - \mathrm{D}_{\mathrm{KL}}\big(q(\boldsymbol{u}) \,\|\, p(\boldsymbol{u})\big) \le \log p(\boldsymbol{y} \mid \gamma, A). \tag{24.12}
+$$
+
+Với $(\gamma, A)$ cố định, việc cực đại hóa Phương trình (24.12) theo $q$ trong họ biến phân (variational family) đã chọn tương đương với việc cực tiểu hóa độ phân kỳ Kullback–Leibler (KL) từ $q(\boldsymbol{u})$ đến phân phối hậu nghiệm chính xác trên các biến cảm sinh. Khi $(\gamma, A)$ được tối ưu hóa đồng thời với các tham số biến phân, cùng một cận được dùng cho cả xấp xỉ hậu nghiệm lẫn ước lượng điểm các tham số của mô hình.
+
+Vì hàm hợp lý phân tích thành tích theo các quan sát, một lô nhỏ $\mathcal{B} \subseteq \{1, \ldots, N\}$ cỡ $b$ được lấy mẫu đều cho bộ ước lượng ELBO không chệch
+
+$$
+\widehat{\mathcal{L}}_{\mathcal{B}} = \frac{N}{b} \sum_{i \in \mathcal{B}} \mathbb{E}_{q(\boldsymbol{f}_i)}\big[\log p(\boldsymbol{y}_i \mid \boldsymbol{f}_i, A)\big] - \mathrm{D}_{\mathrm{KL}}\big(q(\boldsymbol{u}) \,\|\, p(\boldsymbol{u})\big). \tag{24.13}
+$$
+
+Ở đây $q(\boldsymbol{f}_i)$ là phân phối biên được cảm sinh bởi $q(\boldsymbol{u})p(\boldsymbol{f} \mid \boldsymbol{u})$. Gradient ngẫu nhiên của bộ ước lượng này cập nhật các tham số biến phân $\{(\boldsymbol{\mu}_j, \boldsymbol{S}_j)\}_{j=1}^J$ cùng với $w$, các siêu tham số của hàm nhân cơ sở và $A$. Kỳ vọng của logarit hàm hợp lý thường được ước lượng bằng Monte Carlo cho các mô hình quan sát không Gauss. Như vậy, SVDKL thực hiện tối ưu hóa cận dưới biến phân, không phải huấn luyện bằng hàm hợp lý biên chính xác.
+
+## 4. Ước lượng hàm nhân
+
+So với các cấu trúc xác suất lồng nhau sâu hơn như quá trình Gauss sâu, DKL tiêu chuẩn thường đặt ra một bài toán ước lượng đơn giản hơn. Dù vậy, hiệu năng thực tế phụ thuộc mạnh vào cách huấn luyện nhiều tham số được ước lượng điểm của nó.
+
+Có ba chiến lược phổ biến:
+
+1. tiền huấn luyện (pre-train) mạng nơ-ron để học $w$, đóng băng nó, và chỉ khớp các siêu tham số $\theta$ của hàm nhân cơ sở;
+2. dùng tiền huấn luyện làm khởi động ấm (warm start) rồi tinh chỉnh (fine-tune) đồng thời $w$ và $\theta$;
+3. học $\gamma = (\theta, w)$ đầu-cuối (end-to-end) từ đầu.
+
+Các chiến lược khác nhau về chi phí tính toán, mức dễ bị quá khớp (overfitting) và sự phụ thuộc vào một quy trình tiền huấn luyện; không chiến lược nào tốt nhất trong mọi trường hợp. Trong cả ba trường hợp, DKL tiêu chuẩn ước lượng điểm $w$ và $\theta$, nên không nên nhầm tính dễ xử lý của nó với một cách xử lý Bayes đầy đủ cho độ bất định trong bộ trích xuất đặc trưng.
+
+Lựa chọn thứ hai là hàm mục tiêu huấn luyện. Với hồi quy có hàm hợp lý Gauss, có thể tối ưu hóa logarit hàm hợp lý biên chính xác của GP khi tính toán dày đặc là khả thi, hoặc một xấp xỉ của nó khi dùng các phương pháp số có khả năng mở rộng. Với các hàm hợp lý không Gauss và huấn luyện theo lô nhỏ, SVDKL thay vào đó tối ưu hóa ELBO trong Phương trình (24.12). Cách sau cho phép tối ưu hóa ngẫu nhiên nhưng đưa vào một phép xấp xỉ biến phân. Lotfi và cộng sự đề xuất *hàm hợp lý biên có điều kiện* (conditional marginal likelihood), tạo một phân phối hậu nghiệm từ một tập con của dữ liệu và tính hàm hợp lý biên của phần còn lại; họ báo cáo rằng cách này có thể giảm nhẹ hiện tượng chưa khớp (underfitting) của hàm hợp lý biên trong lựa chọn mô hình (model selection).
+
+Quá khớp vẫn là một mối lo chính đáng. Ober và cộng sự xác định các bệnh lý quá khớp trong DKL được huấn luyện bằng hàm hợp lý biên và quy chúng cho sự linh hoạt quá mức của hàm nhân đã học. Wilson và cộng sự phản bác một phần lời giải thích đi kèm về số hạng độ phức tạp của hàm hợp lý biên, lập luận rằng nó bỏ sót một sự phụ thuộc bổ sung vào mức khớp dữ liệu. Các quan điểm này không loại bỏ nhu cầu thực tế phải kiểm tra hiệu năng dự đoán và độ bất định trên dữ liệu giữ lại (held-out). Một cách xử lý Bayes đầy đủ cho các tham số của mạng nơ-ron có thể biểu diễn thêm độ bất định nhưng tốn kém hơn đáng kể; chính quy hóa tiêu chuẩn như suy giảm trọng số (weight decay) là một biện pháp bảo vệ phổ biến hơn trong thực hành.
+
+Khi dùng các hàm nhân cơ sở chuyên biệt như hàm nhân hỗn hợp phổ, việc khởi tạo được thiết kế riêng có thể quan trọng. Do đó, một quy trình làm việc hợp lý là bắt đầu với một bộ trích xuất đặc trưng đã tiền huấn luyện và đóng băng, khớp hàm nhân cơ sở, và chỉ chuyển sang tinh chỉnh đồng thời, hàm hợp lý biên có điều kiện hoặc huấn luyện đầu-cuối khi kết quả trên tập kiểm định (validation set) biện minh cho độ phức tạp tăng thêm.
+
+## 5. DKL trong thực hành, các bản cài đặt và tài nguyên
+
+Nhiều framework hoàn thiện hỗ trợ DKL. *GPyTorch* tích hợp các mô-đun mạng nơ-ron của PyTorch với suy luận GP chính xác và xấp xỉ, đại số tuyến tính tăng tốc trên GPU, và các phương pháp biến phân có khả năng mở rộng. Do đó nó rất phù hợp để làm nguyên mẫu các kiến trúc DKL và các biến thể SVDKL, nhưng các giả định xấp xỉ và giả định số của phương pháp GP được chọn vẫn áp dụng.
+
+Một điểm khởi đầu thuận tiện là hướng dẫn tích hợp mạng nơ-ron của GPyTorch tại [`https://docs.gpytorch.ai/en/stable/examples/06_PyTorch_NN_Integration_DKL/index.html`](https://docs.gpytorch.ai/en/stable/examples/06_PyTorch_NN_Integration_DKL/index.html). Trước khi thêm SKI hoặc một xấp xỉ biến phân, thường nên kiểm tra xem các bộ giải chính xác hoặc lặp mặc định có đủ cho tập dữ liệu đang xét hay không. SVDKL cung cấp một con đường riêng để mở rộng quy mô thông qua các biến cảm sinh và tối ưu hóa ngẫu nhiên theo lô nhỏ.
+
+GPJax cung cấp một hướng dẫn khác về hàm nhân sâu tại [`https://docs.jaxgaussianprocesses.com/_examples/deep_kernels/`](https://docs.jaxgaussianprocesses.com/_examples/deep_kernels/). Với tối ưu hóa Bayes, BoTorch tích hợp với GPyTorch và hỗ trợ các quy trình tối ưu hóa dựa trên DKL.

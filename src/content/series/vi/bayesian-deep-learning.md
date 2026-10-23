@@ -10,11 +10,6 @@ objectives:
   - "Chọn một phương pháp mở rộng được cho một mô hình và một tập dữ liệu cho trước, và đánh giá độ bất định dự đoán bằng hiệu chuẩn (calibration), quy tắc chấm điểm thích đáng (proper scoring rule) và dự đoán có chọn lọc (selective prediction)."
   - "Mô tả các hướng nghiên cứu hiện nay của học sâu Bayes và nêu các bài toán mở mà mỗi hướng giải quyết."
 plannedEntries:
-  - title: "Chương 23: Giới thiệu về các phương pháp hàm nhân"
-  - title: "Chương 24: Học hàm nhân sâu"
-  - title: "Chương 25: Quá trình Gauss sâu"
-  - title: "Chương 26: Quá trình hàm nhân sâu và máy hàm nhân sâu"
-  - title: "Chương 27: Học siêu cấp quá trình Gauss với hàm nhân sâu"
   - title: "Chương 28: Giới thiệu về tiên nghiệm"
   - title: "Chương 29: Các tính chất thống kê của tiên nghiệm"
   - title: "Chương 30: Tiên nghiệm có thông tin"
