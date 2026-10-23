@@ -1,0 +1,143 @@
+---
+title: "Hybrid Ensemble Sampling Methods"
+description: "How optimization, deep ensembles and multi-chain MCMC combine to sample multimodal neural network posteriors, with tempering, variants and limitations."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - markov chain monte carlo
+  - deep ensembles
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 25
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl20HybridSampling from '../../components/diagrams/Bdl20HybridSampling.astro';
+
+This chapter highlights that the effectiveness of navigating high-dimensional, non-convex, and multimodal posterior landscapes typical in Bayesian deep learning can be significantly enhanced by hybrid approaches that combine sampling with optimization-based techniques, or ensembles thereof.
+
+## 1. On the efficacy of optimization-informed initialization
+
+The posterior landscapes of interest are typically non-convex and characterized by complex geometries, often featuring multiple, disjoint modal regions of significant probability mass. The successful navigation of this terrain under finite computational constraints necessitates a strategy for balancing global exploration against local exploitation.
+
+To formalize the problem of posterior approximation via sampling, it is instructive to decompose the total approximation error. Following the framework presented in Sommer et al., this error may be attributed to three distinct sources:
+
+1. **Initialization Error:** An error component induced by commencing the sampling trajectory at a point of low probability, distant from the posterior's *typical set*, the high-probability volume where the bulk of the posterior mass is concentrated.
+2. **Discretization Error:** An error component arising from the numerical approximation of a continuous-time stochastic differential equation (e.g., the Langevin diffusion) by a discrete-time iterative algorithm.
+3. **Monte Carlo (MC) Error:** A statistical error component due to the use of a finite ensemble of samples to estimate expectations under the true posterior. This error is inversely related to the number of effective samples drawn.
+
+This chapter is primarily concerned with the mitigation of initialization and Monte Carlo errors, as their interplay motivates the adoption of hybrid sampling strategies. Adjusting the discretization error can be done independently of this interplay.
+
+Most MCMC samplers are designed to be ergodic processes in order to explore the full support of the target distribution. This exploratory capacity distinguishes them from optimization algorithms. Consider, for example, the relationship between Stochastic Gradient Descent and Stochastic Gradient Langevin Dynamics (SGLD; see [Chapter 2](/blog/stochastic-gradient-mcmc)). With potential $U(\theta) := -\log p(\theta \mid \mathcal{D})$, SGD performs gradient descent $\theta_{t+1} = \theta_t - \eta_t \nabla U(\theta_t)$. The unadjusted Langevin algorithm and its stochastic variant (SGLD) add isotropic Gaussian perturbations,
+
+$$
+\theta_{t+1} = \theta_t - \frac{\eta_t}{2} \nabla U(\theta_t) + \sqrt{\eta_t}\, \boldsymbol{\xi}_t, \qquad \boldsymbol{\xi}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{I}). \tag{20.1}
+$$
+
+Equivalently,
+
+$$
+\theta_{t+1} = \theta_t + \frac{\eta_t}{2} \nabla \log p(\theta_t \mid \mathcal{D}) + \boldsymbol{\zeta}_t, \qquad \boldsymbol{\zeta}_t \sim \mathcal{N}(\mathbf{0}, \eta_t \mathbf{I}). \tag{20.2}
+$$
+
+The injected noise facilitates transitions between modes, yet when far from the typical set it can slow the approach to high-density regions.
+
+Optimization procedures such as SGD, while typically not suited to sample from the posterior, are highly adept at rapidly identifying points of high posterior density, such as Maximum A Posteriori (MAP) estimates. This observation motivates a synergistic, two-stage methodology that integrates optimization and sampling. This hybrid approach may be conceptualized as follows:
+
+1. **Optimization-based Initialization:** An optimization algorithm is first employed to find a parameter vector $\theta^*$ that resides within a high-density region of the posterior, effectively minimizing an objective such as the unnormalized negative log-posterior or the negative log-likelihood. This stage is designed to substantially mitigate the initialization error by positioning the sampler's starting point within or proximal to the typical set. For most relevant prior choices (having an unbounded support like an isotropic Gaussian), the obtained $\theta^*$ lies in a region of reasonably high prior density, making it a valid initialization for the MCMC procedure.
+2. **Localized Posterior Sampling:** Subsequent to optimization, an MCMC sampler is initialized at $\theta^*$. Relieved of the protracted and often inefficient burn-in phase (induced by the potentially very complex neural network posterior landscape) required when starting from a random point in the parameter space, the sampler can allocate its computational budget to the more focused task of characterizing the local posterior geometry, thereby more efficiently reducing the Monte Carlo error.
+
+In other words, the practical imperative for such a hybrid strategy is to overcome the inefficiency and instability of samplers initialized from the prior, $p_0(\theta)$, particularly in high dimensions. As shown in Table 20.1, prior-initialized chains frequently fail to discover parameter configurations that yield meaningful predictive performance. This phenomenon is also demonstrated in Figure 20.1 for a simple overparameterized linear network $f(x) = w_1 w_2 x$ with known multimodal posterior, and maximum posterior density at $w_1 = w_2 = 1$ and $w_1 = w_2 = -1$. A sampler with an optimized initialization rapidly converges to and explores one of the true posterior modes, whereas a prior-initialized counterpart fails to explore higher density regions as well as the initialized one within the same budget of sampling steps. This gain in initial sampling efficacy is particularly important for high-dimensional models. Moreover, the computational overhead of the preliminary optimization phase is often negligible relative to the total cost of sampling, yet yields substantial improvements in the overall efficiency of posterior exploration and characterization. Even in the very small-scale example provided in Figure 20.1, the first optimization stage only took 5% of the total runtime.
+
+## 2. Parallelized exploration for mode discovery
+
+The hybrid two-stage strategy effectively solves the problem of finding an initial point close to the typical set. However, a significant challenge remains in posteriors characterized by multiple, well-separated modes (see Chapter 33 for related geometric and topological considerations). In high-dimensional spaces, the regions of low probability density that lie between these modes can practically form energy barriers for an MCMC sampler. Consequently, a single MCMC chain, even when run for a very long time, will likely remain confined to the basin of attraction of its initial mode.
+
+This phenomenon is illustrated in Figure 20.1. The long-run simulation (bottom center plot) is initialized in the posterior mode in the upper-right quadrant but never traverses the low-probability region around the origin to explore the second, symmetric mode in the lower-left quadrant. Relying on the formal ergodicity of a single chain to explore a multimodal landscape is, therefore, not a practically feasible strategy given that computation is usually constrained.
+
+A simple and powerful solution is to use parallel computation by running multiple independent chains, a strategy shown in the lower right plot of Figure 20.1. The core idea is to initialize $M$ different chains from distinct starting points $\{\theta_1^*, \dots, \theta_M^*\}$. If these starting points end up in different basins of attraction, the combined collection of samples from all $M$ chains will form a much more faithful representation of the global posterior. This approach not only provides a mechanism for exploring functionally distinct modes but also represents a more efficient path to reducing the overall Monte Carlo error compared to running a single, exceptionally long chain. This approach is particularly appealing if parallel computing resources are available.
+
+## 3. Variations of hybrid sampling
+
+The conceptual framework of initializing sampling with optimization can be realized through several distinct methodologies, ranging from classical techniques to modern ensemble-based approaches. These methods differ in their approaches to managing the transition from optimization to sampling and in how they address the fundamental challenge of multimodality.
+
+<Figure caption="Figure 20.1: Upper left: Prior initialized sampling using the No U-Turn Sampler (NUTS). Upper right: Optimization initialized sampling using NUTS. Bottom left: Ground truth posterior obtained via numerical integration. Bottom center: Long run sampling of a single NUTS chain from an optimized initialization. Bottom right: Samples obtained from multi-chain NUTS sampling with optimized initializations. For reference, the symmetry manifold w₁w₂ = 1 is highlighted as a solid black line. Schematic reproduction: the posterior is taken as proportional to exp(−A(w₁w₂ − 1)²/2 − (w₁² + w₂²)/2) with A = 50 (standard normal prior, data generated with w₁w₂ = 1), whose maxima lie at w₁ = w₂ ≈ 0.99 and w₁ = w₂ ≈ −0.99, close to the values given in the text; the samples are computed with the unadjusted Langevin algorithm of Equation (20.2) instead of NUTS, the optimized starting points by gradient descent, and the ground truth by evaluating the normalized density on a grid. In the upper panels, more opaque dots are earlier time steps.">
+  <Bdl20HybridSampling />
+</Figure>
+
+**Table 20.1:** The proportion of chains resulting in better root-mean-square error (RMSE) performance than a linear model for two UCI benchmark data sets (the higher the better). NUTS used 5,000 warmup samples. The Bayesian neural network used is a single hidden-layer Multi-Layer Perceptron with 50 hidden neurons. Values are averaged across 12 chains and 3 replications, and SD denotes standard deviation. Adapted from Table 5 of Sommer et al.
+
+| Activation | Data set | Prop. RMSE $<$ linear model | SD |
+|---|---|---:|---:|
+| ReLU | concrete | 0.14 | 0.13 |
+|  | energy | 0.31 | 0.13 |
+| SiLU | concrete | 0.14 | 0.10 |
+|  | energy | 0.28 | 0.05 |
+| tanh | concrete | 0.58 | 0.25 |
+|  | energy | 0.67 | 0.08 |
+
+### 3.1 MAP initialization and tempered transitions
+
+A common practice in the broader Bayesian literature is to initialize a single MCMC chain from a previously computed MAP estimate. This represents the most direct instantiation of the two-stage hybrid approach: a "hard" transition from a pure optimization objective to a pure sampling objective.
+
+A more gradual transition can be achieved by sampling from a **tempered target distribution**, a technique that smoothly interpolates between optimization and sampling. Following Chen et al., Duffield et al. and Welling and Teh, one can define a tempered posterior indexed by a temperature $T \in (0, \infty)$ as
+
+$$
+p_T(\theta \mid \mathcal{D}) \propto [p(\theta \mid \mathcal{D})]^{1/T}. \tag{20.3}
+$$
+
+The temperature $T$ controls the "flatness" of the distribution. In the low-temperature limit $T \to 0$, the distribution $p_T$ concentrates on the global maximizers of the original posterior density, while the corresponding Langevin dynamics approach gradient-based optimization. Conversely, setting $T = 1$ recovers the original, untempered posterior distribution.
+
+This provides a formal mechanism for annealing. As an example, the SGLD update rule can be modified by keeping the posterior drift fixed and scaling the injected Langevin noise by the temperature. For $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$, this gives
+
+$$
+\theta_{t+1} = \theta_t + \frac{\eta_t}{2} \left( \nabla \log p_0(\theta_t) + \frac{N}{N_{\text{batch}}} \sum_{i \in \mathcal{B}_t} \nabla \log p(y_i \mid x_i, \theta_t) \right) + \boldsymbol{\zeta}_t, \qquad \boldsymbol{\zeta}_t \sim \mathcal{N}(\mathbf{0}, \eta_t T \mathbf{I}). \tag{20.4}
+$$
+
+Here, $N$ is the data set size, $\mathcal{B}_t \subset \{1, \dots, N\}$ is a minibatch index set of size $N_{\text{batch}}$, and the minibatch likelihood term is an unbiased estimator of $\nabla \log p(\mathcal{D} \mid \theta_t)$. By starting with a small temperature $T \ll 1$ and gradually increasing it to $T = 1$ over a series of iterations, the algorithm transitions smoothly from an optimization-dominated phase that quickly finds a mode to a sampling phase that explores its local geometry. This perspective also helps to formalize the close relationship between optimization and sampling. For instance, the exploration phase of cyclical SGLD, which aims to find new posterior modes, operates close to the zero-temperature limit during exploration phases, hence approaching optimization before resetting to $T = 1$ to sample.
+
+### 3.2 Ensemble-based initialization for multi-modality
+
+While a single optimized starting point can effectively initialize sampling within one posterior mode, it cannot resolve the broader challenge of exploring a multimodal landscape. As discussed previously, traversing the low-probability regions between modes is often infeasible under computational constraints. To approximate a posterior with functionally distinct solutions, one can use **Deep Ensembles** (DE), as introduced in [Chapter 19](/blog/ensembles-and-approximate-bayesian-inference).
+
+The independent training runs of a DE typically converge to different local minima, yielding a set of diverse parameter vectors $\{\theta_1^*, \dots, \theta_M^*\}$. This collection of solutions provides an ideal set of starting points for multi-chain MCMC. The hybrid process then becomes the following:
+
+1. Train a DE to obtain $M$ distinct, high-performing models. For this step, one can also exploit previous empirical findings in the deep learning community and use readily available pre-trained weight vectors.
+2. Initialize $M$ parallel MCMC chains, with each chain $m$ starting from its corresponding ensemble member's parameters, $\theta_m^*$.
+
+This DE-initialized sampling approach turns posterior exploration into a *post hoc* procedure that can be applied to already-trained models to enhance their uncertainty quantification. This method has been shown to effectively capture diverse posterior structures in various task settings and is also referred to as *Bayesian Deep Ensembles (BDEs)*.
+
+### 3.3 Related and emerging techniques
+
+The core idea of finding diverse, high-quality starting points has inspired several related methods, such as the following three:
+
+- **SWA-based Initialization:** Stochastic Weight Averaging (SWA) is an optimization technique that averages weights from later epochs of an SGD trajectory, often finding wider, more generalizable minima. Instead of averaging the points along the SGD trajectory as in Izmailov et al., the late-epoch iterates can serve as a set of correlated but diverse initializations for MCMC chains, offering a cheaper alternative to training a full Deep Ensemble.
+- **Diffusion-based Localization:** Stochastic localization methods build on score-based learning by perturbing data samples, which in the setting of sampling-based inference would be the model weights, with noise instead of optimizing them and then progressively learning a denoiser. For example one such recent work introduces Stochastic Localization via Iterative Posterior Sampling, the so called SLIPS sampler, which uses MCMC-estimated denoisers to approximate samples from complex target distributions, offering a promising new class of initialization techniques. Currently, however, these diffusion-based localization techniques struggle to cope with the very high dimensional posteriors present in modern neural network architectures (see Chapter 50 for details on diffusion and score-based methods).
+- **Symmetry-Informed Initialization:** The inherent symmetries in neural network architectures can also be used for initialization (see Chapters 32 and 33). For many networks, such as Multi-Layer Perceptrons, one can permute the neurons within a hidden layer without changing the function computed by the network. As shown in Kobialka et al., one can take a *single* pre-trained model and apply a set of $M$ random, function-preserving permutations to its weights. This generates a "pseudo-ensemble" of $M$ parameter vectors that are numerically distinct but functionally identical. Using these permuted vectors to initialize MCMC chains still seems to provide enough diversity to generate a well-working BDE while being highly efficient, requiring only one trained model.
+
+## 4. Limitations
+
+While the ensemble-based hybrid methods discussed offer a powerful, practical solution to exploring multimodal posterior landscapes, they are not without their own set of challenges. These limitations define an active frontier of research in Bayesian deep learning.
+
+### 4.1 Weighting across modes
+
+One of the most significant theoretical challenges is how to combine the samples from different chains exploring distinct posterior modes. When running $M$ independent chains, let $S_m$ denote the number of retained samples from chain $m$, and let $\theta_{m,j}$ denote the $j$-th retained parameter sample from this chain. A simple and common approach is to form the final predictive distribution by treating each chain as an equally weighted component in a mixture,
+
+$$
+p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{M} \sum_{m=1}^{M} \left( \frac{1}{S_m} \sum_{j=1}^{S_m} p(y^* \mid x^*, \theta_{m,j}) \right). \tag{20.5}
+$$
+
+However, this implicitly assumes that each of the $M$ discovered modes contributes equally to the total posterior probability mass. This is rarely the case, as the true "weight" of a mode is its marginal likelihood, which is notoriously difficult to approximate in high dimensions, and its intractability is the reason for using MCMC in the first place. This problem of weighting components in a Bayesian model average is a classic challenge. Proposed solutions include, for example, stacking, but in practice, most researchers and practitioners still resort to an equal weighting.
+
+### 4.2 Computational and resource costs
+
+Despite their relative efficiency compared to naïve sampling, hybrid methods remain computationally intensive. The initial step of training a DE requires the resources to train $M$ separate neural networks. Subsequently, the MCMC sampling phase for each of the $M$ chains adds further computational overhead. This combined cost, while often justifiable by the superior quality of the resulting uncertainty estimates, can be prohibitive for very large models or resource-constrained environments. Furthermore, storing the parameters for $M$ full models and their corresponding posterior samples demands considerable memory and increases inference costs.
+
+### 4.3 Fidelity of mode discovery
+
+The entire framework rests on the assumption that the initial optimization phase successfully identifies diverse and meaningful posterior modes. However, this is not guaranteed under finite budget constraints. While unlikely, the members of a DE might converge to the same basin of attraction or to functionally almost equivalent solutions, limiting the exploratory advantage of the multi-chain approach. Moreover, there is a subtle mismatch between the objectives of the hybrid procedure: the optimizer seeks points that maximize the likelihood (or posterior density), while the Bayesian objective is to integrate over the entire typical set. This can lead to the optimizer overlooking broad, flat modes that contribute significantly to the total posterior mass in favor of sharper, narrower peaks in the loss landscape.
+
+### 4.4 Challenges of local exploration
+
+Even after successfully initializing a chain in the close vicinity of a major posterior mode, fully exploring the local region can be difficult. The local geometry itself can be pathological, containing complex ridges, narrow funnels, or areas of high curvature that challenge even sophisticated samplers like Hamiltonian Monte Carlo (HMC, see [Chapter 1](/blog/introduction-to-sampling)). This can result in the sampler exploring only a small sub-region of the mode, leading to an underestimation of the local posterior variance. To avoid this, one could tune sampler hyperparameters such as its step size or mass matrix for each of the $M$ chains. This, however, further complicates the practical application of these methods and stresses the need for high-performance and auto-tuned samplers.

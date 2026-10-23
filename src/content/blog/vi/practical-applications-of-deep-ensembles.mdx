@@ -1,0 +1,355 @@
+---
+title: "Ứng dụng thực tế của tổ hợp sâu"
+description: "Tổ hợp sâu trong thực tế: LLM hỗn hợp chuyên gia, mô hình phần thưởng RLHF, học tăng cường dựa trên mô hình, dự báo thời tiết, y tế, lái xe và bằng sáng chế."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - deep ensembles
+  - mixture of experts
+  - reinforcement learning
+series: bayesian-deep-learning
+seriesOrder: 26
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl21MixtureOfExperts from '../../../components/diagrams/Bdl21MixtureOfExperts.astro';
+
+Tổ hợp sâu (deep ensemble) có liên hệ với lấy trung bình mô hình Bayes (Bayesian model averaging): trong những điều kiện nhất định, một tổ hợp gồm các mạng được huấn luyện độc lập có thể xấp xỉ phân phối dự đoán hậu nghiệm (posterior predictive distribution) và nhờ đó nắm bắt được độ bất định nhận thức (epistemic uncertainty), đồng thời thể hiện hiệu năng vững vàng trên các bộ dữ liệu chuẩn (benchmark) về phân loại, hồi quy và hiệu chuẩn. Bằng cách huấn luyện độc lập nhiều mạng nơ-ron và kết hợp các dự đoán của chúng, tổ hợp sâu xấp xỉ lấy trung bình mô hình Bayes, một nguyên lý lâu đời để nắm bắt độ bất định nhận thức và cải thiện khả năng tổng quát hóa. Khác với nhiều cách tiếp cận mạng nơ-ron Bayes (Bayesian neural network) tường minh, tổ hợp sâu đạt được những lợi ích này mà không cần suy luận hậu nghiệm phức tạp ([Chương 2](/vi/blog/stochastic-gradient-mcmc)) hay các quy trình huấn luyện chuyên biệt ([Chương 15](/vi/blog/natural-gradient-variational-inference)), nên vừa đơn giản về mặt khái niệm vừa khả thi về mặt tính toán. Chương này xem xét cách các tính chất đó được chuyển vào các bối cảnh ứng dụng, nêu bật những ví dụ cụ thể trong đó tổ hợp sâu nâng cao độ tin cậy, khả năng diễn giải của mô hình và việc ra quyết định trong điều kiện bất định. Chương cũng bàn về việc các điểm mạnh và hạn chế của tổ hợp sâu định hướng thiết kế các hệ thống có khả năng mở rộng và nhận biết độ bất định như thế nào.
+
+## 1. Giới thiệu
+
+Tổ hợp sâu đã trở thành một trong những kỹ thuật được dùng rộng rãi nhất để định lượng độ bất định trong thực hành học sâu hiện đại. Ý tưởng cốt lõi đơn giản đến bất ngờ: huấn luyện độc lập nhiều mạng nơ-ron với các khởi tạo ngẫu nhiên và các quỹ đạo huấn luyện ngẫu nhiên khác nhau, rồi kết hợp các dự đoán của chúng tại thời điểm kiểm tra, thường bằng cách lấy trung bình. Cách tiếp cận này có động cơ mạnh mẽ từ mô thức Bayes, vốn chủ trương dùng phân phối hậu nghiệm thay cho ước lượng điểm.
+
+Sự đơn giản này, cùng với hiệu năng thực nghiệm mạnh, đã khiến tổ hợp sâu trở thành một công cụ dùng ngay hấp dẫn đối với người làm thực tế. Chúng thường xuyên mang lại độ chính xác dự đoán cao hơn và các ước lượng độ bất định được hiệu chuẩn tốt trên nhiều lĩnh vực, bao gồm thị giác máy tính, xử lý ngôn ngữ tự nhiên và các bài toán dự báo. Một số thư viện học sâu Bayes (Bayesian deep learning) có sẵn hỗ trợ cho tổ hợp sâu (Chương 47).
+
+Tổ hợp sâu đã được dùng trong các ứng dụng thực tế ở nhiều bối cảnh khác nhau. Mục này điểm qua một danh sách không đầy đủ các ứng dụng thực tế của tổ hợp sâu. Cụ thể, mục này đề cập các ứng dụng trong mô hình ngôn ngữ lớn (LLM), dự báo thời tiết, chăm sóc sức khỏe và học tăng cường. Một số ứng dụng trong đó (như trong LLM) có thể khiến người đọc bất ngờ. Những ứng dụng khác, như chăm sóc sức khỏe, có vẻ trực quan hơn do các quyết định y khoa đôi khi liên quan đến những hệ quả rất nghiêm trọng. Vì chi phí tính toán của tổ hợp sâu cao, chi phí này phải được bù đắp bằng những cải thiện hiệu năng đáng kể thì việc sử dụng chúng mới hợp lý. Nhìn chung, có thể nhận ra một số chủ đề chung khiến tổ hợp sâu hữu ích trong thực tế:
+
+- Dữ liệu khan hiếm: ở đây tổ hợp sâu có thể được dùng để cung cấp các ước lượng độ bất định có ý nghĩa, từ đó thu thập dữ liệu giàu thông tin theo cách trực tuyến (online). Tổ hợp mô hình (ensemble) cũng có thể được dùng để học các mô hình hoạt động tốt mà tránh được quá khớp (overfitting).
+- Dữ liệu rất đa dạng: ở đây tổ hợp mô hình có thể được dùng để tạo các mạng nơ-ron sâu chuyên biệt cho các phần chia nhỏ của dữ liệu. Tại thời điểm kiểm tra, các thành viên của tổ hợp có thể được kết hợp lại theo nhiều cách khác nhau, thường bằng cách trước hết xác định phần chia nhỏ mà điểm dữ liệu thuộc về rồi áp dụng thành viên chuyên biệt tương ứng.
+- Chi phí của các dự đoán sai rất cao. Tổ hợp mô hình có thể cung cấp các ước lượng độ bất định được hiệu chuẩn tốt, có thể dùng để tránh những sai lầm tốn kém của các thuật toán học sâu. Tổ hợp mô hình cũng thường hoạt động tốt cho bài toán phân loại có chọn lọc (selective classification), trong đó mô hình có thể từ chối đưa ra dự đoán khi không đủ tự tin.
+
+<Figure caption="Hình 21.1: Lớp hỗn hợp chuyên gia (Mixture of Experts). Mỗi vector đầu vào được một bộ định tuyến gán cho 2 trong số 8 chuyên gia. Đầu ra của lớp là tổng có trọng số các đầu ra của hai chuyên gia được chọn. Trong Mixtral, một chuyên gia là một khối truyền thẳng tiêu chuẩn như trong kiến trúc transformer nguyên bản. Hình và mô tả lấy từ Jiang và cộng sự. Vẽ lại dưới dạng sơ đồ.">
+  <Bdl21MixtureOfExperts />
+</Figure>
+
+Tổ hợp mô hình cũng đã được đề xuất và đánh giá mà không tham chiếu tường minh tới suy luận Bayes. Điều này nới lỏng hình thức luận Bayes và, như sẽ thấy, cho phép có những phương pháp thực tế, liên quan tới nhưng tách biệt khỏi lý thuyết chặt chẽ. Ngoài ra, các ứng dụng thực tế thường đặt ra những yêu cầu nghiêm ngặt về tính toán hoặc về các mặt khác. Vì vậy, khi phát triển các phương pháp tổ hợp mới, các nhà nghiên cứu đôi khi có thể có lợi nếu tính đến các chủ đề nêu trên.
+
+## 2. Ứng dụng cho mô hình ngôn ngữ lớn
+
+Phần thảo luận bắt đầu với các ứng dụng thực tế của tổ hợp sâu cho mô hình ngôn ngữ lớn (large language model, LLM). Tại thời điểm viết văn bản này, mô hình ngôn ngữ lớn là lĩnh vực phát triển nhanh nhất của mạng nơ-ron sâu. Tổ hợp mô hình được dùng trong mô hình ngôn ngữ lớn hiện đại theo nhiều cách, đôi khi bị bỏ qua. Chúng là nền tảng cho một số thành phần then chốt của các mô hình đang vận hành thực tế, mang lại những cải thiện hiệu quả đáng kể khi suy luận, giúp tổng quát hóa sang các nhiệm vụ mới dễ dàng hơn và làm cho việc tinh chỉnh (finetuning) ổn định hơn. Các mục tiếp theo xem xét chi tiết những ứng dụng khác nhau này.
+
+### 2.1 Hỗn hợp chuyên gia
+
+Một biến thể phổ biến của tổ hợp sâu được dùng rộng rãi trong các LLM hiện đại là các mô hình hỗn hợp chuyên gia (Mixture of Experts, MoE). Trong tổ hợp sâu nguyên bản, suy luận được thực hiện trên mọi thành viên của tổ hợp rồi lấy trung bình các kết quả. Các mô hình hỗn hợp chuyên gia dùng một bộ định tuyến (router) học được, chọn ra một tập con các thành viên được kích hoạt cho mỗi đầu vào. Về mặt khái niệm, MoE hiện thực một dạng tổ hợp có điều kiện hay tổ hợp động: bộ định tuyến ghép một tập con các chuyên gia cho mỗi đầu vào, tạo ra độ đa dạng định tuyến (routing diversity) khác với việc lấy trung bình tổ hợp tĩnh. Kết quả là một mô hình có khả năng biểu diễn rất cao (nhờ tổng số tham số lớn) mà vẫn nhanh khi suy luận (nhờ số tham số được kích hoạt nhỏ). Các ví dụ nổi tiếng về mô hình hỗn hợp chuyên gia gồm Mixtral-of-Experts và DeepSeekR1.
+
+Trước hết, phần tổng quan ngắn về lớp hỗn hợp chuyên gia của Mixtral được trình bày lại (Hình 21.1). Cho một đầu vào $x$, một bộ định tuyến $G(x)$ và các lớp chuyên gia $E_i(x)$ với $i \in \{0, n-1\}$, đầu ra của mô-đun MoE với đầu vào $x$ được xác định bằng tổng có trọng số các đầu ra của các mạng chuyên gia, trong đó các trọng số là đầu ra của mạng cổng (gating network):
+
+$$
+\sum_{i=0}^{n-1} G(x)_i \cdot E_i(x). \tag{21.1}
+$$
+
+Nhận xét then chốt trong cách viết này là nếu vector cổng thưa, có thể tránh tính đầu ra của các chuyên gia có cổng bằng không. Điều này cho một mô hình rất linh hoạt mà vẫn hiệu quả khi kiểm tra. Các tác giả hiện thực mô-đun cổng bằng cách lấy softmax trên Top-K logit của một lớp tuyến tính. Đáng chú ý, các phương pháp phức tạp hơn cũng đã được khảo sát trong các tài liệu. Cụ thể, các tác giả hiện thực
+
+$$
+G(x) := \operatorname{Softmax}(\operatorname{Top}_K(x \cdot W_g)) \tag{21.2}
+$$
+
+trong đó $(\operatorname{Top}_K(\ell))_i := \ell_i$ nếu $\ell_i$ thuộc $\operatorname{Top}_K$ tọa độ của các logit $\ell \in \mathbb{R}^n$ và $(\operatorname{Top}_K(\ell))_i := -\infty$ trong trường hợp còn lại. Khi đó, có thể điều chỉnh lượng tính toán dùng để xử lý mỗi token bằng cách chọn thích hợp giá trị của $K$, số chuyên gia dùng cho mỗi token. Trong thực tế, tổng số chuyên gia $n$ được giữ lớn hơn nhiều so với số chuyên gia hoạt động $K$. Với Mixtral, các tác giả dùng kiến trúc SwiGLU làm hàm chuyên gia $E_i(x)$. Tổng số chuyên gia là $n = 8$, còn số chuyên gia hoạt động là $k = 2$. Gộp tất cả lại, đầu ra $y$ ứng với một token đầu vào $x$ được tính như sau:
+
+$$
+y = \sum_{i=0}^{n-1} \operatorname{Softmax}(\operatorname{Top}_2(x \cdot W_g))_i \cdot \operatorname{SwiGLU}_i(x). \tag{21.3}
+$$
+
+Khi huấn luyện, các chuyên gia khác nhau chuyên môn hóa vào các phần khác nhau của phân phối dữ liệu, cho một mạng có thể mô hình hóa những phân phối dữ liệu phức tạp. Khi kiểm tra, chỉ những chuyên gia liên quan tới mẫu kiểm tra được kích hoạt, nhờ đó giảm đáng kể tải tính toán. Trong bối cảnh mô hình Mixtral (và tổng quát hơn là các mô hình LLM), vì các chuyên gia được áp dụng độc lập trên các token đầu vào khác nhau, mô-đun hỗn hợp chuyên gia được dùng để thay thế các lớp kết nối đầy đủ của kiến trúc. Bảng kết quả sau đây được trình bày lại.
+
+| Mô hình | Số tham số hoạt động | MMLU | HellaS |
+| --- | :-: | :-: | :-: |
+| LLaMA 2 7B | 7B | 44.4% | 77.1% |
+| LLaMA 2 13B | 13B | 55.6% | 80.7% |
+| LLaMA 1 33B | 33B | 56.8% | 83.7% |
+| LLaMA 2 70B | 70B | 69.9% | 85.4% |
+| Mistral 7B | 7B | 62.5% | 81.0% |
+| Mixtral 8x7B | 13B | 70.6% | 84.4% |
+
+**Bảng 21.1:** So sánh các mô hình Mixtral và LLaMA trên các bộ dữ liệu chuẩn MMLU và HellaSwag, theo Jiang và cộng sự.
+
+Có thể thấy mô hình Mixtral cạnh tranh được với mô hình LLaMA 2 70B trong khi dùng ít hơn 5 lần số tham số hoạt động khi suy luận.
+
+Tiếp theo là mô tả một phiên bản cải tiến của kiến trúc hỗn hợp chuyên gia được hiện thực trong mô hình DeepSeekMoE. Đổi mới then chốt là DeepSeekMoE dùng các chuyên gia chi tiết hơn và tách riêng một số chuyên gia làm chuyên gia dùng chung. Ký hiệu $u_t$ là đầu vào FFN của token thứ $t$. Các tác giả tính đầu ra FFN $h'_t$ như sau:
+
+$$
+h'_t = u_t + \sum_{i=1}^{N_s} \mathrm{FFN}_i^{(s)}(u_t) + \sum_{i=1}^{N_r} g_{i,t} \mathrm{FFN}_i^{(r)}(u_t) \tag{21.4}
+$$
+
+$$
+g_{i,t} = \frac{g'_{i,t}}{\sum_{j=1}^{N_r} g'_{i,t}} \tag{21.5}
+$$
+
+$$
+g'_{i,t} = \begin{cases} s_{i,t}, & s_{i,t} \in \operatorname{Top}_k(\{s_{j,t} | 1 \le j \le N_r\}, K_r) \\ 0, & \text{otherwise} \end{cases} \tag{21.6}
+$$
+
+$$
+s_{i,t} = \operatorname{Sigmoid}(u_t^T e_i) \tag{21.7}
+$$
+
+trong đó $N_s$ và $N_r$ lần lượt là số chuyên gia dùng chung và số chuyên gia được định tuyến; $\mathrm{FFN}_i^{(s)}(\cdot)$ và $\mathrm{FFN}_i^{(r)}(\cdot)$ lần lượt là chuyên gia dùng chung thứ $i$ và chuyên gia được định tuyến thứ $i$; $K_r$ là số chuyên gia được định tuyến được kích hoạt; $g_{i,t}$ là giá trị cổng của chuyên gia thứ $i$; $s_{i,t}$ là độ tương hợp giữa token và chuyên gia (token-to-expert affinity); $e_i$ là vector tâm của chuyên gia được định tuyến thứ $i$; và $\operatorname{Top}_k(\cdot, K)$ là tập gồm $K$ điểm cao nhất trong số các điểm tương hợp được tính cho token thứ $t$ và mọi chuyên gia được định tuyến.
+
+Điều quan trọng là phải phân biệt độ đa dạng định tuyến với độ bất định Bayes (hậu nghiệm) hay độ bất định của mô hình. Độ đa dạng định tuyến xuất phát từ việc ghép có điều kiện (chuyên gia nào được kích hoạt với một đầu vào cho trước), và nó làm tăng tính linh hoạt biểu diễn cũng như hành vi có điều kiện. Ngược lại, độ bất định hậu nghiệm chỉ độ bất định về các tham số và dự đoán của mô hình (độ bất định nhận thức), và thường được ước lượng bằng lấy trung bình mô hình Bayes hoặc bằng các tổ hợp sâu độc lập. Vì vậy, bản thân các kích hoạt của bộ định tuyến không cung cấp độ bất định nhận thức được hiệu chuẩn; khi cần các ước lượng độ bất định có nguyên tắc, các mô hình dựa trên định tuyến nên được kết hợp với các kỹ thuật tổ hợp hoặc kỹ thuật Bayes.
+
+Một đổi mới quan trọng khác là "cân bằng tải không cần mất mát phụ" (Auxiliary-Loss-Free Load Balancing). Kỹ thuật này được thiết kế để tránh sụp đổ định tuyến (routing collapse) mà vẫn giữ được hiệu năng mô hình. Cụ thể, các tác giả đưa vào một số hạng độ chệch (bias) $b_i$ cho mỗi chuyên gia và cộng nó vào các điểm tương hợp tương ứng $s_{i,t}$ để xác định định tuyến top-K:
+
+$$
+g'_{i,t} = \begin{cases} s_{i,t}, & s_{i,t} + b_i \in \operatorname{Top}_k(\{s_{j,t} + b_j | 1 \le j \le N_r\}, K_r) \\ 0, & \text{otherwise.} \end{cases} \tag{21.8}
+$$
+
+| Bộ dữ liệu chuẩn (Thước đo) | | DeepSeek-V2 | Qwen2.5 | LLaMA-3.1 | DeepSeek-V3 |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| # Shot | | 72B | 236B | 72B | 671B |
+| # Tham số được kích hoạt | | 21B | 72B | 405B | 37B |
+| # Tổng số tham số | | 236B | 72B | 405B | 671B |
+| Pile-test (BPB) | | 0.606 | 0.638 | 0.542 | 0.548 |
+| BBH (EM) | 3-shot | 78.8 | 79.8 | 82.9 | 87.5 |
+| MMLU (EM) | 5-shot | 78.4 | 85.0 | 84.4 | 87.1 |
+| MMLU-Redux (EM) | 5-shot | 75.6 | 83.2 | 81.3 | 86.2 |
+| MMLU-Pro (EM) | 5-shot | 51.4 | 58.3 | 52.8 | 64.4 |
+| DROP (F1) | 3-shot | 80.4 | 80.6 | 86.0 | 89.0 |
+| ARC-Easy (EM) | 25-shot | 97.6 | 98.4 | 98.4 | 98.9 |
+| ARC-Challenge (EM) | 25-shot | 92.2 | 94.5 | 95.3 | 95.3 |
+| HellaSwag (EM) | 10-shot | 87.1 | 84.8 | 89.2 | 88.9 |
+| PIQA (EM) | 0-shot | 83.9 | 82.6 | 85.9 | 84.7 |
+| WinoGrande (EM) | 5-shot | 86.3 | 82.3 | 85.2 | 84.9 |
+| RACE-Middle (EM) | 5-shot | 73.1 | 68.1 | 74.2 | 67.1 |
+| RACE-High (EM) | 5-shot | 52.6 | 50.3 | 56.8 | 51.3 |
+| TriviaQA (EM) | 5-shot | 80.0 | 71.9 | 82.7 | 82.9 |
+| NaturalQuestions (EM) | 5-shot | 38.6 | 33.2 | 41.5 | 40.0 |
+| AGIEval (EM) | 0-shot | 57.5 | 75.8 | 60.6 | 79.6 |
+
+**Bảng 21.2:** So sánh hiệu năng trên các bộ dữ liệu chuẩn tiếng Anh của DeepSeek-V2, Qwen2.5, LLaMA-3.1 và DeepSeek-V3, trình bày lại từ bài báo gốc.
+
+Lưu ý rằng số hạng độ chệch chỉ được dùng cho việc định tuyến. Giá trị cổng, sẽ được nhân với đầu ra FFN, vẫn được suy ra từ điểm tương hợp ban đầu $s_{i,t}$. Trong quá trình huấn luyện, độ chệch được điều chỉnh động.
+
+Các tác giả còn đề xuất một "mất mát phụ theo chuỗi" (Sequence-Wise Auxiliary Loss). Mất mát này nhằm ngăn sự mất cân bằng cực đoan trong bất kỳ chuỗi đơn lẻ nào. Cụ thể, các tác giả hiện thực mất mát theo chuỗi sau:
+
+$$
+\ell_{\mathrm{Bal}} = \alpha \sum_{i=1}^{N_r} f_i P_i, \tag{21.9}
+$$
+
+trong đó hệ số cân bằng $\alpha$ là một siêu tham số (hyperparameter) được gán một giá trị nhỏ, và trong đó
+
+$$
+f_i = \frac{N_r}{K_r T} \sum_{t=1}^{T} \mathbb{1}(\{s_{i,t} \in \operatorname{Top}_k(\{s_{j,t} \mid 1 \le j \le N_r\}, K_r)\}) \tag{21.10}
+$$
+
+và
+
+$$
+P_i = \frac{1}{T} \sum_{t=1}^{T} s'_{i,t}, \quad \text{with} \quad s'_{i,t} = \frac{s_{i,t}}{\sum_{j=1}^{N_r} s_{j,t}}. \tag{21.11}
+$$
+
+Bảng 21.2 cho thấy DeepSeek-V3 đạt ngang bằng hoặc vượt các mô hình đối chứng trong khi dùng ít tham số được kích hoạt hơn đáng kể.
+
+## 3. Ứng dụng cho học tăng cường
+
+### 3.1 Học tăng cường từ phản hồi của con người
+
+Thành phần được biết đến nhiều nhất của các thuật toán học tăng cường (reinforcement learning, RL) được hiện thực bằng tổ hợp mô hình là học tăng cường từ phản hồi của con người (Reinforcement Learning from Human Feedback, RLHF). RLHF có động cơ từ khó khăn trong việc tạo tín hiệu huấn luyện cho các nhiệm vụ RL như sinh văn bản mở. Để hiểu khó khăn này, có thể so sánh với trường hợp phân loại ảnh. Với bài toán phân loại ảnh, có thể gán nhãn tập dữ liệu bằng cách trước hết gán cho mỗi lớp của tập dữ liệu một phần tử của tập số tự nhiên $\mathbb{N}$, rồi huấn luyện mạng dự đoán số này cho mỗi mẫu đã gán nhãn. Với văn bản mở, việc gán một con số tuyệt đối cho chất lượng văn bản khó hơn nhiều, vì chất lượng văn bản có nhiều bậc tự do và bao gồm những thành phần chủ quan. Ngược lại, so sánh hai văn bản và xếp một văn bản tốt hơn văn bản kia thì dễ hơn nhiều. RLHF dùng cách xếp hạng như vậy của người đánh giá để học một hàm (hàm phần thưởng, reward function) gán các thứ hạng nhất quán cho văn bản mở. Hàm này sau đó được dùng để cải thiện một chính sách (policy) với một trạng thái cho trước.
+
+| | walker | hopper | swimmer | cheetah | ant | reacher | d-pendulum | pendulum |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Có tổ hợp | 5000 | 5000 | 175 | 4500 | −200 | −3 | 7500 | 1250 |
+| Không tổ hợp | 3800 | 3900 | 60 | 3100 | −300 | −4 | 2500 | 1250 |
+
+**Bảng 21.3:** Phần thưởng cuối cùng của các tác tử được huấn luyện bằng RLHF trên các nhiệm vụ MuJoCo trước và sau khi bỏ tổ hợp. Có thể thấy tổ hợp mang lại những cải thiện đáng kể về phần thưởng cuối cùng. Christiano và cộng sự.
+
+Cho $\tau^A = (s, a^A)$ và $\tau^B = (s, a^B)$ là hai cặp (trạng thái, hành động) và một mô hình phần thưởng (reward model) được tham số hóa bởi $\phi$. Người gán nhãn đưa ra các ưu tiên theo cặp, chẳng hạn:
+
+$$
+\tau^A \succ \tau^B \quad \text{or} \quad \tau^B \succ \tau^A. \tag{21.12}
+$$
+
+Hàm phần thưởng học được $\hat{r}_\phi$ cho một phần thưởng vô hướng ứng với mỗi cặp:
+
+$$
+R(\tau) = \hat{r}_\phi(s, a). \tag{21.13}
+$$
+
+Mô hình phần thưởng gán một xác suất để cặp câu hỏi – câu trả lời $\tau^A$ được ưu tiên hơn $\tau^B$ bằng một softmax:
+
+$$
+P[\tau^A \succ \tau^B] = \frac{\exp(R(\tau^A))}{\exp(R(\tau^A)) + \exp(R(\tau^B))}. \tag{21.14}
+$$
+
+Cho một tập dữ liệu các ưu tiên của con người, mô hình phần thưởng được huấn luyện để cực tiểu hóa hàm mất mát entropy chéo (cross-entropy) sau:
+
+$$
+\ell_\phi = -\sum_{(\tau^A, \tau^B, \mu)} \Big[ \mu \log P[\tau^A \succ \tau^B] + (1 - \mu) \log P[\tau^B \succ \tau^A] \Big], \tag{21.15}
+$$
+
+trong đó $\mu = 1$ (tương ứng $\mu = 0$) nếu con người ưu tiên $\tau^A$ (tương ứng $\tau^B$), và $\mu = 0.5$ nếu hai lựa chọn được đánh giá ngang nhau. Mô hình phần thưởng học được sau đó được dùng trong học tăng cường tiêu chuẩn (ví dụ PPO) để huấn luyện một chính sách $\pi_\theta$:
+
+$$
+\max_\theta \; \mathbb{E}_{q \sim \mathcal{D}, q \sim \pi_\theta(q)} \left[ \hat{r}_\phi(q, a) \right] \tag{21.16}
+$$
+
+trong đó $\mathcal{D}$ là phân phối truy vấn.
+
+Gán nhãn một lượng dữ liệu khổng lồ là một nút thắt cổ chai lớn và tốn kém khi huấn luyện các mô hình RL. Vì vậy, việc chọn các mẫu cần gán nhãn một cách thận trọng là rất quan trọng. Vì lý do này, thay vì khớp một mô hình phần thưởng duy nhất cho các bộ ba ưu tiên khác nhau, bài báo RLHF gốc đề xuất khớp một tổ hợp các mô hình phần thưởng. Tổ hợp này sau đó có thể được dùng để ước lượng một thước đo độ bất định về các bộ ba, và chỉ chọn để gán nhãn những bộ ba có độ bất định cao. Cụ thể, thuật toán như sau:
+
+- Khớp một tổ hợp các bộ dự đoán, mỗi bộ được huấn luyện trên $|D|$ bộ ba lấy mẫu có hoàn lại từ $D$. Ước lượng $r$ được định nghĩa bằng cách chuẩn hóa độc lập từng bộ dự đoán rồi lấy trung bình các kết quả.
+- Một phần $1/e$ dữ liệu được giữ lại để làm tập kiểm định (validation set) cho mỗi bộ dự đoán. Dùng chính quy hóa $\ell_2$ và điều chỉnh hệ số chính quy hóa để giữ mất mát trên tập kiểm định trong khoảng từ 1.1 đến 1.5 lần mất mát huấn luyện. Ở một số lĩnh vực, dropout cũng được áp dụng để chính quy hóa.
+- Thay vì áp dụng trực tiếp một softmax, giả định có 10% khả năng con người trả lời ngẫu nhiên đều. Điều chỉnh này được thực hiện vì người đánh giá có một xác suất mắc lỗi không đổi, xác suất này không giảm về 0 khi chênh lệch trong hiệu phần thưởng trở nên cực đoan.
+- Quyết định cách truy vấn các ưu tiên dựa trên một xấp xỉ độ bất định trong bộ ước lượng hàm phần thưởng: lấy mẫu một số lượng lớn các cặp đoạn quỹ đạo có độ dài k, dùng từng bộ dự đoán phần thưởng trong tổ hợp để dự đoán đoạn nào sẽ được ưu tiên trong mỗi cặp, rồi chọn những quỹ đạo mà các dự đoán có phương sai cao nhất giữa các thành viên của tổ hợp.
+
+Cuối cùng, lưu ý rằng RLHF là một thành phần then chốt trong việc tinh chỉnh các LLM hiện đại để chúng an toàn và đáng tin cậy hơn.
+
+### 3.2 Tổ hợp mô hình trong RL dựa trên mô hình
+
+Trong các tài liệu còn có nhiều ứng dụng khác của tổ hợp sâu trong RL, đưa tổ hợp mô hình vào cả các phương pháp RL dựa trên mô hình (model-based) lẫn không dựa trên mô hình (model-free). Mục này trình bày chi tiết hơn về Kurutach và cộng sự và Yu và cộng sự, là các phương pháp RL dựa trên mô hình và dùng tổ hợp mô hình để nắm bắt độ bất định của mô hình thế giới (world model).
+
+Các phiên bản đơn giản hóa của các thuật toán được trình bày dưới đây. Yu và cộng sự dùng nhiều phân phối Gauss với giá trị trung bình và hiệp phương sai học được để mô hình hóa quan hệ giữa các trạng thái tương lai và phần thưởng. Công trình này hiện thực thuật toán tối ưu hóa chính sách ngoại tuyến dựa trên mô hình (Model-based Offline Policy Optimization, MOPO), Thuật toán 23, cho RL dựa trên mô hình. Tương tự, Kurutach và cộng sự dùng nhiều mô hình thế giới để sinh các mẫu tổng hợp cho việc học chính sách. Công trình này hiện thực thuật toán tối ưu hóa chính sách vùng tin cậy với tổ hợp mô hình (Model Ensemble Trust Region Policy Optimization, ME-TRPO), Thuật toán 24.
+
+Chi tiết hơn, MOPO hoạt động trong chế độ RL ngoại tuyến (offline). Cách tiếp cận này bắt đầu bằng việc huấn luyện một tổ hợp các mô hình động lực học (chẳng hạn, mỗi mô hình học một phân phối Gauss trên các trạng thái tiếp theo, gồm giá trị trung bình và hiệp phương sai, khi biết trạng thái và hành động hiện tại). Do đó, phương sai của tổ hợp cung cấp một thước đo định lượng về độ bất định của mô hình. Khi dùng các mô hình học được để mô phỏng các chuyển trạng thái phục vụ việc học chính sách, MOPO trừ khỏi các phần thưởng mô phỏng một khoản phạt tỉ lệ với độ bất định này. MDP mô phỏng có phần thưởng bị phạt này được chứng minh là cho một cận dưới của hiệu năng trong môi trường thật, nhờ đó chống lại việc khai thác lỗi của mô hình và dịch chuyển phân phối. Về mặt thực nghiệm, MOPO vượt các phương pháp RL ngoại tuyến trước đó trên các bộ dữ liệu chuẩn thông dụng. Trong khi đó, ME-TRPO nhắm tới thiết lập RL dựa trên mô hình trực tuyến tiêu chuẩn, và cũng dùng một tổ hợp các mô hình thế giới học được để tính đến những vùng có sai số mô hình cao. ME-TRPO sinh các lượt triển khai (rollout) tổng hợp từ tổ hợp, cập nhật chính sách bằng một phương pháp vùng tin cậy (bảo đảm các cập nhật ổn định), và dùng sự bất đồng của tổ hợp để lọc hoặc phạt các quỹ đạo mô hình không đáng tin. Nhờ vậy, ME-TRPO giảm số lần tương tác với môi trường thật mà vẫn giữ được độ vững của chính sách. Cả hai phương pháp đều cho thấy việc dùng tổ hợp các mô hình thế giới (và dùng phương sai dự đoán hay sự bất đồng của chúng) cho phép tối ưu hóa chính sách có nhận biết độ bất định trong RL dựa trên mô hình như thế nào.
+
+**Thuật toán 23** Hiện thực MOPO với động lực học xác suất có chính quy hóa và độ bất định của tổ hợp
+
+```text
+Input: Reward penalty coefficient λ, rollout horizon h, rollout batch size b
+Output: Trained policy π
+// Train ensemble dynamics model
+Train on batch data 𝒟_env an ensemble of N probabilistic dynamics
+  {Tᵢᵇ(s′, r | s, a) = 𝒩(μᵢ(s, a), Σᵢ(s, a))}ᵢ₌₁ᴺ
+Initialize policy π and empty replay buffer 𝒟_model ← ∅
+for epoch = 1, 2, … do
+    // Outer iteration of MBPO
+    for = 1, 2, …, b do
+        Sample state s₁ from 𝒟_env for rollout initialization
+        for j = 1, 2, …, h do
+            Sample action aⱼ ∼ π(sⱼ)
+            Randomly pick dynamics Tᵇ from {Tᵢᵇ}ᵢ₌₁ᴺ and sample (sⱼ₊₁, rⱼ) ∼ Tᵇ(sⱼ, aⱼ)
+            Compute r̃ⱼ = rⱼ − λ max_{i=1,…,N} ‖Σᵢ(sⱼ, aⱼ)‖_F
+            Add (sⱼ, aⱼ, r̃ⱼ, sⱼ₊₁) to 𝒟_model
+    Draw samples from 𝒟_env ∪ 𝒟_model and update π
+```
+
+**Thuật toán 24** Tối ưu hóa chính sách vùng tin cậy với tổ hợp mô hình (ME-TRPO)
+
+```text
+Input: Number of world models K
+Output: Optimized policy π_θ
+Initialize policy π_θ and world models {f̂_ϕᵢ}ᵢ₌₁ᴷ; set data set 𝒟 ← ∅
+repeat
+    Collect samples from real system f using π_θ and add them to 𝒟
+    Train all models on 𝒟
+    repeat
+        Collect fictitious samples from {f̂_ϕᵢ}ᵢ₌₁ᴷ using π_θ
+        Update π_θ with TRPO on fictitious samples
+        Estimate performances η̂(θ; ϕᵢ) for i = 1, …, K
+    until performances stop improving
+until π_θ performs well in real environment f
+```
+
+Dù cách xây dựng tổ hợp khác nhau đáng kể, có thể thấy trong cả hai trường hợp, tổ hợp mô hình được dùng để duy trì độ bất định của mô hình thế giới và chính quy hóa quá trình học. Điều này đến lượt nó cải thiện đáng kể độ phức tạp mẫu (sample complexity) và phần thưởng cuối cùng. Các kết quả phần thưởng có và không có tổ hợp của MOPO và MBPO trên nhiều môi trường Mujoco khác nhau cũng được trình bày lại ở đây. Có thể thấy tổ hợp cải thiện cả MOPO lẫn phương pháp đối chứng MBPO.
+
+| Phương pháp | halfcheetah-mixed | walker2d-mixed | halfcheetah-jump | ant-angle |
+| --- | :-: | :-: | :-: | :-: |
+| MOPO có tổ hợp | 6448.7 ± 115 | 1923.6 ± 752 | 3577.3 ± 461 | 2256.0 ± 288 |
+| MOPO không tổ hợp | 6405.8 ± 35 | 1916.4 ± 611 | 4016.6 ± 144 | 2530.9 ± 137 |
+| MBPO có tổ hợp | 5598.4 ± 1285 | 1021.8 ± 586 | 2971.4 ± 1262 | 13.6 ± 65 |
+| MBPO không tổ hợp | 2247.2 ± 581 | 500.3 ± 34 | −68.7 ± 1936 | −720.1 ± 728 |
+
+**Bảng 21.4:** So sánh hiệu năng của các phương pháp khác nhau trên nhiều nhiệm vụ; MOPO và MBPO trình bày lại từ các bài báo gốc. Có thể thấy tổ hợp cải thiện cả MOPO lẫn phương pháp đối chứng MBPO.
+
+## 4. Ứng dụng cho dự báo thời tiết
+
+Một ứng dụng quan trọng khác của tổ hợp sâu là trong các mô hình thời tiết. Phương pháp tổ hợp cung cấp những ước lượng độ bất định quan trọng cho các mô hình thời tiết, có thể giúp giảm nhẹ tác động của các điều kiện thời tiết cực đoan. Các công trình ví dụ gồm Azizzadenesheli và cộng sự, Chen và cộng sự, Pathak và cộng sự, Weyn và cộng sự. Từ lâu đã được xác lập rằng tổ hợp các phương pháp số truyền thống, dùng các điều kiện ban đầu khác nhau, cho các ước lượng thời tiết tốt hơn. Đổi mới then chốt của phần lớn các bài báo học sâu nằm ở tốc độ tính toán của mỗi thành viên tổ hợp. Mạng nơ-ron sâu có thể tăng tốc đáng kể việc giải các phương trình đạo hàm riêng cần thiết để dự đoán các hình thái thời tiết. Điều này đến lượt nó cho phép dùng những tổ hợp lớn hơn đáng kể so với khả năng trước đây. Chẳng hạn, tốc độ của FourCastNet cho phép tạo nhanh và rẻ các dự báo tổ hợp lớn với hàng nghìn thành viên nhằm cải thiện dự báo xác suất, và nhanh hơn các cách tiếp cận truyền thống nhiều bậc độ lớn.
+
+## 5. Ứng dụng cho dữ liệu y tế
+
+Có rất nhiều công trình dùng tổ hợp mô hình cho các ứng dụng y tế. Chúng trải dài từ dùng tổ hợp để có các dự đoán đáng tin cậy trên chuỗi thời gian lâm sàng tới phát hiện đáng tin cậy bệnh Alzheimer. Mục này trình bày chi tiết hơn về Wickstrøm và cộng sự. Vì công trình này làm việc với dữ liệu chuỗi thời gian, nó giúp làm nổi bật sự đa dạng của các bối cảnh mà tổ hợp sâu cải thiện các thước đo kiểm tra. Ở đây, các tác giả khảo sát phương pháp ánh xạ kích hoạt lớp (class activation mapping, CAM) cho dự đoán học sâu có thể giải thích được. CAM ban đầu được phát triển cho dữ liệu ảnh, nhưng cũng đã được chứng minh là áp dụng được cho dữ liệu thời gian như chuỗi thời gian lâm sàng. Bằng cách dùng các mạng nơ-ron sâu (DNN) có một cấu trúc xử lý đặc thù, CAM có thể gán cho mỗi bước thời gian trong đầu vào một điểm số cho biết bước thời gian đó quan trọng thế nào đối với một dự đoán cho trước. Các trường hợp ví dụ về dữ liệu chuỗi thời gian là dự đoán tử vong, phát hiện nhiễm trùng và dự đoán quỹ đạo điều trị của bệnh nhân.
+
+Ký hiệu $w_{c,k}$ là trọng số nối bộ lọc thứ $k$ trong khối tích chập cuối cùng với nơ-ron ứng với lớp $c$ ở lớp đầu ra, và $z_{k,t}$ là kích hoạt tại bước thời gian $t$ do bộ lọc thứ $k$ trong khối tích chập cuối cùng của FCN tạo ra. Khi đó, đầu vào của hàm softmax cuối cùng ở lớp đầu ra có thể được biểu diễn như sau:
+
+$$
+g_c = \sum_{k=1}^{K} w_{c,k} \sum_{t=1}^{T} z_{k,t} = \sum_{t=1}^{T} r_{c,t}, \tag{21.17}
+$$
+
+trong đó $K$ là số bộ lọc trong khối tích chập cuối cùng, $T$ là độ dài của chuỗi thời gian, và $r_{c,t}$ là điểm liên quan (relevance score) của bước thời gian $t$ đối với lớp $c$:
+
+$$
+r_{c,t} = \sum_{k=1}^{K} w_{c,k} z_{k,t}. \tag{21.18}
+$$
+
+Có thể loại bỏ mọi điểm liên quan âm bằng cách sửa Phương trình (21.18) như sau:
+
+$$
+r_{c,t} = \max\left(0, \sum_{k=1}^{K} w_{c,k} z_{k,t}\right). \tag{21.19}
+$$
+
+Để tính giá trị trung bình và độ lệch chuẩn của các điểm liên quan trên tổ hợp, cho mỗi CNN được tham số hóa bởi một tập tham số $\{\theta_1, \ldots, \theta_M\}$, trong đó $M$ là số mô hình trong tổ hợp. Khi đó, xét các điểm liên quan dương từ Phương trình (21.19), độ liên quan trung bình trên tổ hợp được định nghĩa là:
+
+$$
+\mu_r = \frac{1}{M} \sum_{m=1}^{M} r_{\theta_m}, \tag{21.20}
+$$
+
+và độ lệch chuẩn trên tổ hợp được định nghĩa là:
+
+$$
+\sigma_r = \sqrt{\frac{1}{M-1} \sum_{m=1}^{M} (r_{\theta_m} - \mu_r)^2}. \tag{21.21}
+$$
+
+Trong mọi thí nghiệm, các tác giả co giãn các điểm liên quan về khoảng từ 0 đến 1 bằng phương trình sau:
+
+$$
+r_c \leftarrow \frac{r_c - \min(r_c)}{\max(r_c) - \min(r_c)}. \tag{21.22}
+$$
+
+Nếu độ lệch chuẩn vượt quá một ngưỡng nào đó, các điểm liên quan được đặt bằng không. Điều này có thể được viết thành:
+
+$$
+\tilde{\mu}_{r_t} = \begin{cases} \mu_{r_t}, & \text{if } \sigma_{r_t} < \varepsilon, \\ 0, & \text{else,} \end{cases} \tag{21.23}
+$$
+
+trong đó ngưỡng $\varepsilon$ được chọn cho phù hợp với dữ liệu cụ thể.
+
+Cách tiếp cận này cải thiện đáng kể khả năng giải thích so với mạng đơn lẻ. Để tính mức độ chính xác của một mô hình trong việc định vị các bước thời gian liên quan, các tác giả so sánh $k$ bước thời gian liên quan nhất đối với một dự đoán với các bước thời gian liên quan nhất đã biết. Với một mẫu $i$ cho trước, cho
+
+$$
+Y_i = \{y_1^{(i)}, \ldots, y_{N_r}^{(i)}\}, \tag{21.24}
+$$
+
+là tập các điểm liên quan, trong đó $N_r$ là số bước thời gian liên quan đã biết trong chuỗi thời gian, và cho $R_i(k)$ là $k$ bước thời gian liên quan nhất đối với dự đoán của mô hình.
+
+Độ chính xác liên quan hoàn hảo đạt được khi mọi phần tử của $Y_i$ đều nằm trong $R_i(k)$. Với một mẫu $i$ cho trước, độ chính xác liên quan có thể được tính như sau:
+
+$$
+\mathrm{RelevanceAccuracy}_i(k) = \frac{|R_i(k) \cap Y_i|}{|Y_i|}. \tag{21.25}
+$$
+
+Với một mẫu $i$ cho trước, độ nhất quán liên quan trên $M$ mô hình khi đó có thể được tính bằng:
+
+$$
+\mathrm{RelevanceConsistency}_i(k) = \frac{1}{M} \sum_{m,n=1}^{M} \frac{\left|R_i^{(m)}(k) \cap R_i^{(n)}(k)\right|}{k}. \tag{21.26}
+$$
+
+Một số kết quả trên tập dữ liệu EGG200, gồm các chuỗi thời gian EGG ghi lại hoạt động điện trong một nhịp tim duy nhất, được trình bày lại ở đây. Nhiệm vụ là phân biệt nhịp tim bình thường với nhịp tim có dấu hiệu nhồi máu cơ tim (heart attack). Bảng 21.5 cho thấy độ nhất quán liên quan của 10 mô hình đơn lẻ và 10 mô hình tổ hợp trên cả hai tập dữ liệu.
+
+Có thể thấy tổ hợp mô hình cải thiện đáng kể độ nhất quán liên quan của các điểm liên quan.
+
+| Top $k$ | Đơn lẻ | Tổ hợp |
+| :-: | :-: | :-: |
+| $k = 5$ | 0.57 ± 0.15 | 0.82 ± 0.07 |
+| $k = 7$ | 0.60 ± 0.15 | 0.84 ± 0.07 |
+| $k = 10$ | 0.63 ± 0.14 | 0.85 ± 0.06 |
+| $k = 15$ | 0.67 ± 0.13 | 0.88 ± 0.05 |
+
+**Bảng 21.5:** So sánh hiệu năng giữa mô hình đơn lẻ và mô hình tổ hợp trên tập dữ liệu ECG200. Các con số cho biết ý nghĩa thống kê ở mức ý nghĩa 0.01.
+
+## 6. Ứng dụng cho lái xe tự hành
+
+Học tổ hợp (ensemble learning) đã trở thành một chiến lược quan trọng để cải thiện độ tin cậy, độ vững và khả năng ước lượng độ bất định của các hệ thống lái xe tự hành, đặc biệt cho dự báo quỹ đạo trong các môi trường mà an toàn là yếu tố sống còn. Bằng cách kết hợp dự đoán của nhiều mô hình, tổ hợp mô hình làm giảm sự quá tự tin (overconfidence), cải thiện khả năng tổng quát hóa và biểu diễn chính xác hơn bản chất đa mode của hành vi tương lai của xe cộ và người đi bộ. Tuy nhiên, các tổ hợp sâu truyền thống đòi hỏi chi phí tính toán và bộ nhớ đáng kể, hạn chế việc triển khai chúng trong các ứng dụng lái xe tự hành thời gian thực. Các nghiên cứu gần đây giải quyết thách thức này bằng các kiến trúc tổ hợp hiệu quả, như tổ hợp transformer gọn nhẹ và các mạng con được đóng gói hoặc phân nhóm, vốn giữ được độ đa dạng dự đoán và mức hiệu chuẩn độ bất định của tổ hợp thông thường trong khi giảm đáng kể chi phí tính toán. Những cách tiếp cận này giúp xe tự hành đưa ra các dự đoán quỹ đạo dài hạn đáng tin cậy hơn, định lượng độ bất định tốt hơn, và lập kế hoạch cũng như ra quyết định an toàn hơn trong các tình huống giao thông phức tạp và mơ hồ.
+
+## 7. Bằng sáng chế về tổ hợp sâu
+
+Các bằng sáng chế về tổ hợp sâu cho thấy tầm quan trọng ngày càng tăng của các kỹ thuật học sâu dựa trên tổ hợp trong nhiều ứng dụng thực tế đa dạng. Chẳng hạn, một bằng sáng chế minh họa cách các cách tiếp cận dựa trên tổ hợp có thể cải thiện việc ra quyết định ở xe tự hành bằng cách đưa các ước lượng độ bất định vào cùng với đầu ra phát hiện vật thể, cho phép dự đoán an toàn và đáng tin cậy hơn. Tương tự, một bằng sáng chế khác trình bày việc dùng các mô hình học sâu tổ hợp để nâng cao trải nghiệm số bằng cách kết hợp nhiều bộ ước lượng học máy với mạng nơ-ron nhằm tạo ra các gợi ý tốt hơn. Ngoài ra, một bằng sáng chế thứ ba làm nổi bật cách các kỹ thuật học máy tổ hợp có thể cải thiện việc phát hiện sự kiện tương lai bằng cách kết hợp các mô hình có đặc tính dự đoán khác nhau để cân bằng giữa độ chính xác và tính kịp thời. Gộp lại, các bằng sáng chế này cho thấy tính thiết thực của tổ hợp sâu trong việc cải thiện độ vững, khả năng ước lượng độ bất định, khả năng thích nghi và hiệu năng dự đoán trong các ứng dụng thực tế phức tạp.

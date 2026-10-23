@@ -1,0 +1,143 @@
+---
+title: "Các phương pháp lấy mẫu tổ hợp lai"
+description: "Cách tối ưu hóa, tổ hợp sâu và MCMC nhiều xích kết hợp để lấy mẫu hậu nghiệm đa mode của mạng nơ-ron, với điều chỉnh nhiệt độ, các biến thể và hạn chế."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - markov chain monte carlo
+  - deep ensembles
+  - sampling
+series: bayesian-deep-learning
+seriesOrder: 25
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl20HybridSampling from '../../../components/diagrams/Bdl20HybridSampling.astro';
+
+Chương này nhấn mạnh rằng hiệu quả của việc di chuyển trong các cảnh quan hậu nghiệm nhiều chiều, không lồi và đa mode, vốn điển hình trong học sâu Bayes (Bayesian deep learning), có thể được nâng cao đáng kể nhờ các cách tiếp cận lai kết hợp lấy mẫu với các kỹ thuật dựa trên tối ưu hóa, hoặc tổ hợp mô hình (ensemble) của chúng.
+
+## 1. Về hiệu quả của khởi tạo dựa trên tối ưu hóa
+
+Các cảnh quan hậu nghiệm được quan tâm thường không lồi và có hình học phức tạp, thường gồm nhiều vùng mode rời nhau mang khối lượng xác suất đáng kể. Để di chuyển thành công trên địa hình này dưới các ràng buộc tính toán hữu hạn, cần một chiến lược cân bằng giữa khám phá (exploration) toàn cục và khai thác (exploitation) cục bộ.
+
+Để hình thức hóa bài toán xấp xỉ hậu nghiệm bằng lấy mẫu, sẽ hữu ích nếu phân tách tổng sai số xấp xỉ. Theo khuôn khổ được trình bày trong Sommer và cộng sự, sai số này có thể được quy cho ba nguồn riêng biệt:
+
+1. **Sai số khởi tạo (initialization error):** Một thành phần sai số gây ra do bắt đầu quỹ đạo lấy mẫu tại một điểm có xác suất thấp, cách xa *tập điển hình* (typical set) của hậu nghiệm, tức thể tích có xác suất cao nơi phần lớn khối lượng hậu nghiệm tập trung.
+2. **Sai số rời rạc hóa (discretization error):** Một thành phần sai số phát sinh từ việc xấp xỉ số một phương trình vi phân ngẫu nhiên thời gian liên tục (chẳng hạn khuếch tán Langevin) bằng một thuật toán lặp thời gian rời rạc.
+3. **Sai số Monte Carlo (Monte Carlo error, MC):** Một thành phần sai số thống kê do dùng một tập hữu hạn các mẫu để ước lượng các kỳ vọng theo hậu nghiệm thật. Sai số này tỉ lệ nghịch với số mẫu hiệu dụng được rút.
+
+Chương này chủ yếu quan tâm đến việc giảm sai số khởi tạo và sai số Monte Carlo, vì sự tương tác giữa chúng là động lực để áp dụng các chiến lược lấy mẫu lai. Việc điều chỉnh sai số rời rạc hóa có thể được thực hiện độc lập với sự tương tác này.
+
+Phần lớn các bộ lấy mẫu Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC) được thiết kế là các quá trình ergodic để khám phá toàn bộ giá (support) của phân phối mục tiêu. Khả năng khám phá này phân biệt chúng với các thuật toán tối ưu hóa. Chẳng hạn, hãy xét mối quan hệ giữa hạ gradient ngẫu nhiên (Stochastic Gradient Descent, SGD) và động lực học Langevin gradient ngẫu nhiên (Stochastic Gradient Langevin Dynamics, SGLD; xem [Chương 2](/vi/blog/stochastic-gradient-mcmc)). Với thế năng (potential) $U(\theta) := -\log p(\theta \mid \mathcal{D})$, SGD thực hiện hạ gradient $\theta_{t+1} = \theta_t - \eta_t \nabla U(\theta_t)$. Thuật toán Langevin không hiệu chỉnh (unadjusted Langevin algorithm) và biến thể ngẫu nhiên của nó (SGLD) thêm các nhiễu loạn Gauss đẳng hướng,
+
+$$
+\theta_{t+1} = \theta_t - \frac{\eta_t}{2} \nabla U(\theta_t) + \sqrt{\eta_t}\, \boldsymbol{\xi}_t, \qquad \boldsymbol{\xi}_t \sim \mathcal{N}(\mathbf{0}, \mathbf{I}). \tag{20.1}
+$$
+
+Một cách tương đương,
+
+$$
+\theta_{t+1} = \theta_t + \frac{\eta_t}{2} \nabla \log p(\theta_t \mid \mathcal{D}) + \boldsymbol{\zeta}_t, \qquad \boldsymbol{\zeta}_t \sim \mathcal{N}(\mathbf{0}, \eta_t \mathbf{I}). \tag{20.2}
+$$
+
+Nhiễu được bơm vào tạo điều kiện cho việc chuyển giữa các mode, nhưng khi ở xa tập điển hình, nó có thể làm chậm quá trình tiến tới các vùng mật độ cao.
+
+Các thủ tục tối ưu hóa như SGD, dù thường không phù hợp để lấy mẫu từ hậu nghiệm, lại rất giỏi trong việc nhanh chóng tìm ra các điểm có mật độ hậu nghiệm cao, chẳng hạn các ước lượng hậu nghiệm cực đại (Maximum A Posteriori, MAP). Nhận xét này là động lực cho một phương pháp luận hai giai đoạn mang tính hiệp lực, tích hợp tối ưu hóa và lấy mẫu. Cách tiếp cận lai này có thể được hình dung như sau:
+
+1. **Khởi tạo dựa trên tối ưu hóa:** Trước tiên, một thuật toán tối ưu hóa được dùng để tìm một vector tham số $\theta^*$ nằm trong một vùng mật độ cao của hậu nghiệm, về thực chất là cực tiểu hóa một hàm mục tiêu như logarit âm của hậu nghiệm chưa chuẩn hóa hoặc logarit âm của hàm hợp lý. Giai đoạn này được thiết kế để giảm đáng kể sai số khởi tạo bằng cách đặt điểm xuất phát của bộ lấy mẫu bên trong hoặc gần tập điển hình. Với hầu hết các lựa chọn tiên nghiệm phù hợp (có giá không bị chặn, như một phân phối Gauss đẳng hướng), điểm $\theta^*$ thu được nằm trong một vùng có mật độ tiên nghiệm khá cao, khiến nó trở thành một điểm khởi tạo hợp lệ cho thủ tục MCMC.
+2. **Lấy mẫu hậu nghiệm cục bộ:** Sau bước tối ưu hóa, một bộ lấy mẫu MCMC được khởi tạo tại $\theta^*$. Được giải phóng khỏi giai đoạn khởi động (burn-in) kéo dài và thường kém hiệu quả (gây ra bởi cảnh quan hậu nghiệm có thể rất phức tạp của mạng nơ-ron), vốn cần thiết khi bắt đầu từ một điểm ngẫu nhiên trong không gian tham số, bộ lấy mẫu có thể dành ngân sách tính toán của mình cho nhiệm vụ tập trung hơn là mô tả hình học hậu nghiệm cục bộ, nhờ đó giảm sai số Monte Carlo hiệu quả hơn.
+
+Nói cách khác, yêu cầu thực tế đối với một chiến lược lai như vậy là khắc phục sự kém hiệu quả và thiếu ổn định của các bộ lấy mẫu được khởi tạo từ tiên nghiệm, $p_0(\theta)$, đặc biệt trong không gian nhiều chiều. Như được thể hiện trong Bảng 20.1, các xích khởi tạo từ tiên nghiệm thường không tìm ra được những cấu hình tham số cho hiệu năng dự đoán có ý nghĩa. Hiện tượng này cũng được minh họa trong Hình 20.1 với một mạng tuyến tính quá tham số hóa (overparameterized) đơn giản $f(x) = w_1 w_2 x$ có hậu nghiệm đa mode đã biết, với mật độ hậu nghiệm cực đại tại $w_1 = w_2 = 1$ và $w_1 = w_2 = -1$. Một bộ lấy mẫu có khởi tạo được tối ưu hóa nhanh chóng hội tụ về và khám phá một trong các mode hậu nghiệm thật, trong khi bộ lấy mẫu tương ứng được khởi tạo từ tiên nghiệm không khám phá được các vùng mật độ cao hơn tốt bằng bộ lấy mẫu đã được khởi tạo, trong cùng một ngân sách số bước lấy mẫu. Lợi ích về hiệu quả lấy mẫu ban đầu này đặc biệt quan trọng với các mô hình nhiều chiều. Hơn nữa, chi phí tính toán của giai đoạn tối ưu hóa sơ bộ thường không đáng kể so với tổng chi phí lấy mẫu, nhưng lại mang đến những cải thiện đáng kể về hiệu quả tổng thể của việc khám phá và mô tả hậu nghiệm. Ngay cả trong ví dụ quy mô rất nhỏ ở Hình 20.1, giai đoạn tối ưu hóa đầu tiên chỉ chiếm 5% tổng thời gian chạy.
+
+## 2. Khám phá song song để phát hiện các mode
+
+Chiến lược lai hai giai đoạn giải quyết hiệu quả bài toán tìm một điểm ban đầu gần tập điển hình. Tuy nhiên, một thách thức đáng kể vẫn còn đối với các hậu nghiệm có nhiều mode tách biệt rõ (xem Chương 33 về các xem xét hình học và tô pô liên quan). Trong không gian nhiều chiều, các vùng mật độ xác suất thấp nằm giữa các mode này trên thực tế có thể tạo thành các rào năng lượng (energy barrier) đối với một bộ lấy mẫu MCMC. Do đó, một xích MCMC đơn lẻ, ngay cả khi chạy rất lâu, nhiều khả năng sẽ bị giới hạn trong miền hút (basin of attraction) của mode ban đầu.
+
+Hiện tượng này được minh họa trong Hình 20.1. Lần mô phỏng chạy dài (biểu đồ giữa hàng dưới) được khởi tạo tại mode hậu nghiệm ở góc phần tư trên bên phải nhưng không bao giờ vượt qua vùng xác suất thấp quanh gốc tọa độ để khám phá mode thứ hai, đối xứng, ở góc phần tư dưới bên trái. Vì vậy, dựa vào tính ergodic (ergodicity) hình thức của một xích đơn lẻ để khám phá một cảnh quan đa mode không phải là một chiến lược khả thi trên thực tế, khi tính toán thường bị giới hạn.
+
+Một giải pháp đơn giản và mạnh mẽ là tận dụng tính toán song song bằng cách chạy nhiều xích độc lập, chiến lược được thể hiện trong biểu đồ dưới bên phải của Hình 20.1. Ý tưởng cốt lõi là khởi tạo $M$ xích khác nhau từ các điểm xuất phát phân biệt $\{\theta_1^*, \dots, \theta_M^*\}$. Nếu các điểm xuất phát này rơi vào các miền hút khác nhau, tập hợp gộp các mẫu từ cả $M$ xích sẽ tạo thành một biểu diễn trung thực hơn nhiều của hậu nghiệm toàn cục. Cách tiếp cận này không chỉ cung cấp một cơ chế để khám phá các mode khác biệt về mặt hàm mà còn là một con đường hiệu quả hơn để giảm tổng sai số Monte Carlo so với chạy một xích đơn lẻ đặc biệt dài. Cách tiếp cận này đặc biệt hấp dẫn nếu có sẵn tài nguyên tính toán song song.
+
+## 3. Các biến thể của lấy mẫu lai
+
+Khuôn khổ khái niệm khởi tạo lấy mẫu bằng tối ưu hóa có thể được hiện thực hóa qua một số phương pháp luận riêng biệt, từ các kỹ thuật cổ điển đến các cách tiếp cận hiện đại dựa trên tổ hợp mô hình. Các phương pháp này khác nhau ở cách quản lý quá trình chuyển từ tối ưu hóa sang lấy mẫu và ở cách giải quyết thách thức cơ bản của tính đa mode.
+
+<Figure caption="Hình 20.1: Trên bên trái: lấy mẫu được khởi tạo từ tiên nghiệm bằng bộ lấy mẫu không quay đầu (No U-Turn Sampler, NUTS). Trên bên phải: lấy mẫu được khởi tạo bằng tối ưu hóa với NUTS. Dưới bên trái: hậu nghiệm chuẩn (ground truth) thu được bằng tích phân số. Dưới ở giữa: lấy mẫu chạy dài của một xích NUTS đơn lẻ từ một điểm khởi tạo đã được tối ưu hóa. Dưới bên phải: các mẫu thu được từ lấy mẫu NUTS nhiều xích với các điểm khởi tạo đã được tối ưu hóa. Để tham chiếu, đa tạp đối xứng w₁w₂ = 1 được làm nổi bật bằng một đường liền màu đen. Bản tái hiện mang tính sơ đồ: hậu nghiệm được lấy tỉ lệ với exp(−A(w₁w₂ − 1)²/2 − (w₁² + w₂²)/2) với A = 50 (tiên nghiệm chuẩn tắc, dữ liệu sinh với w₁w₂ = 1), có các cực đại tại w₁ = w₂ ≈ 0.99 và w₁ = w₂ ≈ −0.99, gần với các giá trị nêu trong bài; các mẫu được tính bằng thuật toán Langevin không hiệu chỉnh của Phương trình (20.2) thay vì NUTS, các điểm xuất phát được tối ưu hóa bằng hạ gradient, và hậu nghiệm chuẩn bằng cách tính mật độ đã chuẩn hóa trên một lưới. Trong các khung phía trên, các chấm đậm hơn ứng với các bước thời gian sớm hơn.">
+  <Bdl20HybridSampling />
+</Figure>
+
+**Bảng 20.1:** Tỉ lệ các xích cho hiệu năng căn bậc hai sai số bình phương trung bình (root-mean-square error, RMSE) tốt hơn một mô hình tuyến tính trên hai bộ dữ liệu chuẩn (benchmark) UCI (càng cao càng tốt). NUTS dùng 5 000 mẫu khởi động (warm-up). Mạng nơ-ron Bayes (Bayesian neural network) được dùng là một perceptron nhiều lớp (Multi-Layer Perceptron, MLP) với một lớp ẩn gồm 50 nơ-ron ẩn. Các giá trị được lấy trung bình trên 12 xích và 3 lần lặp lại, và SD là độ lệch chuẩn. Phỏng theo Bảng 5 của Sommer và cộng sự.
+
+| Hàm kích hoạt | Tập dữ liệu | Tỉ lệ RMSE $<$ mô hình tuyến tính | SD |
+|---|---|---:|---:|
+| ReLU | concrete | 0.14 | 0.13 |
+|  | energy | 0.31 | 0.13 |
+| SiLU | concrete | 0.14 | 0.10 |
+|  | energy | 0.28 | 0.05 |
+| tanh | concrete | 0.58 | 0.25 |
+|  | energy | 0.67 | 0.08 |
+
+### 3.1 Khởi tạo MAP và chuyển tiếp có điều chỉnh nhiệt độ
+
+Một thực hành phổ biến trong tài liệu Bayes nói chung là khởi tạo một xích MCMC đơn lẻ từ một ước lượng MAP đã tính trước. Đây là hiện thực trực tiếp nhất của cách tiếp cận lai hai giai đoạn: một sự chuyển tiếp "cứng" từ một hàm mục tiêu tối ưu hóa thuần túy sang một hàm mục tiêu lấy mẫu thuần túy.
+
+Có thể đạt được một sự chuyển tiếp từ từ hơn bằng cách lấy mẫu từ một **phân phối mục tiêu điều chỉnh nhiệt độ** (tempered target distribution), một kỹ thuật nội suy trơn giữa tối ưu hóa và lấy mẫu. Theo Chen và cộng sự, Duffield và cộng sự, và Welling và Teh, có thể định nghĩa một phân phối hậu nghiệm điều chỉnh nhiệt độ (tempered posterior) được đánh chỉ số bởi một nhiệt độ $T \in (0, \infty)$ là
+
+$$
+p_T(\theta \mid \mathcal{D}) \propto [p(\theta \mid \mathcal{D})]^{1/T}. \tag{20.3}
+$$
+
+Nhiệt độ $T$ điều khiển "độ phẳng" của phân phối. Trong giới hạn nhiệt độ thấp $T \to 0$, phân phối $p_T$ tập trung vào các điểm cực đại toàn cục của mật độ hậu nghiệm ban đầu, trong khi động lực học Langevin tương ứng tiến tới tối ưu hóa dựa trên gradient. Ngược lại, đặt $T = 1$ cho lại phân phối hậu nghiệm ban đầu, chưa điều chỉnh nhiệt độ.
+
+Điều này cung cấp một cơ chế hình thức cho ủ nhiệt (annealing). Chẳng hạn, quy tắc cập nhật SGLD có thể được sửa đổi bằng cách giữ cố định số hạng trôi (drift) hậu nghiệm và co giãn nhiễu Langevin được bơm vào theo nhiệt độ. Với $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$, điều này cho
+
+$$
+\theta_{t+1} = \theta_t + \frac{\eta_t}{2} \left( \nabla \log p_0(\theta_t) + \frac{N}{N_{\text{batch}}} \sum_{i \in \mathcal{B}_t} \nabla \log p(y_i \mid x_i, \theta_t) \right) + \boldsymbol{\zeta}_t, \qquad \boldsymbol{\zeta}_t \sim \mathcal{N}(\mathbf{0}, \eta_t T \mathbf{I}). \tag{20.4}
+$$
+
+Ở đây, $N$ là kích thước tập dữ liệu, $\mathcal{B}_t \subset \{1, \dots, N\}$ là một tập chỉ số lô nhỏ (mini-batch) có kích thước $N_{\text{batch}}$, và số hạng hàm hợp lý trên lô nhỏ là một ước lượng không chệch của $\nabla \log p(\mathcal{D} \mid \theta_t)$. Bằng cách bắt đầu với một nhiệt độ nhỏ $T \ll 1$ và tăng dần lên $T = 1$ qua một loạt vòng lặp, thuật toán chuyển trơn tru từ một giai đoạn bị tối ưu hóa chi phối, giai đoạn nhanh chóng tìm ra một mode, sang một giai đoạn lấy mẫu khám phá hình học cục bộ của mode đó. Góc nhìn này cũng giúp hình thức hóa mối quan hệ chặt chẽ giữa tối ưu hóa và lấy mẫu. Chẳng hạn, giai đoạn khám phá của SGLD chu kỳ (cyclical SGLD), vốn nhằm tìm các mode hậu nghiệm mới, vận hành gần giới hạn nhiệt độ bằng không trong các giai đoạn khám phá, do đó tiến gần tới tối ưu hóa, trước khi đặt lại $T = 1$ để lấy mẫu.
+
+### 3.2 Khởi tạo dựa trên tổ hợp mô hình cho tính đa mode
+
+Mặc dù một điểm xuất phát đơn lẻ đã được tối ưu hóa có thể khởi tạo hiệu quả việc lấy mẫu bên trong một mode hậu nghiệm, nó không thể giải quyết thách thức rộng hơn là khám phá một cảnh quan đa mode. Như đã thảo luận ở trên, việc vượt qua các vùng xác suất thấp giữa các mode thường không khả thi dưới các ràng buộc tính toán. Để xấp xỉ một hậu nghiệm bằng các nghiệm khác biệt về mặt hàm, có thể dùng **tổ hợp sâu** (Deep Ensembles, DE), như đã giới thiệu ở [Chương 19](/vi/blog/ensembles-and-approximate-bayesian-inference).
+
+Các lần huấn luyện độc lập của một DE thường hội tụ về các cực tiểu cục bộ khác nhau, cho một tập các vector tham số đa dạng $\{\theta_1^*, \dots, \theta_M^*\}$. Tập nghiệm này cung cấp một tập điểm xuất phát lý tưởng cho MCMC nhiều xích. Khi đó, quy trình lai trở thành như sau:
+
+1. Huấn luyện một DE để thu được $M$ mô hình phân biệt, có hiệu năng cao. Ở bước này, cũng có thể tận dụng các phát hiện thực nghiệm trước đây của cộng đồng học sâu và dùng các vector trọng số đã được huấn luyện sẵn có.
+2. Khởi tạo $M$ xích MCMC song song, mỗi xích $m$ bắt đầu từ các tham số của thành viên tổ hợp tương ứng, $\theta_m^*$.
+
+Cách tiếp cận lấy mẫu được khởi tạo bằng DE này biến việc khám phá hậu nghiệm thành một thủ tục *sau huấn luyện* (post hoc) có thể áp dụng cho các mô hình đã được huấn luyện để cải thiện việc định lượng độ bất định của chúng. Phương pháp này đã được chứng tỏ là nắm bắt hiệu quả các cấu trúc hậu nghiệm đa dạng trong nhiều bối cảnh tác vụ khác nhau và còn được gọi là *tổ hợp sâu Bayes* (Bayesian Deep Ensembles, BDEs).
+
+### 3.3 Các kỹ thuật liên quan và mới nổi
+
+Ý tưởng cốt lõi về việc tìm các điểm xuất phát đa dạng, chất lượng cao đã truyền cảm hứng cho một số phương pháp liên quan, chẳng hạn ba phương pháp sau:
+
+- **Khởi tạo dựa trên SWA:** Lấy trung bình trọng số ngẫu nhiên (Stochastic Weight Averaging, SWA) là một kỹ thuật tối ưu hóa lấy trung bình các trọng số từ các epoch muộn của một quỹ đạo SGD, thường tìm được các cực tiểu rộng hơn, tổng quát hóa tốt hơn. Thay vì lấy trung bình các điểm dọc theo quỹ đạo SGD như trong Izmailov và cộng sự, các bước lặp ở các epoch muộn có thể đóng vai trò một tập điểm khởi tạo tương quan nhưng đa dạng cho các xích MCMC, mang lại một lựa chọn rẻ hơn so với huấn luyện một tổ hợp sâu đầy đủ.
+- **Định vị dựa trên khuếch tán:** Các phương pháp định vị ngẫu nhiên (stochastic localization) xây dựng trên học dựa trên hàm điểm (score-based learning) bằng cách làm nhiễu các mẫu dữ liệu, mà trong bối cảnh suy luận dựa trên lấy mẫu chính là các trọng số của mô hình, bằng nhiễu thay vì tối ưu hóa chúng, rồi học dần một bộ khử nhiễu (denoiser). Chẳng hạn, một công trình gần đây như vậy giới thiệu Stochastic Localization via Iterative Posterior Sampling, tức bộ lấy mẫu SLIPS, dùng các bộ khử nhiễu được ước lượng bằng MCMC để xấp xỉ các mẫu từ những phân phối mục tiêu phức tạp, mở ra một lớp kỹ thuật khởi tạo mới đầy hứa hẹn. Tuy nhiên, hiện nay các kỹ thuật định vị dựa trên khuếch tán này gặp khó khăn với các hậu nghiệm có số chiều rất cao trong các kiến trúc mạng nơ-ron hiện đại (xem Chương 50 để biết chi tiết về các phương pháp khuếch tán và dựa trên hàm điểm).
+- **Khởi tạo dựa trên đối xứng:** Các đối xứng vốn có trong kiến trúc mạng nơ-ron cũng có thể được dùng để khởi tạo (xem Chương 32 và 33). Với nhiều mạng, chẳng hạn các perceptron nhiều lớp, có thể hoán vị các nơ-ron trong một lớp ẩn mà không làm thay đổi hàm do mạng tính. Như được chỉ ra trong Kobialka và cộng sự, có thể lấy một mô hình *duy nhất* đã được huấn luyện trước và áp dụng một tập $M$ phép hoán vị ngẫu nhiên bảo toàn hàm lên các trọng số của nó. Điều này tạo ra một "giả tổ hợp" (pseudo-ensemble) gồm $M$ vector tham số khác nhau về mặt số nhưng đồng nhất về mặt hàm. Dùng các vector hoán vị này để khởi tạo các xích MCMC dường như vẫn cung cấp đủ độ đa dạng để tạo ra một BDE hoạt động tốt, đồng thời rất hiệu quả, vì chỉ cần một mô hình đã huấn luyện.
+
+## 4. Hạn chế
+
+Mặc dù các phương pháp lai dựa trên tổ hợp mô hình được thảo luận ở trên mang lại một giải pháp mạnh mẽ và thực tế để khám phá các cảnh quan hậu nghiệm đa mode, chúng không phải không có những thách thức riêng. Những hạn chế này xác định một biên giới nghiên cứu đang sôi động trong học sâu Bayes.
+
+### 4.1 Đánh trọng số giữa các mode
+
+Một trong những thách thức lý thuyết quan trọng nhất là cách kết hợp các mẫu từ những xích khác nhau khám phá các mode hậu nghiệm riêng biệt. Khi chạy $M$ xích độc lập, gọi $S_m$ là số mẫu được giữ lại từ xích $m$, và gọi $\theta_{m,j}$ là mẫu tham số thứ $j$ được giữ lại từ xích này. Một cách tiếp cận đơn giản và phổ biến là lập phân phối dự đoán cuối cùng bằng cách coi mỗi xích là một thành phần có trọng số bằng nhau trong một hỗn hợp,
+
+$$
+p(y^* \mid x^*, \mathcal{D}) \approx \frac{1}{M} \sum_{m=1}^{M} \left( \frac{1}{S_m} \sum_{j=1}^{S_m} p(y^* \mid x^*, \theta_{m,j}) \right). \tag{20.5}
+$$
+
+Tuy nhiên, cách này ngầm giả định rằng mỗi mode trong $M$ mode được tìm thấy đóng góp như nhau vào tổng khối lượng xác suất hậu nghiệm. Điều này hiếm khi đúng, vì "trọng số" thật của một mode là hàm hợp lý biên (marginal likelihood) của nó, đại lượng nổi tiếng là khó xấp xỉ trong không gian nhiều chiều, và chính tính khó tính toán của nó là lý do dùng MCMC ngay từ đầu. Bài toán đánh trọng số các thành phần trong một trung bình mô hình Bayes (Bayesian model average) là một thách thức kinh điển. Các giải pháp được đề xuất bao gồm, chẳng hạn, xếp chồng (stacking), nhưng trên thực tế phần lớn các nhà nghiên cứu và người thực hành vẫn dùng trọng số bằng nhau.
+
+### 4.2 Chi phí tính toán và tài nguyên
+
+Mặc dù tương đối hiệu quả so với lấy mẫu ngây thơ, các phương pháp lai vẫn đòi hỏi nhiều tính toán. Bước đầu tiên, huấn luyện một DE, đòi hỏi tài nguyên để huấn luyện $M$ mạng nơ-ron riêng biệt. Sau đó, giai đoạn lấy mẫu MCMC cho mỗi xích trong $M$ xích còn thêm chi phí tính toán. Chi phí tổng hợp này, dù thường đáng bỏ ra nhờ chất lượng vượt trội của các ước lượng độ bất định thu được, có thể là quá lớn đối với các mô hình rất lớn hoặc các môi trường hạn chế tài nguyên. Hơn nữa, lưu trữ tham số của $M$ mô hình đầy đủ và các mẫu hậu nghiệm tương ứng đòi hỏi nhiều bộ nhớ và làm tăng chi phí suy luận.
+
+### 4.3 Độ tin cậy của việc phát hiện mode
+
+Toàn bộ khuôn khổ dựa trên giả định rằng giai đoạn tối ưu hóa ban đầu tìm ra được các mode hậu nghiệm đa dạng và có ý nghĩa. Tuy nhiên, điều này không được bảo đảm dưới các ràng buộc ngân sách hữu hạn. Dù khó xảy ra, các thành viên của một DE có thể hội tụ về cùng một miền hút hoặc về các nghiệm gần như tương đương về mặt hàm, làm hạn chế lợi thế khám phá của cách tiếp cận nhiều xích. Hơn nữa, có một sự không khớp tinh tế giữa các mục tiêu của quy trình lai: bộ tối ưu tìm các điểm cực đại hóa hàm hợp lý (hoặc mật độ hậu nghiệm), còn mục tiêu Bayes là tích phân trên toàn bộ tập điển hình. Điều này có thể khiến bộ tối ưu bỏ qua các mode rộng, phẳng đóng góp đáng kể vào tổng khối lượng hậu nghiệm để ưu tiên các đỉnh nhọn hơn, hẹp hơn trong bề mặt hàm mất mát (loss landscape).
+
+### 4.4 Thách thức của việc khám phá cục bộ
+
+Ngay cả sau khi đã khởi tạo thành công một xích ở lân cận gần của một mode hậu nghiệm chính, việc khám phá trọn vẹn vùng cục bộ vẫn có thể khó khăn. Bản thân hình học cục bộ có thể bệnh lý, chứa các sống núi phức tạp, các phễu hẹp hoặc các vùng có độ cong cao gây khó khăn ngay cả cho những bộ lấy mẫu tinh vi như Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC, xem [Chương 1](/vi/blog/introduction-to-sampling)). Điều này có thể dẫn đến việc bộ lấy mẫu chỉ khám phá một vùng con nhỏ của mode, gây ra việc ước lượng thấp phương sai hậu nghiệm cục bộ. Để tránh điều này, có thể tinh chỉnh các siêu tham số của bộ lấy mẫu như kích thước bước (step size) hay ma trận khối lượng (mass matrix) cho từng xích trong $M$ xích. Tuy nhiên, điều này càng làm phức tạp thêm việc áp dụng các phương pháp này trong thực tế và nhấn mạnh nhu cầu về các bộ lấy mẫu hiệu năng cao và tự động tinh chỉnh.

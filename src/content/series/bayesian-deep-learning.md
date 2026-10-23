@@ -10,10 +10,6 @@ objectives:
   - "Choose a method that scales to a given model and data set, and evaluate predictive uncertainty with calibration, proper scoring rules and selective prediction."
   - "Describe current research directions in Bayesian deep learning and state the open problems each one addresses."
 plannedEntries:
-  - title: "Chapter 19: Ensembles: Introduction and Connections with Approximate Bayesian Inference"
-  - title: "Chapter 20: Hybrid Ensemble Sampling Methods"
-  - title: "Chapter 21: Practical Applications of Deep Ensembles"
-  - title: "Chapter 22: PAC-Bayesian Deep Neural Network Ensembles"
   - title: "Chapter 23: Introduction to Kernel Methods"
   - title: "Chapter 24: Deep Kernel Learning"
   - title: "Chapter 25: Deep Gaussian Processes"
