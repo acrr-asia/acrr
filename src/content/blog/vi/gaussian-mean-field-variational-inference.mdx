@@ -1,0 +1,249 @@
+---
+title: "Suy luận biến phân trường trung bình Gauss"
+description: "Giả định trường trung bình làm cho ELBO dễ tính như thế nào: leo theo tọa độ, gradient tái tham số hóa, ba ví dụ minh họa và các hạn chế của cách tiếp cận."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - mean-field approximation
+  - reparameterization gradient
+series: bayesian-deep-learning
+seriesOrder: 17
+---
+
+[Chương 12](/vi/blog/introduction-to-variational-inference) đã giới thiệu cận dưới của bằng chứng (evidence lower bound, ELBO), một hàm mục tiêu dễ tính giúp phát biểu lại suy luận Bayes thành một bài toán tối ưu. Tuy nhiên, việc tối ưu
+
+$$
+\mathcal{L}(\lambda) = \mathbb{E}_{q(\theta;\lambda)}[\log p(\mathcal{D} \mid \theta)] - \mathrm{D}_{\mathrm{KL}}(q(\theta;\lambda) \,\|\, p(\theta))
+\tag{13.1}
+$$
+
+vẫn đòi hỏi tính một kỳ vọng. Trừ khi hàm hợp lý, tiên nghiệm và họ biến phân (variational family) có cấu trúc liên hợp hoặc tuyến tính – Gauss đặc biệt, kỳ vọng này hiếm khi có dạng đóng, và nói chung không có dạng đóng với các hàm hợp lý của mạng nơ-ron.
+
+Để đơn giản hóa việc tối ưu, người ta chấp nhận một giả định mạnh về cấu trúc gọi là giả định *trường trung bình* (mean-field): phân phối biến phân phân tích thành tích theo các tham số, hoặc theo các nhóm tham số được xác định trước. Với $\theta = (\theta_1, \dots, \theta_P)$, dạng phân tích hoàn toàn là
+
+$$
+q(\theta;\lambda) = \prod_{i=1}^{P} q_i(\theta_i;\lambda_i).
+\tag{13.2}
+$$
+
+Như vậy, các tọa độ độc lập với nhau dưới phép xấp xỉ $q$, mặc dù nói chung chúng phụ thuộc nhau dưới phân phối hậu nghiệm thật $p(\theta \mid \mathcal{D})$. Giả định này cho phép cập nhật theo từng tọa độ, nhưng nó ngăn $q$ biểu diễn các tương quan hậu nghiệm và thường dẫn đến việc đánh giá thấp các phương sai hậu nghiệm biên.
+
+## 1. Suy luận biến phân leo theo tọa độ
+
+Dưới giả định trường trung bình, ELBO có thể được tối ưu bằng cách lần lượt cập nhật theo chu kỳ từng thừa số $q_j$ trong khi giữ cố định các thừa số còn lại. Quy trình này được gọi là suy luận biến phân leo theo tọa độ (coordinate ascent variational inference, CAVI). Định nghĩa
+
+$$
+q_{-j}(\theta_{-j};\lambda_{-j}) := \prod_{i \neq j} q_i(\theta_i;\lambda_i).
+\tag{13.3}
+$$
+
+Thay phép xấp xỉ phân tích thành tích vào ELBO và chỉ giữ lại các số hạng phụ thuộc vào $q_j$ cho
+
+$$
+\log q_j^*(\theta_j) = \mathbb{E}_{q_{-j}(\theta_{-j};\lambda_{-j})}[\log p(\mathcal{D}, \theta)] + \text{const},
+\tag{13.4}
+$$
+
+trong đó hằng số cộng thêm có vai trò chuẩn hóa $q_j^*$. Nói cách khác, thừa số tối ưu tỉ lệ với hàm mũ của log phân phối đồng thời kỳ vọng (expected log-joint), với kỳ vọng được lấy theo phép xấp xỉ hiện tại cho mọi tham số khác $\theta_j$.
+
+Toàn bộ quy trình được nêu trong Thuật toán 17. Mỗi bước cập nhật tọa độ chính xác giữ nguyên hoặc làm tăng ELBO; dưới các điều kiện chính quy tiêu chuẩn, các bước cập nhật lặp lại hội tụ về một điểm dừng, nhưng không nhất thiết về điểm tối ưu toàn cục. Các bước cập nhật CAVI dạng đóng dễ có nhất trong các mô hình liên hợp có điều kiện (conditionally conjugate); trong các trường hợp khác, bản thân kỳ vọng hoặc bước cập nhật thu được có thể cần đến xấp xỉ.
+
+Về một cách tiếp cận lai gần đây kết hợp suy luận biến phân và MCMC, xem Alexos và cộng sự.
+
+Giả định trường trung bình giờ được làm mạnh hơn bằng cách lấy mỗi thừa số là một phân phối Gauss:
+
+$$
+q_i(\theta_i;\lambda_i) = \mathcal{N}(\theta_i \mid \mu_i, \sigma_i^2), \qquad \sigma_i > 0.
+\tag{13.5}
+$$
+
+Đây là giả định *Gauss trường trung bình* (Gaussian mean-field). Các tham số biến phân (variational parameters) xác định kỳ vọng và độ lệch chuẩn dương của từng tọa độ,
+
+$$
+\lambda = \{(\mu_i, \sigma_i)\}_{i=1}^{P}.
+\tag{13.6}
+$$
+
+**Thuật toán 17** Suy luận biến phân leo theo tọa độ (CAVI).
+
+```text
+Result: Converged factors q₁(θ₁), …, q_P(θ_P)
+Initialize all factors qᵢ(θᵢ; λᵢ) for i = 1, …, P
+while the ELBO has not converged do
+    for j = 1, …, P do
+        Update q_j using the CAVI rule:
+
+            q_j(θ_j) ∝ exp( E_{q₋ⱼ(θ₋ⱼ; λ₋ⱼ)} [log p(𝒟, θ)] )
+
+    end
+end
+return converged factors q₁(θ₁), …, q_P(θ_P)
+```
+
+Với tối ưu dựa trên gradient, mỗi độ lệch chuẩn dương thường được biểu diễn qua một tham số thang đo không ràng buộc. Các tham số biến phân có thể được tối ưu bằng CAVI khi có các bước cập nhật dạng đóng, hoặc tổng quát hơn, bằng các phương pháp gradient ngẫu nhiên được giới thiệu tiếp theo.
+
+## 2. Tối ưu bằng gradient ngẫu nhiên
+
+Khi không có các bước cập nhật CAVI dạng đóng, ELBO có thể được cực đại hóa bằng leo gradient (gradient ascent) ngẫu nhiên. Viết
+
+$$
+g(\theta;\lambda) := \log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log q(\theta;\lambda),
+\tag{13.7}
+$$
+
+thì cần một bộ ước lượng của
+
+$$
+\nabla_\lambda \mathcal{L}(\lambda) = \nabla_\lambda \mathbb{E}_{q(\theta;\lambda)}[g(\theta;\lambda)].
+\tag{13.8}
+$$
+
+Sự phụ thuộc của phân phối lấy mẫu $q(\theta;\lambda)$ vào $\lambda$ ngăn việc hoán đổi một cách ngây thơ thứ tự của gradient và kỳ vọng.
+
+### 2.1 Bộ ước lượng gradient tái tham số hóa
+
+Một cách tiếp cận tiêu chuẩn có phương sai thấp là *bộ ước lượng gradient tái tham số hóa* (reparameterization gradient estimator), còn gọi là bộ ước lượng theo đường đi (pathwise estimator). Với họ Gauss trường trung bình, rút một nhiễu không phụ thuộc tham số và biến đổi nó theo
+
+$$
+\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}), \qquad \theta = \boldsymbol{\mu} + \boldsymbol{\sigma} \odot \boldsymbol{\epsilon}.
+\tag{13.9}
+$$
+
+Điều này cho
+
+$$
+\mathbb{E}_{q(\theta;\lambda)}[g(\theta;\lambda)] = \mathbb{E}_{\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})}[g(\theta(\lambda, \boldsymbol{\epsilon});\lambda)].
+\tag{13.10}
+$$
+
+Dưới các điều kiện chính quy thông thường, giờ đây phép lấy vi phân có thể được chuyển vào bên trong kỳ vọng:
+
+$$
+\nabla_\lambda \mathbb{E}_{q(\theta;\lambda)}[g(\theta;\lambda)] = \mathbb{E}_{\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})}[\nabla_\lambda g(\theta(\lambda, \boldsymbol{\epsilon});\lambda)].
+\tag{13.11}
+$$
+
+Ở đây $\nabla_\lambda$ là đạo hàm toàn phần, đi qua cả $\theta(\lambda, \boldsymbol{\epsilon})$ lẫn sự phụ thuộc tường minh của $g$ vào $\lambda$. So với các bộ ước lượng hàm điểm (score-function estimator, REINFORCE), bộ ước lượng tái tham số hóa thường có phương sai thấp hơn nhiều mà vẫn không chệch dưới các điều kiện chính quy đã nêu. Với các lô nhỏ (mini-batch), gradient là ngẫu nhiên kép (doubly stochastic) do cả việc lấy mẫu con dữ liệu lẫn việc rút $\boldsymbol{\epsilon}$; lô nhỏ lớn hơn, nhiều mẫu nhiễu độc lập và các biến điều khiển (control variate) có thể giảm phương sai với chi phí tính toán tăng thêm, còn nhiễu thu được phải được tính đến khi chọn lịch kích thước bước. Cách xây dựng theo đường đi cũng áp dụng được cho các họ biến phân khác có thể tái tham số hóa một cách khả vi.
+
+Thuật toán 18 nêu một bước gradient ngẫu nhiên dùng một mẫu.
+
+**Thuật toán 18** Bước gradient tái tham số hóa cho suy luận biến phân Gauss trường trung bình.
+
+```text
+Input : Variational parameters λ determining μ and positive σ, learning rate ρ, mini-batch size b
+Result: Updated variational parameters λ
+Sample a mini-batch ℬ ⊆ {1, …, N} of size b uniformly without replacement
+Sample ϵ ∼ 𝒩(0, I)
+Compute θ = μ + σ ⊙ ϵ                                   /* Reparameterization */
+Compute the scaled mini-batch log-likelihood
+
+    ℓ̂_ℬ(θ) = (N / b) Σ_{n ∈ ℬ} log p(y_n | x_n, θ)
+
+Compute the gradient estimate
+
+    ĝ = ∇_λ [ ℓ̂_ℬ(θ) + log p(θ) − log q(θ; λ) ]
+
+Update λ ← λ + ρ ĝ
+return λ
+```
+
+## 3. Các ví dụ về suy luận biến phân Gauss trường trung bình
+
+Các ví dụ bắt đầu với một mô hình tuyến tính liên hợp, rồi chuyển sang mạng nơ-ron Bayes và bộ tự mã hóa biến phân.
+
+### 3.1 Ví dụ 1: hồi quy tuyến tính Bayes
+
+Xét mô hình hồi quy tuyến tính Bayes (Bayesian linear regression)
+
+$$
+y_n = \Phi(x_n)^\top \mathbf{w} + \epsilon_n, \qquad \epsilon_n \sim \mathcal{N}(0, \beta^{-1}),
+\tag{13.12}
+$$
+
+trong đó $\beta$ là độ chính xác (precision) của nhiễu, $\Phi(\cdot)$ là một ánh xạ đặc trưng (feature map), và các tham số của mô hình là $\theta = \mathbf{w}$. Mô hình dùng
+
+- **Tiên nghiệm:** $p(\mathbf{w}) = \mathcal{N}(\mathbf{w} \mid \mathbf{0}, \alpha^{-1}\mathbf{I})$;
+- **Hàm hợp lý:** $p(y_n \mid x_n, \mathbf{w}) = \mathcal{N}(y_n \mid \Phi(x_n)^\top \mathbf{w}, \beta^{-1})$.
+
+Phân phối hậu nghiệm chính xác là một phân phối Gauss có ma trận hiệp phương sai đầy đủ, được viết là
+
+$$
+p(\mathbf{w} \mid \mathcal{D}) = \mathcal{N}(\mathbf{w} \mid \mathbf{m}, \mathbf{S}).
+\tag{13.13}
+$$
+
+Nó được xấp xỉ bằng họ Gauss trường trung bình
+
+$$
+q(\mathbf{w};\lambda) = \prod_{i=1}^{P} \mathcal{N}(w_i \mid \mu_i, \sigma_i^2).
+\tag{13.14}
+$$
+
+Trong bối cảnh liên hợp này, các bước cập nhật tọa độ có dạng đóng. Chính xác hơn, phân phối Gauss đường chéo tối ưu theo KL ngược (reverse KL) có $\mu_i = m_i$ và $\sigma_i^2 = 1/(\mathbf{S}^{-1})_{ii}$. Như vậy, nó bỏ đi các số hạng hiệp phương sai ngoài đường chéo, và $\sigma_i^2 \le S_{ii}$ cho thấy tường minh xấp xỉ trường trung bình có thể đánh giá thấp các phương sai biên chính xác như thế nào khi có tương quan hậu nghiệm.
+
+### 3.2 Ví dụ 2: mạng nơ-ron Bayes (BNN)
+
+Xét một mạng nơ-ron Bayes (Bayesian neural network, BNN) có các tham số $\theta$ gom mọi trọng số và độ chệch; số tham số $P$ có thể rất lớn. Mô hình là
+
+- **Tiên nghiệm:** $p(\theta) = \mathcal{N}(\theta \mid \mathbf{0}, \mathbf{I})$ (cũng có thể chọn các tiên nghiệm khác);
+- **Hàm hợp lý:** $p(\mathcal{D} \mid \theta) = \prod_{n=1}^{N} p(y_n \mid x_n, \theta)$.
+
+Với xấp xỉ Gauss trường trung bình $q(\theta;\lambda) = \prod_{i=1}^{P} \mathcal{N}(\theta_i \mid \mu_i, \sigma_i^2)$, ELBO là
+
+$$
+\mathcal{L}(\lambda) = \sum_{n=1}^{N} \mathbb{E}_{q(\theta;\lambda)}[\log p(y_n \mid x_n, \theta)] - \mathrm{D}_{\mathrm{KL}}(q(\theta;\lambda) \,\|\, p(\theta)).
+\tag{13.15}
+$$
+
+Do các phép biến đổi phi tuyến của mạng, log hàm hợp lý kỳ vọng nói chung không có dạng đóng, nên các bước cập nhật CAVI giải tích ở trên không áp dụng được. Thay vào đó, ELBO có thể được tối ưu bằng quy trình gradient tái tham số hóa trong Thuật toán 18, cho ra cách tiếp cận Bayes by Backprop. Cùng cách xây dựng gradient ngẫu nhiên này áp dụng được cho mọi họ biến phân có thể tái tham số hóa một cách khả vi, không chỉ cho các xấp xỉ Gauss trường trung bình.
+
+### 3.3 Ví dụ 3: bộ tự mã hóa biến phân
+
+Suy luận biến phân cũng áp dụng được cho các mô hình sinh có biến ẩn (generative latent-variable model). Trong một bộ tự mã hóa biến phân (variational autoencoder, VAE), VI xấp xỉ phân phối hậu nghiệm của một *biến ẩn cục bộ* (local latent variable) $\mathbf{z}_n$ cho mỗi điểm dữ liệu $x_n$, thay vì một phân phối hậu nghiệm trên các tham số toàn cục của bộ giải mã. Mô hình sinh là
+
+1. **Tiên nghiệm:** $\mathbf{z} \sim p(\mathbf{z})$, chẳng hạn $p(\mathbf{z}) = \mathcal{N}(\mathbf{z} \mid \mathbf{0}, \mathbf{I})$;
+2. **Hàm hợp lý:** $p_{\boldsymbol{\psi}}(x \mid \mathbf{z})$, được biểu diễn bởi một mạng giải mã (decoder) với các tham số $\boldsymbol{\psi}$.
+
+Mục tiêu là cực đại hóa log hàm hợp lý biên
+
+$$
+\log p_{\boldsymbol{\psi}}(x) = \log \int p_{\boldsymbol{\psi}}(x \mid \mathbf{z})\, p(\mathbf{z})\, \mathrm{d}\mathbf{z},
+\tag{13.16}
+$$
+
+vốn nói chung không tính được. Với một phân phối $q(\mathbf{z})$ bất kỳ, nguyên lý biến phân ở [Chương 12, Mục 1.3](/vi/blog/introduction-to-variational-inference) cho
+
+$$
+\log p_{\boldsymbol{\psi}}(x) \ge \mathcal{L}(q, \boldsymbol{\psi}; x) := \mathbb{E}_{q(\mathbf{z})}[\log p_{\boldsymbol{\psi}}(x \mid \mathbf{z})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{z}) \,\|\, p(\mathbf{z})).
+\tag{13.17}
+$$
+
+Cận này chặt tại phân phối hậu nghiệm thật $q(\mathbf{z}) = p_{\boldsymbol{\psi}}(\mathbf{z} \mid x)$, nhưng nói chung không thể tính phân phối hậu nghiệm này vì hằng số chuẩn hóa $p_{\boldsymbol{\psi}}(x)$ của nó không tính được. Vì vậy, một mạng suy luận (inference network) $q_{\boldsymbol{\phi}}(\mathbf{z} \mid x)$, gọi là bộ mã hóa (encoder), với các tham số $\boldsymbol{\phi}$, được đưa vào. Nó thực hiện *suy luận khấu hao* (amortized inference) bằng cách ánh xạ mỗi đầu vào tới các tham số của phép xấp xỉ biến phân tương ứng.
+
+Một bộ mã hóa Gauss đường chéo được sử dụng,
+
+$$
+q_{\boldsymbol{\phi}}(\mathbf{z} \mid x) = \mathcal{N}\big(\mathbf{z} \mid \boldsymbol{\mu}_{\boldsymbol{\phi}}(x), \operatorname{diag}\big(\boldsymbol{\sigma}_{\boldsymbol{\phi}}^2(x)\big)\big),
+\tag{13.18}
+$$
+
+trong đó bộ mã hóa cho ra kỳ vọng $\boldsymbol{\mu}_{\boldsymbol{\phi}}(x)$ và độ lệch chuẩn dương $\boldsymbol{\sigma}_{\boldsymbol{\phi}}(x)$. Với một điểm dữ liệu, hàm mục tiêu của VAE là
+
+$$
+\mathcal{L}(\boldsymbol{\psi}, \boldsymbol{\phi}; x) = \underbrace{\mathbb{E}_{q_{\boldsymbol{\phi}}(\mathbf{z} \mid x)}[\log p_{\boldsymbol{\psi}}(x \mid \mathbf{z})]}_{\text{Expected reconstruction log-likelihood}} - \underbrace{\mathrm{D}_{\mathrm{KL}}(q_{\boldsymbol{\phi}}(\mathbf{z} \mid x) \,\|\, p(\mathbf{z}))}_{\text{Latent regularizer}}.
+\tag{13.19}
+$$
+
+ELBO tổng $\sum_{n=1}^{N} \mathcal{L}(\boldsymbol{\psi}, \boldsymbol{\phi}; x_n)$ được cực đại hóa đồng thời theo $\boldsymbol{\psi}$ và $\boldsymbol{\phi}$ bằng leo gradient ngẫu nhiên. Số hạng tái tạo (reconstruction term) được ước lượng bằng các mẫu tái tham số hóa từ $q_{\boldsymbol{\phi}}(\mathbf{z} \mid x)$, còn số hạng KL thường có dạng đóng, như trường hợp hai phân phối Gauss. Việc huấn luyện đồng thời một bộ giải mã và một mạng suy luận khấu hao như vậy chính là cách xây dựng định nghĩa nên bộ tự mã hóa biến phân.
+
+## 4. Các hạn chế của suy luận biến phân Gauss trường trung bình
+
+Suy luận biến phân Gauss trường trung bình là một phép xấp xỉ nhanh và mở rộng được, hỗ trợ các mô hình phức tạp như BNN và VAE, nhưng sự đơn giản của nó dựa trên những giả định mạnh:
+
+1. **Giả định trường trung bình:** phép xấp xỉ phân tích thành tích không thể biểu diễn các tương quan hậu nghiệm giữa các tham số và do đó đánh mất cấu trúc hiệp phương sai của phân phối hậu nghiệm.
+2. **Hành vi của KL ngược:** cực tiểu hóa $\mathrm{D}_{\mathrm{KL}}(q(\theta;\lambda) \,\|\, p(\theta \mid \mathcal{D}))$ phạt nặng một phép xấp xỉ gán xác suất không thể bỏ qua cho những vùng mà mật độ hậu nghiệm thấp. Hành vi tìm mode (mode-seeking) này có thể làm $q$ tập trung quá hẹp và thường góp phần làm đánh giá thấp các phương sai hậu nghiệm biên.
+3. **Giả định Gauss:** một phân phối Gauss duy nhất không thể biểu diễn độ lệch (skewness), đuôi nặng (heavy tail) hay tính đa mode, và việc tối ưu KL ngược thường sẽ chọn một mode của một phân phối hậu nghiệm đa mode.
+
+Những hạn chế này là động lực cho các họ biến phân biểu đạt tốt hơn, bao gồm các xấp xỉ có cấu trúc (structured approximation) nới lỏng phép phân tích trường trung bình và các phương pháp trong không gian hàm (function-space method) định nghĩa phép xấp xỉ trên các phân phối cảm sinh trên hàm.
