@@ -69,10 +69,33 @@ function pairTranslations<E extends { id: string; data: Record<string, unknown> 
   return { originals, translations };
 }
 
+/** A Vietnamese original: an article written in Vietnamese first, with no English version yet. */
+const isVietnameseOriginal = (p: CollectionEntry<'blog'>) => p.data.originalLang === 'vi';
+
+/**
+ * Vietnamese originals, checked: they must live in `vi/` and must not have an English file of the
+ * same name (once the English version is written, the Vietnamese file becomes its translation and
+ * drops `originalLang`).
+ */
+async function vietnameseOriginals(): Promise<CollectionEntry<'blog'>[]> {
+  const all = await getCollection('blog');
+  const ids = new Set(all.map((p) => p.id));
+  const problems: string[] = [];
+  const found = all.filter(isVietnameseOriginal);
+  for (const p of found) {
+    if (entryLang(p) !== 'vi') problems.push(`  - src/content/blog/${p.id}: originalLang "vi" outside src/content/blog/vi/`);
+    else if (ids.has(baseId(p))) problems.push(`  - src/content/blog/${p.id}: has an English version, so it is a translation; remove originalLang`);
+  }
+  if (problems.length > 0) throw new Error(`Invalid Vietnamese originals (see docs/translation-vi.md):\n${problems.join('\n')}`);
+  return found;
+}
+
 async function blogEntries() {
   await assertSeriesReferencesExist();
-  const all = await getCollection('blog');
-  return pairTranslations('blog', all, (o, t) => {
+  const viOriginals = await vietnameseOriginals();
+  const viIds = new Set(viOriginals.map((p) => p.id));
+  const all = (await getCollection('blog')).filter((p) => !viIds.has(p.id));
+  const paired = pairTranslations('blog', all, (o, t) => {
     const a = o.data, b = t.data;
     if (!sameDate(a.publishedAt, b.publishedAt)) return 'publishedAt';
     if (!sameDate(a.updatedAt, b.updatedAt)) return 'updatedAt';
@@ -84,6 +107,7 @@ async function blogEntries() {
     if (a.example !== b.example) return 'example';
     return null;
   });
+  return { ...paired, viOriginals };
 }
 
 /** Newest first. On the same date a later series entry counts as newer, then the id breaks ties. */
@@ -98,10 +122,12 @@ const byDate = (a: CollectionEntry<'blog'>, b: CollectionEntry<'blog'>) =>
  * which), and link to the English page.
  */
 export async function getPosts(lang: Lang = 'en'): Promise<CollectionEntry<'blog'>[]> {
-  const { originals, translations } = await blogEntries();
-  return originals
+  const { originals, translations, viOriginals } = await blogEntries();
+  return [
+    ...originals.map((p) => (lang === 'vi' ? (translations.get(p.id) ?? p) : p)),
+    ...(lang === 'vi' ? viOriginals : []),
+  ]
     .filter(({ data }) => showDrafts || !data.draft)
-    .map((p) => (lang === 'vi' ? (translations.get(p.id) ?? p) : p))
     .sort(byDate);
 }
 
@@ -138,12 +164,22 @@ export async function getInsights(lang: Lang = 'en'): Promise<CollectionEntry<'i
 
 async function seriesEntries() {
   const all = await getCollection('series');
+  // Entries written in Vietnamese first are published in Vietnamese and still planned in English,
+  // so the English file lists them as planned and the Vietnamese file does not; the status may then
+  // differ too (an English series that is all planned while the Vietnamese one is in progress).
+  const viOriginals = await vietnameseOriginals();
+  const viOnly = (id: string) => viOriginals.filter((p) => p.data.series?.id === id).length;
   return pairTranslations('series', all, (o, t) => {
     const a = o.data, b = t.data;
+    const ahead = viOnly(o.id);
     if (a.category !== b.category) return 'category';
-    if (a.status !== b.status) return 'status';
+    if (a.status !== b.status && ahead === 0) return 'status';
     if (a.example !== b.example) return 'example';
-    if (a.plannedEntries.length !== b.plannedEntries.length) return 'the number of plannedEntries';
+    if (a.plannedEntries.length !== b.plannedEntries.length + ahead) {
+      return ahead === 0
+        ? 'the number of plannedEntries'
+        : `the number of plannedEntries (English must equal Vietnamese plus the ${ahead} Vietnamese originals)`;
+    }
     return null;
   });
 }

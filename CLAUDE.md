@@ -81,7 +81,7 @@ Checking one page or link:
 - Research areas on Home and About are proposed interests, not claims of active projects or a staffed lab. Do not overstate ACRR's size or achievements. Any figure shown on the site must be computed from real content.
 - Insights entries separate established facts, interpretations and open questions (`## Established`, `## Interpretation`, `## Open questions`).
 - Do not copy text, names, taglines or articles from the reference site or any other site. All writing must be original and technically correct.
-- English is the original language. Vietnamese pages are translations under `/vi` that follow `docs/translation-vi.md` (glossary, copied fields, Vietnamese term plus English term on first use); never write Vietnamese-only content. No other languages.
+- English is the original language. Vietnamese pages are translations under `/vi` that follow `docs/translation-vi.md` (glossary, copied fields, Vietnamese term plus English term on first use); never write Vietnamese-only content, except Vietnamese originals (`originalLang: "vi"`, see `docs/translation-vi.md`), which San asked for in the series `machine-learning-from-the-ground-up` (Vietnamese published, English planned). No other languages.
 
 ## Design direction
 
