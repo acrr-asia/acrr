@@ -34,6 +34,26 @@ This is the lifecycle the `editorial` skill runs. Each step reads its state from
 | `review-stale` | File changed after the record was written | Re-review the changed passages, then re-record |
 | `ready` | Current passing record, no lint errors | Publishable |
 
+## Editorial queue
+
+When the config has a `queue` section, every item also has an entry in `<queue.dir>/<type>/<slug>.json` (schema `schema/queue-entry.schema.json`). The record answers "did this file pass review"; the queue answers "where is this item in the publication workflow". The queue covers what happens before a file exists (proposal and research, with the reader-value contract) and after it is deployed (the chief editor's live review, findings, acceptance, maintenance, merge and retirement). It is not hashed, so editing it never makes a review stale.
+
+| Status | Meaning |
+|---|---|
+| `proposed` | Idea proposal submitted (`templates/idea-proposal.md`); no file yet |
+| `approved-for-research` | Contract approved; research log in progress (`templates/research-log.md`) |
+| `drafting` | Draft in progress |
+| `technical-review`, `editorial-review` | Review stages running |
+| `revision-required` | Findings to resolve before publication |
+| `ready-to-publish` | Current passing record; gates green |
+| `published-awaiting-live-review` | Deployed; the chief editor has not yet reviewed the live page |
+| `revision-required-after-publication` | Live findings open |
+| `accepted` | Live page accepted by a permitted reviewer |
+| `maintenance` | Accepted, and something it depends on has changed |
+| `rejected`, `merged`, `retired`, `blocked` | Exceptional states (`merged` needs `mergedInto`, `retired` needs `redirect`) |
+
+`eos queue validate` checks: every item has an entry; statuses and enums are valid; accepted items have a chief-editor acceptance with a reviewer and a report; high-risk items are accepted only by `queue.highRiskApprovers`; no accepted item has an open critical or major finding; items started or published from `queue.contractRequiredFrom` have an approved contract. `eos gate` adds these problems as failures when `queue.enforce` is `error`, reports them when it is `warn`, and ignores them when it is `off`.
+
 ## Review record
 
 `eos record <file> --from review.json` writes `editorial/records/<type>/<slug>.json`. The input names the result of each required stage, the seven rubric scores (0 to 4), any critical conditions, finding counts, claims that were not verified, the changes made and the reviewers. The engine computes the decision: `publish` only when every required stage passed, no critical condition is present, no finding is open, the total meets the type's minimum and no dimension is below the per-dimension minimum. It also stores the file's content hash and appends to the record's history, so the record is an audit trail.
