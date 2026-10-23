@@ -431,6 +431,50 @@ from the measurement sense *độ chụm*. In prose, "et al." is written *và c�
 | flat / sharp minimum, loss landscape | cực tiểu phẳng / nhọn (flat / sharp minimum), bề mặt hàm mất mát (loss landscape) |
 | overfitting, underfitting | quá khớp (overfitting), chưa khớp (underfitting) |
 | pruning (structured / unstructured), probing, invariance | tỉa (có cấu trúc / không cấu trúc), thăm dò (probing), tính bất biến (invariance) |
+| variational family, variational parameters, factorized (distribution) | họ biến phân (variational family), tham số biến phân (variational parameters), (phân phối) phân tích thành tích |
+| coordinate ascent variational inference (CAVI), conditionally conjugate | suy luận biến phân leo theo tọa độ (CAVI), liên hợp có điều kiện (conditionally conjugate) |
+| forward / reverse KL, mode-seeking / mode-covering | KL thuận / KL ngược (forward / reverse KL), tìm mode / phủ mode (mode-seeking / mode-covering) |
+| reparameterization gradient, pathwise estimator, score-function (REINFORCE) estimator | gradient tái tham số hóa, bộ ước lượng theo đường đi (pathwise estimator), bộ ước lượng hàm điểm (score-function estimator, REINFORCE) |
+| doubly stochastic, control variate, variance reduction | ngẫu nhiên kép (doubly stochastic), biến điều khiển (control variate), giảm phương sai |
+| variational autoencoder, encoder, decoder, inference network, amortized inference | bộ tự mã hóa biến phân (VAE), bộ mã hóa (encoder), bộ giải mã (decoder), mạng suy luận (inference network), suy luận khấu hao (amortized inference) |
+| local latent variable, importance-weighted autoencoder (IWAE), Jensen's inequality | biến ẩn cục bộ, bộ tự mã hóa có trọng số quan trọng (IWAE), bất đẳng thức Jensen |
+| moment matching, moment | khớp mô-men (moment matching; not *khớp mômen*), mô-men |
+| stochastic regularization technique (SRT), dropout rate, dropout mask | kỹ thuật chính quy hóa ngẫu nhiên (SRT), tỉ lệ dropout (dropout rate), mặt nạ dropout (dropout mask) |
+| Monte Carlo dropout, Concrete Dropout, dropout injection | dropout Monte Carlo (MC Dropout), Concrete Dropout (kept), chèn dropout (dropout injection) |
+| continuous relaxation, Gumbel-softmax trick, Concrete distribution | phép nới lỏng liên tục (continuous relaxation), thủ thuật Gumbel-softmax, phân phối Concrete |
+| scale factor, scale-agnostic / scale-aware, σ-scaling | hệ số co giãn (scale factor; *tỉ lệ* is reserved for the dropout rate), không xét / có xét co giãn, co giãn σ (σ-scaling) |
+| generalized Bayes, generalized posterior, Gibbs posterior, variational learning | Bayes tổng quát (Generalized Bayes), hậu nghiệm tổng quát, hậu nghiệm Gibbs, học biến phân (variational learning) |
+| Bayesian learning rule (BLR) | quy tắc học Bayes (Bayesian learning rule, BLR) |
+| expectation parameter, mean parameter, dual (moment) parameters | tham số kỳ vọng (expectation parameter), tham số trung bình (mean parameter), tham số đối ngẫu (mô-men) (dual (moment) parameters) |
+| minimal exponential family, log-partition function | họ mũ tối thiểu, hàm log phân hoạch (log-partition function) |
+| variational online Newton (VON), variational online Gauss–Newton (VOGN), improved VON (IVON) | Newton trực tuyến biến phân (VON), Gauss–Newton trực tuyến biến phân (VOGN), Newton trực tuyến biến phân cải tiến (IVON) |
+| Bonnet's theorem, Price's theorem, Stein's lemma | định lý Bonnet, định lý Price, bổ đề Stein |
+| per-example gradients, gradient magnitude approximation, feasible set, delta method | gradient theo từng mẫu, xấp xỉ độ lớn gradient, tập khả thi (feasible set), phương pháp delta |
+| particle-based variational inference (ParVI), Stein variational gradient descent (SVGD), Stein variational Newton (SVN) | suy luận biến phân dựa trên hạt (ParVI), hạ gradient biến phân Stein (SVGD), Newton biến phân Stein (SVN) |
+| Stein operator, Stein's identity, Stein kernel, Stein witness function | toán tử Stein, đẳng thức Stein, hàm nhân Stein, hàm chứng Stein |
+| discrepancy, Stein discrepancy, kernel Stein discrepancy (KSD), maximum mean discrepancy (MMD) | độ sai khác (discrepancy), độ sai khác Stein, độ sai khác Stein dựa trên hàm nhân (KSD), độ sai khác trung bình cực đại (MMD) |
+| reproducing kernel Hilbert space (RKHS), reproducing property | không gian Hilbert hàm nhân tái sinh (RKHS), tính chất tái sinh |
+| transport map, continuity equation, Fokker–Planck equation | ánh xạ vận chuyển (transport map), phương trình liên tục, phương trình Fokker–Planck |
+| first / second variation, functional gradient, functional Hessian | biến phân thứ nhất / thứ hai, gradient hàm (functional gradient), ma trận Hesse hàm |
+| Wasserstein / Stein / Fisher-Rao gradient flow, birth-death process | dòng gradient Wasserstein / Stein / Fisher-Rao, quá trình sinh-tử (birth-death process) |
+| metric tensor, Onsager operator, cotangent space, local coordinate chart | tenxơ metric, toán tử Onsager, không gian đối tiếp xúc, bản đồ tọa độ cục bộ (not *địa phương*) |
+| relative Fisher information, (Stein) log-Sobolev inequality, dissipation | thông tin Fisher tương đối, bất đẳng thức log-Sobolev (Stein), sự tiêu tán |
+| descent lemma, propagation of chaos, mean-field / population limit | bổ đề giảm (descent lemma), sự lan truyền hỗn loạn (propagation of chaos), giới hạn trường trung bình / giới hạn quần thể |
+| bandwidth, median heuristic, random Fourier features, variance collapse | độ rộng (bandwidth), quy tắc trung vị (median heuristic), đặc trưng Fourier ngẫu nhiên, sụp đổ phương sai (variance collapse) |
+| unadjusted Langevin algorithm (ULA), Langevin Monte Carlo (LMC) | thuật toán Langevin không hiệu chỉnh (ULA), Monte Carlo Langevin (LMC) |
+| well-posed / ill-posed | đặt chỉnh / đặt không chỉnh (well-posed / ill-posed) |
+| function-space variational inference (FSVI), evaluation map, likelihood functional | suy luận biến phân trong không gian hàm (FSVI), ánh xạ định giá (evaluation map), phiếm hàm hợp lý |
+| cylinder σ-algebra, Radon–Nikodym derivative, absolutely continuous, mutually singular | σ-đại số trụ, đạo hàm Radon–Nikodym, liên tục tuyệt đối, kỳ dị lẫn nhau (mutually singular) |
+| data-processing inequality, Gaussian measure, Hilbert–Schmidt operator | bất đẳng thức xử lý dữ liệu, độ đo Gauss (Gaussian measure), toán tử Hilbert–Schmidt |
+| generalized variational objective (GVO), surrogate objective | hàm mục tiêu biến phân tổng quát hóa (GVO), hàm mục tiêu thay thế |
+| state-space model (SSM), belief state, filtering distribution | mô hình không gian trạng thái (SSM), trạng thái niềm tin (belief state), phân phối lọc |
+| dynamics (transition) model, observation (measurement) model | mô hình động lực (mô hình chuyển trạng thái), mô hình quan sát (mô hình đo) |
+| predict step, update step, innovation, Kalman gain, information form | bước dự đoán, bước cập nhật, phần đổi mới (innovation), độ lợi Kalman, dạng thông tin (information form) |
+| extended Kalman filter (EKF), statistical linear regression (SLR), unscented / cubature KF | bộ lọc Kalman mở rộng (EKF), hồi quy tuyến tính thống kê (SLR), *Unscented* KF / KF cầu phương khối |
+| Gaussian quadrature, plugin approximation | cầu phương Gauss (Gaussian quadrature), xấp xỉ thế trực tiếp (plugin) |
+| assumed density filtering (ADF), expectation propagation (EP) | lọc mật độ giả định (ADF), lan truyền kỳ vọng (Expectation Propagation) |
+| Bayesian online natural gradient (BONG), diagonal plus low rank (DLR) | gradient tự nhiên trực tuyến Bayes (BONG), đường chéo cộng hạng thấp (DLR) |
+| system identification, empirical Bayes, mirror descent | nhận dạng hệ thống, Bayes thực nghiệm (empirical Bayes), hạ gương (mirror descent) |
 | Takeaways (box label) | Điểm cần ghi nhớ |
 | Equation N, Proposition, Definition, Theorem, Proof, Figure, Table, Algorithm | Phương trình N, Mệnh đề, Định nghĩa, Định lý, Chứng minh, Hình, Bảng, Thuật toán |
 | link text "Chapter K, Section j" | Chương K, Mục j (link to `/vi/blog/<slug>` without the `#` anchor) |
