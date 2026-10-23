@@ -1,0 +1,116 @@
+---
+title: "Laplace Approximations: Introduction"
+description: "Why Laplace approximations are local and differential, what makes them attractive for deep networks, their practical costs and where they fall short."
+publishedAt: "2026-10-22"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - laplace approximation
+  - curvature
+  - neural networks
+series: bayesian-deep-learning
+seriesOrder: 10
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl07LaplaceContours from '../../components/diagrams/Bdl07LaplaceContours.astro';
+
+Astute readers of the preceding chapter will have noticed that the methods introduced in Part I come with a concerning amount of computational and memory overhead. Even a perfectly efficient Monte Carlo method, one that draws an i.i.d. sample from the posterior in every single step, still requires *storing* multiple samples (entire copies of the parameter vector) in memory. At prediction time, the forward pass of the model then has to be computed for each of these samples. The number $k$ of samples enters at least multiplicatively into the computational cost $c$ of whatever computation is done with the neural network: A price of $\Omega(kc)$ (the Landau $\Omega$. Yes, that is a *lower* bound) has to be paid, both in memory and computation, to turn a non-Bayesian computation into a Bayesian one. At a time when prominent non-Bayesian deep models are already maxing out the capacity of the best multi-GPU workstations, this is a nonstarter, and arguably the main reason why Bayesian deep learning has acquired a reputation for unacceptably high computational cost.
+
+This Part, however, will introduce a different, more practically minded way to endow neural networks with Bayesian uncertainty. Its history is just as old as that of sampling methods, and was born out of computational necessity in the early days of deep learning. In fact, it was originally invented in the early 19th century, long before digital computers, to turn intractable integrals into tractable ones, at any cost. As computation is once again a bottleneck in the deep learning age, Laplace approximations have re-emerged as a practical tool with new twists that push the envelope of automatic differentiation and numerical linear algebra. It also offers new perspectives on deep learning from the perspective of differential geometry. As will become clear, it now comes with great power, and grave dangers.
+
+## 1. Laplace approximations are local and differential
+
+As in previous chapters, consider a differential program $f : \mathbb{R}^D \times \mathbb{R}^P \to \mathbb{R}^C$ mapping inputs $x \in \mathbb{R}^D$ to outputs $f(x, \theta) \in \mathbb{R}^C$, parametrized by $\theta \in \mathbb{R}^P$. Consider the regularized empirical risk $\mathcal{L}_\Omega \in \mathbb{R}$ defined as
+
+$$
+\mathcal{L}_\Omega(\theta) = \sum_{n=1}^{N} \ell(f(x_n, \theta), y_n) + \Omega(\theta). \tag{7.1}
+$$
+
+with loss function $\ell \colon \mathbb{R}^C \times \mathbb{R}^C \to \mathbb{R}$ and regularizer $\Omega \colon \mathbb{R}^P \to \mathbb{R}$, both strictly convex and twice continuously differentiable.[^1]
+
+Also as in previous chapters, this function is interpreted as an energy function, the unnormalized negative logarithm of a posterior:
+
+$$
+\mathcal{L}_\Omega(\theta) = -\log p(Y \mid X, \theta) - \log p(\theta) + \text{const} = -\log p(\theta \mid \mathcal{D}) + \text{const}. \tag{7.2}
+$$
+
+**Definition 7.1.** *A Laplace approximation is any algorithm within a general class of methods that approximate* $\mathcal{L}_\Omega(\theta)$ *with a quadratic function*
+
+$$
+\mathcal{L}_\Omega(\theta) \approx \frac{1}{2}(\theta - \theta_*)^\top \Psi(\theta_*)(\theta - \theta_*) + \text{const}, \tag{7.3}
+$$
+
+*where* $\Psi(\theta_*) \in \mathbb{R}^{P \times P}$ *is a second-order linear differential operator acting on* $\mathcal{L}_\Omega(\theta_*)$ *at the point* $\theta_* \in \mathbb{R}^P$. *A Laplace approximation is thus defined by the tuple* $(\theta_*, \Psi)$, *which will be called a* ***point estimate*** *and its* ***curvature***, *respectively.*
+
+<Figure caption="Figure 7.1: A linearized Laplace approximation on the most basic feed-forward perceptron f(x, θ) = θ₂·ReLU(θ₁x + 1) for the dataset X = (1, −1), Y = (−1, −1), with regularizer Ω(θ) = 0.2·‖θ‖² and square loss. The gray contour lines denote the energy function. The black dot represents the minimum θ*; the thick black ellipses denote one (solid) and two (dashed) standard deviations of the Laplace approximation. The Gaussian approximation defined by the Laplace approximation clearly captures the local geometry, but not the full global shape of the posterior. Schematic reproduction: the setup as stated does not produce the two point-symmetric minima of the original plot, so the redrawn contours are computed for θ₂·tanh(θ₁x + 1) with targets (1, −1) and the same regularizer and loss, which reproduces that landscape; the ellipses use the generalized Gauss–Newton curvature plus the prior precision of this substitute model at its minimum, so their size and tilt differ from the original plot, and the minimum is drawn as a colored dot.">
+  <Bdl07LaplaceContours />
+</Figure>
+
+Under the assumption of Equation 7.2, any Laplace approximation is directly associated with an approximate **Gaussian measure on the parameter space**,
+
+$$
+\begin{aligned}
+p(\theta \mid \mathcal{D}) &= \frac{1}{Z(\mathcal{D})} \exp(-\mathcal{L}_\Omega(\theta)) && \text{(7.4a)} \\
+&\approx \frac{1}{Z(\mathcal{D})} \exp\left(-\frac{1}{2}(\theta - \theta_*)^\top \Psi(\theta_*)(\theta - \theta_*)\right) && \text{(7.4b)} \\
+&= \mathcal{N}(\theta; \theta_*, \Psi^{-1}(\theta_*)). && \text{(7.4c)}
+\end{aligned}
+$$
+
+The textbook, but impractical, version of the Laplace approximation arises from the Taylor expansion at a local minimizer of the regularized risk:
+
+$$
+[\Psi(\theta)]_{ij} = \left[\nabla_\theta \nabla_\theta^\top \mathcal{L}_\Omega(\theta)\right]_{ij} = \frac{\partial^2 \mathcal{L}_\Omega(\theta)}{\partial \theta_i \partial \theta_j}, \qquad \theta_* = \operatorname*{arg\,min}_{\theta \in \mathbb{R}^P} \mathcal{L}_\Omega(\theta). \tag{7.5}
+$$
+
+That is, pick a point $\theta_*$ where the gradient vanishes, and compute the Hessian there (the matrix $\Psi(\theta_*)$ being the matrix representation of the aforementioned operator, evaluated at $\theta_*$).
+
+## 2. What is to like about Laplace?
+
+Central to the appeal of Laplace approximations is that they are an *analytic post-processing* step that can be tagged onto the established way of training a deep model:
+
+> **How to construct a Laplace approximation:**
+>
+> 1. Train your deep network in any way you know and trust, using whatever optimizer you like. Wait for your training loop to terminate and return the point estimate $\theta_*$.
+> 2. After training has finished (!), compute $\Psi(\theta_*)$. Since it is a second-order differential operator, it can be computed with automatic differentiation, using your favorite auto-diff framework.
+
+And that is it! You now have a "Bayesian uncertainty" estimate in parameter space, in the form of the Gaussian from Equation 7.4c. The advantages of this recipe, some more obvious, some less so, are worth spelling out explicitly:
+
+- **You get to keep your point-estimate**. People who train neural networks, especially if it is a large model, spend extreme resources to find a good value $\theta_*$. Even if this particular value may not hold up to the theoretical demands of Bayesian analysis, it nevertheless embodies a significant investment, so it is appealing to keep working with this valuable object. For Laplace, this point estimate turns directly into a posterior mean. And to state the obvious: The computation overhead of this part is strictly *zero* over whatever the training cost to begin with.
+- **You get to use established tools**. Constructing the Gaussian of Equation 7.4c, requires precisely two computational tools: *Automatic differentiation* to get $\Psi$, and *numerical linear algebra*, to find its (approximate) inverse. These are arguably *the* most powerful, reliable, optimized functionalities available to the machine learning engineer. They can be made extremely numerically robust and conveniently automated, or tailored for radical computational efficiency. And, using probabilistic numerical linear algebra, the discretization and iteration error of these internal computations can be tracked for downstream consideration (More about numerical linear algebra tricks in [Chapter 8](/blog/linearized-laplace-approximations) and Part VIII).
+- **Laplace is post hoc**. Since $\Psi$ is only needed after $\theta_*$ has been found, its cost is not a function of the complexity of training. In fact, the construction of a Laplace approximation is effectively separated from training entirely, and can be done on a pre-trained model downloaded from the Internet. The only caveat is that, since $\Psi$ is a function of the regularized risk, its construction requires access to the training data $\mathcal{D}$, or some compressed representation thereof.
+- **Laplace is analytical**. Laplace approximations return a Gaussian probability measure, whose parameters are computed using optimization, automatic differentiation, and linear algebra. That is, a deterministic quantity (a probability density function) constructed deterministically. There is no source of randomness involved, apart from the potentially stochastic nature of training to find $\theta_*$. As [Chapter 10](/blog/analytic-low-cost-functionality-from-laplace) will show, this makes Laplace approximations interesting for downstream applications and decisions that require analytic marginalization over the parameters.
+- **Deep theoretical meaning**. Chapters [8](/blog/linearized-laplace-approximations) and [9](/blog/differential-geometric-perspective-on-laplace) will show that the local differential nature of the curvature at the heart of Laplace approximations gives them profound theoretical connections, and intuitive interpretations. In fact, they open up a whole self-contained theory of deep learning founded on the differential geometry of the energy manifold associated with $\mathcal{L}_\Omega$.
+- **Laplace turns every deep network into a Gaussian process**. [Chapter 8](/blog/linearized-laplace-approximations) will show that the Gaussian measure $\mathcal{N}(\theta; \theta_*, \Psi^{-1}(\theta_*))$ constructed by the Laplace approximation can be analytically pushed forward to the output space of the network $f(x, \theta)$, where it manifests itself as a Gaussian process, whose mean-function is exactly the trained network $f(x, \theta_*)$, and whose covariance function (kernel) is given by a structured object, a *tangent kernel* (developed further in Part V). This is a powerful perspective for both practical and conceptual reasons: On the practical side, a lot of notions from the Gaussian process literature can be transported more or less directly to deep learning, recovering advanced functionality sorely missing from non-Bayesian deep learning. And on the conceptual side, the tangent kernel contains very specific terms that capture modular, interpretable statements about the role of the training data, the network architecture, and regularization that make deep learning more transparent and interpretable.
+
+## 3. Practical considerations
+
+On first encountering Laplace approximations in deep learning, people tend to have one of two, mutually almost contradictory reactions:
+
+### 3.1 Is this not too simplistic?
+
+A Taylor-expansion? Really? From a fundamentalist Bayesian perspective, a quadratic function is a poor approximation of the posterior, with all its non-convex nonlinear glory (cf. Figure 7.1). But compared to the day-to-day practice of training deep networks, Laplace approximations are a big step forward, from a *zeroth order* approximation (a point estimate) to a *second-order* approximation (a Gaussian probability measure). They offer an easy gateway into the Bayesian world for the deep learning practitioner: Just take your trained model, compute a curvature, and Bob's your uncle.
+
+One should also be careful not to appeal to unrealistic ideals, but compare to realistic alternatives instead. The true posterior may be the theoretical target of all Bayesian analysis, but is completely intractable. All Bayesian methods that are actually accessible are approximations, of different nature. For example, if an ensemble of $S \ll P$ samples $[\theta_s]_{s=1}^S$ is drawn from the posterior, and used to construct a posterior covariance $\hat{\Psi}^{-1} = \frac{1}{S}\sum_{s=1}^{S}(\theta_s - \theta_*)(\theta_s - \theta_*)^\top$ over the parameters $\theta$, that matrix $\hat{\Psi}$ will be of rank at most $S$. If this object is used as a proxy for "posterior uncertainty", one may severely over-estimate confidence intervals. A Laplace approximation might overlook nonlocal aspects of the posterior's geometry, but it can construct an approximate covariance matrix of full rank.
+
+### 3.2 Is this not too expensive?
+
+<em>Hang on, this needs a Hessian over the parameter space? That is a matrix of size $P \times P$, so just storing it will create a memory overhead of $\mathcal{O}(P^2)$. Oh, and then its <em>inverse</em> has to be computed!? That will incur a computational cost of $\mathcal{O}(P^3)$, right?</em> The flaw of such thoughts is that they use worst case statements about objects that are entirely under the user's control.
+
+It is better to think of the curvature $\Psi$ as a *linear operator*, a function mapping vectors to vectors. Such a function need not require the explicit instantiation of a matrix in memory. Chapters [8](/blog/linearized-laplace-approximations) and [10](/blog/analytic-low-cost-functionality-from-laplace) will introduce several possible choices for this operator, spanning a range of computational and memory costs. These include the generalized Gauss-Newton approximation ([Chapter 8, Section 3](/blog/linearized-laplace-approximations#3-the-fisher)), Kronecker-factored approximate curvature, and diagonal approximations to the Hessian ([Chapter 8, Section 4](/blog/linearized-laplace-approximations#4-scalable-curvature-approximations)). In fact, [Chapter 10, Section 1](/blog/analytic-low-cost-functionality-from-laplace#1-fixing-overconfidence-with-calibrated-uncertainty) will show that even the trivial choice $\Psi = \alpha I$ for an arbitrary $\alpha \in \mathbb{R}_+$ (i.e. just replacing the point estimate with an arbitrary Gaussian measure) already fixes some tangible, nontrivial pathologies of non-Bayesian deep learning.
+
+Likewise, numerical linear algebra offers a rich toolbox of iterative, sparse, sketched, etc. methods to solve linear systems of equations of the form $\Psi x = b$ for $x$ without the need to even explicitly form an estimate of the matrix inverse $\Psi^{-1}$ ([Chapter 8, Section 4.1](/blog/linearized-laplace-approximations#41-low-rank-ggn-approximations)). And there are probabilistic versions of these methods that can partially track and estimate the error of their output. The memory and compute cost of Laplace approximations can thus be completely controlled by the user, opening up a wide spectrum of algorithms of varying quality and cost.
+
+On the flip side, this also means that constructing Laplace approximations, just like training deep networks, is not a turnkey operation, and requires care and expertise. But emerging software tools increasingly encapsulate these choices, and provide abstraction layers that allow constructing Laplace approximations with a few lines of code.
+
+## 4. All approximations are wrong
+
+Despite all the arguments in their favor, Laplace approximations remain just that: approximations. Their local nature (the fact that they only use differential quantities evaluated at a single point in the parameter space) is both their principal strength and their principal weakness. As Figure 7.1 shows, the Gaussian posterior created by a Laplace approximation may not capture the geometry of the posterior, not even within the region of the parameter space delineated by one or two standard deviations of that Gaussian. And when intricate numerical routines are used to operate on the curvature operator $\Psi$, their own errors can also severely erode the quality of the approximation.
+
+Laplace approximations should thus best be viewed as an important tool of first resort. At least their most basic variants can be constructed on virtually any deep architecture, often with minimal overhead in both implementation and computation. They can be a powerful diagnostic tool, elucidating the interplay between data and architecture; and offer structured, controllable functionality for everyday requirements like uncertainty quantification, model adaptation, continual learning, and more. But whenever the stakes are high, for example in safety critical applications, or when uncertainty is used to draw scientific conclusions, additional safeguards are needed. In such settings, Laplace approximations may be paired with some of the other frameworks described in this book, to provide a more robust and calibrated uncertainty estimate.
+
+> **Takeaways:**
+>
+> A Laplace approximation is a quadratic approximation to the log posterior associated with a deep model, interpreted as a Gaussian posterior on the parameter space, or a Gaussian process posterior on the predictive (logit) outputs of the model. Such approximations are constructed by first training a point estimate for the parameters in the "normal" way, then computing the curvature operator (or kernel) post hoc. By this nature, Laplace approximations are *local* and *differential*. On the one hand, this is a weakness, because they fail to capture *global*, *nonlinear* structure in the posterior. On the other hand, this is a strength, because it allows the use of powerful automatic differentiation and matrix-free, probabilistic linear algebra, and provides theoretical descriptions of deep learning in the terms of differential geometry. The following chapters will provide further details on these aspects.
+
+[^1]: Note that convexity here is only assumed for the loss and regularizer. The full loss $\mathcal{L}_\Omega(\theta)$ is not generally convex, since the network $f$ is a nonlinear function of the parameters $\theta$.

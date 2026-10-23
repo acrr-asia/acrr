@@ -2720,3 +2720,778 @@ b += text(PB.x0 + PB.w / 2, PB.y0 + PB.h + 38, 'Sampling iteration ' + var('k'),
 svg('Bdl06ScaleSchedules', 640, 320, 'Balancing exponent against proposal scale, and coupled cyclical schedules',
     'Panel a: three bell-shaped curves of normalized illustrative efficiency against the balancing exponent beta from 0.5 to 1. The curve for sigma equal to 0.1 peaks near beta equal to 0.52, the curve for sigma equal to 1 near 0.7, and the curve for sigma equal to 2 near 0.94. Panel b: over 40 sampling iterations in two cycles of 20, the step size sigma k falls along a cosine from 2.0 to about 0.1 and jumps back to 2.0 at iteration 20, while the balancing exponent beta k falls in the same way from 1.00 to about 0.50.',
     b)
+
+
+# ---------- Bdl07: Figure 7.1, Laplace approximation on a two-parameter perceptron ----------
+def bdl07_energy(t1, t2):
+    # Energy of a two-parameter model f(x, theta) = theta2 * tanh(theta1 * x + 1),
+    # inputs X = (1, -1), targets (1, -1), square loss, regularizer 0.2 * ||theta||^2.
+    f1 = t2 * math.tanh(t1 + 1)
+    f2 = t2 * math.tanh(-t1 + 1)
+    return (f1 - 1) ** 2 + (f2 + 1) ** 2 + 0.2 * (t1 * t1 + t2 * t2)
+
+def bdl07_contours(F, xr, yr, n, levels):
+    xs = [xr[0] + i * (xr[1] - xr[0]) / n for i in range(n + 1)]
+    ys = [yr[0] + j * (yr[1] - yr[0]) / n for j in range(n + 1)]
+    Z = [[F(x, y) for x in xs] for y in ys]
+    out = {}
+    for lev in levels:
+        segs = []
+        for j in range(n):
+            for i in range(n):
+                c = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+                v = [Z[b][a] - lev for a, b in c]
+                pts = []
+                for k in range(4):
+                    a, b = k, (k + 1) % 4
+                    if (v[a] < 0) != (v[b] < 0):
+                        tt = v[a] / (v[a] - v[b])
+                        (ia, ja), (ib, jb) = c[a], c[b]
+                        key = tuple(sorted([(ia, ja), (ib, jb)]))
+                        x = xs[ia] + tt * (xs[ib] - xs[ia])
+                        y = ys[ja] + tt * (ys[jb] - ys[ja])
+                        pts.append((key, (x, y)))
+                if len(pts) == 2:
+                    segs.append((pts[0], pts[1]))
+                elif len(pts) == 4:
+                    segs.append((pts[0], pts[1]))
+                    segs.append((pts[2], pts[3]))
+        # chain segments into polylines
+        adj = {}
+        for s_ in segs:
+            for p_ in s_:
+                adj.setdefault(p_[0], []).append(s_)
+        used = set()
+        lines = []
+        for s_ in segs:
+            if id(s_) in used:
+                continue
+            used.add(id(s_))
+            chain = [s_[0], s_[1]]
+            for direction in (0, 1):
+                while True:
+                    end = chain[-1] if direction == 0 else chain[0]
+                    nxt = None
+                    for cand in adj.get(end[0], []):
+                        if id(cand) not in used:
+                            nxt = cand
+                            break
+                    if nxt is None:
+                        break
+                    used.add(id(nxt))
+                    other = nxt[1] if nxt[0][0] == end[0] else nxt[0]
+                    if direction == 0:
+                        chain.append(other)
+                    else:
+                        chain.insert(0, other)
+            lines.append([p_[1] for p_ in chain])
+        out[lev] = lines
+    return out
+
+P = Plot(60, 20, 480, 300, (-3, 3), (-3, 3))
+b = '  <defs><clipPath id="bdl07-lap-clip"><rect x="60" y="20" width="480" height="300" /></clipPath></defs>\n'
+b += '  <g clip-path="url(#bdl07-lap-clip)">\n'
+levels = [0.9, 1.1, 1.2, 1.5, 2, 3, 5, 7, 10, 20]
+cont = bdl07_contours(bdl07_energy, (-3, 3), (-3, 3), 150, levels)
+for lev in levels:
+    for pl in cont[lev]:
+        pts = [(P.X(x), P.Y(y)) for x, y in pl]
+        keep = [pts[0]]
+        for q in pts[1:-1]:
+            if abs(q[0] - keep[-1][0]) + abs(q[1] - keep[-1][1]) > 2.5:
+                keep.append(q)
+        keep.append(pts[-1])
+        if len(keep) >= 2:
+            b += line(keep, 'mut')
+# Laplace approximation: minimum and covariance from the GGN plus prior precision
+best = min((bdl07_energy(1.4 + i * 0.002, 0.8 + j * 0.002), 1.4 + i * 0.002, 0.8 + j * 0.002)
+           for i in range(201) for j in range(251))
+_, m1, m2 = best
+def bdl07_f(t1, t2):
+    return (t2 * math.tanh(t1 + 1), t2 * math.tanh(-t1 + 1))
+e = 1e-5
+J = [[(bdl07_f(m1 + e, m2)[r] - bdl07_f(m1 - e, m2)[r]) / (2 * e),
+      (bdl07_f(m1, m2 + e)[r] - bdl07_f(m1, m2 - e)[r]) / (2 * e)] for r in range(2)]
+G = [[2 * sum(J[r][a] * J[r][c] for r in range(2)) + (0.4 if a == c else 0) for c in range(2)] for a in range(2)]
+det = G[0][0] * G[1][1] - G[0][1] * G[1][0]
+S = [[G[1][1] / det, -G[0][1] / det], [-G[1][0] / det, G[0][0] / det]]
+tr = S[0][0] + S[1][1]
+disc = math.sqrt(((S[0][0] - S[1][1]) / 2) ** 2 + S[0][1] ** 2)
+l1, l2 = tr / 2 + disc, tr / 2 - disc
+ang = 0.5 * math.atan2(2 * S[0][1], S[0][0] - S[1][1])
+for k, cls, dash in ((1, 'thick', ''), (2, 'thick', ' stroke-dasharray="8 6"')):
+    pts = []
+    for i in range(181):
+        a = 2 * math.pi * i / 180
+        u, w = k * math.sqrt(l1) * math.cos(a), k * math.sqrt(l2) * math.sin(a)
+        x = m1 + u * math.cos(ang) - w * math.sin(ang)
+        y = m2 + u * math.sin(ang) + w * math.cos(ang)
+        pts.append((P.X(x), P.Y(y)))
+    b += line(pts, cls, dash)
+b += '  </g>\n'
+b += f'  <circle class="dot" cx="{P.X(m1):.1f}" cy="{P.Y(m2):.1f}" r="4" />\n'
+b += text(P.X(m1) + 8, P.Y(m2) - 8, var('θ') + '<tspan class="sub" dy="3">*</tspan>', 'start', 'small')
+b += text(P.X(-1.55), P.Y(-1.05) + 4, '0.9', 'middle', 'small')
+b += text(P.X(-2.3), P.Y(0.05) + 4, '1.5', 'middle', 'small')
+for v in (-3, -2, -1, 0, 1, 2, 3):
+    b += text(P.x0 - 6, P.Y(v) + 4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+    b += text(P.X(v), P.y0 + P.h + 16, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+b += f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" />\n'
+b += text(P.X(0), P.y0 + P.h + 36, var('θ') + '<tspan class="sub" dy="3">1</tspan>', 'middle')
+b += text(P.x0 - 34, P.Y(0) + 4, var('θ') + '<tspan class="sub" dy="3">2</tspan>', 'middle')
+svg('Bdl07LaplaceContours', 560, 365, 'Laplace approximation on a two-parameter network',
+    'Grey contour lines of the energy over the two parameters theta 1 and theta 2, each from minus 3 to 3. The landscape has two symmetric minima, one near theta 1 equal to 1.6 and theta 2 equal to 1, the other near minus 1.6 and minus 1, separated by a ridge through the origin. A dot marks the right-hand minimum theta star; a thick solid ellipse around it shows one standard deviation and a thick dashed ellipse two standard deviations of the Laplace approximation. The ellipses follow the local curvature at the minimum but extend over regions where the true energy rises steeply and miss the second minimum entirely.',
+    b)
+
+
+# ===================== Chapter 8: Linearized Laplace approximations =====================
+import numpy as _bdl08_np
+
+def bdl08_sub(t):
+    return f'<tspan class="sub" dy="4">{t}</tspan><tspan dy="-4"> </tspan>'
+
+def bdl08_sup(t):
+    return f'<tspan class="sub" dy="-6">{t}</tspan><tspan dy="6"> </tspan>'
+
+def bdl08_path(P, xs, ys, cls, extra=''):
+    return line([(P.X(a), P.Y(b)) for a, b in zip(xs, ys)], cls, extra)
+
+def bdl08_clip(cid, P):
+    return (f'  <clipPath id="{cid}"><rect x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" /></clipPath>\n')
+
+def bdl08_axes(P, xticks, yticks, xlabel, ylabel):
+    o = ''
+    for v in yticks:
+        o += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid')
+        o += text(P.x0 - 6, P.Y(v) + 4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+    for v in xticks:
+        o += text(P.X(v), P.y0 + P.h + 16, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+    o += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 32, xlabel, 'middle', 'small')
+    o += text(P.x0 - 30, P.y0 + P.h / 2 + 4, ylabel, 'middle', 'small')
+    return o
+
+# ---------- Figure 8.1: the linearized Laplace pipeline ----------
+def bdl08_box(x, y, w, h, lines):
+    s = f'  <rect class="box" x="{x}" y="{y}" width="{w}" height="{h}" rx="3" />\n'
+    n = len(lines)
+    for i, (t, cls) in enumerate(lines):
+        yy = y + h / 2 + 5 + (i - (n - 1) / 2) * 17
+        s += text(x + w / 2, yy, t, 'middle', cls)
+    return s
+
+b = ''
+bw, bh = 140, 62
+r1, r2 = 16, 128
+xs8 = [6, 170, 334, 498]
+b += bdl08_box(xs8[0], r1, 136, bh, [('MAP', None), (var('θ') + bdl08_sub('*'), None)])
+b += bdl08_box(xs8[1], r1, 136, bh, [('linearized network', 'small'), (var('f') + bdl08_sup('θ*'), None)])
+b += bdl08_box(xs8[2], r1, 136, bh, [('logit GP', 'small'), ('𝒢𝒫(' + var('f') + '(·, ' + var('θ') + bdl08_sub('*') + '), ' + var('k') + '(Σ))', None)])
+b += bdl08_box(xs8[3], r1, 136, bh, [('predictive', 'small'), (var('p') + '(' + var('y') + bdl08_sub('*') + ' | ' + var('x') + bdl08_sub('*') + ', 𝒟)', None)])
+b += bdl08_box(xs8[1], r2, 136, bh, [('curvature', 'small'), ('Ψ(' + var('θ') + bdl08_sub('*') + ')', None)])
+b += bdl08_box(xs8[2], r2, 136, bh, [('parameter covariance', 'small'), ('Σ = Ψ(' + var('θ') + bdl08_sub('*') + ')' + bdl08_sup('−1'), None)])
+ym = r1 + bh / 2
+b += arrow([(142, ym), (168, ym)])
+b += arrow([(306, ym), (332, ym)])
+b += arrow([(470, ym), (496, ym)])
+b += arrow([(238, r1 + bh), (238, r2 - 2)])
+b += arrow([(306, r2 + bh / 2), (332, r2 + bh / 2)])
+b += arrow([(402, r2), (402, r1 + bh + 2)])
+svg('Bdl08Pipeline', 640, 206, 'The linearized Laplace pipeline',
+    'Four boxes in a row are joined by arrows: the MAP estimate theta star, the linearized network f superscript theta star, the logit Gaussian process GP of f of dot and theta star with kernel k of Sigma, and the predictive distribution p of y star given x star and the data. Below, an arrow runs from the linearized network down to the curvature Psi of theta star, which feeds the parameter covariance Sigma equal to the inverse of Psi of theta star, and an arrow runs from the parameter covariance up into the logit GP.',
+    b)
+
+# ---------- Figure 8.2: linearized versus nonlinear predictive of the same Laplace posterior ----------
+_np = _bdl08_np
+_rng = _np.random.default_rng(3)
+_N2 = 90
+_x2 = _np.concatenate([_rng.uniform(0, 1.5, 40), _rng.uniform(2.5, 5.8, 50)])
+_y2 = -1.2 * _np.sin(1.25 * _x2) + 0.5 * _np.sin(2.6 * _x2) + 0.3 * _rng.standard_normal(_N2)
+_H2 = 50
+_P2 = 3 * _H2 + 1
+
+def bdl08_mlp(t, x):
+    W1, b1, W2, b2 = t[:_H2], t[_H2:2*_H2], t[2*_H2:3*_H2], t[3*_H2]
+    return _np.tanh(_np.outer(x, W1) + b1) @ W2 + b2
+
+def bdl08_mlp_jac(t, x):
+    W1, b1, W2 = t[:_H2], t[_H2:2*_H2], t[2*_H2:3*_H2]
+    h = _np.tanh(_np.outer(x, W1) + b1)
+    d = (1 - h**2) * W2
+    return _np.hstack([d * x[:, None], d, h, _np.ones((len(x), 1))])
+
+_t2 = _np.concatenate([_rng.normal(0, 1.5, _H2), _rng.normal(0, 1.5, _H2), _rng.normal(0, 1 / _np.sqrt(_H2), _H2), [0.0]])
+_sig2, _delta2 = 0.3, 1.0
+_m = _np.zeros(_P2); _v = _np.zeros(_P2)
+for _it in range(20000):
+    _r = bdl08_mlp(_t2, _x2) - _y2
+    _g = bdl08_mlp_jac(_t2, _x2).T @ _r / _sig2**2 + _delta2 * _t2
+    _m = 0.9 * _m + 0.1 * _g; _v = 0.999 * _v + 0.001 * _g**2
+    _t2 -= 0.01 * (_m / (1 - 0.9**(_it + 1))) / (_np.sqrt(_v / (1 - 0.999**(_it + 1))) + 1e-8)
+_J2 = bdl08_mlp_jac(_t2, _x2)
+_S2 = _np.linalg.inv(_J2.T @ _J2 / _sig2**2 + _delta2 * _np.eye(_P2))
+_L2 = _np.linalg.cholesky(_S2)
+_xs2 = _np.linspace(-1.2, 7.5, 200)
+_Js2 = bdl08_mlp_jac(_t2, _xs2)
+_mu2 = bdl08_mlp(_t2, _xs2)
+_sd_lin = _np.sqrt(_np.einsum('ij,jk,ik->i', _Js2, _S2, _Js2))
+_draws = _L2 @ _rng.standard_normal((_P2, 10))
+_paths_lin = [_mu2 + _Js2 @ _draws[:, i] for i in range(10)]
+_paths_nl = [bdl08_mlp(_t2 + _draws[:, i], _xs2) for i in range(10)]
+_mc = _np.zeros_like(_xs2); _mc2 = _np.zeros_like(_xs2); _nmc = 0
+for _blk in range(20):
+    _th = _t2[:, None] + _L2 @ _rng.standard_normal((_P2, 1000))
+    for _i in range(1000):
+        _fv = bdl08_mlp(_th[:, _i], _xs2); _mc += _fv; _mc2 += _fv**2; _nmc += 1
+_mu_nl = _mc / _nmc
+_sd_nl = _np.sqrt(_np.maximum(_mc2 / _nmc - _mu_nl**2, 0))
+
+def bdl08_panel82(P, cid, mean, sd, paths, label, show_y):
+    o = ''
+    o += bdl08_axes(P, [0, 2, 4, 6], [-3, -2, -1, 0, 1], var('x'), var('y') if show_y else '')
+    o += f'  <g clip-path="url(#{cid})">\n'
+    for pth in paths:
+        o += bdl08_path(P, _xs2, pth, 'mut', ' stroke-width="0.9" stroke-opacity="0.7"')
+    o += bdl08_path(P, _xs2, mean + 1.96 * sd, 'ln', ' stroke-dasharray="4 3"')
+    o += bdl08_path(P, _xs2, mean - 1.96 * sd, 'ln', ' stroke-dasharray="4 3"')
+    o += bdl08_path(P, _xs2, mean, 'thick')
+    for a, c in zip(_x2, _y2):
+        o += f'  <circle class="dot" cx="{P.X(a):.1f}" cy="{P.Y(c):.1f}" r="2.6" />\n'
+    o += '  </g>\n'
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 50, label, 'middle')
+    return o
+
+PA = Plot(52, 14, 250, 200, (-1.2, 7.5), (-3.2, 1.6))
+PB = Plot(372, 14, 250, 200, (-1.2, 7.5), (-3.2, 1.6))
+b = '  <defs>\n' + bdl08_clip('bdl08lin-clip-a', PA) + bdl08_clip('bdl08lin-clip-b', PB) + '  </defs>\n'
+b += bdl08_panel82(PA, 'bdl08lin-clip-a', _mu2, _sd_lin, _paths_lin, '(a)', True)
+b += bdl08_panel82(PB, 'bdl08lin-clip-b', _mu_nl, _sd_nl, _paths_nl, '(b)', True)
+svg('Bdl08LinVsNonlin', 640, 284, 'One Laplace posterior under the linearized and the nonlinear predictive',
+    'Two panels share a one-dimensional regression data set with inputs between 0 and 1.5 and between 2.5 and 5.8, and the same ten parameter draws from a full Laplace posterior of a small tanh network. Panel a, linearized network: the thin sample paths, the solid predictive mean and the dashed 95 percent bounds follow the data closely and widen only away from it. Panel b, nonlinear network: the sample paths swing far outside the plotted range, the dashed bounds lie outside the plot over the whole input range and the solid Monte Carlo mean misses the data.',
+    b)
+
+# ---------- Figure 8.3: one-dimensional regression with a Bayesian last layer ----------
+_rng3 = _np.random.default_rng(8)
+_x3 = _np.sort(_np.concatenate([_rng3.uniform(-3.1, -0.2, 11), _rng3.uniform(1.15, 3.0, 9)]))
+_g3 = lambda x: 0.55 - 0.32 * x + 0.62 * _np.sin(2.1 * x + 0.1) - 0.08 * x**2
+_s3 = lambda x: 0.06 + 0.32 / (1 + _np.exp(-3.0 * (x - 0.6)))
+_y3 = _g3(_x3) + _s3(_x3) * _rng3.standard_normal(len(_x3))
+_c3 = _np.linspace(-3.6, 3.6, 13)
+
+def bdl08_feat(x):
+    x = _np.atleast_1d(x)
+    return _np.hstack([_np.exp(-0.5 * ((x[:, None] - _c3[None, :]) / 0.7)**2), _np.ones((len(x), 1)), x[:, None]])
+
+_Phi3 = bdl08_feat(_x3)
+_W3 = 1 / _s3(_x3)**2
+_A3 = _Phi3.T @ (_W3[:, None] * _Phi3) + 1.0 * _np.eye(_Phi3.shape[1])
+_S3 = _np.linalg.inv(_A3)
+_w3 = _S3 @ (_Phi3.T @ (_W3 * _y3))
+_xs3 = _np.linspace(-3.2, 3.2, 260)
+_F3 = bdl08_feat(_xs3)
+_mu3 = _F3 @ _w3
+_sd3 = _np.sqrt(_np.einsum('ij,jk,ik->i', _F3, _S3, _F3))
+_so3 = _np.sqrt(_sd3**2 + _s3(_xs3)**2)
+
+P3 = Plot(60, 60, 560, 200, (-3.2, 3.2), (-2.7, 2.3))
+b = '  <defs>\n' + bdl08_clip('bdl08llr-clip', P3) + '  </defs>\n'
+b += bdl08_axes(P3, [-3, -2, -1, 0, 1, 2, 3], [-2, -1, 0, 1, 2], var('x'), var('y'))
+b += '  <g clip-path="url(#bdl08llr-clip)">\n'
+band = [(P3.X(a), P3.Y(c)) for a, c in zip(_xs3, _mu3 + 1.96 * _sd3)] + [(P3.X(a), P3.Y(c)) for a, c in zip(_xs3[::-1], (_mu3 - 1.96 * _sd3)[::-1])]
+b += '  <path class="band" d="' + ' '.join(('M' if i == 0 else 'L') + f'{p[0]:.1f},{p[1]:.1f}' for i, p in enumerate(band)) + ' Z" />\n'
+b += bdl08_path(P3, _xs3, _g3(_xs3), 'mut', ' stroke-dasharray="1.5 3"')
+b += bdl08_path(P3, _xs3, _mu3 + 1.96 * _so3, 'ln', ' stroke-dasharray="4 3" stroke-width="1"')
+b += bdl08_path(P3, _xs3, _mu3 - 1.96 * _so3, 'ln', ' stroke-dasharray="4 3" stroke-width="1"')
+b += bdl08_path(P3, _xs3, _mu3, 'thick')
+for a, c in zip(_x3, _y3):
+    e = 1.0 * _s3(a)
+    b += line([(P3.X(a), P3.Y(c - e)), (P3.X(a), P3.Y(c + e))], 'mut')
+    b += f'  <circle class="dot" cx="{P3.X(a):.1f}" cy="{P3.Y(c):.1f}" r="3" />\n'
+b += '  </g>\n'
+lx, ly = 100, 14
+b += f'  <rect class="band" x="{lx}" y="{ly}" width="28" height="11" />\n' + text(lx + 36, ly + 10, 'GP latent 95%', 'start', 'small')
+b += line([(lx, ly + 30), (lx + 28, ly + 30)], 'mut', ' stroke-dasharray="1.5 3"') + text(lx + 36, ly + 34, 'signal', 'start', 'small')
+b += line([(lx + 170, ly + 6), (lx + 198, ly + 6)], 'thick') + text(lx + 206, ly + 10, 'MAP / GP mean', 'start', 'small')
+b += line([(lx + 170, ly + 30), (lx + 198, ly + 30)], 'ln', ' stroke-dasharray="4 3" stroke-width="1"') + text(lx + 206, ly + 34, 'observation 95%', 'start', 'small')
+b += line([(lx + 350, ly - 1), (lx + 350, ly + 13)], 'mut') + f'  <circle class="dot" cx="{lx + 350}" cy="{ly + 6}" r="3" />\n' + text(lx + 362, ly + 10, 'training data', 'start', 'small')
+svg('Bdl08LastLayerRegression', 640, 300, 'Linearized Laplace regression with a Bayesian last layer and input-dependent noise',
+    'Twenty training points with one-standard-deviation error bars: eleven between x equal to minus 3.1 and minus 0.2 with small noise, nine between 1.15 and 3 with much larger noise, and a gap in between. The solid MAP and GP mean follows the dotted signal, the shaded latent 95 percent band is narrow on the left, widens slightly in the gap and widens more on the noisy right, and the dashed observation 95 percent curves sit close to the band on the left and far outside it on the right.',
+    b)
+
+# ---------- Figure 8.4: Iris last-layer Laplace classification ----------
+_iris_v = '3.2,1.4 3.2,1.5 3.1,1.5 2.3,1.3 2.8,1.5 2.8,1.3 3.3,1.6 2.4,1.0 2.9,1.3 2.7,1.4 2.0,1.0 3.0,1.5 2.2,1.0 2.9,1.4 2.9,1.3 3.1,1.4 3.0,1.5 2.7,1.0 2.2,1.5 2.5,1.1 3.2,1.8 2.8,1.3 2.5,1.5 2.8,1.2 2.9,1.3 3.0,1.4 2.8,1.4 3.0,1.7 2.9,1.5 2.6,1.0 2.4,1.1 2.4,1.0 2.7,1.2 2.7,1.6 3.0,1.5 3.4,1.6 3.1,1.5 2.3,1.3 3.0,1.3 2.5,1.3 2.6,1.2 3.0,1.4 2.6,1.2 2.3,1.0 2.7,1.3 3.0,1.2 2.9,1.3 2.9,1.3 2.5,1.1 2.8,1.3'
+_iris_g = '3.3,2.5 2.7,1.9 3.0,2.1 2.9,1.8 3.0,2.2 3.0,2.1 2.5,1.7 2.9,1.8 2.5,1.8 3.6,2.5 3.2,2.0 2.7,1.9 3.0,2.1 2.5,2.0 2.8,2.4 3.2,2.3 3.0,1.8 3.8,2.2 2.6,2.3 2.2,1.5 3.2,2.3 2.8,2.0 2.8,2.0 2.7,1.8 3.3,2.1 3.2,1.8 2.8,1.8 3.0,1.8 2.8,2.1 3.0,1.6 2.8,1.9 3.8,2.0 2.8,2.2 2.8,1.5 2.6,1.4 3.0,2.3 3.4,2.4 3.1,1.8 3.0,1.8 3.1,2.1 3.1,2.4 3.1,2.3 2.7,1.9 3.2,2.3 3.3,2.5 3.0,2.3 2.5,1.9 3.0,2.0 3.4,2.3 3.0,1.8'
+_X4 = _np.array([[float(u) for u in p.split(',')] for p in (_iris_v + ' ' + _iris_g).split()])
+_Y4 = _np.array([0] * 50 + [1] * 50)
+_rng4 = _np.random.default_rng(4)
+_split = _np.empty(100, dtype=int)
+for _cls in (0, 1):
+    _idx = _rng4.permutation(_np.where(_Y4 == _cls)[0])
+    _split[_idx[:30]] = 0; _split[_idx[30:40]] = 1; _split[_idx[40:]] = 2
+_mu4 = _X4.mean(0); _sdv4 = _X4.std(0)
+_Wf = _rng4.normal(0, 1.5, (2, 60)); _bf = _rng4.uniform(-2, 2, 60)
+
+def bdl08_iris_feat(X):
+    Z = (X - _mu4) / _sdv4
+    return _np.hstack([_np.tanh(Z @ _Wf + _bf), _np.ones((len(X), 1))])
+
+def bdl08_sigmoid(a):
+    return 1 / (1 + _np.exp(-a))
+
+def bdl08_fit(Phi, y, alpha):
+    w = _np.zeros(Phi.shape[1])
+    for _ in range(100):
+        p = bdl08_sigmoid(Phi @ w)
+        Hm = Phi.T @ (Phi * (p * (1 - p))[:, None]) + alpha * _np.eye(len(w))
+        w -= _np.linalg.solve(Hm, Phi.T @ (p - y) + alpha * w)
+    p = bdl08_sigmoid(Phi @ w)
+    Hm = Phi.T @ (Phi * (p * (1 - p))[:, None]) + alpha * _np.eye(len(w))
+    return w, _np.linalg.inv(Hm)
+
+_eps4 = _np.random.default_rng(5).standard_normal(2000)
+def bdl08_mc(m, v):
+    return bdl08_sigmoid(m[:, None] + _np.sqrt(v)[:, None] * _eps4[None, :]).mean(1)
+
+_Phi4 = bdl08_iris_feat(_X4)
+_tr, _va = _split == 0, _split == 1
+_best = None
+for _alpha in [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10]:
+    _w, _S = bdl08_fit(_Phi4[_tr], _Y4[_tr], _alpha)
+    _m = _Phi4[_va] @ _w; _vv = _np.einsum('ij,jk,ik->i', _Phi4[_va], _S, _Phi4[_va])
+    _p = _np.clip(bdl08_mc(_m, _vv), 1e-9, 1 - 1e-9)
+    _ls = -_np.mean(_Y4[_va] * _np.log(_p) + (1 - _Y4[_va]) * _np.log(1 - _p))
+    if _best is None or _ls < _best[0]:
+        _best = (_ls, _alpha, _w, _S)
+_, _alpha4, _w4, _S4 = _best
+
+_xr4, _yr4 = (1.9, 3.95), (0.9, 2.6)
+_nx4, _ny4 = 60, 43
+_gx = _np.linspace(_xr4[0], _xr4[1], _nx4); _gy = _np.linspace(_yr4[1], _yr4[0], _ny4)
+_GX, _GY = _np.meshgrid(_gx, _gy)
+_G4 = _np.column_stack([_GX.ravel(), _GY.ravel()])
+_F4 = bdl08_iris_feat(_G4)
+_m4 = _F4 @ _w4
+_v4 = _np.einsum('ij,jk,ik->i', _F4, _S4, _F4)
+_p_map = bdl08_sigmoid(_m4)
+_p_mc = bdl08_mc(_m4, _v4)
+_p_pr = bdl08_sigmoid(_m4 / _np.sqrt(1 + _np.pi * _v4 / 8))
+_pc = _np.clip(_p_mc, 1e-12, 1 - 1e-12)
+_ent = -(_pc * _np.log(_pc) + (1 - _pc) * _np.log(1 - _pc)) / _np.log(2)
+
+def bdl08_heat(P, vals, levels=20):
+    q = _np.round(vals.reshape(_ny4, _nx4) * levels) / levels
+    cw, ch = P.w / _nx4, P.h / _ny4
+    o = '  <g class="dot">\n'
+    for j in range(_ny4):
+        i = 0
+        while i < _nx4:
+            k = i
+            while k + 1 < _nx4 and q[j, k + 1] == q[j, i]:
+                k += 1
+            if q[j, i] > 0:
+                o += (f'  <rect x="{P.x0 + i * cw:.1f}" y="{P.y0 + j * ch:.1f}" width="{(k - i + 1) * cw + 0.3:.1f}" '
+                      f'height="{ch + 0.3:.1f}" fill-opacity="{0.85 * q[j, i]:.2f}" />\n')
+            i = k + 1
+    return o + '  </g>\n'
+
+def bdl08_marker(P, xv, yv, kind, black):
+    cls = 'arrowhead' if black else 'box'
+    X, Y = P.X(xv), P.Y(yv)
+    if kind == 0:
+        return f'  <circle class="{cls}" cx="{X:.1f}" cy="{Y:.1f}" r="3.4" stroke-width="1" />\n'
+    if kind == 1:
+        return f'  <path class="{cls}" d="M{X:.1f},{Y - 4:.1f} L{X + 3.8:.1f},{Y + 2.8:.1f} L{X - 3.8:.1f},{Y + 2.8:.1f} Z" stroke-width="1" />\n'
+    return f'  <rect class="{cls}" x="{X - 3.2:.1f}" y="{Y - 3.2:.1f}" width="6.4" height="6.4" stroke-width="1" />\n'
+
+def bdl08_panel84(P, vals, label):
+    o = bdl08_heat(P, vals)
+    o += f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" stroke-width="1" />\n'
+    for (xv, yv), cl, sp in zip(_X4, _Y4, _split):
+        o += bdl08_marker(P, xv, yv, sp, cl == 1)
+    for v in (2.0, 2.5, 3.0, 3.5):
+        o += text(P.X(v), P.y0 + P.h + 14, f'{v:g}', 'middle', 'small')
+    for v in (1.0, 1.5, 2.0, 2.5):
+        o += text(P.x0 - 5, P.Y(v) + 4, f'{v:g}', 'end', 'small')
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 46, label, 'middle')
+    return o
+
+_pw, _ph = 262, 186
+_Q = [Plot(52, 34, _pw, _ph, _xr4, _yr4), Plot(368, 34, _pw, _ph, _xr4, _yr4),
+      Plot(52, 316, _pw, _ph, _xr4, _yr4), Plot(368, 316, _pw, _ph, _xr4, _yr4)]
+b = ''
+for Pq, vals, lab in zip(_Q, [_p_map, _p_mc, _p_pr, _ent], ['(a) MAP', '(b) Monte Carlo softmax', '(c) probit approximation', '(d) predictive entropy']):
+    b += bdl08_panel84(Pq, vals, lab)
+    b += text(Pq.x0 + Pq.w / 2, Pq.y0 + Pq.h + 30, 'sepal width (cm)', 'middle', 'small')
+    b += text(Pq.x0 - 34, Pq.y0 - 10, 'petal width (cm)', 'start', 'small')
+svg('Bdl08IrisLaplace', 640, 590, 'Last-layer Laplace classification of two Iris species',
+    'Four heat maps over sepal width from 1.9 to 3.95 centimeters and petal width from 0.9 to 2.6 centimeters, each overlaid with the 100 versicolor (open markers) and virginica (filled markers) flowers, with circles for training, triangles for validation and squares for test points. In panels a to c the accent shading gives the probability of virginica: the MAP panel switches sharply from light at small petal width to dark at large petal width, while the Monte Carlo and probit panels show the same boundary with a broader, softer transition that fades toward intermediate shading away from the data, and the two are nearly identical. Panel d shades the predictive entropy, which is highest along the class boundary and away from the data and lowest in the two class clusters.',
+    b)
+
+
+# ---------- Bdl09: Figure 9.1, fibers of the restricted network and the tangent space ----------
+def bdl09_proj(cx, cy, s, x, y, z):
+    # oblique projection: x to the right, y into the page (foreshortened), z up
+    return (cx + s * (x + 0.30 * y), cy - s * (0.9 * z - 0.30 * y))
+
+def bdl09_bowl(cx, cy, s, rim_cls='ln'):
+    o = ''
+    # parallels (circles of radius r at height r^2)
+    for r in (0.25, 0.5, 0.75):
+        pts = [bdl09_proj(cx, cy, s, r * math.cos(2 * math.pi * i / 72), r * math.sin(2 * math.pi * i / 72), r * r) for i in range(73)]
+        o += line(pts, 'mut')
+    # meridians
+    for k in range(12):
+        a = 2 * math.pi * k / 12
+        pts = [bdl09_proj(cx, cy, s, r * math.cos(a), r * math.sin(a), r * r) for r in [i / 20 for i in range(21)]]
+        o += line(pts, 'mut')
+    # rim
+    pts = [bdl09_proj(cx, cy, s, math.cos(2 * math.pi * i / 90), math.sin(2 * math.pi * i / 90), 1.0) for i in range(91)]
+    o += line(pts, rim_cls)
+    # outline of the visible sides
+    for sgn in (-1, 1):
+        pts = [bdl09_proj(cx, cy, s, sgn * r, 0, r * r) for r in [i / 20 for i in range(21)]]
+        o += line(pts, rim_cls)
+    return o
+
+b = ''
+# left panel: one fiber and its tangent plane at theta0
+cx, cy, s = 175, 190, 90
+corners = [(-1.3, -1.1), (1.3, -1.1), (1.3, 1.1), (-1.3, 1.1)]
+pts = [bdl09_proj(cx, cy, s, x, y, 0) for x, y in corners]
+b += f'  <polygon class="region" points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" />\n'
+b += line(pts + [pts[0]], 'mut')
+b += bdl09_bowl(cx, cy, s)
+b += f'  <circle class="dot" cx="{cx}" cy="{cy}" r="4" />\n'
+b += text(cx + 8, cy + 20, var('θ') + '<tspan class="sub" dy="3">0</tspan>', 'start', 'small')
+b += text(18, 64, var('ℳ') + '(' + var('θ') + '<tspan class="sub" dy="3">0</tspan><tspan dy="-3">)</tspan>', 'start')
+b += text(18, 200, var('T') + '<tspan class="sub" dy="3">θ0</tspan><tspan dy="-3"> </tspan>' + var('ℳ') + '(' + var('θ') + '<tspan class="sub" dy="3">0</tspan><tspan dy="-3">)</tspan>', 'start')
+# right panel: three fibers stacked in parameter space
+cx2, s2 = 480, 80
+for k, (yy, lab) in enumerate(((140, '0'), (195, '1'), (250, '2'))):
+    b += bdl09_bowl(cx2, yy, s2, 'ln' if k == 0 else 'ln')
+for yy, lab, ly in ((140, '0', 64), (195, '1', 120), (250, '2', 176)):
+    b += text(330, ly, var('ℳ') + '(' + var('θ') + f'<tspan class="sub" dy="3">{lab}</tspan><tspan dy="-3">)</tspan>', 'start')
+svg('Bdl09Fibers', 640, 262, 'Fibers of the restricted network and the tangent space of one fiber',
+    'Left: a curved bowl-shaped surface labelled M of theta 0, the fiber through the parameter theta 0, with a flat shaded plane touching it at its lowest point theta 0, labelled T theta 0 M of theta 0, the tangent space of the fiber. Right: three such bowl-shaped surfaces stacked above one another, labelled M of theta 0, M of theta 1 and M of theta 2, three disjoint fibers into which the parameter space is partitioned.',
+    b)
+
+
+# ---------- Bdl10: Figure 10.1, MAP vs Laplace vs RGPR confidence on two moons ----------
+# Schematic reproduction computed here: a small ReLU network (2-32-32-1) trained by
+# full-batch Adam on a two-moons data set, a last-layer Laplace approximation with the
+# probit (MacKay) approximation, and an RGPR term with variance growing cubically in |x|.
+import numpy as _np10
+
+def bdl10_moons(n, noise, rng):
+    m = n // 2
+    t1 = _np10.linspace(0, _np10.pi, m); t2 = _np10.linspace(0, _np10.pi, n - m)
+    a = _np10.stack([_np10.cos(t1), _np10.sin(t1)], 1)
+    b = _np10.stack([1 - _np10.cos(t2), 1 - _np10.sin(t2) - 0.5], 1)
+    X = _np10.concatenate([a, b]) + noise * rng.standard_normal((n, 2))
+    y = _np10.concatenate([_np10.zeros(m), _np10.ones(n - m)])
+    X = (X - _np10.array([0.5, 0.25])) * 2.0
+    return X, y
+
+def bdl10_train():
+    rng = _np10.random.default_rng(10)
+    X, y = bdl10_moons(160, 0.12, rng)
+    sizes = [2, 32, 32, 1]
+    W = [rng.standard_normal((sizes[i], sizes[i+1])) * _np10.sqrt(2.0 / sizes[i]) for i in range(3)]
+    B = [_np10.zeros(sizes[i+1]) for i in range(3)]
+    params = W + B
+    m = [_np10.zeros_like(p) for p in params]; v = [_np10.zeros_like(p) for p in params]
+    lr, wd = 0.01, 5e-4
+    for it in range(1, 4001):
+        h1p = X @ W[0] + B[0]; h1 = _np10.maximum(h1p, 0)
+        h2p = h1 @ W[1] + B[1]; h2 = _np10.maximum(h2p, 0)
+        f = (h2 @ W[2] + B[2])[:, 0]
+        p = 1 / (1 + _np10.exp(-f))
+        g = (p - y)[:, None] / len(y)
+        gW2 = h2.T @ g; gB2 = g.sum(0)
+        d2 = (g @ W[2].T) * (h2p > 0)
+        gW1 = h1.T @ d2; gB1 = d2.sum(0)
+        d1 = (d2 @ W[1].T) * (h1p > 0)
+        gW0 = X.T @ d1; gB0 = d1.sum(0)
+        grads = [gW0 + wd*W[0], gW1 + wd*W[1], gW2 + wd*W[2], gB0, gB1, gB2]
+        for k in range(6):
+            m[k] = 0.9*m[k] + 0.1*grads[k]; v[k] = 0.999*v[k] + 0.001*grads[k]**2
+            mh = m[k] / (1 - 0.9**it); vh = v[k] / (1 - 0.999**it)
+            params[k] -= lr * mh / (_np10.sqrt(vh) + 1e-8)
+    return X, y, W, B
+
+def bdl10_feat(Xq, W, B):
+    h1 = _np10.maximum(Xq @ W[0] + B[0], 0)
+    h2 = _np10.maximum(h1 @ W[1] + B[1], 0)
+    return _np10.concatenate([h2, _np10.ones((len(Xq), 1))], 1)
+
+bdl10_X, bdl10_y, bdl10_W, bdl10_B = bdl10_train()
+bdl10_w = _np10.concatenate([bdl10_W[2][:, 0], bdl10_B[2]])
+_phi = bdl10_feat(bdl10_X, bdl10_W, bdl10_B)
+_pp = 1 / (1 + _np10.exp(-_phi @ bdl10_w))
+bdl10_prior_var = 100.0
+_H = (_phi * (_pp*(1-_pp))[:, None]).T @ _phi + _np10.eye(len(bdl10_w)) / bdl10_prior_var
+bdl10_Sigma = _np10.linalg.inv(_H)
+
+def bdl10_conf(Xq, kind):
+    ph = bdl10_feat(Xq, bdl10_W, bdl10_B)
+    mu = ph @ bdl10_w
+    if kind == 'map':
+        s2 = _np10.zeros_like(mu)
+    else:
+        s2 = _np10.einsum('ij,jk,ik->i', ph, bdl10_Sigma, ph)
+        if kind == 'rgpr':
+            s2 = s2 + 1000.0 * (_np10.maximum(_np10.abs(Xq) - 3.0, 0)**3).sum(1) / 3
+    p = 1 / (1 + _np10.exp(-mu / _np10.sqrt(1 + _np10.pi * s2 / 8)))
+    return _np10.maximum(p, 1 - p), mu
+
+def bdl10_contour(F, xs, ys, P):
+    # marching squares for the zero level of F (F[j, i] at x = xs[i], y = ys[j])
+    segs = ''
+    for j in range(len(ys) - 1):
+        for i in range(len(xs) - 1):
+            c = [(xs[i], ys[j], F[j, i]), (xs[i+1], ys[j], F[j, i+1]),
+                 (xs[i+1], ys[j+1], F[j+1, i+1]), (xs[i], ys[j+1], F[j+1, i])]
+            pts = []
+            for k in range(4):
+                (xa, ya, fa), (xb, yb, fb) = c[k], c[(k+1) % 4]
+                if (fa > 0) != (fb > 0):
+                    t = fa / (fa - fb)
+                    pts.append((xa + t*(xb-xa), ya + t*(yb-ya)))
+            for a in range(0, len(pts) - 1, 2):
+                (x1, y1), (x2, y2) = pts[a], pts[a+1]
+                segs += f'M{P.X(x1):.1f},{P.Y(y1):.1f} L{P.X(x2):.1f},{P.Y(y2):.1f} '
+    return f'  <path class="thick" d="{segs.strip()}" />\n'
+
+def bdl10_panel(x0, y0, size, kind, title, show_y):
+    P = Plot(x0, y0, size, size, (-5, 5), (-5, 5))
+    o = ''
+    # heatmap: 32 x 32 cells, opacity quantized to steps of 0.1, equal cells merged along rows
+    n = 32; cell = 10 / n
+    cs = _np10.array([[-5 + (i + 0.5)*cell, -5 + (j + 0.5)*cell] for j in range(n) for i in range(n)])
+    conf, _ = bdl10_conf(cs, kind)
+    lev = _np10.round((conf - 0.5) / 0.5 * 10).astype(int).reshape(n, n)
+    o += '  <g class="dot" shape-rendering="crispEdges">\n'
+    for j in range(n):
+        i = 0
+        while i < n:
+            k = i
+            while k + 1 < n and lev[j, k + 1] == lev[j, i]:
+                k += 1
+            if lev[j, i] > 0:
+                x1 = P.X(-5 + i*cell); x2 = P.X(-5 + (k + 1)*cell)
+                y1 = P.Y(-5 + (j + 1)*cell); y2 = P.Y(-5 + j*cell)
+                o += (f'    <rect x="{x1:.1f}" y="{y1:.1f}" width="{x2 - x1:.1f}" height="{y2 - y1:.1f}" '
+                      f'fill-opacity="{lev[j, i]/10:.1f}" />\n')
+            i = k + 1
+    o += '  </g>\n'
+    g = 60; xs = _np10.linspace(-5, 5, g); ys = _np10.linspace(-5, 5, g)
+    XX, YY = _np10.meshgrid(xs, ys)
+    _, mu = bdl10_conf(_np10.stack([XX.ravel(), YY.ravel()], 1), 'map')
+    o += bdl10_contour(mu.reshape(g, g), xs, ys, P)
+    o += '  <g style="stroke-width:0.8">\n'
+    for (px, py), lab in zip(bdl10_X, bdl10_y):
+        cls = 'arrowhead' if lab == 0 else 'box'
+        o += f'    <circle class="{cls}" cx="{P.X(px):.1f}" cy="{P.Y(py):.1f}" r="1.8" />\n'
+    o += '  </g>\n'
+    o += f'  <rect class="ln" x="{x0}" y="{y0}" width="{size}" height="{size}" />\n'
+    for v in (-4, -2, 0, 2, 4):
+        o += text(P.X(v), y0 + size + 13, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+        if show_y:
+            o += text(x0 - 4, P.Y(v) + 4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+    o += text(x0 + size/2, y0 + size + 29, var('x') + '<tspan class="sub" dy="3">1</tspan>', 'middle')
+    o += text(x0 + size/2, y0 - 8, title, 'middle')
+    return o
+
+b = ''
+S = 128
+b += text(14, 28 + S/2, var('x') + '<tspan class="sub" dy="3">2</tspan>', 'middle')
+b += bdl10_panel(42, 28, S, 'map', 'MAP', True)
+b += bdl10_panel(42 + S + 12, 28, S, 'laplace', 'Laplace', False)
+b += bdl10_panel(42 + 2*(S + 12), 28, S, 'rgpr', 'RGPR', False)
+# far-right panel: confidence along a ray alpha * x0, log-scaled distance
+_dir = _np10.array([0.6, -0.8])
+lx0 = 42 + 3*(S + 12) + 34
+Q = Plot(lx0, 28, 150, S, (0, 2), (0.45, 1.02))
+b += line([(Q.x0, Q.Y(0.5)), (Q.x0 + Q.w, Q.Y(0.5))], 'grid')
+for v in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0):
+    b += text(Q.x0 - 4, Q.Y(v) + 4, f'{v:.1f}', 'end', 'small')
+    b += line([(Q.x0, Q.Y(v)), (Q.x0 + Q.w, Q.Y(v))], 'grid')
+b += f'  <rect class="ln" x="{Q.x0}" y="{Q.y0}" width="{Q.w}" height="{Q.h}" />\n'
+b += text(Q.X(0), Q.y0 + Q.h + 14, '10<tspan dy="-5" class="sub">0</tspan>', 'middle', 'small')
+b += text(Q.X(1), Q.y0 + Q.h + 14, '10<tspan dy="-5" class="sub">1</tspan>', 'middle', 'small')
+b += text(Q.X(2), Q.y0 + Q.h + 14, '10<tspan dy="-5" class="sub">2</tspan>', 'middle', 'small')
+b += text(Q.x0 + Q.w/2, Q.y0 + Q.h + 29, 'Distance from origin', 'middle', 'small')
+b += text(Q.x0 + Q.w/2, 20, 'Confidence', 'middle')
+_ls = _np10.linspace(0, 2, 160)
+_ray = (10**_ls)[:, None] * _dir[None, :]
+_styles = {'map': ('thick', ''), 'laplace': ('ln', ' stroke-dasharray="5 3"'), 'rgpr': ('acc', ' stroke-dasharray="7 3 2 3"')}
+bdl10_rayconf = {}
+for kind, (cls, extra) in _styles.items():
+    c, _ = bdl10_conf(_ray, kind)
+    bdl10_rayconf[kind] = c
+    b += line([(Q.X(l), Q.Y(cv)) for l, cv in zip(_ls, c)], cls, extra)
+ly = Q.y0 + Q.h + 52
+for k, (kind, lab) in enumerate([('map', 'MAP'), ('laplace', 'Laplace'), ('rgpr', 'RGPR')]):
+    cls, extra = _styles[kind]
+    xx = 120 + k * 150
+    b += line([(xx, ly - 4), (xx + 28, ly - 4)], cls, extra)
+    b += text(xx + 34, ly, lab, 'start', 'small')
+# colour bar for the heatmap shading (confidence 0.5 to 1.0), as in the original figure
+cbx = Q.x0 + Q.w + 10
+b += '  <g class="dot" shape-rendering="crispEdges">\n'
+for k in range(1, 11):
+    yb = Q.Y(0.5 + 0.05 * (k - 1)); yt = Q.Y(0.5 + 0.05 * k)
+    b += f'    <rect x="{cbx}" y="{yt:.1f}" width="8" height="{yb - yt + 0.6:.1f}" fill-opacity="{k/10:.1f}" />\n'
+b += '  </g>\n'
+b += f'  <rect class="ln" x="{cbx}" y="{Q.Y(1.0):.1f}" width="8" height="{Q.Y(0.5) - Q.Y(1.0):.1f}" style="stroke-width:1" />\n'
+for v, lab in ((0.5, '0.5'), (0.75, '0.75'), (1.0, '1.0')):
+    b += text(cbx + 11, Q.Y(v) + 4, lab, 'start', 'small')
+b += text(42, ly + 22, 'Shading: stronger = higher confidence (0.5 to 1). Line: decision boundary, p = 0.5.', 'start', 'small')
+svg('Bdl10OverconfidenceRgpr', 700, 28 + S + 105, 'Predictive confidence of MAP, Laplace and RGPR on two moons',
+    'Three square panels over the input square from minus 5 to 5 show the confidence of a ReLU network on a two-moons data set, with the decision boundary drawn as a line. In the MAP panel nearly the whole plane is shaded dark, meaning confidence close to 1 everywhere except along the boundary. In the Laplace panel the shading fades with distance from the data. In the RGPR panel the shading is light everywhere away from the data. A fourth panel plots the maximum confidence along a ray against the distance from the origin on a logarithmic axis from 1 to 100: the MAP curve rises to 1, the Laplace curve levels off below 1, and the RGPR curve falls back toward 0.5. A colour bar beside it maps the shading to confidence values from 0.5 to 1.0.',
+    b)
+print('ray confidence at distance 100:', {k: round(float(v[-1]), 3) for k, v in bdl10_rayconf.items()})
+
+
+# ---------- Chapter 11: model selection with the marginal likelihood ----------
+import random as bdl11_random
+
+def bdl11_gauss(mu, s, a):
+    return lambda x: a * math.exp(-0.5 * ((x - mu) / s) ** 2)
+
+# Figure 11.1: Occam's razor
+def bdl11_occam():
+    P = Plot(60, 30, 540, 200, (-1.0, 1.0), (0, 1.05))
+    b = ''
+    b += f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" />\n'
+    simple = bdl11_gauss(0.0, 0.17, 1.0)
+    inter = bdl11_gauss(0.0, 0.40, 0.49)
+    comp = bdl11_gauss(0.0, 1.4, 0.19)
+    b += P.curve(simple, cls='thick')
+    b += P.curve(inter, cls='thick', extra=' stroke-dasharray="9 6"')
+    b += P.curve(comp, cls='thick', extra=' stroke-dasharray="2 5"')
+    xd = 0.33
+    b += line([(P.X(xd), P.Y(0) + 12), (P.X(xd), P.Y(inter(xd)))], 'ln', ' stroke-dasharray="4 3"')
+    for f in (simple, inter, comp):
+        b += f'  <circle class="dot" cx="{P.X(xd):.1f}" cy="{P.Y(f(xd)):.1f}" r="4" />\n'
+    b += text(P.X(xd), P.Y(0) + 28, var('𝒟'), 'middle')
+    b += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate(30 {P.y0 + P.h / 2:.1f}) rotate(-90)">' + var('p') + '(' + var('𝒟') + ' | ' + var('ℳ') + ')</text>\n'
+    lx, ly = 420, 46
+    for i, (lab, dash) in enumerate((('simple model', ''), ('intermediate model', ' stroke-dasharray="9 6"'), ('complex model', ' stroke-dasharray="2 5"'))):
+        y = ly + 18 * i
+        b += line([(lx, y), (lx + 34, y)], 'thick', dash)
+        b += text(lx + 42, y + 4, lab, 'start', 'small')
+    svg('Bdl11OccamRazor', 620, 290, 'Occam’s razor effect of the marginal likelihood',
+        'Three bell-shaped curves of the marginal likelihood p of D given M over the space of all possible datasets. The simple model is tall and narrow, the intermediate model is lower and wider, and the complex model is low and almost flat across the whole axis. At a marked dataset D to the right of the peaks, the intermediate model has the highest value, the complex model the middle value and the simple model the lowest.',
+        b)
+
+# Figure 11.2: online selection of prior variances on a small BNN
+def bdl11_online():
+    b = ''
+    # panel 1: log marginal likelihood vs steps
+    A = Plot(36, 20, 120, 110, (0, 1), (0, 1))
+    b += line([(A.x0, A.y0), (A.x0, A.y0 + A.h), (A.x0 + A.w, A.y0 + A.h)])
+    def lml(t):
+        # rises in two smooth steps and converges
+        return 0.92 - 0.55 * math.exp(-6 * t) - 0.25 / (1 + math.exp((t - 0.38) / 0.04)) - 0.12 / (1 + math.exp((t - 0.62) / 0.03)) + 0.0 * t
+    b += A.curve(lambda t: min(0.97, max(0.02, lml(t) - lml(0) + 0.05)), cls='thick')
+    b += text(A.x0 + A.w / 2, A.y0 + A.h + 18, 'steps', 'middle', 'small')
+    b += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate(22 {A.y0 + A.h / 2:.1f}) rotate(-90)">log ' + var('q') + '(' + var('𝒟') + ' | ' + var('ℳ') + ')</text>\n'
+    # panel 2: prior variances vs steps
+    B = Plot(196, 20, 120, 110, (0, 1), (0, 1))
+    b += line([(B.x0, B.y0), (B.x0, B.y0 + B.h), (B.x0 + B.w, B.y0 + B.h)])
+    curves = [
+        (lambda t: 0.35 + 0.55 * t - 0.15 * math.exp(-((t - 0.25) / 0.1) ** 2) + 0.12 * math.exp(-((t - 0.15) / 0.08) ** 2), ''),
+        (lambda t: 0.35 + 0.25 * math.exp(-((t - 0.18) / 0.1) ** 2) - 0.12 * (1 - math.exp(-5 * t)), ' stroke-dasharray="8 3 2 3"'),
+        (lambda t: 0.35 - 0.12 * (1 - math.exp(-8 * t)) + 0.05 * t, ' stroke-dasharray="2 3"'),
+        (lambda t: 0.35 - 0.25 * (1 - math.exp(-10 * t)) + 0.08 * t, ' stroke-dasharray="6 4"'),
+    ]
+    for f, dash in curves:
+        b += B.curve(f, n=120, cls='mut', extra=dash)
+    b += line([(B.x0 + 8, B.y0 + 12), (B.x0 + 26, B.y0 + 12)], 'mut')
+    b += text(B.x0 + 30, B.y0 + 16, var('σ') + '<tspan class="sub" dy="4">ℓ</tspan><tspan class="sub" dy="-9">2</tspan>', 'start', 'small')
+    b += text(B.x0 + B.w / 2, B.y0 + B.h + 18, 'steps', 'middle', 'small')
+    b += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate(182 {B.y0 + B.h / 2:.1f}) rotate(-90)">prior variances</text>\n'
+    # data: two interleaved classes
+    rng = bdl11_random.Random(11)
+    pts = []
+    for i in range(40):
+        a = rng.uniform(0, math.pi)
+        pts.append((math.cos(a) * 0.55 - 0.2 + rng.gauss(0, 0.12), math.sin(a) * 0.55 - 0.1 + rng.gauss(0, 0.12), 0))
+        a = rng.uniform(0, math.pi)
+        pts.append((0.2 - math.cos(a) * 0.55 + rng.gauss(0, 0.12), 0.1 - math.sin(a) * 0.55 + 0.1 + rng.gauss(0, 0.12), 1))
+    def smooth(x, y):
+        g = y - 0.35 * math.sin(2.2 * x) - 0.05
+        return 1 / (1 + math.exp(-g / 0.18))
+    def jagged(x, y):
+        g = y - 0.35 * math.sin(2.2 * x) - 0.05 + 0.22 * math.sin(9 * x + 1) * math.cos(7 * y) + 0.12 * math.sin(13 * y - 4 * x)
+        return 1 / (1 + math.exp(-g / 0.03))
+    n = 22
+    for (px, f, lab) in ((372, smooth, 'optimized'), (500, jagged, 'naïve')):
+        size = 110
+        cell = size / n
+        for i in range(n):
+            for j in range(n):
+                x = -1 + 2 * (i + 0.5) / n
+                y = 1 - 2 * (j + 0.5) / n
+                p = f(x, y)
+                b += f'  <rect class="arrowhead" x="{px + i * cell:.1f}" y="{20 + j * cell:.1f}" width="{cell + 0.3:.1f}" height="{cell + 0.3:.1f}" style="fill-opacity:{0.04 + 0.42 * p:.2f}" />\n'
+        b += f'  <rect class="ln" x="{px}" y="20" width="{size}" height="{size}" />\n'
+        for (x, y, c) in pts:
+            sx = px + (x + 1) / 2 * size
+            sy = 20 + (1 - y) / 2 * size
+            if not (px + 2 < sx < px + size - 2 and 22 < sy < 128):
+                continue
+            if c == 0:
+                b += f'  <circle class="dot" cx="{sx:.1f}" cy="{sy:.1f}" r="2.2" />\n'
+            else:
+                b += line([(sx - 2.5, sy - 2.5), (sx + 2.5, sy + 2.5)], 'ln') + line([(sx - 2.5, sy + 2.5), (sx + 2.5, sy - 2.5)], 'ln')
+        b += text(px + size / 2, 148, lab, 'middle', 'small')
+    # colour bar
+    cx = 628
+    for k in range(10):
+        p = 1 - (k + 0.5) / 10
+        b += f'  <rect class="arrowhead" x="{cx}" y="{20 + k * 11:.1f}" width="12" height="11.3" style="fill-opacity:{0.04 + 0.42 * p:.2f}" />\n'
+    b += f'  <rect class="ln" x="{cx}" y="20" width="12" height="110" />\n'
+    for v, y in ((1, 24), (0.5, 79), (0, 134)):
+        b += text(cx + 16, y, f'{v:g}', 'start', 'small')
+    b += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate(676 75) rotate(90)">' + var('p') + '(' + var('y') + '<tspan class="sub" dy="3">*</tspan><tspan dy="-3"> | </tspan>' + var('x') + '<tspan class="sub" dy="3">*</tspan><tspan dy="-3">, </tspan>' + var('𝒟') + ')</text>\n'
+    svg('Bdl11OnlineSelection', 690, 160, 'Online selection of layerwise prior variances with the Laplace marginal likelihood',
+        'Four panels. First, the log Laplace marginal likelihood log q of D given M increases monotonically over training steps in several stages and levels off. Second, the layerwise prior variances change during training: one rises steadily while the others drop and settle. Third and fourth, the predictive class probability over a two-dimensional input space with the training points of two classes shown as dots and crosses: the optimized model has a smooth, gradual decision boundary, while the naively trained model has a sharp, irregular boundary with isolated patches. A grey-scale bar maps shading to probabilities from 0 to 1.',
+        b)
+
+# Figure 11.3: flat and sharp minima
+def bdl11_flat_sharp():
+    P = Plot(60, 20, 540, 230, (0, 1), (0, 1.05))
+    b = ''
+    b += f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" />\n'
+    def train(x):
+        return 0.04 + 3.0 * (x - 0.38) ** 2 - 0.68 * math.exp(-((x - 0.87) / 0.03) ** 2)
+    def test(x):
+        return train(x - 0.06) + 0.02
+    def upto(f):
+        pts = []
+        for i in range(401):
+            x = i / 400
+            if f(x) > 1.05:
+                break
+            pts.append((P.X(x), P.Y(f(x))))
+        return pts
+    b += line(upto(train), 'thick')
+    b += line(upto(test), 'thick', ' stroke-dasharray="9 6"')
+    for xm, lab in ((0.38, 'flat'), (0.87, 'sharp')):
+        b += line([(P.X(xm), P.y0), (P.X(xm), P.y0 + P.h + 6)], 'ln', ' stroke-dasharray="2 3"')
+        b += f'  <circle class="dot" cx="{P.X(xm):.1f}" cy="{P.Y(train(xm)):.1f}" r="4" />\n'
+        b += f'  <circle class="dot" cx="{P.X(xm):.1f}" cy="{P.Y(test(xm)):.1f}" r="4" />\n'
+        b += text(P.X(xm), P.y0 + P.h + 24, var('θ') + '<tspan class="sub" dy="4">*</tspan><tspan class="sub" dy="-12">' + lab + '</tspan>', 'middle')
+    b += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate(32 {P.y0 + P.h / 2:.1f}) rotate(-90)">− log ' + var('p') + '(' + var('θ') + ' | ' + var('𝒟') + ')</text>\n'
+    lx, ly = P.x0 + 12, P.y0 + 18
+    b += line([(lx, ly), (lx + 34, ly)], 'thick') + text(lx + 42, ly + 4, 'Training loss', 'start', 'small')
+    b += line([(lx, ly + 18), (lx + 34, ly + 18)], 'thick', ' stroke-dasharray="9 6"') + text(lx + 42, ly + 22, 'Test loss', 'start', 'small')
+    svg('Bdl11FlatSharpMinima', 620, 290, 'Training and test loss around a flat and a sharp minimum',
+        'The training loss, a solid curve of the negative log posterior, has a broad flat minimum at theta star flat and a narrow sharp minimum at theta star sharp further right, separated by a hump. The test loss, dashed, is the same landscape shifted slightly to the right. At the flat minimum the test loss is only slightly higher than the training loss, while at the sharp minimum the test loss sits near the top of the hump.',
+        b)
+
+bdl11_occam()
+bdl11_online()
+bdl11_flat_sharp()

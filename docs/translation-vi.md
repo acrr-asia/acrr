@@ -390,3 +390,47 @@ from the measurement sense *độ chụm*. In prose, "et al." is written *và c�
 | normalizing flow, embedding network, summary statistic, amortized, coverage diagnostics, misspecification | luồng chuẩn hóa (normalizing flow), mạng nhúng (embedding network), thống kê tóm tắt, khấu hao (amortized), chẩn đoán độ phủ, đặc tả sai (misspecification) |
 | multilevel Monte Carlo, telescoping sum, coupling, trace-class | Monte Carlo đa mức (MLMC), tổng lồng (telescoping sum), phép ghép cặp (coupling), lớp vết (trace-class) |
 | low precision, quantization gap, stochastic / deterministic rounding, fixed point, gradient accumulator | độ chính xác thấp (low precision; numeric sense), khoảng cách lượng tử (quantization gap), làm tròn ngẫu nhiên / tất định, dấu phẩy tĩnh (fixed point), bộ tích lũy gradient |
+| point estimate, curvature (of a Laplace approximation) | ước lượng điểm, độ cong |
+| regularized empirical risk, regularizer, energy function | rủi ro thực nghiệm có chính quy hóa, số hạng chính quy hóa (regularizer), hàm năng lượng |
+| linearized network, linearization point, network Jacobian | mạng tuyến tính hóa, điểm tuyến tính hóa, ma trận Jacobi của mạng (network Jacobian) |
+| local minimizer / maximum / optimum | điểm cực tiểu / cực đại / tối ưu cục bộ (not *địa phương*) |
+| post hoc | sau huấn luyện (post hoc); not *hậu kiểm* |
+| pushforward (noun), push forward (verb) | ảnh đẩy tới (pushforward), đẩy tới |
+| pullback (metric), pull back | metric kéo lùi (pullback), kéo lùi |
+| matrix-free | không cần lập ma trận (matrix-free) |
+| matrix-vector product, covariance-vector product | tích ma trận – vector, tích hiệp phương sai – vector |
+| Kronecker-factored approximate curvature (KFAC / K-FAC), Kronecker factor | độ cong xấp xỉ phân tích Kronecker (KFAC; acronym spelled as in the original), thừa số Kronecker |
+| diagonal / low-rank / block-diagonal approximation | xấp xỉ đường chéo / hạng thấp / đường chéo khối |
+| eigenpair, top eigenspace, Woodbury matrix identity | cặp trị riêng – vector riêng (cặp riêng), không gian riêng trội, đẳng thức ma trận Woodbury |
+| positive (semi)definite (PSD), rank-deficient, degenerate | (nửa) xác định dương (PSD), hụt hạng (thiếu hạng), suy biến |
+| Kullback–Leibler (KL) divergence | độ phân kỳ Kullback–Leibler (KL) on first use per article, then *độ phân kỳ KL* |
+| score (gradient of the log-likelihood), sufficient statistic | hàm điểm (score), thống kê đủ (sufficient statistic) |
+| exponential family, natural parameter, partition function, base measure | họ mũ (exponential family), tham số tự nhiên, hàm phân hoạch, độ đo cơ sở |
+| empirical Fisher (EFIM) | ma trận thông tin Fisher thực nghiệm (empirical Fisher, EFIM) |
+| cross-entropy, softmax, logit, probit, link function | entropy chéo (cross-entropy), softmax, logit, probit, hàm liên kết |
+| Riemannian metric, Fisher (information) metric, statistical manifold | metric Riemann (Riemannian metric), metric (thông tin) Fisher, đa tạp thống kê (statistical manifold) |
+| tangent space, tangent vector, tangent kernel | không gian tiếp xúc (tangent space), vector tiếp tuyến, hàm nhân tiếp tuyến |
+| fiber, fiber bundle, effective parameter space | thớ (fiber), phân thớ (fiber bundle), không gian tham số hiệu dụng |
+| diffeomorphism, isometry, exponential map | vi phôi (diffeomorphism), phép đẳng cự (isometry), ánh xạ mũ (exponential map) |
+| reparametrized / Riemannian / diffusion Laplace approximation | xấp xỉ Laplace tái tham số hóa / Riemann / khuếch tán |
+| damping, preconditioner | số hạng tắt dần (damping), bộ tiền điều kiện (preconditioner) |
+| gradient flow, gradient ascent | dòng gradient (gradient flow), leo gradient (gradient ascent) |
+| overconfidence, asymptotic confidence | sự quá tự tin (overconfidence), độ tự tin tiệm cận |
+| out-of-distribution (OOD), in-distribution (ID) | ngoài phân phối (out-of-distribution, OOD), trong phân phối (in-distribution, ID) |
+| continual learning, catastrophic forgetting | học liên tục (continual learning), quên thảm họa (catastrophic forgetting) |
+| elastic weight consolidation (EWC) | củng cố trọng số đàn hồi (elastic weight consolidation, EWC) |
+| plasticity, stability, process noise, smoothing | tính dẻo (plasticity), tính ổn định (stability), nhiễu quá trình, làm trơn (smoothing) |
+| Bayesian optimization, surrogate model, upper confidence bound (UCB) | tối ưu hóa Bayes (BO), mô hình thay thế (surrogate model), cận tin cậy trên (UCB) |
+| information gain, expected predictive information gain (EPIG) | lượng thông tin thu được (information gain), lượng thông tin dự đoán thu được kỳ vọng (EPIG) |
+| exploration, exploitation | khám phá (exploration), khai thác (exploitation) |
+| model selection, hyperparameter, hyperprior | lựa chọn mô hình (model selection), siêu tham số (hyperparameter), siêu tiên nghiệm (hyperprior) |
+| hierarchical Bayes, type-II maximum likelihood (ML-II) | Bayes phân cấp, hợp lý cực đại loại II (maximum likelihood II, ML-II) |
+| Occam's razor, cross-validation | dao cạo Occam (Occam's razor), kiểm định chéo (cross-validation) |
+| PAC-Bayes bound, sub-Gamma | cận PAC-Bayes, dưới Gamma (sub-Gamma) |
+| online (model selection / optimization) | trực tuyến (online) |
+| flat / sharp minimum, loss landscape | cực tiểu phẳng / nhọn (flat / sharp minimum), bề mặt hàm mất mát (loss landscape) |
+| overfitting, underfitting | quá khớp (overfitting), chưa khớp (underfitting) |
+| pruning (structured / unstructured), probing, invariance | tỉa (có cấu trúc / không cấu trúc), thăm dò (probing), tính bất biến (invariance) |
+| Takeaways (box label) | Điểm cần ghi nhớ |
+| Equation N, Proposition, Definition, Theorem, Proof, Figure, Table, Algorithm | Phương trình N, Mệnh đề, Định nghĩa, Định lý, Chứng minh, Hình, Bảng, Thuật toán |
+| link text "Chapter K, Section j" | Chương K, Mục j (link to `/vi/blog/<slug>` without the `#` anchor) |
