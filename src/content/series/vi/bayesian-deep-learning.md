@@ -10,13 +10,6 @@ objectives:
   - "Chọn một phương pháp mở rộng được cho một mô hình và một tập dữ liệu cho trước, và đánh giá độ bất định dự đoán bằng hiệu chuẩn (calibration), quy tắc chấm điểm thích đáng (proper scoring rule) và dự đoán có chọn lọc (selective prediction)."
   - "Mô tả các hướng nghiên cứu hiện nay của học sâu Bayes và nêu các bài toán mở mà mỗi hướng giải quyết."
 plannedEntries:
-  - title: "Chương 12: Giới thiệu về suy luận biến phân"
-  - title: "Chương 13: Suy luận biến phân trường trung bình Gauss"
-  - title: "Chương 14: Suy luận biến phân dựa trên dropout"
-  - title: "Chương 15: Suy luận biến phân dựa trên gradient tự nhiên"
-  - title: "Chương 16: Suy luận biến phân dựa trên hạt"
-  - title: "Chương 17: Suy luận biến phân trong không gian hàm"
-  - title: "Chương 18: Suy luận biến phân tuần tự"
   - title: "Chương 19: Tổ hợp mô hình: giới thiệu và mối liên hệ với suy luận Bayes xấp xỉ"
   - title: "Chương 20: Các phương pháp lấy mẫu tổ hợp lai"
   - title: "Chương 21: Ứng dụng thực tế của tổ hợp sâu"

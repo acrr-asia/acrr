@@ -1,0 +1,1109 @@
+---
+title: "Suy luận biến phân dựa trên hạt"
+description: "Hạ gradient biến phân Stein, dòng gradient trên các độ đo xác suất, các biến thể bậc hai và ngẫu nhiên, ứng dụng và lý thuyết của VI dựa trên hạt."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - stein variational gradient descent
+  - gradient flows
+series: bayesian-deep-learning
+seriesOrder: 20
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl16SvgdParticles from '../../../components/diagrams/Bdl16SvgdParticles.astro';
+
+## 1. Giới thiệu
+
+Học sâu Bayes (Bayesian deep learning, BDL) tìm cách ước lượng phân phối hậu nghiệm (posterior) trên các tham số của một mạng nơ-ron sâu. Tuy nhiên, trong bối cảnh này, các phương pháp suy luận truyền thống gặp phải những thách thức đáng kể.
+
+Các phương pháp Monte Carlo xích Markov (Markov chain Monte Carlo, MCMC) như Monte Carlo Hamilton (Hamiltonian Monte Carlo, HMC) ([Chương 1](/vi/blog/introduction-to-sampling)) chính xác về mặt tiệm cận và về nguyên tắc có thể sinh mẫu từ phân phối hậu nghiệm thực. Tuy nhiên, trên thực tế chúng thường chậm đến mức không thể chấp nhận và mở rộng kém đối với các tập dữ liệu lớn hay các mô hình mạng nơ-ron nhiều chiều.
+
+Suy luận biến phân (variational inference, VI) đưa ra một lựa chọn thay thế có khả năng mở rộng tốt hơn bằng cách phát biểu lại bài toán suy luận thành một bài toán tối ưu hóa ([Chương 12](/vi/blog/introduction-to-variational-inference)): giả định một phân phối xấp xỉ $q(\theta)$ và điều chỉnh các tham số của nó để cực tiểu hóa độ phân kỳ Kullback–Leibler (KL) $\mathrm{D}_{\mathrm{KL}}(q \| \pi)$ tới phân phối hậu nghiệm mục tiêu $\pi(\theta)$. Dạng VI phổ biến nhất được dùng trong mạng nơ-ron Bayes là VI trường trung bình (mean-field) ([Chương 13](/vi/blog/gaussian-mean-field-variational-inference)), vốn giả định mọi trọng số độc lập với nhau (chẳng hạn các phân phối hậu nghiệm Gauss đường chéo). Dù thuận tiện về mặt tính toán, phép xấp xỉ này rất hạn chế: nó không nắm bắt được các tương quan phức tạp của phân phối hậu nghiệm hay tính đa mode, thường đánh giá thấp độ bất định và có thể dẫn đến các mô hình hiệu chuẩn kém. Những họ biến phân giàu biểu đạt hơn (chẳng hạn phân phối Gauss hiệp phương sai đầy đủ, luồng chuẩn hóa (normalizing flow)) quả thực có tồn tại, nhưng chúng đặt ra những thách thức tối ưu hóa đáng kể và khó tinh chỉnh, thường đòi hỏi những phép suy dẫn riêng cho từng mô hình.
+
+Nếu các thuật toán MCMC cổ điển chính xác về mặt tiệm cận nhưng quá chậm đối với học sâu, còn VI trường trung bình nhanh nhưng thường cho các xấp xỉ hậu nghiệm thô, thì liệu có cách nào kết hợp hiệu quả tính toán của VI với bản chất phi tham số của MCMC? Các phương pháp *suy luận biến phân dựa trên hạt* (Particle-Based Variational Inference, ParVI) nhằm thu hẹp khoảng cách này bằng cách kết hợp thế mạnh của cả MCMC lẫn suy luận biến phân.
+
+Ý tưởng cốt lõi, do Liu và Wang đưa ra lần đầu, là duy trì một tập gồm $n$ hạt (particle) $\{\theta^i\}_{i=1}^n$ cùng nhau biểu diễn một phân phối hậu nghiệm xấp xỉ. Thay vì làm tiến hóa từng hạt bằng các bước di chuyển Monte Carlo ngẫu nhiên, ParVI (ở dạng nguyên mẫu của nó) vận chuyển một cách tất định toàn bộ tập hạt về phía những vùng có mật độ hậu nghiệm cao. Ở mỗi vòng lặp, các hạt được dùng để xấp xỉ một hướng vận chuyển của cả quần thể làm giảm độ phân kỳ KL tới mục tiêu $\pi$, thông qua một dạng hạ gradient trong không gian các phân phối xác suất. Bằng cách dùng thông tin từ hàm điểm (score) của mục tiêu (gradient của $\log \pi(\theta)$) và ghép cặp các hạt với nhau qua một tương tác đẩy, các phương pháp ParVI khuyến khích các hạt tản ra và phủ lên giá (support) của phân phối hậu nghiệm thay vì sụp về một mode duy nhất (xem Hình 16.1 để có minh họa trực quan). Về thực chất, ParVI xem suy luận Bayes như một bài toán tối ưu hóa trong không gian hàm, tìm một phân phối (được biểu diễn bằng các hạt) cực tiểu hóa $\mathrm{D}_{\mathrm{KL}}(q \| \pi)$. Cách tiếp cận này giữ được tính linh hoạt của lấy mẫu phi tham số, vì phân phối thực nghiệm do các hạt biểu diễn không bị buộc phải nằm trong một họ tham số cụ thể (chẳng hạn họ Gauss), đồng thời tận dụng tối ưu hóa dựa trên gradient để đạt hiệu quả và khả năng mở rộng. Dù vậy, với một số hữu hạn hạt, bản thân phép xấp xỉ thực nghiệm cũng bị hạn chế, và chất lượng của nó phụ thuộc vào số hạt, lựa chọn hàm nhân (kernel) và các tương tác giữa các hạt.
+
+**Nền tảng toán học và hướng dẫn đọc.** So với các chương trước, một số phần của chương này dùng thêm một số kiến thức toán học, cụ thể là không gian Hilbert hàm nhân tái sinh (reproducing kernel Hilbert space, RKHS), cùng các khái niệm từ vận chuyển tối ưu (optimal transport) và dòng gradient (gradient flow) trên không gian các độ đo xác suất. Để giúp người đọc định hướng trong chương, các mục được đánh dấu sao ($^\ast$) có tính chuyên sâu hơn và có thể bỏ qua một cách an toàn trong lần đọc đầu: người đọc chủ yếu quan tâm đến phương pháp cơ bản có thể đọc Mục 2, 3, 6 và 7, rồi quay lại các mục có dấu sao sau.
+
+<Figure caption="Hình 16.1: Minh họa một cách tiếp cận suy luận biến phân dựa trên hạt trên phân phối mục tiêu π là hỗn hợp của ba phân phối Gauss. Dùng thuật toán hạ gradient biến phân Stein (Stein variational gradient descent, SVGD; Thuật toán 20), 100 hạt được mô phỏng từ 𝒩(0, 0.5 I) và tiến hóa theo động lực học SVGD; ba ô hình thể hiện các hạt sau 1, 10 và 50 vòng lặp (từ trái sang phải). Ban đầu các hạt bị hút về những vùng có mật độ hậu nghiệm cao, sau đó lực đẩy của hàm nhân khuyến khích các hạt tản ra và tạo thành một xấp xỉ phi tham số của phân phối hậu nghiệm. Bản vẽ lại dạng sơ đồ: các ô hình được tính bằng cách chạy SVGD với hàm nhân RBF (độ rộng chọn theo quy tắc trung vị) và kích thước bước 0.5 trên một hỗn hợp trọng số bằng nhau của ba phân phối Gauss đẳng hướng có độ lệch chuẩn 0.6; vị trí các mode được đọc gần đúng từ hình gốc.">
+  <Bdl16SvgdParticles />
+</Figure>
+
+## 2. Nhìn lại các hàm mục tiêu biến phân
+
+### 2.1 Độ phân kỳ KL và cận dưới của bằng chứng (ELBO)
+
+VI phát biểu bài toán ước lượng phân phối hậu nghiệm Bayes thành một bài toán tối ưu hóa. Cụ thể, cho một phân phối hậu nghiệm mục tiêu $\pi(\theta) := p(\theta \mid \mathcal{D}) \propto p(\mathcal{D} \mid \theta) p(\theta)$, VI tìm một phân phối xấp xỉ $q(\theta)$ cực tiểu hóa độ phân kỳ KL tới phân phối hậu nghiệm mục tiêu:
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q \| \pi) = \mathbb{E}_q\left[\log \frac{q(\theta)}{\pi(\theta)}\right] = -\mathbb{E}_q\left[\log \pi(\theta)\right] + \mathbb{E}_q\left[\log q(\theta)\right]. \tag{16.1}
+$$
+
+Cực tiểu hóa độ phân kỳ KL tương đương với cực đại hóa cận dưới của bằng chứng (evidence lower bound, ELBO), vì
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q \| \pi) = -\underbrace{\mathbb{E}_q\left[\log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log p(\mathcal{D})\right]}_{:= \mathbb{E}_q[\log \pi(\theta)]} + \mathbb{E}_q\left[\log q(\theta)\right] \tag{16.2}
+$$
+
+$$
+\phantom{\mathrm{D}_{\mathrm{KL}}(q \| \pi)} = -\underbrace{\mathbb{E}_q\left[\log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log q(\theta)\right]}_{:= \mathrm{ELBO}(q)} + \log p(\mathcal{D}) \tag{16.3}
+$$
+
+$$
+\phantom{\mathrm{D}_{\mathrm{KL}}(q \| \pi)} = -\mathrm{ELBO}(q) + \mathrm{const.} \tag{16.4}
+$$
+
+ELBO cung cấp một hàm mục tiêu tính được để khớp phép xấp xỉ biến phân. Trong VI thông thường, $q$ bị buộc phải thuộc một họ tham số, chẳng hạn $\{q_\psi\}_{\psi \in \Psi}$, với các tham số biến phân $\psi$. Ví dụ, có thể chọn một họ phân phối Gauss, khi đó các tham số biến phân đơn giản là $\psi = [\mu, \Sigma]$, xác định trung bình $\mu$ và hiệp phương sai $\Sigma$ của họ biến phân. Sau đó ELBO được cực đại hóa theo các tham số biến phân (chẳng hạn bằng leo gradient ngẫu nhiên) để thu được xấp xỉ của phân phối hậu nghiệm.
+
+Trong ParVI, mục tiêu vẫn là một phân phối biến phân $q(\theta)$ cực đại hóa ELBO. Tuy nhiên, ràng buộc rằng $q(\theta)$ phải thuộc một họ tham số giờ đây được nới bỏ. Do đó, cần giải một bài toán tối ưu hóa *vô hạn chiều* trên không gian các độ đo xác suất, thay vì một bài toán tối ưu hóa *hữu hạn chiều* trên không gian các tham số biến phân.
+
+### 2.2 Vận chuyển vô cùng bé của q bởi một trường vector
+
+Cho $q$ và $\pi$ là các mật độ $C^1$ dương chặt trên $\mathbb{R}^d$. Cố định một trường vector $C^1$ $\phi : \mathbb{R}^d \to \mathbb{R}^d$ suy giảm đủ nhanh (hoặc có giá compact) để các số hạng biên dưới đây triệt tiêu. Với $\varepsilon$ nhỏ, xét một ánh xạ vận chuyển (transport map) thu được như một nhiễu loạn nhỏ của ánh xạ đồng nhất, cụ thể là
+
+$$
+T_\varepsilon(\theta) = \theta + \varepsilon\, \phi(\theta), \qquad T_0 = \mathrm{Id}. \tag{16.5}
+$$
+
+Xét các phân phối thu được dưới dạng ảnh đẩy tới (pushforward) của $q$ qua ánh xạ vận chuyển này, cụ thể là
+
+$$
+q_\varepsilon = (T_\varepsilon)_\# q, \quad \text{i.e.} \quad \int f(\theta)\, q_\varepsilon(\theta)\, \mathrm{d}\theta = \int f(T_\varepsilon(\theta))\, q(\theta)\, \mathrm{d}\theta \quad \forall f. \tag{16.6}
+$$
+
+Theo công thức đổi biến, mật độ $q_\varepsilon$ được cho tường minh bởi
+
+$$
+q_\varepsilon(\theta) = q\big(T_\varepsilon^{-1}(\theta)\big) \left| \det \nabla T_\varepsilon^{-1}(\theta) \right|, \tag{16.7}
+$$
+
+trong đó $T_\varepsilon^{-1}$ là ánh xạ ngược của $T_\varepsilon$, và $\nabla T_\varepsilon^{-1}$ là ma trận Jacobi của $T_\varepsilon^{-1}$. Khai triển bậc nhất theo $\varepsilon$ cho *phương trình liên tục* (continuity equation) cổ điển
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon}\right|_{\varepsilon=0} q_\varepsilon(\theta) = -\nabla_\theta \cdot \big(q(\theta)\phi(\theta)\big) \quad \Longleftrightarrow \quad \partial_\varepsilon q_\varepsilon + \nabla \cdot (q_\varepsilon \phi) = 0 \quad \text{at } \varepsilon = 0. \tag{16.8}
+$$
+
+### 2.3 Đạo hàm của độ phân kỳ KL
+
+Mục đích là định nghĩa ánh xạ vận chuyển $T_\varepsilon$, thông qua trường vector $\phi$, sao cho nó làm giảm độ phân kỳ KL: $\mathrm{D}_{\mathrm{KL}}((T_\varepsilon)_\# q \| \pi) \leq \mathrm{D}_{\mathrm{KL}}(q \| \pi)$. Để xác định một trường vector phù hợp, giờ đây phiếm hàm KL được lấy đạo hàm theo độ lớn nhiễu loạn $\varepsilon$, cụ thể là
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi) = \int q_\varepsilon(\theta) \log \frac{q_\varepsilon(\theta)}{\pi(\theta)}\, \mathrm{d}\theta. \tag{16.9}
+$$
+
+Dùng phương trình liên tục (16.8) và quy tắc đạo hàm tích, đại lượng này có thể được tính như sau:
+
+$$
+\begin{aligned}
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} &= \int \left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon}\right|_{\varepsilon=0} \left\{ q_\varepsilon(\theta) \log \tfrac{q_\varepsilon(\theta)}{\pi(\theta)} \right\} \mathrm{d}\theta \\
+&= \int \Big[ -\nabla \cdot \big(q(\theta)\phi(\theta)\big) \Big] \Big( \log \tfrac{q(\theta)}{\pi(\theta)} + 1 \Big)\, \mathrm{d}\theta \\
+&= \int q(\theta)\phi(\theta) \cdot \nabla_\theta \Big( \log \tfrac{q(\theta)}{\pi(\theta)} + 1 \Big)\, \mathrm{d}\theta \quad \text{(integration by parts)} \\
+&= \int q(\theta)\, \phi(\theta) \cdot \Big( \nabla \log q(\theta) - \nabla \log \pi(\theta) \Big)\, \mathrm{d}\theta \\
+&= \mathbb{E}_q\Big[ \phi(\theta)^\top \big( \nabla \log q(\theta) - \nabla \log \pi(\theta) \big) \Big] \\
+&= -\mathbb{E}_q\Big[ \nabla_\theta \cdot \phi(\theta) + \phi(\theta)^\top \nabla \log \pi(\theta) \Big],
+\end{aligned}
+$$
+
+trong đó dòng cuối dùng đẳng thức $\mathbb{E}_q[\nabla \cdot \phi] = -\mathbb{E}_q[\phi^\top \nabla \log q]$. Điều này cho thấy
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} = -\mathbb{E}_q\big[T_\pi \phi(\theta)\big], \qquad T_\pi \phi := \nabla \cdot \phi + \phi^\top \nabla \log \pi. \tag{16.10}
+$$
+
+### 2.4 Hướng giảm nhanh nhất
+
+Từ biểu thức trên, mọi hướng làm *tăng* $\mathbb{E}_q[T_\pi \phi]$ đều dẫn tới sự *giảm* của $\mathrm{D}_{\mathrm{KL}}(\cdot \| \pi)$. Một cách tự nhiên, mục tiêu là chọn hướng $\phi$ làm giảm độ phân kỳ KL nhiều nhất. Nghĩa là, bài toán cần giải là
+
+$$
+\operatorname*{arg\,min}_{\phi \in \mathcal{G}} \left\{ \left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}((T_\varepsilon)_\# q \| \pi)\right|_{\varepsilon=0} : \|\phi\|_{\mathcal{G}} \leq 1 \right\} = \operatorname*{arg\,max}_{\phi \in \mathcal{G}} \Big\{ \mathbb{E}_q\left[T_\pi \phi(\theta)\right] : \|\phi\|_{\mathcal{G}} \leq 1 \Big\}, \tag{16.11}
+$$
+
+trong đó $\mathcal{G}$ là một không gian hàm định chuẩn. Để tiến thêm, xét việc giới hạn trường vector $\phi$ trong một quả cầu của RKHS. Điều này cho phép thu được một biểu thức dạng đóng cho trường vector cực đại hóa gradient âm ở vế phải của (16.11). Phần thảo luận bắt đầu với một số kiến thức nền về toán tử $T_\pi$.
+
+**Toán tử Stein và đẳng thức Stein.** Toán tử $T_\pi$ được gọi là *toán tử Stein* (Stein operator) (Langevin), do mối liên hệ của nó với *đẳng thức Stein* (Stein's identity). Cho $\pi$ là một mật độ $C^1$ dương chặt trên $\mathbb{R}^d$ với hàm điểm $u_\pi(\theta) := \nabla \log \pi(\theta)$. Khi đó, với mọi hàm thử đủ chính quy $f : \mathbb{R}^d \to \mathbb{R}^d$ thỏa mãn các điều kiện biên bằng không nhẹ, đẳng thức Stein phát biểu rằng
+
+$$
+\mathbb{E}_\pi\left[T_\pi f(\theta)\right] = \mathbb{E}_\pi\left[\nabla_\theta \cdot f(\theta) + f(\theta)^\top u_\pi(\theta)\right] = 0, \tag{16.12}
+$$
+
+điều dễ thấy là đúng nhờ tích phân từng phần. Cần nhấn mạnh rằng toán tử Stein (Langevin) $T_\pi$ chỉ phụ thuộc vào *hàm điểm* và do đó không đòi hỏi hằng số chuẩn hóa của $\pi$. Thật vậy, $\nabla_\theta \log \pi = \nabla_\theta \log \tilde{\pi}$ với $\pi = \tilde{\pi}/Z$. Đây là một tính chất đặc biệt hữu ích trong học sâu Bayes, nơi hằng số chuẩn hóa không tính được.
+
+**Độ sai khác Stein.** Đẳng thức (16.12) đặc trưng hóa $\pi$ theo nghĩa là, dưới các điều kiện nhẹ đối với lớp hàm thử $\mathcal{G}$, $\mathbb{E}_q[T_\pi f] = 0$ với mọi $f \in \mathcal{G}$ như vậy *khi và chỉ khi* $q = \pi$ hầu khắp nơi. Tổng quát hơn, giá trị cực đại của kỳ vọng này trên mọi hàm thử $f \in \mathcal{G}$ có thể được dùng để đặc trưng hóa sự khác biệt giữa hai phân phối $q$ và $\pi$. Cụ thể, *độ sai khác Stein* (Stein discrepancy) được định nghĩa là
+
+$$
+\mathbb{D}(q \| \pi) := \max_{f \in \mathcal{G}} \left\{ \mathbb{E}_q\left[T_\pi f\right] : \|f\|_{\mathcal{G}} \leq 1 \right\}. \tag{16.13}
+$$
+
+Rõ ràng, lựa chọn lớp hàm $\mathcal{G}$ ở đây có tính quyết định. Lớp hàm này phải đủ phong phú để bảo đảm $\mathbb{D}(q \| \pi)$ có khả năng phân biệt thỏa đáng, nhưng không quá phong phú đến mức làm $\mathbb{D}(q \| \pi)$ không tính được. Theo Chwialkowski và cộng sự, Gorham và Mackey, cùng Liu và Wang, $\mathcal{G}$ được chọn là một RKHS nhận giá trị vector. Điều này không chỉ bảo đảm phiếm hàm tuyến tính $f \mapsto \mathbb{E}_q[T_\pi f]$ liên tục, mà còn bảo đảm bài toán tối ưu hóa trong (16.11), (16.13) có nghiệm dạng đóng.
+
+**Độ sai khác Stein dựa trên hàm nhân.** Cho $\mathcal{H}$ là một RKHS gồm các hàm nhận giá trị vô hướng với hàm nhân $C^2$ xác định dương $k : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$. Gọi $\mathcal{H}^d := \mathcal{H} \times \cdots \times \mathcal{H}$ là RKHS nhận giá trị trong $\mathbb{R}^d$ tương ứng, được trang bị tích trong $\langle f, g \rangle_{\mathcal{H}^d} = \sum_{\ell=1}^d \langle f_\ell, g_\ell \rangle_{\mathcal{H}}$. Dùng tính chất tái sinh của không gian Hilbert và tích phân từng phần, với mọi $f \in \mathcal{H}^d$ đều có
+
+$$
+\begin{aligned}
+\mathbb{E}_q[T_\pi f] &= \mathbb{E}_q\big[\nabla \cdot f(\theta)\big] + \mathbb{E}_q\big[f(\theta)^\top u_\pi(\theta)\big] \\
+&= \mathbb{E}_q\big[\operatorname{Tr}(\nabla_\theta f(\theta))\big] + \mathbb{E}_q\big[f(\theta)^\top u_\pi(\theta)\big] \\
+&= \big\langle f(\cdot), \mathbb{E}_{\theta \sim q}\big[k(\theta, \cdot)\, u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\big] \big\rangle_{\mathcal{H}^d} = \langle f, \mu_{q,\pi} \rangle_{\mathcal{H}^d}.
+\end{aligned} \tag{16.14}
+$$
+
+trong đó dòng cuối dùng $\mu_{q,\pi}$ để ký hiệu *hàm chứng Stein* (Stein witness function), được định nghĩa là
+
+$$
+\mu_{q,\pi}(\cdot) := \mathbb{E}_{\theta \sim q}\left[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\right] \in \mathcal{H}^d. \tag{16.15}
+$$
+
+Thay ngược vào (16.13), *độ sai khác Stein dựa trên hàm nhân* (kernel Stein discrepancy, KSD) giữa $q$ và $\pi$ được cho bởi chuẩn đối ngẫu trong RKHS
+
+$$
+\mathrm{KSD}(q \| \pi) := \max_{f \in \mathcal{H}^d} \left\{ \mathbb{E}_q\left[T_\pi f\right] : \|f\|_{\mathcal{H}^d} \leq 1 \right\} = \|\mu_{q,\pi}\|_{\mathcal{H}^d}. \tag{16.16}
+$$
+
+Dùng (16.15) và tính chất tái sinh, có thể thu được một biểu thức dạng đóng cho bình phương KSD là
+
+$$
+\mathrm{KSD}^2(q \| \pi) = \mathbb{E}_{(\theta, \theta') \sim q \otimes q}\left[ k_\pi(\theta, \theta') \right], \tag{16.17}
+$$
+
+trong đó
+
+$$
+k_\pi(\theta, \theta') := u_\pi^\top(\theta) k(\theta, \theta') u_\pi(\theta') + u_\pi^\top(\theta) \nabla_{\theta'} k(\theta, \theta') + \nabla_\theta^\top k(\theta, \theta') u_\pi(\theta') + \operatorname{Tr}(\nabla_\theta \nabla_{\theta'} k(\theta, \theta'))
+$$
+
+là *hàm nhân Stein* (Stein kernel). Cho một tập hạt $\{\theta^i\}_{i=1}^n \sim q$, một ước lượng V-thống kê (V-statistic) (chệch) cho KSD khi đó được cho bởi
+
+$$
+\widehat{\mathrm{KSD}^2}(q \| \pi) = \frac{1}{n^2} \sum_{i,j=1}^n k_\pi(\theta^i, \theta^j), \tag{16.18}
+$$
+
+với chi phí $\mathcal{O}(n^2)$. Cũng như trường hợp độ sai khác trung bình cực đại (maximum mean discrepancy, MMD), có một biến thể U-thống kê (U-statistic) không chệch. Với các mẫu i.i.d. từ $q$, (16.18) là một ước lượng chệch của $\mathrm{KSD}^2(q \| \pi)$; đối với một hệ hạt tương tác, cùng biểu thức đó được hiểu tự nhiên hơn như bình phương KSD của độ đo thực nghiệm $q^n = \frac{1}{n} \sum_{i=1}^n \delta_{\theta^i}$.
+
+KSD có một số tính chất đặc biệt khiến nó đặc biệt hữu ích trong bối cảnh học sâu Bayes:
+
+- **Không cần chuẩn hóa.** Từ mục tiêu $\pi$ chỉ cần $u_\pi = \nabla \log \pi$, và hằng số chuẩn hóa $Z$ bị triệt tiêu.
+- **Xác định hội tụ.** Với các hàm nhân phù hợp (chẳng hạn hàm nhân đa toàn phương nghịch đảo (inverse multi-quadric, IMQ) với độ rộng (bandwidth) thích hợp) và các điều kiện nhẹ về đuôi của $\pi$, $\mathrm{KSD}(q \| \pi) \to 0$ kéo theo $q \Rightarrow \pi$.
+- **Vai trò thuật toán.** Theo (16.16), KSD định lượng chuẩn của hướng giảm nhanh nhất trong $\mathcal{H}^d$. Phần tử biểu diễn Riesz (Riesz representer) $\mu_{q,\pi}$ của nó chính là trường vector được SVGD sử dụng.
+
+**Độ sai khác Stein dựa trên hàm nhân như hướng giảm nhanh nhất.** Quay lại (16.16), nghiệm cực đại của bài toán tối ưu hóa có ràng buộc (16.11) được cho bởi hàm chứng đã chuẩn hóa
+
+$$
+\bar{\phi}_{q,\pi} = \operatorname*{arg\,max}_{\phi \in \mathcal{H}^d} \left\{ \mathbb{E}_q\left[T_\pi \phi\right] : \|\phi\|_{\mathcal{H}^d} \leq 1 \right\} = \frac{\mu_{q,\pi}}{\|\mu_{q,\pi}\|_{\mathcal{H}^d}}, \tag{16.19}
+$$
+
+với giả thiết $\mu_{q,\pi} \neq 0$; giá trị cực đại tương ứng chính là $\mathrm{KSD}(q \| \pi) = \|\mu_{q,\pi}\|_{\mathcal{H}^d}$. Điều này đặc trưng hóa hướng giảm nhanh nhất của độ phân kỳ KL trong RKHS nhận giá trị vector $\mathcal{H}^d$. Trên thực tế, thuật toán SVGD được giới thiệu ở mục tiếp theo dùng hàm chứng *chưa chuẩn hóa* $\phi^\ast_{q,\pi} := \mu_{q,\pi}$, có cùng hướng; với lựa chọn này, tốc độ giảm tức thời của độ phân kỳ KL là $-\|\mu_{q,\pi}\|^2_{\mathcal{H}^d} = -\mathrm{KSD}^2(q \| \pi)$.
+
+## 3. Hạ gradient biến phân Stein (SVGD)
+
+### 3.1 Tổng quan cơ bản
+
+Mục 2 đã xác lập rằng, cho một ánh xạ vận chuyển vô cùng bé $T_\varepsilon(\theta) = \theta + \varepsilon \phi(\theta)$, vốn, như đã nêu, thỏa mãn
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}((T_\varepsilon)_\# q \| \pi)\right|_{\varepsilon=0} = -\mathbb{E}_q[T_\pi \phi(\theta)], \qquad T_\pi \phi := \nabla \cdot \phi + \phi^\top \nabla \log \pi, \tag{16.20}
+$$
+
+hướng *giảm nhanh nhất* cực đại hóa gradient âm trong (16.20) trong số mọi nhiễu loạn nằm trong quả cầu $\{\phi \in \mathcal{H}^d : \|\phi\|_{\mathcal{H}^d} \leq 1\}$ của RKHS nhận giá trị vector $\mathcal{H}^d$ tỉ lệ với hàm chứng $\mu_{q,\pi}$, xem (16.15). Theo cách làm thông thường, hướng chưa chuẩn hóa được sử dụng:
+
+$$
+\phi^\star_{q,\pi}(\cdot) = \mathbb{E}_{\theta \sim q}\left[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\right]. \tag{16.21}
+$$
+
+Kết quả này gợi ý thủ tục lặp sau đây để biến đổi một độ đo ban đầu $q_0$ thành phân phối hậu nghiệm mục tiêu $\pi$: với $k = 0, 1, \ldots$
+
+$$
+q_{k+1} = \left(T^\ast_{\varepsilon_k}\right)_\# q_k, \quad \text{where} \quad T^\ast_{\varepsilon_k}(\theta) = \theta + \varepsilon_k \phi^\ast_{q_k,\pi}(\theta). \tag{16.22}
+$$
+
+Có thể mô tả tương đương (16.22) ở cấp độ một hạt đơn lẻ. Cụ thể, với mọi $k = 0, 1, \ldots$, $q_k = \mathrm{Law}(\theta_k)$, trong đó $(\theta_k)_{k \in \mathbb{N}}$ được định nghĩa theo[^1]
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k \mathbb{E}_{\theta \sim q_k}\left[k(\theta, \theta_k) u_\pi(\theta) + \nabla_\theta k(\theta, \theta_k)\right], \qquad \theta_0 \sim q_0. \tag{16.23}
+$$
+
+Có thể nhận ra hai số hạng trong kỳ vọng ở (16.23), mỗi số hạng đóng một vai trò khác nhau trong các bước cập nhật:
+
+$$
+\underbrace{\mathbb{E}_{\theta \sim q_k}[k(\theta, \theta_k) \nabla_\theta \log \pi(\theta)]}_{\text{attraction to high } \pi} + \underbrace{\mathbb{E}_{\theta \sim q_k}[\nabla_\theta k(\theta, \theta_k)]}_{\text{repulsion \& diversity}}. \tag{16.24}
+$$
+
+Số hạng thứ nhất đẩy các hạt về phía những vùng có xác suất cao bằng cách đi theo một phiên bản được làm trơn của gradient của log-mật độ. Số hạng thứ hai là một lực đẩy ngăn mọi hạt sụp về một điểm duy nhất.
+
+[^1]: Lưu ý một sự quá tải nhẹ về ký hiệu: $k(\cdot, \cdot)$ ký hiệu hàm nhân, trong khi chỉ số dưới $k$ đánh số vòng lặp. Ý nghĩa dự định luôn rõ ràng từ ngữ cảnh.
+
+**Diễn giải theo hạ gradient hàm.** Các bước cập nhật định nghĩa bởi (16.22) có thể được xem như một dạng hạ gradient hàm (functional gradient descent) trong RKHS nhận giá trị vector $\mathcal{H}^d$. Nhắc lại rằng, với mọi phiếm hàm $\mathcal{F} : \mathcal{H}^d \to \mathbb{R}$, *biến phân thứ nhất* (first variation) $\mathrm{D}\mathcal{F}(f)(g)$ tại $f \in \mathcal{H}^d$ theo hướng $g \in \mathcal{H}^d$ có thể được định nghĩa là
+
+$$
+\mathrm{D}\mathcal{F}(f)(g) := \lim_{\varepsilon \to 0} \frac{1}{\varepsilon} \left(\mathcal{F}(f + \varepsilon g) - \mathcal{F}(f)\right). \tag{16.25}
+$$
+
+Trong khi đó, giả sử $\mathcal{F}$ khả vi Fréchet, *gradient hàm* (functional gradient) $\nabla_f \mathcal{F}(f) : \mathbb{R}^d \to \mathbb{R}^d$ của nó là phần tử trong $\mathcal{H}^d$ sao cho, với mọi $g \in \mathcal{H}^d$:[^2]
+
+$$
+\mathrm{D}\mathcal{F}(f)(g) = \langle \nabla_f \mathcal{F}(f), g \rangle_{\mathcal{H}^d}. \tag{16.27}
+$$
+
+[^2]: Một cách tương đương: $\mathcal{F}(f + \varepsilon g) = \mathcal{F}(f) + \varepsilon \langle \nabla_f \mathcal{F}(f), g \rangle_{\mathcal{H}^d} + \mathcal{O}(\varepsilon^2). \qquad (16.26)$
+
+Xét ánh xạ vận chuyển $T_f = \mathrm{id} + f$, trong đó $\mathrm{id}$ là ánh xạ đồng nhất và $f \in \mathcal{H}^d$. Định nghĩa phiếm hàm
+
+$$
+\mathcal{F}_{q,\pi}(f) = \mathrm{D}_{\mathrm{KL}}\Big({T_f}_\# q \,\Big\|\, \pi\Big). \tag{16.28}
+$$
+
+Khi đó có thể chứng minh rằng gradient hàm $\nabla_f \mathcal{F}_{q,\pi}(f)$, tính tại ánh xạ không $f = 0$, thỏa mãn
+
+$$
+\nabla_f \mathcal{F}_{q,\pi}(0) = -\phi^\ast_{q,\pi}. \tag{16.29}
+$$
+
+Do đó, các ánh xạ vận chuyển $T^\ast_{\varepsilon_k}(\theta)$ dùng để định nghĩa dãy phân phối $(q_k)_{k \in \mathbb{N}}$ trong (16.22), cụ thể là
+
+$$
+T^\ast_{\varepsilon_k}(\theta) = \theta + \varepsilon_k \phi^\ast_{q_k,\pi}(\theta) = \theta - \varepsilon_k \nabla_f \mathcal{F}_{q_k,\pi}(0)(\theta) \tag{16.30}
+$$
+
+có thể được xem như thực hiện một dãy các bước hạ gradient hàm trong RKHS.
+
+**Giới hạn thời gian liên tục.** Các bước cập nhật trong (16.22) và (16.23) cũng có thể được xem như một phép rời rạc hóa theo thời gian của một quá trình thời gian liên tục được gọi là *dòng gradient biến phân Stein* (Stein variational gradient flow). Cụ thể, khi kích thước bước $\varepsilon_k \to 0$, sự tiến hóa của các mật độ $(q_k)_{k \in \mathbb{N}}$ định nghĩa bởi (16.22) được mô tả bằng phương trình liên tục
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \phi^\ast_{q_t,\pi}(\theta)), \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.31}
+$$
+
+Một cách tương đương, sự tiến hóa của hạt $(\theta_k)_{k \in \mathbb{N}}$ định nghĩa bởi (16.23) được mô tả bằng phương trình vi phân thường (ordinary differential equation, ODE) phi tuyến
+
+$$
+\mathrm{d}\theta_t = \phi^\ast_{q_t,\pi}(\theta_t)\, \mathrm{d}t, \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.32}
+$$
+
+Có thể xem các bước cập nhật trong (16.22) hoặc (16.23) lần lượt là phép rời rạc hóa Euler tiến (forward Euler) của động lực học trong (16.31) và (16.32).
+
+**Các kết quả hội tụ cơ bản.** Ý tưởng đằng sau (16.22) hoặc (16.23) là, với các kích thước bước $(\varepsilon_k)_{k \in \mathbb{N}_0}$ đủ nhỏ, các bước cập nhật này làm giảm độ phân kỳ KL. Dưới các giả thiết bổ sung về mục tiêu, hàm nhân và động lực học giới hạn, sự giảm này có thể được dùng để chứng minh hội tụ về $\pi$; xem Mục 8. Thật vậy, dưới các giả thiết phù hợp, có thể chứng minh rằng
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \mathcal{O}(\varepsilon_k^2). \tag{16.33}
+$$
+
+Do đó, với kích thước bước $\varepsilon_k$ đủ nhỏ, độ phân kỳ KL giữa phân phối hiện tại $q_k$ và phân phối mục tiêu $\pi$ quả thực giảm ở mỗi vòng lặp.
+
+### 3.2 Xấp xỉ bằng hạt
+
+Ở vòng lặp thứ $k$, (16.23) đòi hỏi tính một kỳ vọng theo phân phối (chưa biết) $q_k$. Do đó số hạng này cần được xấp xỉ. Để làm vậy, có thể dùng một phép xấp xỉ thực nghiệm. Cụ thể, gọi $\{\theta_0^i\}_{i=1}^n$ là một tập hạt được rút i.i.d. từ phân phối ban đầu $q_0$. Sau đó các hạt được cập nhật, với $k = 0, 1, 2, \ldots$ và $i = 1, \ldots, n$,
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \mathbb{E}_{\theta \sim q_k^n}\left[k(\theta, \theta_k^i) u_\pi(\theta) + \nabla_\theta k(\theta, \theta_k^i)\right], \tag{16.34}
+$$
+
+trong đó $q_k^n = \frac{1}{n} \sum_{i=1}^n \delta_{\theta_k^i}$ là phân phối thực nghiệm của các hạt $\{\theta_k^i\}_{i=1}^n$ ở vòng lặp thứ $k$. Nghĩa là, với $k = 0, 1, 2, \ldots$ và $i = 1, \ldots, n$,
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_k^j, \theta_k^i) u_\pi(\theta_k^j) + \nabla_{\theta_k^j} k(\theta_k^j, \theta_k^i) \Big]. \tag{16.35}
+$$
+
+Thuật toán này, được tóm tắt trong Thuật toán 20, được gọi là *hạ gradient biến phân Stein* (Stein variational gradient descent, SVGD).
+
+**Thuật toán 20** Hạ gradient biến phân Stein (SVGD)
+
+```text
+Inputs : target score u_π(θ) = ∇ log π(θ); kernel k; step sizes {ε_k}_{k∈ℕ}; particles {θ_0^i}_{i=1}^n
+Outputs: updated particles {θ_K^i}_{i=1}^n
+for k = 0 to K − 1 do
+    compute scores g_j ← u_π(θ_k^j) for j = 1, …, n
+    for i = 1 to n do
+        ϕ^i ← (1/n) Σ_{j=1}^n [ k(θ_k^j, θ_k^i) g_j + ∇_{θ_k^j} k(θ_k^j, θ_k^i) ]
+        θ_{k+1}^i ← θ_k^i + ε_k ϕ^i
+return {θ_K^i}_{i=1}^n
+```
+
+### 3.3 Độ phức tạp và cài đặt thực tế
+
+**Độ phức tạp tính toán.** Với các lựa chọn thông thường của hàm nhân $k$, mỗi vòng lặp trong (16.35) đòi hỏi tính mọi tương tác theo cặp. Do đó chi phí tính toán tăng theo $\mathcal{O}(n^2)$ xét theo số lần đánh giá hàm nhân (và gradient của hàm nhân), và theo $\mathcal{O}(n)$ xét theo số lần đánh giá hàm điểm. Khi số hạt lớn, hoặc tập dữ liệu lớn, có một số cách để giảm chi phí tính toán:
+
+- **Hàm điểm trên lô nhỏ.** Ước lượng hàm điểm $u_\pi(\theta) := \nabla_\theta \log \pi(\theta)$ bằng các lô nhỏ (mini-batch) của dữ liệu. Cách này cho một xấp xỉ ngẫu nhiên nhưng không chệch (xem Mục 6).
+- **Xấp xỉ hàm nhân.** Dùng đặc trưng Fourier ngẫu nhiên (random Fourier features) để giảm tương tác $\mathcal{O}(n^2)$ xuống $\mathcal{O}(nm)$ hoặc $\mathcal{O}(n \log n)$; xem Mục 6.3 để biết thêm chi tiết.
+- **Song song hóa.** Dùng tính toán song song, lưu ý rằng cả ma trận hàm nhân lẫn các tổng đều song song theo dữ liệu và thân thiện với GPU.
+
+**Chọn độ rộng.** Lựa chọn độ rộng của hàm nhân ảnh hưởng quyết định đến sự cân bằng giữa số hạng hút và số hạng đẩy trong phương trình cập nhật, và do đó đến sự phân tán của các hạt. Các lịch thích nghi (chẳng hạn quy tắc trung vị (median heuristic)) thường được sử dụng.
+
+**Kích thước bước và tiêu chí dừng.** Cũng như với hạ gradient thông thường, các kích thước bước $(\varepsilon_k)_{k \in \mathbb{N}}$ cũng phải được chọn cẩn thận: nếu quá lớn, phép rời rạc hóa dòng gradient bên dưới trở nên mất ổn định; nếu quá nhỏ, sự hội tụ chậm một cách không cần thiết. Trên thực tế, người ta thường dùng một kích thước bước hằng số nhỏ, hoặc một lược đồ thích nghi như AdaGrad. Một cách khác là các biến thể SVGD không cần tốc độ học (learning-rate-free), dựa trên các ý tưởng từ tối ưu hóa trực tuyến không tham số (còn gọi là đặt cược đồng xu (coin betting)), loại bỏ hoàn toàn nhu cầu chọn lịch kích thước bước, và có thể mở rộng cho các miền có ràng buộc. Gần đây hơn, các lịch kích thước bước thích nghi suy ra từ góc nhìn dòng gradient (xem Mục 4) đã được xây dựng cho SVGD và các thuật toán lấy mẫu liên quan, với các bảo đảm hội tụ ngang với các phiên bản được tinh chỉnh tối ưu của chúng, sai khác các thừa số logarit. Về điều kiện kết thúc, không có tiêu chí dừng nào được thống nhất chung: các lựa chọn phổ biến gồm chạy với một ngân sách tính toán cố định, hoặc theo dõi độ lớn của các bước cập nhật hạt hay một ước lượng thực nghiệm của KSD, xem (16.18), và dừng khi các đại lượng này xuống dưới một ngưỡng.
+
+## 4. Suy luận biến phân dựa trên hạt (ParVI) như dòng gradient∗
+
+Mục 3 đã suy ra thuật toán SVGD và chỉ ra cách nó có thể được xem như một phép rời rạc hóa theo thời gian, kết hợp với một xấp xỉ bằng hạt của độ đo đang tiến hóa, của một quá trình trường trung bình thời gian liên tục được gọi là dòng gradient biến phân Stein. Mục này chỉ ra rằng đây chỉ là một ví dụ của một *dòng gradient trên không gian các độ đo xác suất*. Mục này đưa ra một công thức chung để xây dựng những dòng gradient như vậy và mô tả một số ví dụ, trong đó dòng gradient biến phân Stein là một trường hợp đặc biệt. Mục này cũng chỉ ra cách rời rạc hóa theo thời gian các dòng gradient này, cùng với việc xấp xỉ độ đo đang tiến hóa bằng các hạt, cho ra các thuật toán ParVI thực tế.
+
+### 4.1 Cơ sở về dòng gradient
+
+Mục này giới thiệu khái niệm dòng gradient trên không gian các độ đo xác suất. Phần trình bày dựa trên việc đồng nhất một cách hình thức không gian các độ đo xác suất với một đa tạp Riemann (vô hạn chiều). Do đó, mục này bắt đầu bằng việc nhắc lại một số khái niệm cơ bản của hình học Riemann.
+
+**Đa tạp, không gian tiếp xúc, không gian đối tiếp xúc.** Để thuận tiện, mục này xét đa tạp các mật độ trơn, dương chặt trên $\mathbb{R}^d$, cụ thể là $\mathcal{P} = \left\{ q \in C^\infty(\mathbb{R}^d) : \int q\, \mathrm{d}\theta = 1, q > 0 \right\}$. Với mỗi $q \in \mathcal{P}$, *không gian tiếp xúc* (tangent space) của $\mathcal{P}$ được cho bởi $\mathcal{T}_q \mathcal{P} \subseteq \left\{ \sigma \in C^\infty(\mathbb{R}^d) : \int \sigma\, \mathrm{d}\theta = 0 \right\}$. Ký hiệu $\mathcal{T}_q^\star \mathcal{P}$ là không gian đối tiếp xúc (cotangent space), tức đối ngẫu tô pô của $\mathcal{T}_q \mathcal{P}$.
+
+**Tenxơ metric, toán tử Onsager, metric Riemann.** Gọi $M(q) : \mathcal{T}_q \mathcal{P} \to \mathcal{T}_q^\star \mathcal{P}$ là một *tenxơ metric* (metric tensor), ánh xạ các phần tử trong không gian tiếp xúc $\mathcal{T}_q \mathcal{P}$ thành các phần tử trong không gian đối tiếp xúc $\mathcal{T}_q^\star \mathcal{P}$. Khi đó có thể định nghĩa một *metric Riemann* (Riemannian metric) $g_q : \mathcal{T}_q \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$ theo $g_q(\sigma_1, \sigma_2) = \langle M(q)\sigma_1, \sigma_2 \rangle$, trong đó $\langle \cdot, \cdot \rangle$ là *cặp đối ngẫu* (duality pairing) từ $\mathcal{T}_q^\ast \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$. Nghịch đảo của tenxơ metric $M(q)$, ký hiệu $M^{-1}(q) : \mathcal{T}_q^\ast \mathcal{P} \to \mathcal{T}_q \mathcal{P}$, được gọi là *toán tử Onsager* (Onsager operator).
+
+**Biến phân thứ nhất, gradient Riemann.** Tiếp theo, nhắc lại định nghĩa *biến phân thứ nhất* của $\mathcal{F}$ theo $q$. Đây là hàm duy nhất trong $\mathcal{T}_q^\ast \mathcal{P}$ sao cho
+
+$$
+\lim_{\varepsilon \to 0} \frac{1}{\varepsilon} \left[\mathcal{F}(q + \varepsilon\sigma) - \mathcal{F}(q)\right] = \left\langle \frac{\delta \mathcal{F}(q)}{\delta q}, \sigma \right\rangle, \tag{16.36}
+$$
+
+với mọi $\sigma \in \mathcal{T}_q \mathcal{P}$. Gradient của $\mathcal{F}$ theo metric Riemann $g_q$, ký hiệu $\mathrm{grad}\mathcal{F}$, khi đó được định nghĩa qua điều kiện
+
+$$
+g_q\left(\mathrm{grad}\mathcal{F}, \sigma\right) = \left\langle \frac{\delta \mathcal{F}}{\delta q}, \sigma \right\rangle, \tag{16.37}
+$$
+
+với mọi $\sigma \in \mathcal{T}_q \mathcal{P}$. Dùng đặc trưng của metric Riemann theo toán tử Onsager (xem ở trên), có thể viết gradient Riemann dưới dạng $\mathrm{grad}\mathcal{F}(q) = M^{-1}(q) \frac{\delta \mathcal{F}}{\delta q}$.
+
+**Dòng gradient.** Giờ đây có thể định nghĩa *dòng gradient* của $\mathcal{F}$ trên không gian $(\mathcal{P}, g)$. Đó là một đường cong $t \mapsto q_t$ thỏa mãn
+
+$$
+\frac{\partial q_t}{\partial t} = -\mathrm{grad}\mathcal{F}(q_t) := -M^{-1}(q_t) \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}. \tag{16.38}
+$$
+
+Với điều kiện dòng đặt chỉnh (well posed), và dưới các giả thiết bổ sung về phiếm hàm $\mathcal{F}$ và về hình học (chẳng hạn tính lồi, tính bức (coercivity) phù hợp, hoặc các bất đẳng thức hàm; xem bên dưới), thường có thể chứng minh (16.38) hội tụ về một điểm cực tiểu của phiếm hàm $\mathcal{F}$; với hàm mục tiêu KL được xét dưới đây, mục tiêu $\pi$ chính là điểm cực tiểu này, tức là $q_t \to \pi$ khi $t \to \infty$. Do đó dòng gradient này cung cấp một phương pháp tổng quát để vận chuyển một phân phối tham chiếu ban đầu $q_0$ tới phân phối hậu nghiệm mục tiêu $\pi$. Cụ thể, các thuật toán khác nhau để lấy mẫu từ phân phối hậu nghiệm mục tiêu thu được ứng với những lựa chọn khác nhau về:
+
+1. *phiếm hàm mục tiêu* $\mathcal{F}(q)$ (chẳng hạn độ phân kỳ KL, các độ phân kỳ $f$ khác, KSD);
+2. *hình học* trên $\mathcal{P}$ (chẳng hạn Wasserstein, Stein, Fisher-Rao);
+3. *phép rời rạc hóa theo thời gian* (chẳng hạn Euler tiến, Euler lùi, dòng tiến);
+4. *phép rời rạc hóa theo không gian* (chẳng hạn phần tử hữu hạn, xấp xỉ bằng hạt).
+
+**Phiếm hàm mục tiêu.** Để đơn giản hóa phần thảo luận, trong suốt mục này giả sử phiếm hàm mục tiêu là độ phân kỳ KL: $\mathcal{F}(q) = \mathrm{D}_{\mathrm{KL}}(q \| \pi)$. Khi đó, biến phân thứ nhất của $\mathcal{F}$ theo $q$ có thể được tính là
+
+$$
+\frac{\delta \mathcal{F}}{\delta q}(\theta) = \log \frac{q(\theta)}{\pi(\theta)} + 1 = \log q(\theta) - \log \pi(\theta) + 1. \tag{16.39}
+$$
+
+Lựa chọn này có cơ sở hợp lý: trong số mọi độ phân kỳ $f$ với $f$ khả vi liên tục xác định trên tập số thực dương, độ phân kỳ KL là độ phân kỳ duy nhất có biến phân thứ nhất không đổi (sai khác các hằng số) khi $\pi$ được nhân với một hằng số dương.
+
+Tất nhiên, có thể chọn những phiếm hàm mục tiêu khác, dẫn đến các thuật toán ParVI khác để lấy mẫu từ $\pi$. Chúng gồm độ sai khác Stein dựa trên hàm nhân, năng lượng tương tác được làm trơn (mollified interacting energy, MIE) và độ phân kỳ $\chi^2$.
+
+### 4.2 Dòng gradient Wasserstein
+
+**Hình học.** Trước hết xét dòng gradient sinh bởi metric Wasserstein bậc hai (quadratic Wasserstein metric). Để định nghĩa tenxơ metric Wasserstein, trước hết định nghĩa $\psi_\sigma$ là nghiệm của phương trình đạo hàm riêng (partial differential equation, PDE) elliptic
+
+$$
+-\nabla_\theta \cdot (q \nabla_\theta \psi_\sigma) = \sigma. \tag{16.40}
+$$
+
+Tenxơ metric Wasserstein $M(q) : \mathcal{T}_q \mathcal{P} \to \mathcal{T}_q^\ast \mathcal{P}$ và nghịch đảo của nó $M^{-1}(q) : \mathcal{T}_q^\ast \mathcal{P} \to \mathcal{T}_q \mathcal{P}$ khi đó được định nghĩa theo
+
+$$
+M(q)\sigma = \psi_\sigma, \quad \text{for all } \sigma \in \mathcal{T}_q \mathcal{P} \tag{16.41}
+$$
+
+$$
+M^{-1}(q)\psi = -\nabla_\theta \cdot (q \nabla_\theta \psi), \quad \text{for all } \psi \in \mathcal{T}_q^\ast \mathcal{P}. \tag{16.42}
+$$
+
+Trong khi đó, sau một vài phép tính sơ cấp, metric Riemann–Wasserstein $g_q : \mathcal{T}_q \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$ được xác định là
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \nabla_\theta \psi_{\sigma_1}(\theta)^\top \nabla_\theta \psi_{\sigma_2}(\theta) q(\theta)\, \mathrm{d}\theta. \tag{16.43}
+$$
+
+**Dòng gradient.** Thay (16.42) vào (16.38) và sắp xếp lại cho thấy dòng gradient Wasserstein được cho bởi phương trình liên tục
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \big(q_t(\theta)\, v_t(\theta)\big), \quad v_t(\theta) = -\nabla_\theta \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta). \tag{16.44}
+$$
+
+Ngoài ra, thay biến phân thứ nhất của độ phân kỳ KL từ (16.39) vào (16.44) cho dòng gradient Wasserstein của độ phân kỳ KL là
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \left( q_t(\theta) \nabla_\theta \log \frac{\pi(\theta)}{q_t(\theta)} \right) \tag{16.45}
+$$
+
+$$
+\phantom{\frac{\partial q_t(\theta)}{\partial t}} = -\nabla_\theta \cdot \big( q_t(\theta) \left(\nabla_\theta \log \pi(\theta) - \nabla_\theta \log q_t(\theta)\right) \big). \tag{16.46}
+$$
+
+Một cách hình thức, cũng có thể mô tả dòng gradient trong (16.46) ở cấp độ một hạt đơn lẻ, gọi là *mô tả Lagrange* (Lagrangian description). Cụ thể, với mọi $t \geq 0$, có $q_t = \mathrm{Law}(\theta_t)$, trong đó $(\theta_t)_{t \geq 0}$ là nghiệm của
+
+$$
+\dot{\theta}_t = \nabla_\theta \log \pi(\theta_t) - \nabla_\theta \log q_t(\theta_t), \quad \theta_0 \sim q_0. \tag{16.47}
+$$
+
+Phương trình này, đôi khi được gọi là *phương trình Langevin tất định* (deterministic Langevin equation), là *phi tuyến* theo nghĩa sự tiến hóa theo thời gian không chỉ phụ thuộc vào quá trình $\theta_t$ mà còn phụ thuộc vào phân phối $q_t$ của nó.
+
+Mặt khác, để ý rằng số hạng thứ hai trong (16.46) bằng $\Delta_\theta q_t$, trong đó $\Delta_\theta$ là toán tử Laplace. Do đó (16.46) có thể được viết lại thành
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \nabla_\theta \log \pi(\theta)) + \Delta_\theta q_t(\theta). \tag{16.48}
+$$
+
+Đây chính là *phương trình Fokker–Planck* mô tả sự tiến hóa theo thời gian của luật biên của động lực học Langevin quá tắt dần (overdamped) đối với $\pi$. Nói cách khác, với mọi $t \geq 0$, có $q_t = \mathrm{Law}(\theta_t)$, trong đó giờ đây $(\theta_t)_{t \geq 0}$ được định nghĩa là nghiệm của *phương trình vi phân ngẫu nhiên* (stochastic differential equation)
+
+$$
+\mathrm{d}\theta_t = \nabla \log \pi(\theta_t)\, \mathrm{d}t + \sqrt{2}\, \mathrm{d}w_t, \quad \theta_0 \sim q_0, \tag{16.49}
+$$
+
+trong đó $w = (w_t)_{t \geq 0}$ là một chuyển động Brown chuẩn nhận giá trị trong $\mathbb{R}^d$. Do đó, có thể xem động lực học Langevin quá tắt dần là dòng gradient của độ phân kỳ KL theo metric Wasserstein bậc hai.
+
+**Tốc độ hội tụ.** Có thể dễ dàng thu được sự tiêu tán của độ phân kỳ KL dọc theo dòng gradient Wasserstein (Wasserstein gradient flow, WGF). Cụ thể, dùng quy tắc dây chuyền,
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} \mathrm{D}_{\mathrm{KL}}(q_t \| \pi) = -\int q_t(\theta) \left\| \nabla_\theta \log \tfrac{q_t(\theta)}{\pi(\theta)} \right\|^2 \mathrm{d}\theta = -\mathcal{I}(q_t \| \pi) \leq 0, \tag{16.50}
+$$
+
+trong đó $\mathcal{I}(q \| \pi)$ là *thông tin Fisher tương đối* (relative Fisher information) của $q$ đối với $\pi$. Do đó $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi)$ tiêu tán với tốc độ bằng thông tin Fisher tương đối. Nếu thêm vào đó phân phối mục tiêu $\pi$ thỏa mãn một bất đẳng thức log-Sobolev với hằng số $\lambda$, thì bất đẳng thức này kéo theo sự hội tụ theo hàm mũ về phân phối mục tiêu, với tốc độ xác định bởi $\lambda$: $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq e^{-2\lambda t} \mathrm{D}_{\mathrm{KL}}(q_0 \| \pi)$.
+
+**Các thuật toán thực tế.** Phần trước đã cho hai phương trình vi phân khác nhau, xem (16.47) và (16.49), một trong hai là ngẫu nhiên, và phân phối biên của cả hai đều đi theo dòng gradient Wasserstein của độ phân kỳ KL, xem (16.46). Các phương trình này gợi ý những thuật toán khác nhau để lấy mẫu từ phân phối mục tiêu $\pi$.
+
+Trước hết xét (16.49), phương trình dễ dàng cho ra một thuật toán lấy mẫu thực tế. Cụ thể, dùng phép rời rạc hóa Euler–Maruyama, có thể định nghĩa $(\theta_k)_{k = 0, 1, 2, \ldots}$ theo phương trình cập nhật
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k \nabla_\theta \log \pi(\theta_k) + \sqrt{2\varepsilon_k}\, z_k, \quad \theta_0 \sim q_0, \tag{16.51}
+$$
+
+trong đó $(\varepsilon_k)_{k = 0, 1, \ldots}$ là một dãy kích thước bước dương, không tăng; và $(z_k)_{k = 0, 1, 2, \ldots}$ là các biến ngẫu nhiên chuẩn tắc i.i.d. Thuật toán trong (16.51) không gì khác hơn là *thuật toán Langevin không hiệu chỉnh* (unadjusted Langevin algorithm, ULA), còn gọi là *Monte Carlo Langevin* (Langevin Monte Carlo, LMC), một thuật toán MCMC phổ biến; các biến thể gradient ngẫu nhiên của nó được thảo luận chi tiết trong [Chương 2](/vi/blog/stochastic-gradient-mcmc) và trong chuyên khảo gần đây của Fearnhead và cộng sự. Dù có liên hệ với việc phát biểu lại bài toán lấy mẫu thành một bài toán tối ưu hóa, thuật toán này thường không được xem là một thuật toán "suy luận biến phân dựa trên hạt", vì nó không đòi hỏi dùng một tập hợp hạt.
+
+Giờ xét (16.47). Trong trường hợp này, phép rời rạc hóa Euler tiến định nghĩa một dãy $(\theta_k)_{k = 0, 1, \ldots}$ theo
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k (\nabla_\theta \log \pi(\theta_k) - \nabla_\theta \log q_k(\theta_k)), \quad \theta_0 \sim q_0. \tag{16.52}
+$$
+
+Không thể cài đặt trực tiếp phương trình này, vì nó phụ thuộc vào dãy phân phối chưa biết $(q_k)_{k = 0, 1, \ldots}$. Thay vào đó, một lựa chọn là làm tiến hóa một tập hợp hạt $(\theta_k^i)_{k = 0, 1, \ldots}^{i = 1, \ldots, n}$ và cập nhật
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \left( \nabla_\theta \log \pi(\theta_k^i) - \widehat{\nabla_\theta \log q_k}(\theta_k^i) \right), \quad \theta_0^i \overset{\text{i.i.d.}}{\sim} q_0, \tag{16.53}
+$$
+
+trong đó $\widehat{\nabla_\theta \log q_k}$ là một xấp xỉ của $\nabla_\theta \log q_k$, được xây dựng từ các hạt $\{\theta_k^i\}_{i=1}^n$. Có nhiều lựa chọn cho phép xấp xỉ này, bao gồm xấp xỉ trực tiếp mật độ $q_k$ bằng một ước lượng mật độ hàm nhân (kernel density estimate) hoặc một luồng chuẩn hóa, và xấp xỉ hàm điểm $\nabla \log q_k$ bằng khớp hàm điểm (score matching).
+
+### 4.3 Dòng gradient Stein
+
+Mục này đưa ra một cách diễn giải chặt chẽ hơn cho giới hạn trường trung bình, thời gian liên tục của thuật toán SVGD, xem (16.31), như một dòng gradient trên không gian các độ đo xác suất được trang bị một metric Riemann được chọn phù hợp.
+
+**Hình học.** Tương tự như trước, xem (16.40), để định nghĩa tenxơ metric Stein, trước hết đưa vào $\psi_\sigma$ là nghiệm của phương trình vi tích phân đạo hàm riêng (integro-partial differential equation)
+
+$$
+-\nabla_\theta \cdot \left( q(\theta) \int k(\theta', \theta) \nabla_{\theta'} \psi_\sigma(\theta') q(\theta')\, \mathrm{d}\theta' \right) = \sigma(\theta), \tag{16.54}
+$$
+
+trong đó $k : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$ là một hàm nhân đối xứng xác định dương. Khi đó *tenxơ metric Stein* (Stein metric tensor) và nghịch đảo của nó có thể được định nghĩa là
+
+$$
+M(q)\sigma = \psi_\sigma, \quad \text{for all } \sigma \in \mathcal{T}_q \mathcal{P} \tag{16.55}
+$$
+
+$$
+M^{-1}(q)\psi = -\nabla_\theta \cdot \left( q(\theta) \int k(\theta', \theta) \nabla_{\theta'} \psi(\theta') q(\theta')\, \mathrm{d}\theta' \right), \quad \text{for all } \psi \in \mathcal{T}_q^\ast \mathcal{P}. \tag{16.56}
+$$
+
+Suy ra metric Riemann–Stein gắn với tenxơ metric này được cho bởi
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \nabla_\theta \psi_{\sigma_1}^\top(\theta) \left[ \int k(\theta', \theta) \nabla_{\theta'} \psi_{\sigma_2}(\theta') q(\theta')\, \mathrm{d}\theta' \right] q(\theta)\, \mathrm{d}\theta. \tag{16.57}
+$$
+
+**Dòng gradient.** Tương tự như trước, thay (16.56) vào (16.38) và sắp xếp lại cho thấy dòng gradient Stein được cho bởi phương trình liên tục
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \big(q_t(\theta)\, v_t(\theta)\big), \quad v_t(\theta) = -\int k(\theta', \theta) \nabla_{\theta'} \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta')\, q_t(\theta')\, \mathrm{d}\theta'. \tag{16.58}
+$$
+
+Ngoài ra, thay biến phân thứ nhất của độ phân kỳ KL từ (16.39) vào (16.58) cho dòng gradient Stein của độ phân kỳ KL (tức là dòng gradient biến phân Stein) là
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \left( q_t(\theta) \int k(\theta', \theta) \nabla_{\theta'} \log \frac{\pi(\theta')}{q_t(\theta')} q_t(\theta')\, \mathrm{d}\theta' \right) \tag{16.59}
+$$
+
+$$
+\phantom{\frac{\partial q_t(\theta)}{\partial t}} = -\nabla_\theta \cdot \left( q_t(\theta) \int k(\theta', \theta) \left[\nabla_{\theta'} \log \pi(\theta') - \nabla_{\theta'} \log q_t(\theta')\right] q_t(\theta')\, \mathrm{d}\theta' \right). \tag{16.60}
+$$
+
+Cuối cùng, giả sử các điều kiện biên phù hợp đối với $k$ và lấy tích phân từng phần, điều này dẫn trở lại
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \phi^\ast_{q_t,\pi}(\theta)), \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) \nabla_\theta \log \pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.61}
+$$
+
+**Tốc độ hội tụ.** Dùng một phiên bản thích hợp của quy tắc dây chuyền, có thể chứng minh rằng sự tiêu tán của độ phân kỳ KL dọc theo dòng gradient biến phân Stein được cho bởi
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} \mathrm{D}_{\mathrm{KL}}(q_t \| \pi) = -\langle \phi_t, \mu_{q_t,\pi} \rangle_{\mathcal{H}^d} = -\|\mu_{q_t,\pi}\|^2_{\mathcal{H}^d} = -\mathcal{I}_{\mathrm{Stein}}(q_t \| \pi) := -\mathrm{KSD}^2(q_t \| \pi) \leq 0. \tag{16.62}
+$$
+
+Do đó, $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi)$ không tăng và tiêu tán với tốc độ bằng *thông tin Stein–Fisher* (Stein-Fisher information), tức là bình phương KSD. Tương tự như trước, nếu $\pi$ thỏa mãn một *bất đẳng thức log-Sobolev Stein* (Stein log-Sobolev inequality) với hằng số $\lambda$, thì có hội tụ theo hàm mũ: $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq \mathrm{D}_{\mathrm{KL}}(q_0 \| \pi) e^{-2\lambda t}$.
+
+### 4.4 Dòng gradient Fisher-Rao và Wasserstein-Fisher-Rao
+
+Hình học Wasserstein và hình học Stein đều dẫn tới những dòng gradient *vận chuyển khối lượng*. Ngược lại, hình học Fisher-Rao dẫn tới một dòng gradient thay đổi khối lượng một cách cục bộ thông qua động lực học sinh-tử (birth-death) thay vì vận chuyển trong không gian; nói một cách không hình thức, khối lượng có thể bị loại bỏ ở một vùng và được tạo ra ở vùng khác, như thể nó được *dịch chuyển tức thời* (teleported).
+
+**Hình học.** Metric Riemann Fisher-Rao $g_q : \mathcal{T}_q \mathcal{P} \times \mathcal{T}_q \mathcal{P} \to \mathbb{R}$ được định nghĩa theo
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \frac{\sigma_1 \sigma_2}{q}\, \mathrm{d}\theta, \tag{16.63}
+$$
+
+hoặc, viết $\sigma = q \psi_\sigma$,
+
+$$
+g_q(\sigma_1, \sigma_2) = \int \psi_{\sigma_1} \psi_{\sigma_2} q\, \mathrm{d}\theta. \tag{16.64}
+$$
+
+Trong khi đó tenxơ metric Fisher-Rao $M(q) : \mathcal{T}_q \mathcal{P} \to \mathcal{T}_q^\ast \mathcal{P}$ gắn với $g_q$, và nghịch đảo của nó $M^{-1}(q) : \mathcal{T}_q^\ast \mathcal{P} \to \mathcal{T}_q \mathcal{P}$, được cho bởi
+
+$$
+M(q)\sigma = \psi_\sigma = \frac{\sigma}{q}, \quad \text{for all } \sigma \in \mathcal{T}_q \mathcal{P} \tag{16.65}
+$$
+
+$$
+M^{-1}(q)\psi = q\left(\psi - \mathbb{E}_q[\psi]\right), \quad \text{for all } \psi \in \mathcal{T}_q^\ast \mathcal{P}. \tag{16.66}
+$$
+
+Nói một cách chặt chẽ, các thế đối tiếp xúc (cotangent potential) được đồng nhất sai khác các hằng số cộng; một cách tương đương, có thể làm việc với phần tử đại diện đã quy tâm $\psi - \mathbb{E}_q[\psi]$, khi đó $M(q)$ và $M^{-1}(q)$ là nghịch đảo đúng nghĩa của nhau.
+
+**Dòng gradient.** Thay (16.66) vào (16.38) suy ra dòng gradient Fisher-Rao có dạng
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -q_t(\theta) \left( \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta) - \mathbb{E}_{\theta \sim q_t}\left[ \left.\frac{\delta \mathcal{F}}{\delta q}\right|_{q = q_t}(\theta) \right] \right). \tag{16.67}
+$$
+
+Do đó, thay thêm (16.39), dòng gradient Fisher-Rao của độ phân kỳ KL được cho bởi
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = q_t(\theta) \Big[ \log \pi(\theta) - (\log q_t(\theta)) - \mathbb{E}_{\theta \sim q_t}\left[\log \pi(\theta) - \log q_t(\theta)\right] \Big]. \tag{16.68}
+$$
+
+Dòng gradient này là một ví dụ của *quá trình sinh-tử* (birth-death process). Vì không có đạo hàm theo không gian, nó có thể được xem như một hệ vô hạn các phương trình vi phân thường, được đánh chỉ số theo tham số. Ưu điểm của một quá trình như vậy là nó cho phép các bước di chuyển toàn cục (tức là dịch chuyển tức thời) khối lượng của mật độ xác suất (chẳng hạn từ một mode sang mode khác) theo trọng số tương đối của chúng, mà không cần vận chuyển khối lượng này qua các vùng có xác suất thấp. Nhược điểm là, do không có khuếch tán, giá của $q_t$ không bao giờ thay đổi trong quá trình tiến hóa. Điều này có nghĩa là việc mô phỏng số hiệu quả dòng gradient Fisher-Rao không hề đơn giản.
+
+Một giải pháp là kết hợp hình học Wasserstein và hình học Fisher-Rao thành một hình học lai, bao gồm cả vận chuyển khối lượng lẫn dịch chuyển tức thời. Cụ thể, dòng gradient theo hình học *Wasserstein-Fisher-Rao* có dạng
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot \big(q_t(\theta) v_t(\theta)\big) + q_t(\theta) \alpha_t(\theta), \tag{16.69}
+$$
+
+trong đó
+
+$$
+v_t(\theta) = -\nabla_\theta \frac{\delta\, \mathrm{D}_{\mathrm{KL}}(q_t \| \pi)}{\delta q_t} = \nabla \log \pi(\theta) - \nabla \log q_t(\theta) \tag{16.70}
+$$
+
+$$
+\begin{aligned}
+\alpha_t(\theta) &= -\left( \frac{\delta\, \mathrm{D}_{\mathrm{KL}}(q_t \| \pi)}{\delta q_t} - \mathbb{E}_{q_t}\left[ \frac{\delta\, \mathrm{D}_{\mathrm{KL}}(q_t \| \pi)}{\delta q_t} \right] \right) \\
+&= (\log \pi(\theta) - \log q_t(\theta)) - \mathbb{E}_{q_t}[\log \pi(\theta) - \log q_t(\theta)].
+\end{aligned} \tag{16.71}
+$$
+
+**Tốc độ hội tụ.** Dưới các điều kiện nhẹ đối với $\pi$ và $q_0$, có thể chứng minh rằng tốc độ hội tụ tiệm cận của dòng gradient Wasserstein-Fisher-Rao *không phụ thuộc* vào phân phối mục tiêu $\pi$. Cụ thể, giả sử $q_0$ và $\pi$ đều có mô-men bậc hai bị chặn, và tỉ số của chúng thỏa mãn một điều kiện tăng trưởng nhất định, thì $\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq C e^{-t}$ với mọi $t \geq t_0$.
+
+## 5. Các phương pháp bậc hai và ParVI Riemann∗
+
+Mục 3 đã chỉ ra rằng SVGD có thể được xem như thực hiện một dạng hạ gradient hàm đối với độ phân kỳ KL trên một RKHS nhận giá trị vector. Cụ thể, nếu định nghĩa phiếm hàm
+
+$$
+\mathcal{F}_{q,\pi}(f) = \mathrm{D}_{\mathrm{KL}}\Big((\mathrm{id} + f)_\# q \,\Big\|\, \pi\Big), \quad f \in \mathcal{H}^d, \tag{16.72}
+$$
+
+thì (phiên bản quần thể vô hạn của) thuật toán SVGD được định nghĩa thông qua các bước cập nhật
+
+$$
+q_{k+1} = \left(T^\ast_{\varepsilon_k}\right)_\# q_k, \quad \text{where} \quad T^\ast_{\varepsilon_k} = \mathrm{id} - \varepsilon_k \nabla_f \mathcal{F}_{q_k,\pi}(0). \tag{16.73}
+$$
+
+Dựa trên góc nhìn này về SVGD, có nhiều cách để tăng tốc thuật toán SVGD. Chúng bao gồm:
+
+- Đưa thông tin bậc hai vào để các bước thích nghi với tình trạng điều kiện xấu (ill-conditioning) cục bộ của phân phối hậu nghiệm.
+- Điều chỉnh *hình học* của đa tạp tham số thông qua một metric Riemann (gradient tự nhiên).
+
+Cả hai cách tiếp cận này được trình bày sơ lược dưới đây.
+
+### 5.1 Newton biến phân Stein (SVN)
+
+Thuật toán Newton biến phân Stein (Stein variational Newton, SVN), do Detommaso và cộng sự đề xuất, đưa thông tin bậc hai vào các bước cập nhật để tăng tốc hội tụ. Cụ thể, hướng giảm nhanh nhất trong (16.73) được thay bằng một xấp xỉ của hướng Newton.
+
+Nhắc lại rằng hướng Newton được định nghĩa là điểm cực tiểu của một xấp xỉ bậc hai (thay vì tuyến tính) cục bộ của $\mathcal{F}$. Để định nghĩa điểm cực tiểu này, trước hết cần đưa vào *biến phân thứ hai* (second variation) $\mathrm{D}^2\mathcal{F}(0)(g, g')$ của $\mathcal{F}$ tại 0, theo cặp hướng $g, g' \in \mathcal{H}^d$, được định nghĩa là
+
+$$
+\mathrm{D}^2\mathcal{F}(0)(g, g') := \lim_{\varepsilon \to 0} \frac{1}{\varepsilon} \left(\mathrm{D}\mathcal{F}(\varepsilon g')(g) - \mathrm{D}\mathcal{F}(0)(g)\right). \tag{16.74}
+$$
+
+Trong khi đó, giả sử $\mathcal{F}$ khả vi Fréchet hai lần tại 0, *ma trận Hesse hàm* (functional Hessian) $\nabla_f^2 \mathcal{F}(0)$ của nó tại 0 là toán tử tuyến tính $\mathcal{H}^d \to \mathcal{H}^d$ sao cho, với mọi $g, g' \in \mathcal{H}^d$,
+
+$$
+\mathrm{D}^2\mathcal{F}(0)(g, g') = \langle \nabla_f^2 \mathcal{F}(0)[g], g' \rangle_{\mathcal{H}^d}. \tag{16.75}
+$$
+
+Ở vòng lặp thứ $k$, mục tiêu là tìm hướng Newton $g = (g_1, \ldots, g_d) \in \mathcal{H}^d$ cho phiếm hàm $\mathcal{F}_{q_k,\pi}(f)$, tính tại $f = 0$. Hướng này được đặc trưng bởi các điều kiện dừng bậc nhất: với mọi $g' \in \mathcal{H}^d$,
+
+$$
+\mathrm{D}^2\mathcal{F}_{q_k,\pi}(0)(g, g') = -\mathrm{D}\mathcal{F}_{q_k,\pi}(0)(g') \tag{16.76}
+$$
+
+hoặc, một cách tương đương, với mọi $g' \in \mathcal{H}^d$,
+
+$$
+\langle \nabla_f^2 \mathcal{F}_{q_k,\pi}(0)[g], g' \rangle_{\mathcal{H}^d} = -\langle \nabla_f \mathcal{F}_{q_k,\pi}(0), g' \rangle_{\mathcal{H}^d}. \tag{16.77}
+$$
+
+Nhờ Liu và Wang cùng Detommaso và cộng sự, có các biểu thức tường minh cho cả gradient hàm $\nabla_f \mathcal{F}_{q_k,\pi}(0)$ lẫn ma trận Hesse hàm $\nabla_f^2 \mathcal{F}_{q_k,\pi}(0)$, tính tại $f = 0$. Cụ thể, theo từng thành phần,
+
+$$
+\left[\nabla_f \mathcal{F}_{q_k,\pi}(0)\right]_i(\theta') = -\mathbb{E}_{\theta \sim q_k}\left[k(\theta, \theta') \partial_i \log \pi(\theta) + \partial_i k(\theta, \theta')\right] \tag{16.78}
+$$
+
+$$
+\left[\nabla_f^2 \mathcal{F}_{q_k,\pi}(0)\right]_{i,j}(\theta', \theta'') = -\mathbb{E}_{\theta \sim q_k}\left[\partial_{ij}^2 \log \pi(\theta) k(\theta, \theta') k(\theta, \theta'') - \partial_i k(\theta, \theta') \partial_j k(\theta, \theta'')\right]. \tag{16.79}
+$$
+
+Để giải (16.77), Detommaso và cộng sự đề xuất một xấp xỉ Galerkin. Cụ thể, gọi $(\theta_k^i)_{i=1}^n$ là một tập hạt phân phối theo $q_k$. Định nghĩa không gian tuyến tính hữu hạn chiều $\mathcal{H}_n = \mathrm{span}\left\{k(\theta_k^1, \cdot), \ldots, k(\theta_k^n, \cdot)\right\} \subseteq \mathcal{H}$, và gọi $\mathcal{H}_n^d = \mathcal{H}_n \times \cdots \times \mathcal{H}_n$ là không gian các hàm nhận giá trị vector tương ứng. Khi đó có thể tìm một nghiệm xấp xỉ $g = (g_1, \ldots, g_d) \in \mathcal{H}_n^d$, cụ thể là
+
+$$
+g_j(\theta) = \sum_{i=1}^n \alpha_i^j k(\theta_k^i, \theta), \tag{16.80}
+$$
+
+với các hệ số thực $(\alpha_i^j)_{i=1:n}^{j=1:d}$ cần xác định. Trong trường hợp này, (16.77) quy về một hệ tuyến tính hữu hạn chiều, cho bởi
+
+$$
+\sum_{l=1}^n H_{rl} \alpha_l = b_r, \quad \text{for each } r = 1, \ldots, n, \tag{16.81}
+$$
+
+trong đó $\alpha_l = (\alpha_l^1, \ldots, \alpha_l^d)$ là vector các hệ số chưa biết, và
+
+$$
+[H_{rl}]_{ij} = \left[\nabla_f^2 \mathcal{F}_{q_k,\pi}(0)\right]_{ij}(\theta_k^r, \theta_k^l), \quad b_r = -\nabla_f \mathcal{F}_{q_k,\pi}(0)(\theta_k^r). \tag{16.82}
+$$
+
+Giải (16.81) và thay các hệ số trở lại dạng giả định (ansatz) (16.80) cho một xấp xỉ $g = (g_1, \ldots, g_d) \in \mathcal{H}_n^d \subseteq \mathcal{H}^d$ của hướng Newton. Chính xác hơn, chỉ có thể tính một xấp xỉ Monte Carlo của ma trận Hesse $H_{rl}$ và của gradient $b_r$, dùng tập hợp $(\theta^i)_{i=1}^n$, và điều này cho một ước lượng $\hat{g}^n$ của hướng Newton $g$. Khi đó thuật toán SVN có dạng
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \hat{g}^n(\theta_k^i). \tag{16.83}
+$$
+
+Trên thực tế, việc tính nghiệm của hệ tuyến tính (16.81) có thể tốn kém đến mức không khả thi trong các bài toán nhiều chiều hoặc khi dùng số lượng hạt lớn, và nghiệm có thể không phải là một hướng giảm hợp lệ. Detommaso và cộng sự đề xuất hai giải pháp. Giải pháp thứ nhất là dùng phương pháp Newton – gradient liên hợp không chính xác (inexact Newton-conjugate gradient, NCG), phương pháp bảo đảm một hướng giảm bằng cách dừng sớm vòng lặp gradient liên hợp. Cách tiếp cận này cũng mở rộng được cho số chiều cao, vì nó chỉ đòi hỏi tính tích ma trận – vector với mỗi $H_{rl}$. Giải pháp thứ hai là dùng một xấp xỉ đường chéo khối của biến phân thứ hai, có thể kết hợp với một xấp xỉ Gauss–Newton của $\nabla^2 \log \pi$, hoặc NCG không chính xác.
+
+### 5.2 SVGD Riemann (RSVGD)
+
+Cho $(\Theta, g)$ là một đa tạp Riemann, tức là một đa tạp khả vi $\Theta$ được trang bị một metric Riemann $g$, định nghĩa là một họ $g = (g_\theta)_{\theta \in \Theta}$ các tích trong $g_\theta(\cdot, \cdot) : \mathcal{T}_\theta \Theta \times \mathcal{T}_\theta \Theta \to \mathbb{R}$ trên các không gian tiếp xúc $\mathcal{T}_\theta \Theta$, biến thiên trơn theo $\theta$.
+
+Cho một bản đồ tọa độ cục bộ (local coordinate chart), metric $g$ được biểu diễn bởi một ma trận đối xứng xác định dương cỡ $d \times d$ với các phần tử $G_{ij}$. Khi đó gradient của một hàm $f : \Theta \to \mathbb{R}$ và divergence của một trường vector $V$ có thể được viết là
+
+$$
+\mathrm{grad} f = \sum_{i,j=1}^d G^{ij} \frac{\partial f}{\partial x_i} \frac{\partial}{\partial x_j} = G^{-1} \nabla f \tag{16.84}
+$$
+
+$$
+\mathrm{div}(V) = |G|^{-\frac{1}{2}} \sum_i \frac{\partial}{\partial x_i} \left( |G|^{\frac{1}{2}} V^i \right) = |G|^{-\frac{1}{2}} \nabla \cdot (|G|^{\frac{1}{2}} V), \tag{16.85}
+$$
+
+trong đó $G^{ij}$ là phần tử thứ $(i, j)$ của ma trận nghịch đảo $G^{-1}$, $V^i$ là thành phần (phản biến) thứ $i$ của $V$, và $|G| = \det(G)$.
+
+Theo Liu và Zhu, giờ đây có thể định nghĩa *toán tử Riemann–Stein* (Riemannian-Stein operator) và *đẳng thức Riemann–Stein* (Riemannian-Stein identity) là
+
+$$
+T_\pi^{(G)} \phi := \mathrm{div}_G \phi + \langle \phi, \mathrm{grad} \log \pi \rangle_G, \qquad \mathbb{E}_\pi\left[T_\pi^{(G)} \phi\right] = 0, \tag{16.86}
+$$
+
+trong đó $\langle a, b \rangle_G = a^T G b$, $\mathrm{div}_G$ là divergence Riemann định nghĩa ở trên, và $\pi$ được hiểu là một mật độ đối với độ đo thể tích Riemann. Đây là những tổng quát hóa tự nhiên của toán tử Stein (Euclid) và đẳng thức Stein (Euclid) đã được giới thiệu ở Mục 2.4, xem (16.12).
+
+Một lần nữa, mục tiêu là hướng giảm nhanh nhất của độ phân kỳ KL. Đặt $T_\varepsilon(\theta) = \theta + \varepsilon \phi(\theta)$ và $q_\varepsilon = (T_\varepsilon)_\# q$,[^3] đạo hàm của độ phân kỳ KL theo độ lớn nhiễu loạn được cho bởi
+
+$$
+\left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} = -\mathbb{E}_q\left[T_\pi^{(G)} \phi(\theta)\right], \qquad T_\pi^{(G)} \phi := \mathrm{div}_G \phi + \langle \phi, \mathrm{grad} \log \pi \rangle_G. \tag{16.87}
+$$
+
+Tương tự như trước, nhiệm vụ giờ đây là giải bài toán tối ưu hóa có ràng buộc
+
+$$
+\phi^\ast = \operatorname*{arg\,min}_{\phi \in \mathcal{G}} \left\{ \left.\frac{\mathrm{d}}{\mathrm{d}\varepsilon} \mathrm{D}_{\mathrm{KL}}(q_\varepsilon \| \pi)\right|_{\varepsilon=0} : \|\phi\|_{\mathcal{G}} \leq 1 \right\} = \operatorname*{arg\,max}_{\phi \in \mathcal{G}} \left\{ \mathbb{E}_q\left[T_\pi^{(G)} \phi(\theta)\right] : \|\phi\|_{\mathcal{G}} \leq 1 \right\}, \tag{16.88}
+$$
+
+trong đó $\mathcal{G}$ là một không gian hàm định chuẩn. Ngoài ra còn đòi hỏi $\phi^\ast$ là một trường vector hợp lệ, bất biến với hệ tọa độ, và có thể biểu diễn ở dạng đóng.
+
+Yêu cầu thứ nhất và thứ hai loại bỏ lựa chọn Euclid ngây thơ $\mathcal{G} = \mathcal{H}^d$, tức RKHS nhận giá trị vector được dùng khi suy dẫn bước cập nhật SVGD tiêu chuẩn, vì các phần tử của nó không phải là những trường vector được định nghĩa một cách nội tại trên đa tạp. Thay vào đó, chọn
+
+$$
+\mathcal{G} = \{\mathrm{grad} f : f \in \mathcal{H}\}, \tag{16.89}
+$$
+
+trong đó $\mathcal{H}$ là RKHS gắn với một hàm nhân xác định dương $k : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$. Gradient này là một đối tượng được định nghĩa tốt trên $\Theta$; nó chắc chắn là một trường vector hợp lệ; và nó bất biến với hệ tọa độ. Hơn nữa, có thể suy ra một nghiệm dạng đóng là
+
+$$
+\phi^\ast = \mathrm{grad}_{(\cdot)} f^\ast(\cdot), \quad f^\ast(\cdot) = \mathbb{E}_{\theta \sim q}\left[\langle \mathrm{grad}_\theta k(\theta, \cdot), \mathrm{grad}_\theta \log \pi(\theta) \rangle_{G_\theta} + \mathrm{div}_\theta\left(\mathrm{grad}_\theta k(\theta, \cdot)\right)\right], \tag{16.90}
+$$
+
+trong đó mọi toán tử gradient và divergence được hiểu theo nghĩa Riemann định nghĩa ở trên, với chỉ số dưới cho biết biến được lấy theo. Do đó bước cập nhật SVGD Riemann có dạng
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \mathrm{grad}_{\theta_k^i} \left[ \frac{1}{n} \sum_{j=1}^n \Big[ \langle \mathrm{grad}_{\theta_k^j} k(\theta_k^j, \theta_k^i), \mathrm{grad}_{\theta_k^j} \log \pi(\theta_k^j) \rangle_{G_{\theta_k^j}} + \mathrm{div}_{\theta_k^j}\Big(\mathrm{grad}_{\theta_k^j} k(\theta_k^j, \theta_k^i)\Big) \Big] \right]. \tag{16.91}
+$$
+
+Trong một cài đặt hoàn toàn nội tại, phép cộng Euclid trong bước cập nhật này nên được thay bằng một bước co rút (retraction) hoặc một bước theo ánh xạ mũ (exponential map) trên $\Theta$. Số hạng $\mathrm{grad} \log \pi = G^{-1} \nabla \log \pi$ là một phiên bản đã tiền điều kiện của hàm điểm. Nếu chọn metric Riemann để xấp xỉ độ cong của phân phối hậu nghiệm (chẳng hạn thông tin Fisher), thì việc này có tác dụng *làm trắng* (whitening) hàm điểm. Điều này có thể tăng tốc hội tụ trong các mô hình có điều kiện xấu.
+
+[^3]: Ở đây, ánh xạ vận chuyển được biểu diễn trong một bản đồ tọa độ cục bộ; một cách nội tại hơn, có thể định nghĩa $T_\varepsilon$ thông qua ánh xạ mũ hoặc một phép co rút.
+
+## 6. ParVI ngẫu nhiên và có khả năng mở rộng
+
+Để mở rộng các thuật toán ParVI như SVGD cho các tập dữ liệu lớn và các mô hình nhiều chiều, cần một số điều chỉnh. Chúng bao gồm:
+
+- các xấp xỉ ngẫu nhiên của hàm điểm (chẳng hạn lô nhỏ, giảm phương sai);
+- động lực học *có nhiễu* vẫn giữ được khả năng khám phá trong khi bảo toàn sự giảm của độ phân kỳ KL;
+- các kỹ thuật *ở cấp hệ thống* (hàm nhân đặc trưng ngẫu nhiên, cài đặt trên GPU/phân tán).
+
+Các điều chỉnh này được phát triển theo cách nhất quán với góc nhìn gradient hàm đã xác lập ở Mục 2–3.
+
+### 6.1 SVGD với lô nhỏ
+
+**Tổng quan cơ bản.** Cho phân phối hậu nghiệm mục tiêu là $\pi(\theta) \propto p(\mathcal{D} \mid \theta) p(\theta)$ với $\mathcal{D} = \{(X_n, Y_n)\}_{n=1}^N$. Hàm điểm chính xác của mục tiêu được cho bởi
+
+$$
+u_\pi(\theta) = \nabla \log p(\theta) + \sum_{n=1}^N \nabla \log p(Y_n \mid X_n, \theta). \tag{16.92}
+$$
+
+Cho một lô nhỏ $B_k \subset \{1, \ldots, N\}$ kích thước $b$, có thể định nghĩa một ước lượng *không chệch* của hàm điểm là
+
+$$
+\widehat{u}_\pi(\theta; B_k) = \nabla \log p(\theta) + \frac{N}{b} \sum_{n \in B_k} \nabla \log p(Y_n \mid X_n, \theta), \tag{16.93}
+$$
+
+với $\mathbb{E}_{B_k}\big[\widehat{u}_\pi(\theta; B_k)\big] = u_\pi(\theta)$. Thay $u_\pi$ bằng $\widehat{u}_\pi$ trong hàm chứng của SVGD, xem (16.21), cho
+
+$$
+\widehat{\phi}^\ast_{q,\pi}(\cdot; B_k) = \mathbb{E}_{\theta \sim q}\left[k(\theta, \cdot) \widehat{u}_\pi(\theta; B_k) + \nabla_\theta k(\theta, \cdot)\right]. \tag{16.94}
+$$
+
+Thay biểu thức này vào phiên bản quần thể của thuật toán SVGD, xem (16.22) hoặc (16.23), thu được
+
+$$
+q_{k+1} = (\hat{T}^\ast_{\varepsilon_k})_\# q_k, \quad \text{where} \quad \hat{T}^\ast_{\varepsilon_k}(\theta) = \theta + \varepsilon_k \hat{\phi}^\ast_{q_k,\pi}(\theta; B_k), \tag{16.95}
+$$
+
+hoặc tương đương, theo một hạt đơn lẻ $\theta_k$ có phân phối cho bởi $q_k = \mathrm{Law}(\theta_k)$, các bước cập nhật
+
+$$
+\theta_{k+1} = \theta_k + \varepsilon_k \mathbb{E}_{\theta \sim q_k}\left[k(\theta, \theta_k) \hat{u}_\pi(\theta; B_k) + \nabla_\theta k(\theta, \theta_k)\right], \quad \theta_0 \sim q_0. \tag{16.96}
+$$
+
+Tất nhiên, trên thực tế phải xấp xỉ kỳ vọng theo $(q_k)_{k \in \mathbb{N}}$ chưa biết. Tương tự như trước, cho $\{\theta_0^i\}_{i=1}^n \overset{\text{i.i.d.}}{\sim} q_0$, các hạt được cập nhật với $i = 1, \ldots, n$:
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \frac{1}{n} \sum_{j=1}^n \left[k(\theta_k^j, \theta_k^i) \widehat{u}_\pi(\theta_k^j; B_k) + \nabla_{\theta_k^j} k(\theta_k^j, \theta_k^i)\right]. \tag{16.97}
+$$
+
+Thủ tục này được tóm tắt trong Thuật toán 21.
+
+**Các kết quả hội tụ.** Một câu hỏi tự nhiên là liệu các phép biến đổi ngẫu nhiên định nghĩa trong (16.95) có còn làm giảm độ phân kỳ KL hay không. Nghĩa là, với các kích thước bước $\varepsilon_k$ đủ nhỏ, liệu có đúng là $\mathrm{D}_{\mathrm{KL}}\big((\hat{T}^\ast_{\varepsilon_k})_\# q \,\big\|\, \pi\big) \leq \mathrm{D}_{\mathrm{KL}}(q \| \pi)$?
+
+Phương trình (16.33) đã nêu một bổ đề giảm (descent lemma) cho SVGD: dưới các điều kiện phù hợp, thuật toán SVGD làm giảm độ phân kỳ KL ở mỗi vòng lặp. Trong bối cảnh ngẫu nhiên, có thể chứng minh một kết quả tương tự cho *sự giảm kỳ vọng* (expected descent). Gọi $\mu_{q,\pi}$ là hàm chứng chính xác và $\widehat{\mu}_{q,\pi}$ là phiên bản lô nhỏ của nó, sao cho $\mathbb{E}[\widehat{\mu}_{q,\pi}] = \mu_{q,\pi}$. Cụ thể,
+
+$$
+\mathbb{E}\left[\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) \mid q_k\right] - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \mathcal{O}(\varepsilon_k^2), \tag{16.98}
+$$
+
+trong đó số hạng $\mathcal{O}(\varepsilon_k^2)$ giờ đây còn phụ thuộc vào phương sai của ước lượng hàm điểm trên lô nhỏ. Do đó, việc dùng lô nhỏ bảo toàn sự giảm của KL theo kỳ vọng. Lưu ý rằng phát biểu này liên quan đến động lực học lô nhỏ ở cấp quần thể; đối với thuật toán với số hạt hữu hạn, còn phải tính thêm đến phép xấp xỉ thực nghiệm của hàm chứng. Để có các bảo đảm hội tụ mạnh hơn (chẳng hạn hội tụ hầu chắc chắn), phải áp đặt các điều kiện Robbins-Monro tiêu chuẩn lên các kích thước bước $(\varepsilon_k)_{k \in \mathbb{N}}$.
+
+**Thuật toán 21** Hạ gradient biến phân Stein (SVGD) với lô nhỏ
+
+```text
+Inputs : particles {θ_0^i}_{i=1}^n; kernel k; step sizes {ε_k}; batch size b
+Outputs: updated particles {θ_K^i}_{i=1}^n
+for k = 0 to K − 1 do
+    sample mini-batch B_k of size b
+    compute û_π(θ_k^j; B_k) for j = 1, …, n
+    for i = 1 to n do
+        θ_{k+1}^i ← θ_k^i + (ε_k/n) Σ_{j=1}^n [ k(θ_k^j, θ_k^i) û_π(θ_k^j; B_k) + ∇_{θ_k^j} k(θ_k^j, θ_k^i) ]
+return {θ_K^i}_{i=1}^n
+```
+
+**Các mở rộng.** Dù thuận tiện về mặt tính toán, việc dùng một ước lượng trên lô nhỏ không phải không có nhược điểm. Chẳng hạn, dù không chệch, xấp xỉ ngẫu nhiên có thể có phương sai lớn. Có nhiều cách tiếp cận để giảm phương sai, bao gồm:
+
+1. **Biến điều khiển (control variates).** Định nghĩa một điểm neo $\tilde{\theta}$ (chẳng hạn ước lượng hậu nghiệm cực đại (maximum a posteriori, MAP)), và dùng một ước lượng kiểu gradient ngẫu nhiên giảm phương sai (stochastic variance reduced gradient, SVRG):
+
+   $$
+   \tilde{u}_\pi(\theta; \tilde{\theta}, B_k) = \widehat{u}_\pi(\theta; B_k) - \widehat{u}_\pi(\tilde{\theta}; B_k) + u_\pi(\tilde{\theta}). \tag{16.99}
+   $$
+
+   Ước lượng này vẫn không chệch đối với $u_\pi(\theta)$, và có phương sai nhỏ hơn so với $\hat{u}_\pi(\theta)$.
+2. **Lấy trung bình Polyak–Ruppert.** Dùng trung bình của các bước lặp để làm dịu các dao động ngẫu nhiên. Điều này cho phương sai (tiệm cận) nhỏ hơn, và có thể cho một xấp xỉ ổn định hơn của phân phối hậu nghiệm mục tiêu. Tuy nhiên, cần thận trọng: lấy trung bình vị trí các hạt nói chung không tương đương với cải thiện xấp xỉ hậu nghiệm, và có thể không phù hợp với các phân phối hậu nghiệm đa mode.
+
+### 6.2 Lấy mẫu tối ưu hóa hạt ngẫu nhiên (SPOS)
+
+Thuật toán lấy mẫu tối ưu hóa hạt ngẫu nhiên (stochastic particle optimization sampling, SPOS), do Zhang và cộng sự đề xuất, bổ sung động lực học Langevin gradient ngẫu nhiên (stochastic gradient Langevin dynamics, SGLD) vào dòng gradient biến phân Stein, xem (16.31) hoặc (16.32). Trong giới hạn trường trung bình, thời gian liên tục, thuật toán này được mô tả bởi PDE McKean-Vlasov
+
+$$
+\partial_t q_t(\theta) = -\nabla \cdot \left[ q_t(\theta) \left( \beta^{-1} u_\pi(\theta) + \int_{\mathbb{R}^d} \left[k(\theta', \theta) u_\pi(\theta') + \nabla_{\theta'} k(\theta', \theta)\right] \mathrm{d}q_t(\theta') \right) \right] + \beta^{-1} \Delta q_t(\theta), \tag{16.100}
+$$
+
+hoặc, viết $q_t = \mathrm{Law}(\theta_t)$, bởi phương trình vi phân ngẫu nhiên (SDE) McKean
+
+$$
+d\theta_t = \left[ \beta^{-1} u_\pi(\theta_t) + \int \left[k(\theta', \theta_t) u_\pi(\theta') + \nabla_{\theta'} k(\theta', \theta_t)\right] \mathrm{d}q_t(\theta') \right] dt + \sqrt{2\beta^{-1}}\, dw_t, \tag{16.101}
+$$
+
+trong đó $\beta > 0$ là một tham số nhiệt độ.
+
+Trong giới hạn khi nhiệt độ $\beta \to \infty$, độ trôi và khuếch tán Langevin triệt tiêu, và (16.101) quy về một cách hình thức thành động lực học SVGD trường trung bình, thời gian liên tục, xem (16.32); trong khi đó, nếu số hạng tương tác giữa các hạt bị loại bỏ hoặc trở nên không đáng kể (chẳng hạn trong giới hạn độ rộng hàm nhân tiến về không, khi đó lực đẩy giữa các hạt phân biệt triệt tiêu), SPOS quy về một biến thể điều chỉnh nhiệt độ của SGLD.
+
+Tất nhiên, trên thực tế (16.101) được xấp xỉ bằng (i) một tập hữu hạn hạt và (ii) một phép rời rạc hóa theo thời gian thích hợp (chẳng hạn Euler Maruyama). Cũng có thể dùng một ước lượng ngẫu nhiên (chẳng hạn trên lô nhỏ) cho hàm điểm. Điều này cho thuật toán SPOS cuối cùng:
+
+$$
+\theta_{k+1}^i = \theta_k^i + \varepsilon_k \left[ \beta^{-1} \hat{u}_\pi(\theta_k^i; B_k) + \frac{1}{n} \sum_{j=1}^n \Big( k(\theta_k^j, \theta_k^i)\, \hat{u}_\pi(\theta_k^j; B_k) + \nabla_{\theta_k^j} k(\theta_k^j, \theta_k^i) \Big) \right] + \sqrt{2\varepsilon_k \beta^{-1}}\, \xi_k^i, \tag{16.102}
+$$
+
+trong đó $\xi_k^i \sim \mathcal{N}(0, I)$ là một dãy biến ngẫu nhiên chuẩn tắc i.i.d.
+
+**Các kết quả hội tụ.** Dưới các giả thiết thích hợp (chẳng hạn tính log-lõm, mô-men ban đầu bị chặn, kích thước bước hằng số hoặc giảm dần), có thể thu được các tốc độ hội tụ *phi tiệm cận* cho SPOS theo metric 1-Wasserstein $W_1$. Trên thực tế, số hạng nhiễu cải thiện khả năng khám phá và làm giảm các điểm bất động giả của dòng Stein tất định.
+
+### 6.3 Hàm nhân đặc trưng ngẫu nhiên và tương tác dưới bậc hai
+
+Ở mỗi vòng lặp, SVGD đòi hỏi tính $\{k(\theta^i, \theta^j)\}_{i,j=1}^n$. Do đó chi phí của nó là $\mathcal{O}(n^2)$ mỗi vòng lặp. Nếu cần một số lượng hạt rất lớn, có một số lựa chọn để giảm chi phí tính toán:
+
+- **Đặc trưng Fourier ngẫu nhiên.** Với các hàm nhân bất biến tịnh tiến $k(\theta, \theta') = \kappa(\theta - \theta')$, có thể dùng xấp xỉ $k(\theta, \theta') \approx \varphi(\theta)^\top \varphi(\theta')$ với $m$ đặc trưng Fourier ngẫu nhiên $\varphi : \mathbb{R}^d \to \mathbb{R}^m$. Trong trường hợp này,
+
+  $$
+  \phi_{q,\pi}(\cdot) \approx \underbrace{\mathbb{E}_{\theta \sim q}\big[\varphi(\theta)\, u_\pi(\theta)^\top\big]^\top}_{\in \mathbb{R}^{d \times m}} \varphi(\cdot) + \underbrace{\mathbb{E}_{\theta \sim q}\big[J_\varphi(\theta)\big]^\top}_{\in \mathbb{R}^{d \times m}} \varphi(\cdot), \tag{16.103}
+  $$
+
+  trong đó $J_\varphi(\theta) \in \mathbb{R}^{m \times d}$ là ma trận Jacobi của $\varphi$ tại $\theta$; trong bối cảnh lô nhỏ, có thể thay $u_\pi$ bằng ước lượng ngẫu nhiên $\widehat{u}_\pi$. Điều này giảm chi phí tương tác giữa các hạt từ $\mathcal{O}(n^2)$ xuống $\mathcal{O}(nm)$, chưa kể chi phí đánh giá các đặc trưng và ma trận Jacobi của chúng.
+- **Đặc trưng có cấu trúc.** Việc dùng các đặc trưng có cấu trúc (chẳng hạn đặc trưng ngẫu nhiên trực giao) có thể cải thiện thêm chi phí tính toán.
+
+### 6.4 Cài đặt trên GPU và phân tán
+
+Trong bối cảnh một nút GPU đơn lẻ, cả ma trận hàm nhân $\mathbf{K} = [k(\theta^i, \theta^j)]_{ij}$ lẫn vector hàm điểm $\boldsymbol{u}_\pi = [\hat{u}_\pi(\theta^i)]_i$ đều phù hợp với song song hóa trên GPU. Cụ thể, các cài đặt được biên dịch tức thời (JIT) (chẳng hạn PyTorch, JAX) gộp hai số hạng trong (16.97) thành các kernel tensor theo lô.
+
+Với GPU trên nhiều nút, gồm $M$ thiết bị, mỗi thiết bị giữ khoảng $n/M$ hạt và một phân mảnh dữ liệu, một vòng lặp điển hình sẽ là:
+
+1. tính các hàm điểm cục bộ trên các lô cục bộ;
+2. thực hiện *all-reduce* các đặc trưng của hạt (hoặc các thống kê đủ cho (16.103));
+3. cập nhật các hạt cục bộ.
+
+Ở bước cuối, có một số cách để tránh giao tiếp toàn cục $\mathcal{O}(n^2)$. Chúng bao gồm dùng một phép phân tích đặc trưng ngẫu nhiên (16.103) và *all-reduce* các tóm tắt $m$ chiều; các hàm nhân thưa theo khối (đồ thị láng giềng gần nhất); hoặc các xấp xỉ hạt cảm sinh (inducing particle) (tương tự GP thưa).
+
+## 7. Ứng dụng trong học sâu Bayes
+
+Các phương pháp ParVI đã được áp dụng cho nhiều bài toán trong BDL, mang lại những lựa chọn có khả năng mở rộng thay thế cho suy luận Bayes chính xác trên các cảnh quan hậu nghiệm nhiều chiều, không lồi và đa mode.
+
+### 7.1 Mạng nơ-ron Bayes
+
+Mạng nơ-ron Bayes (Bayesian neural network, BNN) định nghĩa một phân phối hậu nghiệm trên các tham số mạng $\theta$ khi cho dữ liệu $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$:
+
+$$
+\pi(\theta) \propto p(\mathcal{D} \mid \theta) p(\theta), \tag{16.104}
+$$
+
+trong đó $p(\mathcal{D} \mid \theta)$ là hàm hợp lý sinh bởi các đầu ra của mạng $f(\cdot, \theta)$, và $p(\theta)$ là phân phối tiên nghiệm trên các tham số mạng.
+
+**Dự đoán hậu nghiệm.** Với một BNN, các dự đoán cho đầu vào mới $x_\ast$ thu được bằng cách tính *phân phối dự đoán hậu nghiệm* (posterior predictive distribution), được định nghĩa là
+
+$$
+p(y_\ast \mid x_\ast, \mathcal{D}) = \int p(y_\ast \mid x_\ast, \theta) \pi(\theta)\, \mathrm{d}\theta. \tag{16.105}
+$$
+
+Trong các kiến trúc hiện đại, việc tính chính xác phân phối hậu nghiệm là không khả thi, và tích phân trong (16.105) phải được xấp xỉ. Các phương pháp ParVI như SVGD xấp xỉ $\pi$ bằng một tập hợp hạt $\{\theta^i\}_{i=1}^n$, và có thể áp dụng ngay trong bối cảnh này. Cụ thể, các hạt này có thể được dùng để xấp xỉ phân phối dự đoán hậu nghiệm là
+
+$$
+p(y_\ast \mid x_\ast, \mathcal{D}) \approx \frac{1}{n} \sum_{i=1}^n p(y_\ast \mid x_\ast, \theta^i). \tag{16.106}
+$$
+
+SVGD và các phương pháp tổ hợp Stein liên quan đã cho hiệu năng thực nghiệm cạnh tranh trên BNN, cho cả tác vụ hồi quy lẫn phân loại. Chẳng hạn, trên các bộ dữ liệu chuẩn (benchmark) phân loại ảnh như CIFAR-10 và MNIST, SVGD với $n \approx 20$ hạt đã được báo cáo là vượt trội các phương pháp cạnh tranh (chẳng hạn tổ hợp sâu (deep ensemble)) về độ chính xác dự đoán, tính đa dạng hàm và định lượng độ bất định, dù những cải thiện này phụ thuộc vào bài toán và kiến trúc.
+
+Đặc biệt đáng chú ý là công trình của D'Angelo và cộng sự, thống nhất một số biến thể SVGD áp dụng được cho BNN dưới tên gọi *tổ hợp mạng nơ-ron biến phân Stein* (Stein variational neural network ensembles). Khung lý thuyết của họ bao gồm thuật toán SVGD ban đầu (thực hiện suy luận trực tiếp trong không gian trọng số và dùng một hàm nhân định nghĩa trong không gian trọng số) cũng như tổ hợp sâu tiêu chuẩn, vốn có thể được xem như SVGD với một hàm nhân định nghĩa bởi một hàm chỉ thị.
+
+Khung này cũng bao gồm một số biến thể SVGD mới, được thiết kế riêng cho BNN, thu được thông qua những lựa chọn cẩn thận về hàm nhân. Chúng bao gồm *SVGD trọng số với hàm nhân hàm* (function-kernel weight SVGD), trong đó hàm nhân được định nghĩa trong không gian đầu ra của mạng nơ-ron:
+
+$$
+k_f(\theta, \theta') = \exp\left( -\frac{1}{h} \mathbb{E}_{x \sim p(x)}\left[\|f(x; \theta) - f(x; \theta')\|^2\right] \right), \tag{16.107}
+$$
+
+trong đó $h > 0$ là một tham số độ rộng, $p(x)$ là phân phối biên của các đầu vào, và $f(x; \theta)$ là đầu ra của mạng nơ-ron với tham số $\theta$ khi cho đầu vào $x$. Trên thực tế, hàm nhân này được xấp xỉ bằng một ước lượng Monte Carlo trên một lô nhỏ đầu vào, thường được lấy mẫu từ phân phối huấn luyện thực nghiệm. Như D'Angelo và cộng sự đã chỉ ra, lựa chọn hàm nhân này khuyến khích tính đa dạng hàm của các hạt và tránh sự sụp đổ của phân phối hậu nghiệm hàm. Kết quả là hiệu chuẩn tốt hơn, sự tương đồng lớn hơn với phân phối hậu nghiệm thực, và khả năng phát hiện dữ liệu ngoài phân phối (out-of-distribution, OOD) được nâng cao.
+
+**Phát hiện dữ liệu ngoài phân phối.** Bài toán phát hiện dữ liệu ngoài phân phối có thể được mô tả như sau: cho một điểm kiểm tra $x_\ast$, quyết định xem $x_\ast$ có đến từ cùng phân phối với dữ liệu huấn luyện hay từ một phân phối khác. Cho một điểm kiểm tra $x_\ast$, entropy dự đoán
+
+$$
+\mathcal{H}\left[p(y_\ast \mid x_\ast, \mathcal{D})\right] = -\sum_{y_\ast} p(y_\ast \mid x_\ast, \mathcal{D}) \log p(y_\ast \mid x_\ast, \mathcal{D}) \tag{16.108}
+$$
+
+có thể được dùng làm điểm số ngoài phân phối. Cụ thể, giá trị entropy nhỏ hơn tương ứng với các dự đoán tự tin (tức là nhiều khả năng ở trong phân phối); giá trị lớn hơn tương ứng với các dự đoán bất định (tức là có thể ở ngoài phân phối). Trong các phương pháp ParVI như SVGD (và các biến thể), sự bất đồng giữa các hạt trong không gian dự đoán trực tiếp làm tăng entropy đối với các đầu vào kiểm tra ở xa dữ liệu huấn luyện, nhờ đó cung cấp một tín hiệu OOD hữu ích; D'Angelo và cộng sự báo cáo khả năng phát hiện OOD được cải thiện so với các phương pháp như tổ hợp sâu, dù hiệu năng tương đối phụ thuộc vào bài toán. Xem thêm Chương 44 để có một cách trình bày bổ sung về việc từ chối dự đoán dựa trên độ bất định dự đoán.
+
+**Học chủ động.** Trong học chủ động (active learning) (Bayes), mục tiêu là chọn những điểm dữ liệu giàu thông tin nhất để truy vấn nhằm cải thiện hiệu năng của mô hình (chẳng hạn BNN). Trong các mô hình Bayes, một hàm thu nhận (acquisition function) phổ biến là mức giảm của entropy hậu nghiệm kỳ vọng, cụ thể là
+
+$$
+\mathrm{MI}(y_\ast, \theta \mid x_\ast, \mathcal{D}) = \mathcal{H}\left[p(y_\ast \mid x_\ast, \mathcal{D})\right] - \mathbb{E}_{\theta \sim \pi(\theta)}\left[\mathcal{H}(p(y_\ast \mid x_\ast, \theta))\right]. \tag{16.109}
+$$
+
+Hàm này được gọi là *học chủ động Bayes qua bất đồng* (Bayesian active learning by disagreement, BALD); xem Chương 53 để có cách trình bày chi tiết về học chủ động Bayes. Với các phương pháp ParVI (chẳng hạn SVGD), có thể dễ dàng xấp xỉ hàm thu nhận này bằng cách thay phân phối hậu nghiệm $\pi$ bởi xấp xỉ dựa trên hạt của nó.
+
+### 7.2 Mô hình quy mô lớn và tinh chỉnh Bayes
+
+Với các mô hình rất lớn (chẳng hạn mô hình ngôn ngữ lớn hoặc mô hình nền tảng thị giác), việc xử lý hoàn toàn theo kiểu Bayes trên mọi tham số thường quá tốn kém về mặt tính toán, và có thể khó biện minh so với các chiến lược định lượng độ bất định rẻ hơn. Số lượng tham số lớn khiến ngay cả suy luận hậu nghiệm xấp xỉ cũng không khả thi, và kích thước khổng lồ của tập dữ liệu (tiền) huấn luyện thường dẫn đến độ bất định hậu nghiệm tương đối thấp ở nhiều tham số.
+
+Mặt khác, trong quá trình tinh chỉnh (fine-tuning), số tham số có thể học nhỏ hơn nhiều, và tập dữ liệu thường cũng nhỏ hơn nhiều, hàm ý độ bất định lớn hơn đáng kể. Do đó, có lý do vững hơn để chấp nhận chi phí bổ sung gắn với việc dùng các phương pháp Bayes.
+
+Gọi $\theta$ là các tham số của một mô hình tiền huấn luyện lớn, và $\phi$ là các tham số (chẳng hạn của một bộ chuyển đổi (adapter) nhỏ, của lớp cuối) cần được tinh chỉnh dựa trên dữ liệu phía sau $\mathcal{D}$. Mục tiêu là tính phân phối hậu nghiệm trên các tham số tinh chỉnh, cụ thể là
+
+$$
+\pi(\phi) := p(\phi \mid \mathcal{D}, \theta) \propto p(\mathcal{D} \mid \theta, \phi) p(\phi), \tag{16.110}
+$$
+
+trong đó, tương tự như trước, $p(\mathcal{D} \mid \theta, \phi)$ là hàm hợp lý sinh bởi các đầu ra của mô hình, và $p(\phi)$ là một phân phối tiên nghiệm trên các tham số tinh chỉnh.
+
+Vì suy luận chính xác trên $\pi(\phi)$ nói chung không tính được, có thể xấp xỉ nó bằng ParVI. Cụ thể, dùng một thuật toán ParVI sẽ thu được $n$ hạt $\{\phi^i\}_{i=1}^n$, mỗi hạt biểu diễn tham số của một mô hình tinh chỉnh hơi khác nhau. Điều này cho một phân phối dự đoán hậu nghiệm xấp xỉ
+
+$$
+p(y_\ast \mid x_\ast, \mathcal{D}) \approx \frac{1}{n} \sum_{i=1}^n p(y_\ast \mid x_\ast, \phi^i, \theta), \tag{16.111}
+$$
+
+có thể định lượng độ bất định (nhận thức) trong chế độ ít dữ liệu. Tinh chỉnh dựa trên ParVI tương thích với các chiến lược tiết kiệm tham số (chẳng hạn thích ứng hạng thấp (low-rank adaptation, LoRA), chỉ tinh chỉnh độ chệch (bias)), giữ cho số chiều ở mức kiểm soát được; xem Chương 39 và Chương 43 để có cách trình bày chi tiết lần lượt về suy luận lớp cuối và các cách tiếp cận Bayes cho mô hình ngôn ngữ lớn. Cũng có thể mở rộng cho học liên tục (continual learning): khi các tập dữ liệu mới $\mathcal{D}_1, \mathcal{D}_2, \ldots$ lần lượt đến, tập hạt có thể được lan truyền qua các bước cập nhật ParVI tuần tự ([Chương 18](/vi/blog/sequential-variational-inference)), tương tự như lọc hạt.
+
+## 8. Bảo đảm lý thuyết và các bài toán mở∗
+
+Dù có hiệu năng thực nghiệm ấn tượng, các thuật toán ParVI như SVGD vẫn thiếu loại lý thuyết sắc nét, có xét đến số chiều, vốn nay đã là tiêu chuẩn đối với các bộ lấy mẫu dựa trên khuếch tán (chẳng hạn Monte Carlo Langevin, Monte Carlo Hamilton). Mục này tóm tắt các kết quả lý thuyết hiện có cho SVGD, bao gồm (i) động lực học thời gian liên tục, vô hạn hạt; (ii) động lực học thời gian rời rạc, vô hạn hạt; (iii) động lực học thời gian liên tục, hữu hạn hạt; và (iv) động lực học thời gian rời rạc, hữu hạn hạt. Mục này kết thúc bằng việc phác thảo một số bài toán mở và hướng nghiên cứu thú vị cho tương lai.
+
+### 8.1 SVGD thời gian liên tục, vô hạn hạt
+
+Mục này điểm lại các kết quả hội tụ cho động lực học SVGD thời gian liên tục, vô hạn hạt, cụ thể là
+
+$$
+\frac{\partial q_t(\theta)}{\partial t} = -\nabla_\theta \cdot (q_t(\theta) \phi^\ast_{q_t,\pi}(\theta)), \qquad \phi^\ast_{q_t,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_t}[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)]. \tag{16.112}
+$$
+
+**Tính đặt chỉnh.** Dưới các điều kiện về độ trơn và tốc độ tăng đối với mục tiêu $\pi$ và hàm nhân $k$, PDE này đặt chỉnh (tức là có tồn tại toàn cục, tính duy nhất, tính chính quy). Dù $\pi$ là một nghiệm dừng của PDE, việc chứng minh tính duy nhất của nghiệm bất biến, và sự hội tụ của $q_t$ về $\pi$, nói chung đòi hỏi thêm các giả thiết: chẳng hạn KSD triệt tiêu đặc trưng hóa $\pi$ (tức là KSD xác định hội tụ đối với hàm nhân được chọn), hoặc mục tiêu thỏa mãn một bất đẳng thức hàm thích hợp (xem bên dưới).
+
+**Đẳng thức tiêu tán.** Dùng giải tích trên không gian các độ đo xác suất, sự tiêu tán của độ phân kỳ KL dọc theo động lực học SVGD trường trung bình, thời gian liên tục được cho bởi
+
+$$
+\frac{\mathrm{d}}{\mathrm{d}t} \mathrm{D}_{\mathrm{KL}}(q_t \| \pi) = -\mathcal{I}_{\mathrm{Stein}}(q_t \| \pi), \tag{16.113}
+$$
+
+trong đó $\mathcal{I}_{\mathrm{Stein}}(q \| \pi)$ là *thông tin Stein–Fisher* của $q$ tương đối với $\pi$, trùng với bình phương độ sai khác Stein dựa trên hàm nhân (KSD)
+
+$$
+\mathcal{I}_{\mathrm{Stein}}(q \| \pi) := \mathrm{KSD}^2(q \| \pi). \tag{16.114}
+$$
+
+Do đó, nói riêng, KL là một phiếm hàm Lyapunov và bình phương KSD là tốc độ tiêu tán. Dưới các giả thiết bổ sung (chẳng hạn mô-men bậc nhất bị chặn, hàm nhân bị chặn), (16.113) kéo theo $\mathcal{I}_{\mathrm{Stein}}(q_t \| \pi) \to 0$ khi $t \to \infty$. Do đó, với các lựa chọn hàm nhân thích hợp, và với các điều kiện chặt (tightness) hoặc điều kiện mô-men phù hợp, điều này còn kéo theo $q_t \Rightarrow \pi$. Một hệ quả khác của (16.113) là
+
+$$
+\min_{0 \leq s \leq t} \mathrm{KSD}^2(q_s \| \pi) \leq \frac{1}{t} \int_0^t \mathrm{KSD}^2(q_s \| \pi)\, \mathrm{d}s \leq \frac{\mathrm{D}_{\mathrm{KL}}(q_0 \| \pi)}{t}. \tag{16.115}
+$$
+
+**Tốc độ hội tụ.** Với giả thiết mục tiêu $\pi$ thỏa mãn một bất đẳng thức hàm thích hợp, có thể định lượng dòng hội tụ về $\pi$ nhanh đến mức nào. Chẳng hạn, nếu mục tiêu thỏa mãn một *bất đẳng thức log-Sobolev Stein* (log-Sobolev inequality, LSI) với hằng số $\lambda$, cụ thể là
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q \| \pi) \leq \frac{1}{2\lambda} \mathcal{I}_{\mathrm{Stein}}(q \| \pi), \tag{16.116}
+$$
+
+thì động lực học SVGD trường trung bình, thời gian liên tục hội tụ với tốc độ hàm mũ về phân phối mục tiêu
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_t \| \pi) \leq e^{-2\lambda t} \mathrm{D}_{\mathrm{KL}}(q_0 \| \pi). \tag{16.117}
+$$
+
+### 8.2 SVGD thời gian rời rạc, vô hạn hạt
+
+Tiếp theo, xét phép rời rạc hóa Euler tiến của động lực học thời gian liên tục, vô hạn hạt trong (16.112), cụ thể là
+
+$$
+q_{k+1} = \left(\mathrm{id} + \varepsilon_k \phi^\ast_{q_k,\pi}\right)_\# q_k, \quad \phi^\ast_{q_k,\pi}(\cdot) = \mathbb{E}_{\theta \sim q_k}\left[k(\theta, \cdot) u_\pi(\theta) + \nabla_\theta k(\theta, \cdot)\right], \tag{16.118}
+$$
+
+trong đó $(\varepsilon_k)_{k \in \mathbb{N}}$ là một lịch kích thước bước dương, không tăng. Điều này tương ứng với *giới hạn quần thể* (population limit) hay *giới hạn trường trung bình* (mean-field limit) của thuật toán SVGD.
+
+**Một bổ đề giảm đầu tiên.** Công trình gốc của Liu đã đưa ra những bảo đảm lý thuyết đầu tiên cho SVGD trong thời gian rời rạc ở cấp quần thể. Cụ thể, với giả thiết KSD và hàm nhân bị chặn, Liu đã chứng minh một *bổ đề giảm*, bảo đảm rằng với kích thước bước đủ nhỏ thì KL giảm ở mỗi vòng lặp. Nghĩa là,
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \varepsilon_k^2 R \cdot \mathrm{KSD}^2(q_k \| \pi), \tag{16.119}
+$$
+
+trong đó $0 < R < \infty$ là một hằng số dương phụ thuộc vào hàm nhân và hàm điểm, cụ thể là $R = \sup_x \left[\frac{1}{2} \|\nabla \log p\|_{\mathrm{Lip}}\, k(x, x) + 2 \nabla_{xx'} k(x, x')\right]$.
+
+**Những tốc độ hội tụ phi tiệm cận ban đầu.** Sau đó, Korba và cộng sự thu được một bổ đề giảm tương tự và chứng minh tốc độ hội tụ phi tiệm cận đầu tiên cho phiên bản quần thể của thuật toán SVGD. Cụ thể, với giả thiết hàm nhân và đạo hàm bậc nhất của nó bị chặn bởi $0 < B < \infty$; mục tiêu là $L$-trơn, sao cho ma trận Hesse của mục tiêu bị chặn bởi $0 < L < \infty$; và KSD dọc theo quỹ đạo các bước lặp của thuật toán bị chặn bởi $0 < C < \infty$, Korba và cộng sự đã chứng minh rằng
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q_{k+1} \| \pi) - \mathrm{D}_{\mathrm{KL}}(q_k \| \pi) \leq -\varepsilon_k \mathrm{KSD}^2(q_k \| \pi) + \varepsilon_k^2 \frac{(\alpha^2 + L) B^2}{2} \cdot \mathrm{KSD}^2(q_k \| \pi), \tag{16.120}
+$$
+
+với mọi $\alpha > 1$, miễn là kích thước bước $\varepsilon_k := \varepsilon \leq \frac{\alpha - 1}{\alpha B C^{1/2}}$. Dù bổ đề giảm này khá giống với bổ đề đã thu được trước đó trong Liu, nó dựa trên những kỹ thuật chứng minh khá khác, cụ thể là phép tính vi phân trên không gian Wasserstein.
+
+Tiếp theo kết quả này, Korba và cộng sự còn thu được tốc độ hội tụ $\mathcal{O}(\frac{1}{K})$ cho trung bình cộng của bình phương KSD giữa các bước lặp $q_k$ và $\pi$. Cụ thể, viết $c_\varepsilon = \varepsilon\big(1 - \varepsilon \frac{(\alpha^2 + L) B^2}{2}\big)$, và giả sử một điều kiện tương tự về kích thước bước, các tác giả đã chứng minh rằng
+
+$$
+\min_{k = 0, \ldots, K-1} \mathrm{KSD}^2(q_k \| \pi) \leq \frac{1}{K} \sum_{k=0}^{K-1} \mathrm{KSD}^2(q_k \| \pi) \leq \frac{\mathrm{D}_{\mathrm{KL}}(q_0 \| \pi)}{c_\varepsilon K}. \tag{16.121}
+$$
+
+**Cận độ phức tạp dưới bất đẳng thức $T_1$ của Talagrand.** Tiếp theo những kết quả này, Salim và cộng sự thu được những cận độ phức tạp số vòng lặp đầu tiên phụ thuộc tường minh vào số chiều cho SVGD, với giả thiết mục tiêu $\pi$ thỏa mãn bất đẳng thức $T_1$ của Talagrand. Đáng chú ý, khác với các công trình trước, kết quả của họ không đòi hỏi giả thiết KSD bị chặn đều dọc theo các bước lặp của thuật toán, một giả thiết không thể kiểm chứng trước khi chạy thuật toán.
+
+Cụ thể hơn, Salim và cộng sự trước hết chứng minh một bổ đề giảm và một tốc độ hội tụ phi tiệm cận cho trung bình của bình phương KSD. Kết quả của họ về cơ bản giống hệt các kết quả tương ứng trong Korba và cộng sự, ngoại trừ việc giờ đây sự phụ thuộc vào cận của hàm nhân là tuyến tính thay vì bậc hai, và cận về kích thước bước không đòi hỏi cận về KSD. Cuối cùng, các tác giả đưa ra kết quả độ phức tạp phụ thuộc số chiều đầu tiên cho SVGD, chỉ ra rằng, miễn là số vòng lặp thỏa mãn
+
+$$
+K = \tilde{\Omega}\left( \frac{L d^{\frac{3}{2}}}{\lambda^{\frac{1}{2}} \varepsilon} \right), \tag{16.122}
+$$
+
+thì thu được $\mathrm{KSD}^2(\bar{q}_K \| \pi) \leq \varepsilon$, trong đó $\lambda$ là hằng số trong bất đẳng thức $T_1$ của Talagrand; và $\bar{q}_K = \frac{1}{K} \sum_{k=0}^{K-1} q_k$ là trung bình của các bước lặp.
+
+**Hội tụ dưới các giả thiết độ trơn yếu hơn.** Gần đây nhất, Sun và cộng sự đã chứng minh sự hội tụ của SVGD (tức là một bổ đề giảm, tốc độ hội tụ, độ phức tạp số vòng lặp) dưới các giả thiết yếu hơn. Cụ thể, kết quả của họ đòi hỏi (a) mục tiêu thỏa mãn một bất đẳng thức $T_p$ với hằng số $\lambda$ hoặc một bất đẳng thức $(T_p, J)$ tổng quát hóa; và (b) thế năng của mục tiêu là $(L_0, L_1)$-trơn, tức là tồn tại các hằng số $L_0, L_1 > 0$ sao cho $\|\nabla^2 V(\theta)\|_{\mathrm{op}} \leq L_0 + L_1 \|\nabla V(\theta)\|$ với mọi $\theta \in \mathbb{R}^d$. Điều này mở rộng đáng kể các kết quả trước đó, vốn đều giả thiết thế năng $L$-trơn (tức là hàm điểm liên tục Lipschitz toàn cục, ma trận Hesse bị chặn toàn cục), qua đó loại trừ một lớp lớn các hàm thế năng (chẳng hạn các đa thức bậc lớn hơn hai).
+
+### 8.3 SVGD với hữu hạn hạt
+
+Cuối cùng, mục này điểm lại các kết quả hội tụ cho hệ hữu hạn hạt. Mục này xét cả động lực học thời gian liên tục, cụ thể là
+
+$$
+\dot{\theta}_t^i = \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_t^j, \theta_t^i) u_\pi(\theta_t^j) + \nabla_{\theta_t^j} k(\theta_t^j, \theta_t^i) \Big], \quad i = 1, \ldots, n, \tag{16.123}
+$$
+
+lẫn phiên bản thời gian rời rạc của nó, tức là chính thuật toán SVGD, cụ thể là
+
+$$
+\theta_{t+1}^i = \theta_t^i + \varepsilon_t \frac{1}{n} \sum_{j=1}^n \Big[ k(\theta_t^j, \theta_t^i) u_\pi(\theta_t^j) + \nabla_{\theta_t^j} k(\theta_t^j, \theta_t^i) \Big], \quad i = 1, \ldots, n, \tag{16.124}
+$$
+
+trong đó, với một chút lạm dụng ký hiệu, $t$ giờ đây đánh chỉ số cả thời gian trong động lực học thời gian liên tục lẫn vòng lặp trong thuật toán thời gian rời rạc.
+
+**Các chiến lược tổng quát để chứng minh hội tụ.** Nói chung, việc chứng minh hội tụ của hệ hữu hạn hạt có thể đi theo hai con đường. Tương tự như trước, gọi $q_t^n = \frac{1}{n} \sum_{j=1}^n \delta_{\theta_t^j}$ là phân phối thực nghiệm của hệ hạt tương tác. Khi đó có thể:
+
+- (i) Chứng minh rằng $\lim_{t \to \infty} [\lim_{n \to \infty} q_t^n] = \lim_{t \to \infty} q_t = \pi$. Nghĩa là:
+  - (i.a) **Sự lan truyền hỗn loạn (propagation of chaos).** Trước hết chứng minh rằng phân phối thực nghiệm $q_t^n$ hội tụ về phân phối trường trung bình $q_t$ khi $n \to \infty$, với mọi thời điểm hữu hạn $t \in [0, \infty)$.
+  - (i.b) **Hội tụ về trạng thái cân bằng với vô hạn hạt.** Sau đó chứng minh rằng phân phối trường trung bình $q_t$ hội tụ về phân phối mục tiêu $\pi$ khi $t \to \infty$. Đây là chủ đề của Mục 8.1 và 8.2.
+- (ii) Chứng minh rằng $\lim_{n \to \infty} [\lim_{t \to \infty} q_t^n] = \lim_{n \to \infty} \pi^n = \pi$. Nghĩa là:
+  - (ii.a) **Hội tụ về trạng thái cân bằng với hữu hạn hạt.** Trước hết chứng minh rằng phân phối thực nghiệm $q_t^n$ hội tụ về một trạng thái cân bằng (duy nhất), chẳng hạn $\pi^n$, khi $t \to \infty$.
+  - (ii.b) **Sự lan truyền hỗn loạn đều theo thời gian.** Sau đó chứng minh rằng phân phối cân bằng thực nghiệm $\pi^n$ hội tụ về mục tiêu $\pi$ khi $n \to \infty$.
+
+Xem Banerjee và cộng sự và Liu và cộng sự để có minh họa trực quan cho hai cách tiếp cận này. Phần thảo luận tiếp theo tập trung vào (i), vì đây là cách tiếp cận chiếm ưu thế trong các tài liệu. Về (ii), cần nhắc ngắn gọn đến công trình gần đây của Liu và cộng sự, phân tích cách tiếp cận này cho SVGD Gauss, trong đó cả phân phối mục tiêu lẫn phân phối ban đầu đều là Gauss, và hàm nhân là song tuyến tính. Trong trường hợp này, phân phối trường trung bình vẫn là Gauss tại mọi thời điểm và có thể chứng minh sự hội tụ định lượng, đều theo thời gian, của hệ hữu hạn hạt về giới hạn trường trung bình của nó. Gần đây nhất, Balasubramanian và cộng sự đã chứng minh các cận lan truyền hỗn loạn đều theo thời gian cho SVGD, thu được các tốc độ phụ thuộc logarit vào số hạt trong bối cảnh tổng quát, và các tốc độ tham số $\mathcal{O}(n^{-1/2})$, đều theo thời gian, cho các mục tiêu Gauss với hàm nhân nhận giá trị ma trận. Karimi Jaghargh và cộng sự cùng Priser và cộng sự cũng nghiên cứu tính chất tiệm cận với hữu hạn hạt.
+
+**Sự lan truyền hỗn loạn.** Một số bài báo khác nhau đã chứng minh sự hội tụ phụ thuộc thời gian của hệ hữu hạn hạt về giới hạn trường trung bình của nó, trong cả thời gian liên tục lẫn thời gian rời rạc, dưới các giả thiết khác nhau về hàm nhân (chẳng hạn liên tục, Lipschitz, trơn) và về thế năng (chẳng hạn bị chặn đều). Chẳng hạn, đối với thuật toán thời gian rời rạc, Korba và cộng sự đã chỉ ra rằng, với mọi khoảng thời gian hữu hạn cố định $T$, và với mọi vòng lặp $t$ tương ứng với các thời điểm không vượt quá $T$,
+
+$$
+\mathbb{E}\left[W_2^2(q_t, q_t^n)\right] \leq \frac{1}{2} \left( \frac{1}{\sqrt{n}} \sqrt{\mathrm{Var}(q_0)}\, e^{LT} \right) \left( e^{2LT} - 1 \right), \tag{16.125}
+$$
+
+trong đó $L$ là một hằng số phụ thuộc vào hàm nhân $k$ và mục tiêu $\pi$; xem Korba và cộng sự để biết chi tiết.
+
+**Các phân tích hội tụ thống nhất.** Bằng cách kết hợp sự hội tụ của phân phối hữu hạn hạt $q_t^n$ về phân phối trường trung bình $q_t$ khi $n \to \infty$ (xem ở trên) với sự hội tụ của phân phối trường trung bình $q_t$ về phân phối mục tiêu $\pi$ khi $t \to \infty$, hai nhóm nghiên cứu nay đã thu được một phân tích hội tụ thống nhất cho thuật toán SVGD.
+
+Kết quả đầu tiên như vậy được chứng minh trong Shi và Mackey, những người đã kết hợp các tốc độ cải tiến cho $q_t^n \to q_t$ với các tốc độ đã có cho $q_t \to \pi$ để thu được một cận cho $\min_{0 \leq s \leq t} \mathrm{KSD}(q_s^n \| \pi)$. Tuy nhiên, do cận của họ giữa phân phối hữu hạn hạt và phân phối trường trung bình phụ thuộc lũy thừa kép vào thời gian (thông qua tổng các kích thước bước), tốc độ thu được khá chậm, cụ thể là cỡ $1/\sqrt{\log \log n}$.
+
+Gần đây hơn, Banerjee và cộng sự đã thu được các tốc độ hội tụ hữu hạn hạt cải thiện đáng kể cho SVGD, theo cả KSD lẫn metric Wasserstein-2. Cụ thể, các tác giả cải thiện sự phụ thuộc vào số hạt từ tốc độ $1/\sqrt{\log \log n}$ của Shi và Mackey lên $1/\sqrt{n}$ (một cải thiện lũy thừa kép), trong cả thời gian liên tục lẫn rời rạc. Dưới các giả thiết nhẹ về hàm nhân và thế năng, các cận này cũng tăng theo đa thức của số chiều $d$.
+
+### 8.4 Lời nguyền số chiều
+
+Lời nguyền số chiều (curse of dimensionality) ảnh hưởng đến các thuật toán ParVI như SVGD chủ yếu thông qua hình học của RKHS.
+
+Ngay cả với các mục tiêu Gauss đơn giản, SVGD với các hàm nhân tiêu chuẩn (chẳng hạn hàm cơ sở bán kính (radial basis function, RBF), IMQ) có thể đánh giá thấp một cách có hệ thống phương sai hậu nghiệm trong không gian nhiều chiều. Hiện tượng này được gọi là *hiện tượng sụp đổ phương sai* (variance collapse phenomenon). Thật vậy, với hàm nhân RBF, độ lớn của số hạng đẩy trong phương trình cập nhật Stein, xem (16.35), có thể bị chặn trên bởi một đại lượng giảm theo $d$. Do đó, các hạt có xu hướng sụp đổ mode (mode collapse).
+
+Trong Ba và cộng sự, các tác giả tiến hành một phân tích chi tiết về hiện tượng này. Họ lập luận rằng, trong không gian nhiều chiều, "lực dẫn động" (tức là hàm điểm có trọng số theo hàm nhân) có phương sai lớn hơn lực đẩy. Điều này, cùng với bản chất tất định của các bước cập nhật SVGD (tức là không có nhiễu hay tái lấy mẫu), dẫn đến việc đánh giá thấp phương sai một cách có hệ thống. Sau đó các tác giả xét giới hạn khi $n, d \to \infty$, với $\frac{d}{n} \to \gamma$ cho một $\gamma > 1$ nào đó. Với một mục tiêu Gauss đẳng hướng, có thể đặc trưng hóa tường minh hành vi của phương sai SVGD như một hàm của $\gamma$, cho hai lựa chọn hàm nhân phổ biến (tức là RBF, IMQ). Trong cả hai trường hợp, phương sai học được giảm khi $\gamma$ tăng, gợi ý rằng số hạt nên tăng tuyến tính theo $d$ để ước lượng một cách đáng tin cậy phương sai lấy trung bình theo số chiều.
+
+Hiện tượng sụp đổ phương sai đã thúc đẩy nhiều phát triển về phương pháp. Các cách tiếp cận cấu trúc giảm số chiều hiệu dụng, bao gồm SVGD truyền thông điệp (message-passing SVGD), SVGD chiếu (projected SVGD), SVGD cắt lát (sliced SVGD), SVGD Grassmann và SVGD không gian hàm (function-space SVGD). Trong khi đó, các cách tiếp cận hình học dùng các hàm nhân đã tiền điều kiện hoặc nhận giá trị ma trận để làm trắng hàm điểm một cách thích nghi. Cuối cùng, các biến thể ngẫu nhiên của SVGD, như SPOS, đưa nhiễu vào động lực học để chống lại sự sụp đổ tất định.
+
+### 8.5 Các bài toán mở
+
+Mục này kết thúc bằng việc nêu bật một số bài toán mở.
+
+**Thiết kế hàm nhân trong không gian nhiều chiều.** Trong phần lớn các ứng dụng, người dùng thực tế phải dùng hàm nhân RBF, với độ rộng được chọn thích nghi theo quy tắc trung vị. Trong không gian rất nhiều chiều, lựa chọn này thường không hiệu quả. Các câu hỏi mở bao gồm việc thiết kế những hàm nhân có cơ sở lý thuyết, phụ thuộc bài toán (chẳng hạn hàm nhân không gian hàm, hàm nhân kiểu hàm nhân tiếp tuyến nơ-ron (neural tangent kernel, NTK), hoặc hàm nhân tiền điều kiện Fisher) và những hàm nhân thích nghi, phụ thuộc vòng lặp; cùng những bảo đảm gắn lựa chọn hàm nhân với các tốc độ *bền vững theo số chiều*.
+
+**Sự suy biến khi có hữu hạn hạt.** Hiện vẫn thiếu những điều kiện tổng quát (chẳng hạn không phụ thuộc thuật toán) ngăn sự sụp đổ hạt đối với một lớp rộng các mục tiêu. Các kỹ thuật kinh nghiệm thực tế (chẳng hạn độ rộng thích nghi, điều chỉnh nhiệt độ (tempering), thỉnh thoảng đưa nhiễu vào, làm mới bằng MCMC) có thể hữu ích, nhưng vẫn nằm ngoài lý thuyết hiện tại. Trong khi đó, việc thu được các tốc độ hội tụ phi tiệm cận, hữu hạn hạt tốt hơn dưới các giả thiết yếu hơn vẫn là một chủ đề nghiên cứu đang diễn ra sôi động.
+
+**Vượt ra ngoài KSD.** Các tốc độ hội tụ thông thường (cả vô hạn hạt lẫn hữu hạn hạt) được phát biểu theo KSD. Tuy nhiên, trong thực tế, người dùng có thể quan tâm đến các thước đo khác như rủi ro dự đoán, độ phủ (coverage), v.v. Một câu hỏi mở là khi nào (và với tốc độ nào) việc giảm KSD bảo đảm được các phân phối dự đoán được hiệu chuẩn? Hiện chỉ có những kết quả từng phần với giả thiết có thêm cấu trúc ở mục tiêu (chẳng hạn Gauss) hoặc ở hàm nhân (chẳng hạn hàm nhân hợp, song tuyến tính).
+
+**Lý thuyết cho SVGD với gradient ngẫu nhiên.** Các ứng dụng thông thường của ParVI trong BDL (xem Mục 7.1) đòi hỏi dùng gradient ngẫu nhiên và/hoặc đưa thêm nhiễu vào. Hiện vẫn thiếu một lý thuyết hoàn chỉnh cho SVGD với lô nhỏ (chẳng hạn có giảm phương sai) và cho các biến thể có nhiễu của SVGD (chẳng hạn SPOS).
+
+**Quyền riêng tư vi phân.** Quyền riêng tư vi phân (differential privacy) cho các thuật toán ParVI như SVGD phần lớn vẫn chưa được khám phá. Dù đã có kết quả cho các thuật toán lấy mẫu khác như MCMC gradient ngẫu nhiên ([Chương 2](/vi/blog/stochastic-gradient-mcmc)), các câu hỏi về việc tương tác giữa các hạt ảnh hưởng thế nào đến tổn thất quyền riêng tư, và làm thế nào để hiệu chỉnh các thuật toán ParVI cho quyền riêng tư vi phân mà không phá hỏng độ chính xác hay gây ra sụp đổ hạt, vẫn chưa được nghiên cứu chi tiết.
+
+## 9. Tóm tắt
+
+Chương này đã giới thiệu suy luận biến phân dựa trên hạt, một họ phương pháp kết hợp tính linh hoạt phi tham số của MCMC với hiệu quả dựa trên tối ưu hóa của VI. Bắt đầu từ SVGD, chương đã chỉ ra cách các phương pháp ParVI có thể được hiểu như những phép rời rạc hóa theo thời gian và xấp xỉ bằng hạt của các dòng gradient trên không gian các độ đo xác suất, và đã mô tả một số biến thể bậc hai, Riemann và ngẫu nhiên. Sau đó chương đã khảo sát các ứng dụng của những phương pháp này trong học sâu Bayes, từ mạng nơ-ron Bayes đến tinh chỉnh Bayes các mô hình quy mô lớn, trước khi điểm lại các bảo đảm lý thuyết hiện có. ParVI vẫn là một lĩnh vực phát triển nhanh, và các bài toán mở được phác thảo ở mục trước (bao gồm thiết kế hàm nhân trong không gian nhiều chiều, sự suy biến khi có hữu hạn hạt và lý thuyết cho các biến thể ngẫu nhiên) nhiều khả năng sẽ vẫn là những chủ đề nghiên cứu sôi động trong những năm tới.

@@ -1,0 +1,414 @@
+---
+title: "Suy luận biến phân dựa trên dropout"
+description: "Dropout trở thành suy luận Bayes xấp xỉ như thế nào: dẫn xuất dropout Monte Carlo qua quá trình Gauss, Concrete Dropout và chèn dropout."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - dropout
+  - uncertainty estimation
+series: bayesian-deep-learning
+seriesOrder: 18
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl14ScaleAwareDropout from '../../../components/diagrams/Bdl14ScaleAwareDropout.astro';
+
+Như đã thấy ở các chương trước, thực hiện suy luận biến phân (variational inference) đòi hỏi tối ưu một phân phối biến phân xấp xỉ. Điều thú vị là trong quá trình tìm một phép xấp xỉ phù hợp, có thể tận dụng một khái niệm vốn được đưa ra để chính quy hóa mô hình: chính quy hóa ngẫu nhiên (stochastic regularization). Chiến lược này dựa trên một trực giác đơn giản: đưa các nhiễu loạn ngẫu nhiên vào quá trình suy luận trong lúc huấn luyện ngăn mọi tập con tham số đồng thích nghi (co-adapting) với nhau, buộc mạng phân bố biểu diễn đã học trên các đường dẫn dư thừa. Do đó, chính quy hóa ngẫu nhiên thực chất đóng vai trò một cơ chế lấy mẫu ẩn: mỗi cấu hình bị nhiễu loạn chẳng qua là một mẫu rút từ một phân phối nền trên các cấu hình mạng. Chương này sẽ chỉ ra rằng sự giao thoa giữa các kỹ thuật chính quy hóa ngẫu nhiên và lấy mẫu Monte Carlo (MC), dưới một số điều kiện, có thể dẫn đến một phân phối biến phân xấp xỉ hiệu quả.
+
+## 1. Dropout Monte Carlo
+
+Như với mọi chiến lược suy luận biến phân (VI) được bàn trong cuốn sách này, cần tìm một phép xấp xỉ Bayes phù hợp để cực tiểu hóa độ phân kỳ Kullback–Leibler (KL) và mang lại mọi tính chất tốt đã được bàn trong phần giới thiệu ([Chương 12](/vi/blog/introduction-to-variational-inference)). Vì cách tiếp cận Bayes được áp dụng trong bối cảnh học sâu (và do đó mạng nơ-ron được xử lý theo nhiều cách khác nhau), cần tìm một chiến lược để xử lý các tham số của mạng theo cách xác suất. Nhưng khoan đã, các nghiên cứu về mạng nơ-ron đã từng khai thác việc ngẫu nhiên hóa bên trong mô hình: liệu có thể đơn giản tận dụng các chiến lược đó để đặt nền móng cho phép xấp xỉ Bayes hay không? Tất nhiên là có thể, và phương pháp được khảo sát trong chương này quả thực dựa trên những công cụ toán học quen thuộc đã có từ nhiều năm: **các kỹ thuật chính quy hóa ngẫu nhiên (stochastic regularization techniques, SRT)**. Như tên gọi gợi ý, SRT đóng vai trò một cơ chế chính quy hóa cho mô hình, đạt được bằng cách đưa tính ngẫu nhiên vào quá trình dự đoán. Cách ngẫu nhiên hóa này có thể được dùng trực tiếp để dẫn xuất phân phối xấp xỉ được tìm kiếm trong suốt chương này. Mục này bàn về cách thu được một phép xấp xỉ Bayes bằng một trong những SRT nổi tiếng nhất: **dropout**.[^1]
+
+### 1.1 Hàm mục tiêu dropout
+
+Dropout là một SRT mạnh và phổ biến, dựa trên một nguyên lý đơn giản và trực quan: tắt ngẫu nhiên các nơ-ron trong lúc huấn luyện. Điều đó có nghĩa là gì, và tại sao lại nên làm như vậy? "Tắt" ở đây có nghĩa đen là *triệt tiêu* đóng góp mà một nơ-ron mang lại cho việc tính đầu ra. Để đơn giản, xét một mạng nơ-ron (NN) có một lớp ẩn, với ma trận trọng số $\mathbf{W}_h \in \mathbb{R}^{D \times Q}$ và các độ chệch (bias) $\mathbf{b}_h \in \mathbb{R}^{Q}$ (nối đầu vào với lớp *ẩn*) và ma trận trọng số $\mathbf{W}_l \in \mathbb{R}^{Q \times C}$ (nối lớp ẩn với lớp *cuối*, tức lớp đầu ra). Trong điều kiện thông thường, một nơ-ron $z^{(i)}$ của lớp ẩn mang một đại lượng bằng tổ hợp tuyến tính của đầu vào với vector $\mathbf{W}_h^{(i)}$ cộng một hằng số $b_h^{(i)}$, được đưa qua một hàm kích hoạt phi tuyến, tức là $z^{(i)} = \sigma(\mathbf{x}^\top \mathbf{W}_h^{(i)} + b_h^{(i)})$. Nếu áp dụng dropout cho lớp ẩn, một số nơ-ron $z^{(i)}$ của lớp sẽ giữ nguyên giá trị ban đầu $\sigma(\mathbf{x}^\top \mathbf{W}_h^{(i)} + b_h^{(i)})$, còn các nơ-ron còn lại bị đặt về không. Những nơ-ron nào và bao nhiêu nơ-ron bị đặt về không phụ thuộc vào một tham số gọi là **tỉ lệ dropout** (dropout rate), tức là xác suất để một nơ-ron bị loại bỏ. Về mặt hình thức, điều này tương đương với việc cập nhật mỗi nơ-ron ẩn bằng cách nhân $\sigma(\mathbf{x}^\top \mathbf{W}_h^{(i)} + b_h^{(i)}) \cdot o^{(i)}$ với một biến ngẫu nhiên $o^{(i)} \sim \mathcal{B}(1 - \phi)$, sao cho nơ-ron bị đặt về không với xác suất $\phi$ (tỉ lệ dropout nói ở trên). Cùng cơ chế này có thể được áp dụng cho lớp đầu vào, loại bỏ từng thành phần đầu vào. Quy trình này ảnh hưởng đến đầu ra cuối cùng $\hat{\mathbf{y}}$ của bộ dự đoán và cho:
+
+$$
+\hat{\mathbf{y}} = \left(\sigma\left(\mathbf{W}_h^\top (\mathbf{x} \circ \mathbf{o}_h) + \mathbf{b}_h\right) \circ \mathbf{o}_l\right)^\top \cdot \mathbf{W}_l, \tag{14.1}
+$$
+
+trong đó $\mathbf{o}_h = [o_h^{(i)}]_{i=1}^{D}$ và $\mathbf{o}_l = [o_l^{(i)}]_{i=1}^{Q}$ là các vector chứa các giá trị hiện thực $o_h^{(i)} \sim \mathcal{B}(1-\phi)$ và $o_l^{(i)} \sim \mathcal{B}(1-\phi)$ cho mỗi đầu vào $\mathbf{x}^{(i)}$ và mỗi nơ-ron ẩn $z^{(i)}$, còn $\circ$ ký hiệu tích Hadamard (Hadamard product). Khi các nơ-ron ẩn đi qua lớp cuối của mô hình ví dụ, đầu ra cuối cùng không còn chứa toàn bộ thông tin ban đầu của lớp ẩn mà chỉ chứa đóng góp của các nơ-ron không bị thay đổi.
+
+Giờ đây khi đã rõ dropout hoạt động như thế nào, câu hỏi chính là tại sao nên dùng nó: loại bỏ một phần thông tin trong các lượt truyền xuôi chẳng phải là bất lợi sao? Không hẳn, nếu nhớ rằng dropout là một bộ chính quy hóa tác động lên mạng nơ-ron trong lúc huấn luyện. Trong huấn luyện, việc loại bỏ một số nơ-ron có tác dụng buộc bộ dự đoán không dựa hoàn toàn vào một tập con rất nhỏ các nơ-ron, vì chúng không phải lúc nào cũng có mặt. Hành vi này tránh tính thưa và khuyến khích tri thức được phân bố dày đặc trên toàn lớp. Trong quá trình học, cách phát biểu hàm mất mát không khác cách thông thường, ngoại trừ việc đầu ra $\hat{\mathbf{y}}$ được tính có dùng dropout. Chẳng hạn, trong trường hợp hồi quy, có thể dùng hàm mất mát sai số bình phương:
+
+$$
+\mathcal{L}_{\mathrm{dr}}(\mathcal{D}, \theta) \coloneqq \frac{1}{2N} \sum_{n=1}^{N=|\mathcal{D}|} \|\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}\|_2^2, \tag{14.2}
+$$
+
+trong đó $\theta$ ký hiệu các tham số của mô hình (tức $\mathbf{W}_h$, $\mathbf{b}_h$ và $\mathbf{W}_l$), được dùng để tính dự đoán $\hat{\mathbf{y}}^{(n)}$.
+
+Xuất phát từ hàm mục tiêu dropout này, phần tiếp theo chỉ ra cách dẫn xuất phép xấp xỉ Bayes của nó.[^2] Tuy nhiên, trước khi đi vào chi tiết, cần thêm một thành phần cuối cùng vào hàm mục tiêu để cân đối, đó là chính quy hóa $L_2$ trên các trọng số của mạng:
+
+$$
+\mathcal{L}_{\mathrm{dr}}(\mathcal{D}, \theta) \coloneqq \underbrace{\frac{1}{2N} \sum_{n=1}^{N=|\mathcal{D}|} \|\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}\|_2^2}_{\text{Mean Squared Error}} + \underbrace{\lambda_{\mathbf{W}_h}\|\mathbf{W}_h\|_2^2 + \lambda_{\mathbf{W}_l}\|\mathbf{W}_l\|_2^2 + \lambda_{\mathbf{b}_h}\|\mathbf{b}_h\|_2^2}_{L_2}, \tag{14.3}
+$$
+
+trong đó $\lambda_{\mathbf{W}_h}$, $\lambda_{\mathbf{W}_l}$ và $\lambda_{\mathbf{b}_h}$ là các hệ số suy giảm trọng số (weight decay).
+
+Như sẽ được bàn ở phần sau của chương, việc đưa số hạng này vào là một bước cơ bản để thu được một phép xấp xỉ có cơ sở; may mắn là điều này không phải là trở ngại trong thực hành, vì đưa vào loại chính quy hóa này là thông lệ khi tối ưu mạng nơ-ron.
+
+Trong phần tiếp theo, dropout được trình bày như một phép xấp xỉ Bayes theo dẫn xuất gốc của Gal và Ghahramani, vốn đặt lập luận trên nền các quá trình Gauss. Đây không phải con đường duy nhất: một dẫn xuất khác hoàn toàn không cần đến GP mà làm việc trực tiếp trong không gian trọng số, xem dropout là suy luận biến phân trong một mạng nơ-ron Bayes với phân phối xấp xỉ là một hỗn hợp Gauss (mixture of Gaussians), và tổng quát hóa lập luận cho cả họ các kỹ thuật chính quy hóa ngẫu nhiên. Mặc dù ở đây theo dẫn xuất dựa trên GP, vì nó làm tường minh sự tương đương với hàm mục tiêu dropout trong Phương trình 14.2, người đọc nên ghi nhớ rằng cách diễn giải Bayes cho dropout không nhất thiết phụ thuộc vào bộ máy GP.
+
+### 1.2 Quá trình Gauss: nền tảng của phép xấp xỉ
+
+Để xác định xem hàm mục tiêu dropout có phải là một phép xấp xỉ Bayes hay không, cần giới thiệu trước một cách ngắn gọn một mô hình phi tham số hữu ích: **quá trình Gauss** (Gaussian process). Để đơn giản, chỉ những khía cạnh thực sự cần cho dẫn xuất được trình bày; về quá trình Gauss và hàm nhân (kernel) một cách đầy đủ hơn, xem Chương 23.
+
+Quá trình Gauss (GP) là những công cụ thống kê hữu ích cho phép định nghĩa các phân phối trên hàm. Gọi $\mathrm{f} : \mathbb{R}^{D} \to \mathbb{R}$ là một bộ hồi quy *một đầu ra*;[^3] theo đó, $\mathbf{y} \in \mathbb{R}^{N}$ ký hiệu vector các giá trị mục tiêu vô hướng và $\mathbf{f} = [\mathrm{f}(\mathbf{x}^{(n)})]_{n=1}^{N} \in \mathbb{R}^{N}$ là vector gom các giá trị của $\mathrm{f}$ tại $N$ đầu vào. Đến đây, chỉ cần giả sử tồn tại một tiên nghiệm cụ thể $p(\mathrm{f})$ trên các phần tử của không gian giả thuyết, cho biết bộ hồi quy $\mathrm{f}$ nào có khả năng đã sinh ra dữ liệu nhiều hơn hay ít hơn. Theo quy tắc Bayes, phân phối hậu nghiệm thu được là:
+
+$$
+p(\mathrm{f}|\mathbf{X}, \mathbf{y}) = \frac{p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X})}{p(\mathbf{y}|\mathbf{X})} = \frac{p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X})}{\int p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X})\, \mathrm{d}\mathrm{f}} \propto p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X}). \tag{14.4}
+$$
+
+Chính lúc này GP phát huy tác dụng, cho phép tính phân phối hậu nghiệm một cách giải tích. Để làm được điều đó, GP khai thác một trực giác khéo léo: các đầu vào $\mathbf{x}$ tương tự nhau nên cho ra các đầu ra $\mathrm{f}(\mathbf{x})$ tương tự nhau; theo một nghĩa nào đó, mô hình mong muốn là mô hình làm cho các đầu vào $\mathbf{x}$ đồng biến thiên. Hành vi này có thể được hiện thực bằng một hàm hiệp phương sai (covariance function) $k(\mathbf{x}_a, \mathbf{x}_b)$, định nghĩa độ tương tự giữa hai đầu vào cho trước. Hàm hiệp phương sai cho phép đặt một phân phối Gauss lên các giá trị hàm:
+
+$$
+\mathbf{f}|\mathbf{X} \sim \mathcal{N}(0, K(\mathbf{X}, \mathbf{X})) \tag{14.5}
+$$
+
+$$
+\mathbf{y}|\mathbf{f} \sim \mathcal{N}(\mathbf{f}, \tau^{-1}\mathbf{I}_N), \tag{14.6}
+$$
+
+trong đó $K(\mathbf{X}, \mathbf{X})$ là một ma trận hiệp phương sai $N \times N$ được định nghĩa bằng hàm hiệp phương sai $k(\mathbf{x}_a, \mathbf{x}_b)$, và $\tau^{-1}\mathbf{I}_N$ là nhiễu dự đoán nội tại của hàm, thu được bằng cách nhân nghịch đảo của tham số độ chính xác (precision) $\tau$ với một ma trận đơn vị $N \times N$ là $\mathbf{I}_N$. Lưu ý rằng tiên nghiệm GP được định nghĩa trên hàm $\mathrm{f}$, còn Phương trình 14.5 nêu phân phối mà nó cảm sinh trên tập hữu hạn các giá trị $\mathbf{f}$ tại các đầu vào quan sát được; chính điều này làm cho mô hình dễ tính.
+
+Việc mở rộng cho các đầu ra $C$ chiều của MLP là trực tiếp: chỉ cần mô hình hóa mỗi thành phần đầu ra bằng một bộ hồi quy riêng $\mathrm{f}_c : \mathbb{R}^{D} \to \mathbb{R}$, $c = 1, \dots, C$, đặt một GP độc lập lên mỗi bộ hồi quy, tất cả dùng chung một hàm hiệp phương sai. Để ký hiệu gọn, các giá trị mục tiêu và các giá trị hàm được gom vào hai ma trận $N \times C$
+
+$$
+\mathbf{Y} = \begin{bmatrix} \mathbf{y}_1 & \cdots & \mathbf{y}_C \end{bmatrix} \in \mathbb{R}^{N \times C}, \qquad \mathbf{F} = \begin{bmatrix} \mathbf{f}_1 & \cdots & \mathbf{f}_C \end{bmatrix} \in \mathbb{R}^{N \times C}, \tag{14.7}
+$$
+
+với các cột thứ $c$ là $\mathbf{y}_c, \mathbf{f}_c \in \mathbb{R}^{N}$ lần lượt gom thành phần mục tiêu thứ $c$ và các giá trị hàm thứ $c$ là $[\mathrm{f}_c(\mathbf{x}^{(n)})]_{n=1}^{N}$ trên $N$ mẫu; còn các hàng thứ $n$, ký hiệu $\mathbf{y}^{(n)}, \mathbf{f}^{(n)} \in \mathbb{R}^{C}$, gom $C$ thành phần đầu ra của mẫu thứ $n$. Với ký hiệu này, Phương trình 14.5 đúng theo từng cột,
+
+$$
+\mathbf{f}_c|\mathbf{X} \sim \mathcal{N}(0, K(\mathbf{X}, \mathbf{X})) \tag{14.8}
+$$
+
+$$
+\mathbf{y}_c|\mathbf{f}_c \sim \mathcal{N}(\mathbf{f}_c, \tau^{-1}\mathbf{I}_N), \tag{14.9}
+$$
+
+với các $\mathbf{f}_c$ độc lập với nhau khi biết hàm hiệp phương sai. Từ đây, tập $C$ mô hình độc lập này được viết gọn là $\mathbf{F}|\mathbf{X} \sim \mathcal{N}(0, K(\mathbf{X}, \mathbf{X}))$ và $\mathbf{Y}|\mathbf{F} \sim \mathcal{N}(\mathbf{F}, \tau^{-1}\mathbf{I}_N)$, trong đó phân phối Gauss được hiểu là tác động riêng lên từng cột. Không cần thêm chi tiết nào về GP cho mục đích hiện tại.
+
+Đến đây vẫn còn một câu hỏi chưa được trả lời: tại sao cần đưa GP vào? Lý do là GP giữ vai trò then chốt trong việc dẫn xuất phép xấp xỉ Bayes. Nhắc lại dẫn xuất ELBO ở [Chương 12](/vi/blog/introduction-to-variational-inference): cực đại hóa cận dưới của bằng chứng (evidence lower bound, ELBO) tương đương với cực tiểu hóa độ phân kỳ KL giữa phân phối thật và phân phối xấp xỉ. Đối với phép xấp xỉ Bayes bằng dropout, cần chứng minh rằng hàm mục tiêu dropout, theo một nghĩa nào đó, đang cực đại hóa cận dưới của bằng chứng. Xuất phát từ một GP mà trên đó có thể dẫn xuất ELBO và dùng một hàm hiệp phương sai thích hợp, cuối cùng có thể chỉ ra rằng hàm mục tiêu ELBO quả thực tương đương với hàm mục tiêu dropout trong Phương trình 14.2.
+
+### 1.3 Dropout như một phép xấp xỉ Bayes
+
+Giờ đây khi mọi thành phần đã sẵn sàng, có thể đi vào chi tiết phần cốt lõi của chương: dùng dropout như một phép xấp xỉ Bayes. Ý tưởng gồm ba bước:
+
+1. Mô hình hóa cấu trúc của MLP được giới thiệu ở Mục 1.1 bằng một quá trình Gauss với các tiên nghiệm và hàm hiệp phương sai thuận tiện;
+2. Định nghĩa một phân phối xấp xỉ phù hợp mô phỏng tác dụng của dropout;
+3. Cuối cùng, chỉ ra rằng cực đại hóa ELBO dẫn tới một sự tương đương tự nhiên với hàm mục tiêu dropout được mô tả trong Phương trình 14.2.
+
+#### Xấp xỉ MLP bằng quá trình Gauss
+
+Điểm xuất phát là một quá trình Gauss với một hàm hiệp phương sai thuận tiện; cụ thể, GP cần được xây dựng sao cho phép xấp xỉ của nó tương đương với việc tối ưu một perceptron nhiều lớp (multilayer perceptron, MLP) với hàm mục tiêu dropout. Xét hàm hiệp phương sai sau:
+
+$$
+k_{p(\mathbf{w}_h), p(b_h)}(\mathbf{x}_a, \mathbf{x}_b) = \int\!\!\int \sigma(\mathbf{w}_h^\top \mathbf{x}_a + b_h)\, \sigma(\mathbf{w}_h^\top \mathbf{x}_b + b_h)\, p(\mathbf{w}_h)\, p(b_h)\, \mathrm{d}\mathbf{w}_h\, \mathrm{d}b_h, \tag{14.10}
+$$
+
+trong đó, để tiện, các ký hiệu $\mathbf{w}_h \in \mathbb{R}^{D}$ và $b_h \in \mathbb{R}$ được dùng để biểu diễn một vector trọng số và một số hạng độ chệch tổng quát.[^4] Ở đây ký hiệu chỉ một hàm hiệp phương sai cụ thể (tức một hàm nhận hai đầu vào $\mathbf{x}_a$ và $\mathbf{x}_b$) nhưng cũng phụ thuộc vào các phân phối xác suất $p(\mathbf{w}_h)$ và $p(b_h)$. Trong suốt chương này, các tiên nghiệm chuẩn tắc được chọn, $p(\mathbf{w}_h) = \mathcal{N}(0, \mathbf{I}_D)$ và $p(b_h) = \mathcal{N}(0, 1)$; lựa chọn này sẽ cần đến về sau, khi tính độ phân kỳ KL ở dạng đóng. Bằng cách lấy mẫu từ các phân phối này, có thể xét một xấp xỉ MC của tích phân, chuyển sự phụ thuộc vào phân phối thành sự phụ thuộc vào $Q$ giá trị hiện thực rút từ các phân phối đó. Với $Q$ mẫu $\mathbf{W}_h^{(q)} \sim p(\mathbf{w}_h)$ và $b_h^{(q)} \sim p(b_h)$ rút từ các phân phối tiên nghiệm, và với $\mathbf{W}_h = [\mathbf{W}_h^{(q)}]_{q=1}^{Q}$ và $\mathbf{b}_h = [b_h^{(q)}]_{q=1}^{Q}$, Phương trình 14.10 có thể được xấp xỉ bởi:
+
+$$
+k_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{x}_a, \mathbf{x}_b) = \frac{1}{Q} \sum_{q=1}^{Q} \sigma\left({\mathbf{W}_h^{(q)}}^\top \mathbf{x}_a + b_h^{(q)}\right) \sigma\left({\mathbf{W}_h^{(q)}}^\top \mathbf{x}_b + b_h^{(q)}\right). \tag{14.11}
+$$
+
+Sau đó, $\mathbf{W}_h$ và $\mathbf{b}_h$ được dùng để dẫn xuất một mô hình đồ thị tương tự Phương trình 14.5:
+
+$$
+\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h \sim \mathcal{N}(0, K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X})) \tag{14.12}
+$$
+
+$$
+\mathbf{y}_c|\mathbf{f}_c \sim \mathcal{N}(\mathbf{f}_c, \tau^{-1}\mathbf{I}_N), \tag{14.13}
+$$
+
+trong đó $K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X})$, như trong Phương trình 14.5, ký hiệu một ma trận hiệp phương sai $N \times N$ thu được bằng cách áp dụng hàm $k_{\mathbf{W}_h, \mathbf{b}_h}$ cho từng cặp đầu vào trong $(\mathbf{X}, \mathbf{X})$. Vì đã đặt một GP độc lập lên mỗi thành phần đầu ra, việc lấy điều kiện theo $\mathbf{W}_h$ và $\mathbf{b}_h$ làm cho các cột của $\mathbf{Y}$ độc lập có điều kiện, nên $p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)$ phân tích thành tích theo các thành phần $\mathbf{y}_c$; điều này cho mật độ của toàn bộ ma trận $\mathbf{Y}$, từ đó có thể dẫn xuất $p(\mathbf{Y}|\mathbf{X})$ bằng cách lấy biên theo $\mathbf{W}_h$ và $\mathbf{b}_h$:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h \tag{14.14}
+$$
+
+$$
+\phantom{p(\mathbf{Y}|\mathbf{X})} = \int\!\!\int \prod_{c=1}^{C} p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.15}
+$$
+
+Tiếp đó, hàm mật độ $p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)$ có thể thu được bằng cách lấy biên theo $\mathbf{f}_c$, cho phép khai triển $p(\mathbf{Y}|\mathbf{X})$ thành:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int \left( \int \prod_{c=1}^{C} p(\mathbf{y}_c|\mathbf{f}_c, \mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, p(\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, \mathrm{d}\mathbf{f}_c \right) p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h \tag{14.16}
+$$
+
+$$
+\phantom{p(\mathbf{Y}|\mathbf{X})} = \int\!\!\int \left( \prod_{c=1}^{C} \int p(\mathbf{y}_c|\mathbf{f}_c)\, p(\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, \mathrm{d}\mathbf{f}_c \right) p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.17}
+$$
+
+Khi đó, mỗi số hạng $p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h) = \int p(\mathbf{y}_c|\mathbf{f}_c)\, p(\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, \mathrm{d}\mathbf{f}_c$ có thể được tính giải tích nhờ Phương trình 14.12, bằng $\mathcal{N}(0, K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X}) + \tau^{-1}\mathbf{I}_N)$, và $p(\mathbf{Y}|\mathbf{X})$ có thể được viết lại thành:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int \prod_{c=1}^{C} \mathcal{N}(\mathbf{y}_c; 0, K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X}) + \tau^{-1}\mathbf{I}_N)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.18}
+$$
+
+Lúc này mô hình đồ thị đã chứa các tham số $\mathbf{W}_h$ và $\mathbf{b}_h$; để đưa cách phát biểu này đến gần cách phát biểu dùng cho một perceptron nhiều lớp, cần đưa vào các biến phụ trợ. Ma trận hiệp phương sai có thể được phân tích thành một tích ngoài $\Psi\Psi^\top$, trong đó $\Psi = [\psi(\mathbf{x}^{(n)}, \mathbf{W}_h, \mathbf{b}_h)^\top]_{n=1}^{N} \in \mathbb{R}^{N \times Q}$ là ma trận được tạo từ các vector $Q$ chiều $\psi(\mathbf{x}, \mathbf{W}_h, \mathbf{b}_h) = \sqrt{\frac{1}{Q}}\, \sigma(\mathbf{W}_h^\top \mathbf{x} + \mathbf{b}_h)$, sao cho $K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X}) = \Psi\Psi^\top$. Thay điều này vào Phương trình 14.18 cho:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int \prod_{c=1}^{C} \mathcal{N}(\mathbf{y}_c; 0, \Psi\Psi^\top + \tau^{-1}\mathbf{I}_N)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.19}
+$$
+
+Với mỗi thừa số của tích này, một biến $\mathbf{w}_c \sim \mathcal{N}(0, \mathbf{I}_Q)$ kích thước $Q \times 1$ được đưa vào:
+
+$$
+\mathcal{N}(\mathbf{y}_c; 0, \Psi\Psi^\top + \tau^{-1}\mathbf{I}_N) = \int \mathcal{N}(\mathbf{y}_c; \Psi\mathbf{w}_c, \tau^{-1}\mathbf{I}_N)\, \mathcal{N}(\mathbf{w}_c; 0, \mathbf{I}_Q)\, \mathrm{d}\mathbf{w}_c. \tag{14.20}
+$$
+
+Lưu ý rằng giờ đây kỳ vọng của các $\mathbf{y}_c$ độc lập có dạng $\Psi\mathbf{w}_c$, với $\psi(\mathbf{x}^{(n)}, \mathbf{W}_h, \mathbf{b}_h)^\top \mathbf{w}_c$ cho mẫu thứ $n$; gom các biến phụ trợ theo ký hiệu ma trận $\mathbf{W}_l = [\mathbf{w}_c]_{c=1}^{C}$ sẽ thu lại dự đoán trung bình $\mathbf{Y} = \Psi\mathbf{W}_l$, giờ đã giống hơn với cách phát biểu MLP ban đầu. Khi đó, $p(\mathbf{Y}|\mathbf{X})$ có thể được viết dưới dạng một phép lấy biên theo $\mathbf{W}_h$, $\mathbf{W}_l$ và $\mathbf{b}_h$:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int\!\!\int p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)\, p(\mathbf{W}_h)\, p(\mathbf{W}_l)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{W}_l\, \mathrm{d}\mathbf{b}_h. \tag{14.21}
+$$
+
+#### Tiên nghiệm của phân phối xấp xỉ
+
+Khi GP đã được định nghĩa, cần xây dựng phân phối xấp xỉ cho các tham số của mô hình. Ý tưởng là tìm một phân phối phù hợp $q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$ có thể cực tiểu hóa độ phân kỳ KL với phân phối thật $p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$. Vì các tham số $\mathbf{W}_h$, $\mathbf{W}_l$ và $\mathbf{b}_h$ đã được giả định là độc lập với nhau, phân phối xấp xỉ $q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$ có thể được dẫn xuất dưới dạng tích của từng thành phần xấp xỉ riêng lẻ:
+
+$$
+q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) = q(\mathbf{W}_h)\, q(\mathbf{W}_l)\, q(\mathbf{b}_h). \tag{14.22}
+$$
+
+Bây giờ, hãy nhớ lại mục tiêu chính của cả mục này: điều cần tìm không phải là một phép xấp xỉ tổng quát mà là một phép xấp xỉ *dựa trên dropout*. Theo một nghĩa nào đó, các phân phối độc lập $q(\mathbf{W}_h)$, $q(\mathbf{W}_l)$ và $q(\mathbf{b}_h)$ nên được mô hình hóa như kết quả của một quá trình ngẫu nhiên có liên quan đến dropout. Nhưng tác dụng của dropout ảnh hưởng như thế nào đến phân phối xác suất của các tham số? Loại bỏ một nơ-ron đầu vào $\mathbf{x}_d^{(n)}$ tương đương với việc đặt về không mọi trọng số nối nơ-ron đó với lớp ẩn. Do đó, nếu cùng một tỉ lệ dropout $\phi$ được đặt cho mọi nơ-ron của một lớp, các $\mathbf{W}_h^{(i)}$ và $\mathbf{W}_l^{(i)}$ riêng lẻ được xấp xỉ bằng một hỗn hợp Gauss với hiệp phương sai chung và các vector kỳ vọng riêng, còn các độ chệch $b_h^{(i)}$ được xấp xỉ bằng một phân phối Gauss đơn giản:
+
+$$
+q(\mathbf{W}_h^{(i)}) = (1 - \phi)\, \mathcal{N}(\mathbf{M}_h^{(i)}, \sigma^2\mathbf{I}_Q) + \phi\, \mathcal{N}(0, \sigma^2\mathbf{I}_Q), \tag{14.23}
+$$
+
+$$
+q(\mathbf{W}_l^{(i)}) = (1 - \phi)\, \mathcal{N}(\mathbf{M}_l^{(i)}, \sigma^2\mathbf{I}_C) + \phi\, \mathcal{N}(0, \sigma^2\mathbf{I}_C), \tag{14.24}
+$$
+
+$$
+q(\mathbf{b}_h) = \mathcal{N}(\mathbf{m}_h, \sigma^2\mathbf{I}_Q). \tag{14.25}
+$$
+
+Theo một nghĩa nào đó, các ma trận $\mathbf{M}_h = [\mathbf{M}_h^{(i)}]_{i=1}^{D}$ và $\mathbf{M}_l = [\mathbf{M}_l^{(i)}]_{i=1}^{Q}$ mã hóa các trọng số của mạng khi không có dropout: do đó, các trọng số xác suất $\mathbf{W}_h$ và $\mathbf{W}_l$ thu được bằng cách rút từ một hỗn hợp có xác suất $1 - \phi$ trả về "trọng số thực sự" và xác suất $\phi$ đặt chúng về không.
+
+Xuất phát từ Phương trình 14.23, cuối cùng có thể tái tham số hóa các phân phối xác suất trên $\mathbf{W}_h$, $\mathbf{W}_l$ và $\mathbf{b}_h$ theo các biến ngẫu nhiên Bernoulli, đúng như những gì xảy ra khi dùng dropout. Với cùng cách tiếp cận như thủ thuật tái tham số hóa (reparametrization trick) dùng cho bộ tự mã hóa (autoencoder), tính ngẫu nhiên có thể được quy về các sự kiện đơn giản (sinh nhiễu và dropout), và phân phối xác suất trên các tham số được tạo lập trực tiếp theo các sự kiện đó. Trước hết, cần sinh các biến ngẫu nhiên Bernoulli. Có thể sinh một vector $\boldsymbol{o}_h \in \{0, 1\}^{D}$ trong đó mỗi phần tử $\boldsymbol{o}_h^{(i)} \sim \mathcal{B}(1 - \phi)$ tuân theo phân phối Bernoulli với xác suất $1 - \phi$; sau đó, chỉ cần nhân vector ngẫu nhiên này với ma trận kỳ vọng, $\operatorname{diag}(\boldsymbol{o}_h) \cdot \mathbf{M}_h$, để đặt về không các hàng tương ứng với các đơn vị bị loại bỏ. Có thể làm tương tự để mô hình hóa dropout trên lớp ẩn, bằng cách đưa vào một vector $\boldsymbol{o}_l \in \{0, 1\}^{Q}$. Thứ hai, nhiễu trong Phương trình 14.23 được sinh bằng cách đưa vào các biến ngẫu nhiên hỗ trợ $\boldsymbol{R}_h \sim \mathcal{N}(0, \mathbf{I}_{D \times Q})$, $\boldsymbol{R}_l \sim \mathcal{N}(0, \mathbf{I}_{Q \times C})$ và $\mathrm{r}_h \sim \mathcal{N}(0, \mathbf{I}_Q)$ để tính nhiễu cộng. Kết hợp hai bước này, $\mathbf{W}_h$, $\mathbf{W}_l$ và $\mathbf{b}_h$ có thể được dẫn xuất như hàm của $\boldsymbol{o}_h$, $\boldsymbol{o}_l$, $\boldsymbol{R}_h$, $\boldsymbol{R}_l$ và $\mathrm{r}_h$:
+
+$$
+\mathbf{W}_h(\boldsymbol{o}_h, \boldsymbol{R}_h) = \operatorname{diag}(\boldsymbol{o}_h) \cdot (\mathbf{M}_h + \sigma\boldsymbol{R}_h) + \operatorname{diag}(1 - \boldsymbol{o}_h) \cdot \sigma\boldsymbol{R}_h \tag{14.26}
+$$
+
+$$
+\mathbf{W}_l(\boldsymbol{o}_l, \boldsymbol{R}_l) = \operatorname{diag}(\boldsymbol{o}_l) \cdot (\mathbf{M}_l + \sigma\boldsymbol{R}_l) + \operatorname{diag}(1 - \boldsymbol{o}_l) \cdot \sigma\boldsymbol{R}_l \tag{14.27}
+$$
+
+$$
+\mathbf{b}_h(\mathrm{r}_h) = \mathbf{m}_h + \sigma\mathrm{r}_h. \tag{14.28}
+$$
+
+Lưu ý rằng các trọng số được lấy mẫu vẫn mang nhiễu loạn Gauss $\sigma\boldsymbol{R}_h$ và $\sigma\boldsymbol{R}_l$: sự tương đương với dropout được khôi phục trong giới hạn $\sigma \to 0$, khi đó $\mathbf{W}_h(\boldsymbol{o}_h, \boldsymbol{R}_h) \to \operatorname{diag}(\boldsymbol{o}_h) \cdot \mathbf{M}_h$ và $\mathbf{W}_l(\boldsymbol{o}_l, \boldsymbol{R}_l) \to \operatorname{diag}(\boldsymbol{o}_l) \cdot \mathbf{M}_l$, tức là đúng các trọng số bị che của Mục 1.1.
+
+Cuối cùng, có thể khai thác các phép tái tham số hóa mới này để tính cận dưới của bằng chứng.
+
+#### Tính ELBO
+
+Ký hiệu được đưa vào trong Phương trình 14.26 (tách các biến ngẫu nhiên khỏi các tham số thực sự của mạng) là yếu tố cơ bản giúp việc tính ELBO thuận lợi hơn. Nhắc lại một lần nữa dẫn xuất ELBO của [Chương 12](/vi/blog/introduction-to-variational-inference) cho:
+
+$$
+\begin{aligned}
+\mathcal{L}_{GP\text{-}VI} \coloneqq{}& \int\!\!\int\!\!\int q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{W}_l\, \mathrm{d}\mathbf{b}_h \\
+&- \mathrm{KL}(q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \| p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)).
+\end{aligned} \tag{14.29}
+$$
+
+Bắt đầu bằng việc tính số hạng $\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$; để làm vậy, có thể khai thác tính độc lập giữa các $\mathbf{y}_c$:
+
+$$
+\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) = \log \prod_{c=1}^{C} p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \tag{14.30}
+$$
+
+$$
+\phantom{\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)} = \sum_{c=1}^{C} \log p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \tag{14.31}
+$$
+
+$$
+\phantom{\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)} = \sum_{c=1}^{C} \log \mathcal{N}(\mathbf{y}_c; \Psi\mathbf{W}_l^{(c)}, \tau^{-1}\mathbf{I}_N) \tag{14.32}
+$$
+
+$$
+\phantom{\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)} = -\frac{NC}{2}\log(2\pi) + \frac{NC}{2}\log(\tau) - \sum_{c=1}^{C} \frac{\tau}{2}\|\mathbf{y}_c - \Psi\mathbf{W}_l^{(c)}\|_2^2. \tag{14.33}
+$$
+
+Bây giờ, đặt $\hat{\mathbf{Y}} = \Psi\mathbf{W}_l$, với $\hat{\mathbf{y}}^{(n)} = \psi(\mathbf{x}^{(n)}, \mathbf{W}_h, \mathbf{b}_h)^\top \mathbf{W}_l$: làm như vậy sẽ thu được một ma trận dự đoán $\hat{\mathbf{Y}} \in \mathbb{R}^{N \times C}$, và do đó có thể lấy tổng theo chiều thứ nhất của ma trận này:
+
+$$
+\sum_{c=1}^{C} \|\mathbf{y}_c - \hat{\mathbf{y}}_c\|_2^2 = \sum_{n=1}^{N} \|\mathbf{y}_n - \hat{\mathbf{y}}_n\|_2^2. \tag{14.34}
+$$
+
+Do đó, số hạng thứ nhất trong tích phân của hàm mục tiêu $\mathcal{L}_{GP\text{-}VI}$ có thể được viết lại thành một tổng theo các mẫu:
+
+$$
+q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) = \tag{14.35}
+$$
+
+$$
+= \sum_{n=1}^{N} q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \log p(\mathbf{y}_n|\mathbf{x}_n, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \tag{14.36}
+$$
+
+$$
+= \sum_{n=1}^{N} q(\boldsymbol{o}_h, \boldsymbol{R}_h, \boldsymbol{o}_l, \boldsymbol{R}_l, \mathrm{r}_h) \log p(\mathbf{y}_n|\mathbf{x}_n, \mathbf{W}_h(\boldsymbol{o}_h, \boldsymbol{R}_h), \mathbf{W}_l(\boldsymbol{o}_l, \boldsymbol{R}_l), \mathbf{b}_h(\mathrm{r}_h)). \tag{14.37}
+$$
+
+Bây giờ, tích phân trong Phương trình 14.29 có thể được xấp xỉ bằng tích phân MC. Cụ thể, thay vì lấy tích phân theo $\mathbf{W}_h$, $\mathbf{W}_l$ và $\mathbf{b}_h$, giờ đây lấy tổng trên một tập các giá trị hiện thực $\tilde{\mathbf{W}}_h$, $\tilde{\mathbf{W}}_l$ và $\tilde{\mathbf{b}}_h$.
+
+$$
+\mathcal{L}_{GP\text{-}MC} \coloneqq \sum_{n=1}^{N} \log p(\mathbf{y}^{(n)}|\mathbf{x}^{(n)}, \tilde{\mathbf{W}}_h^{(n)}, \tilde{\mathbf{W}}_l^{(n)}, \tilde{\mathbf{b}}_h^{(n)}) - \mathrm{KL}(q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \| p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)). \tag{14.38}
+$$
+
+Cuối cùng, cần tính độ phân kỳ KL giữa phân phối thật và phân phối xấp xỉ. Trở ngại chính ở đây là không có lời giải giải tích cho bài toán, vì một hỗn hợp Gauss sẽ được so sánh với một phân phối Gauss duy nhất. Tuy nhiên, vì cả $q$ và $p$ đều phân tích thành tích theo $\mathbf{W}_h$, $\mathbf{W}_l$ và $\mathbf{b}_h$, độ phân kỳ tách *chính xác* thành tổng của ba số hạng độc lập:
+
+$$
+\begin{aligned}
+&\mathrm{KL}(q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \| p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)) \\
+&= \mathrm{KL}(q(\mathbf{W}_h) \| p(\mathbf{W}_h)) + \mathrm{KL}(q(\mathbf{W}_l) \| p(\mathbf{W}_l)) + \mathrm{KL}(q(\mathbf{b}_h) \| p(\mathbf{b}_h)),
+\end{aligned} \tag{14.39}
+$$
+
+nên phép xấp xỉ duy nhất cần đến liên quan đến hai số hạng hỗn hợp.[^5] Với $Q$ đủ lớn, KL trên $\mathbf{W}_h$ và $\mathbf{W}_l$ có thể được xấp xỉ bởi:
+
+$$
+\mathrm{KL}(q(\mathbf{W}_h) \| p(\mathbf{W}_h)) \approx \frac{DQ}{2}(\sigma^2 - \log(\sigma^2) - 1) + \frac{1 - \phi}{2} \sum_{d=1}^{D} {\mathbf{M}_h^{(d)}}^\top \mathbf{M}_h^{(d)} + \text{const} \tag{14.40}
+$$
+
+$$
+\mathrm{KL}(q(\mathbf{W}_l) \| p(\mathbf{W}_l)) \approx \frac{QC}{2}(\sigma^2 - \log(\sigma^2) - 1) + \frac{1 - \phi}{2} \sum_{q=1}^{Q} {\mathbf{M}_l^{(q)}}^\top \mathbf{M}_l^{(q)} + \text{const}. \tag{14.41}
+$$
+
+Số hạng độ chệch có thể được tính giải tích:
+
+$$
+\mathrm{KL}(q(\mathbf{b}_h) \| p(\mathbf{b}_h)) = \frac{1}{2}\left({\mathbf{m}_h}^\top \mathbf{m}_h + Q(\sigma^2 - \log(\sigma^2) - 1)\right) + \text{const} \tag{14.42}
+$$
+
+Kết hợp các số hạng KL riêng lẻ cho trọng số và độ chệch, bỏ qua $\sigma$ (không ảnh hưởng đến việc tối ưu theo $\mathbf{M}_h$, $\mathbf{M}_l$ và $\mathbf{m}_h$) và nhân với $\frac{1}{N\tau}$, cuối cùng thu được phép xấp xỉ Bayes MC:
+
+$$
+\mathcal{L}_{GP\text{-}MC} \propto -\frac{\tau}{2} \sum_{n=1}^{N} \|\mathbf{y}_n - \hat{\mathbf{y}}_n\|_2^2 - \frac{1 - \phi}{2}(\|\mathbf{M}_h\|_2^2 + \|\mathbf{M}_l\|_2^2) - \frac{1}{2}\|\mathbf{m}_h\|_2^2 \tag{14.43}
+$$
+
+$$
+\phantom{\mathcal{L}_{GP\text{-}MC}} \propto -\frac{1}{2N} \sum_{n=1}^{N} \|\mathbf{y}_n - \hat{\mathbf{y}}_n\|_2^2 - \frac{1 - \phi}{2N\tau}(\|\mathbf{M}_h\|_2^2 + \|\mathbf{M}_l\|_2^2) - \frac{1}{2N\tau}\|\mathbf{m}_h\|_2^2. \tag{14.44}
+$$
+
+Vì cực đại hóa $\mathcal{L}_{GP\text{-}MC}$ tương đương với cực tiểu hóa $-\mathcal{L}_{GP\text{-}MC}$, biểu thức trên thu lại hàm mục tiêu dropout trong Phương trình 14.3 với lựa chọn $\lambda_{\mathbf{W}_h} = \lambda_{\mathbf{W}_l} = \frac{1 - \phi}{2N\tau}$ và $\lambda_{\mathbf{b}_h} = \frac{1}{2N\tau}$. Lưu ý rằng sự tương ứng này cố định độ chính xác $\tau$ của mô hình một khi suy giảm trọng số đã được chọn. Điều này cho thấy dùng một hàm mục tiêu dropout cùng với một số hạng chính quy hóa thích hợp quả thực là một phép xấp xỉ Bayes đúng nghĩa.
+
+## 2. Concrete Dropout: tỉ lệ dropout như một tham số biến phân
+
+Dẫn xuất ở trên cho thấy dropout *là* một phép xấp xỉ Bayes, nhưng không nói gì về cách chọn giá trị "tối ưu" của tỉ lệ dropout $\phi$. Một câu hỏi liên quan, với một mạng nơ-ron có nhiều lớp, là có nên dùng các tỉ lệ *khác nhau* cho các lớp khác nhau (hoặc thậm chí, ở mức cực đoan, cho từng nơ-ron) hay không. Một cách tiếp cận có vẻ hợp lý là tìm kiếm lưới (grid search) trên một tập tỉ lệ dropout ứng viên cho trước để ước lượng giá trị tốt nhất cho mỗi lớp. Tuy nhiên, quy trình này là một giải pháp không khả thi: nó tốn kém quá mức với các mô hình lớn, chưa kể số cấu hình dropout theo lớp tăng theo hàm mũ với số lớp (chưa nói đến sự bùng nổ tổ hợp của cấu hình theo từng nơ-ron!). Hơn nữa, nó trở nên hoàn toàn bất khả thi trong các bối cảnh mà lượng dữ liệu sẵn có thay đổi theo thời gian, như học tăng cường (reinforcement learning) hay học suốt đời (lifelong learning), vì tỉ lệ tối ưu sẽ phải được tinh chỉnh lại khi quá trình huấn luyện tiến triển.
+
+Một cách tiếp cận thay thế và khả thi hơn là *học* chính tỉ lệ dropout cùng với các trọng số của mạng bằng hạ gradient, thông qua cực tiểu hóa một hàm mục tiêu phù hợp. Với mục đích này, cách diễn giải biến phân của dropout, mang tên **Concrete Dropout**, cung cấp một lời giải tinh tế: vì tỉ lệ dropout tham số hóa phân phối xấp xỉ của Phương trình 14.23, nó là một tham số biến phân (variational parameter) có vai trò hoàn toàn ngang hàng với $\mathbf{M}_h$, $\mathbf{M}_l$ và $\mathbf{m}_h$, và chính ELBO là hàm mục tiêu cần tối ưu theo nó. Viết ELBO cho một mạng tổng quát có $L$ lớp với các tỉ lệ theo lớp $\phi_l$ và các ma trận trọng số kỳ vọng $\mathbf{M}_l$, rồi chuẩn hóa theo $N$, cho
+
+$$
+\widehat{\mathcal{L}} = -\frac{1}{N} \sum_{n=1}^{N} \log p(\mathbf{y}^{(n)}|\mathbf{x}^{(n)}, \hat{\boldsymbol{\omega}}_n) + \frac{1}{N} \sum_{l=1}^{L} \mathrm{KL}\left(q_{\phi_l}(\mathbf{W}_l) \,\|\, p(\mathbf{W}_l)\right), \tag{14.45}
+$$
+
+trong đó $\hat{\boldsymbol{\omega}}_n \sim q$ ký hiệu một bộ trọng số duy nhất được lấy mẫu thông qua các mặt nạ dropout (dropout mask), và độ phân kỳ theo từng lớp có dạng
+
+$$
+\mathrm{KL}\left(q_{\phi_l}(\mathbf{W}_l) \,\|\, p(\mathbf{W}_l)\right) \propto \frac{1 - \phi_l}{2}\|\mathbf{M}_l\|_2^2 - K_l\, \mathcal{H}(\phi_l), \tag{14.46}
+$$
+
+với $K_l$ là số đơn vị của lớp $l$ và
+
+$$
+\mathcal{H}(\phi_l) = -\phi_l \log \phi_l - (1 - \phi_l)\log(1 - \phi_l) \tag{14.47}
+$$
+
+là entropy của một biến ngẫu nhiên Bernoulli với tỉ lệ $\phi_l$. Do đó, tỉ lệ dropout không còn là một siêu tham số (hyperparameter) cần tìm kiếm mà trở thành kết quả của chính quá trình tối ưu. Tuy nhiên, điều này chỉ khả thi nếu gradient của Phương trình 14.45 theo $\phi_l$ thực sự tính được, điều không đúng với các mặt nạ rời rạc được dùng cho đến giờ.
+
+Ý tưởng then chốt để vượt qua vấn đề này là tái tham số hóa chính mặt nạ dropout, sao cho có thể lan truyền ngược một cách hợp lệ qua các nơ-ron "bị ngẫu nhiên hóa" (tức là qua chính các đơn vị bị lớp dropout tắt đi). Những thủ thuật tái tham số hóa như vậy, vốn cũng đặt nền móng cho các kỹ thuật như bộ tự mã hóa biến phân (variational autoencoder, VAE), sẽ được trình bày chi tiết ở các chương sau; ở đây phần thảo luận chỉ giới hạn ở thủ thuật Gumbel-softmax (Gumbel-softmax trick), chính là điều cho phép xem tỉ lệ dropout như một tham số biến phân thực sự trong quá trình tối ưu. Vì trong trường hợp dropout cần tối ưu các tham số của một phân phối Bernoulli *rời rạc*, thủ thuật tái tham số hóa gốc không thể áp dụng trực tiếp: việc lấy mẫu một mặt nạ nhị phân không khả vi theo tỉ lệ dropout $\phi$. Vì vậy, cần một phép nới lỏng liên tục (continuous relaxation), chẳng hạn phân phối Concrete (Concrete distribution), vốn được đề xuất cho các biến ngẫu nhiên ẩn trong các mô hình sinh sâu. Phân phối Concrete thay phép $\arg\max$ xuất hiện trong phép tái tham số hóa Gumbel-max của một biến rời rạc bằng một hàm softmax được điều khiển bởi nhiệt độ, nhờ đó cho ra một biến ngẫu nhiên liên tục, khả vi, tập trung vào các đỉnh của đơn hình khi nhiệt độ $t \to 0$. Điều này cho phép viết lại một biến ngẫu nhiên rời rạc, và do đó không khả vi, $\mathbf{z}$ thành $\tilde{\mathbf{z}} = g(\phi, \varepsilon)$, trong đó toàn bộ tính ngẫu nhiên do một biến ngẫu nhiên $\varepsilon$ không phụ thuộc vào $\phi$ mang lại, còn $g$ là tất định và khả vi theo $\phi$. Một phép phân tích như vậy chính là điều cần trong trường hợp đang xét: các mặt nạ dropout biến các đơn vị của mạng thành các biến ngẫu nhiên, và áp dụng thủ thuật trên cho chúng cho phép lan truyền ngược gradient tới tham số biến phân $\phi$ đang được tối ưu. Trong trường hợp nhị phân đang quan tâm ở đây, hàm softmax rút gọn thành hàm sigmoid $\sigma(\cdot)$, và mặt nạ được nới lỏng có dạng
+
+$$
+\tilde{\mathbf{z}} = \sigma\left(\frac{1}{t}\left(\log\phi - \log(1 - \phi) + \log u - \log(1 - u)\right)\right), \tag{14.48}
+$$
+
+trong đó $u \sim \mathcal{U}[0, 1]$ là một biến phân phối đều không phụ thuộc vào tham số $\phi$. Do đó, gradient chỉ truyền qua các số hạng chứa $\phi$, còn $u$ đóng vai trò một nguồn nhiễu bên ngoài, giờ đây làm cho $\tilde{\mathbf{z}}$ khả vi theo $\phi$.
+
+## 3. Chèn dropout
+
+Cách phát biểu MC Dropout gốc dự kiến kích hoạt dropout lúc suy luận trên một mạng nơ-ron dùng dropout để chính quy hóa trong lúc huấn luyện. Nếu một mặt kỹ thuật này cho một lời giải với chi phí triển khai tối thiểu, thì mặt khác, việc tích hợp nó vào các mạng nơ-ron đã huấn luyện sẽ đòi hỏi huấn luyện lại mô hình. Điều này thường không khả thi, hoặc vì quy trình huấn luyện hay dữ liệu gốc không còn sẵn có, hoặc vì việc huấn luyện lại có nguy cơ làm giảm hiệu năng của một mô hình đã triển khai và đã qua quy trình thẩm định. Để giải quyết vấn đề này, các công trình gần đây cho thấy chiến lược như vậy có thể được áp dụng cho các mạng nơ-ron bất kỳ, bất kể có dùng dropout trong lúc huấn luyện hay không; kỹ thuật này được gọi là **chèn dropout** (dropout injection). Chiến lược này tránh hoàn toàn chi phí và rủi ro của việc huấn luyện lại, bổ sung khả năng ước lượng độ bất định cho một mạng tất định có sẵn mà không thay đổi trọng số hay đòi hỏi tối ưu thêm. Giải pháp đầu tiên được đề xuất trong tài liệu xuất phát từ một ý tưởng đơn giản, tức là tìm một tỉ lệ dropout $\phi$ phù hợp *sau huấn luyện* bằng cách cực tiểu hóa log hàm hợp lý âm (negative log-likelihood, NLL). Dù trực quan trong thực hành, việc chèn dropout vào một mạng nơ-ron đã huấn luyện ẩn chứa những hệ quả tinh tế chưa được xử lý trong cách phát biểu gốc. Cụ thể, một nhược điểm đáng chú ý lộ ra khi dùng chiến lược này cho các bài toán hồi quy.
+
+### 3.1 Chèn dropout: trường hợp hồi quy
+
+Trong một bài toán hồi quy, bộ dự đoán $f(\mathbf{x}, \theta)$ với các tham số $\theta$ nhận đầu vào là một vector $\mathbf{x}$ $D$ chiều và cho ra một số thực $\mathbf{y}$. Bây giờ xét một bộ hồi quy suy luận biến phân Monte Carlo (Monte Carlo Variational Inference, MC-VI) $f_{\text{MC-VI}} : \mathbb{R}^{D} \to \mathbb{R}^{M}$, nhận đầu vào là một vector $D$ chiều và cho ra $M$ dự đoán MC bằng cách lấy mẫu từ một phân phối tham số $q(\theta|\phi)$ được xấp xỉ bằng tỉ lệ dropout $\phi$. Theo Loquercio và cộng sự, thách thức chính của việc chèn dropout là tìm tỉ lệ dropout $\phi$ phù hợp nhất cực tiểu hóa NLL:
+
+$$
+\phi = \arg\min_{\phi'} \frac{1}{N} \sum_{n=1}^{N} \frac{1}{2} \frac{(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi'))^2}{{\sigma^2}^{(n)}(\phi')} + \frac{1}{2}\log({\sigma^2}^{(n)}(\phi')), \tag{14.49}
+$$
+
+trong đó $\hat{\mathbf{y}}^{(n)}(\phi')$ và ${\sigma^2}^{(n)}(\phi')$ là kỳ vọng và phương sai thực nghiệm của dự đoán được tính bằng bộ hồi quy MC-VI; đáng lưu ý là cả hai đều phụ thuộc vào tỉ lệ dropout $\phi'$. Trong thực hành, các giá trị $\phi'$ quá cao, đến một lúc nào đó, sẽ dẫn tới suy giảm hiệu năng nghiêm trọng, vì trung bình mô hình Bayes (Bayesian model average, BMA) $\frac{1}{M}\sum_{m=1}^{M} f(\mathbf{x}, \theta_m)$ sẽ lệch quá xa dự đoán của mạng tất định gốc $f(\mathbf{x}, \theta_{\text{MAP}})$. Do đó, miền các giá trị $\phi$ phù hợp thu hẹp lại thành khoảng $[0, \phi_{\max}]$, trong đó $\phi_{\max}$ là tỉ lệ dropout mà tại đó mức suy giảm hiệu năng còn chấp nhận được.
+
+Tuy nhiên, trong tình huống này một biến chứng tinh tế có thể xảy ra. Về nguyên tắc, có thể cực tiểu hóa NLL hoặc bằng cách cực tiểu hóa sai số bình phương, hoặc bằng cách làm cho thước đo độ bất định bằng sai số bình phương ở mỗi mẫu. Do đó, vấn đề nảy sinh khi tại giá trị cực đại $\phi_{\max}$, các phương sai mà ${\sigma^2}^{(n)}(\phi)$ nắm bắt được vẫn quá nhỏ để phản ánh chính xác các sai số bình phương $(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi))^2$. Trong bối cảnh chèn dropout, nơi không thể tinh chỉnh các dự đoán, việc cực tiểu hóa NLL chỉ phục vụ để xác định giá trị $\phi$ cực tiểu hóa khoảng cách giữa sai số bình phương và phương sai thực nghiệm $|{\sigma^2}^{(n)}(\phi) - (\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi))^2|$. Nhưng điều gì xảy ra nếu khoảng $[0, \phi_{\max}]$ nhỏ đến mức nó luôn cho các phương sai thấp hơn đáng kể so với các sai số bình phương tương ứng? Trong tình huống đó, dù thước đo độ bất định không thể phản ánh chính xác các sai số, có thể tiếp cận bài toán từ một góc độ khác: nếu khó khăn nảy sinh do độ lớn của thước đo độ bất định không đủ, thì việc co giãn lại nó là một giải pháp thực tế. Khi đó, Phương trình 14.49 có thể được viết lại thành một bài toán cực tiểu hóa hai biến, trong đó $\phi$ tối ưu và hệ số co giãn (scale factor) $S$ được tìm đồng thời:
+
+$$
+\phi, S = \arg\min_{\phi', s} \frac{1}{N} \sum_{n=1}^{N} \frac{1}{2} \frac{(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi'))^2}{s \cdot {\sigma^2}^{(n)}(\phi')} + \frac{1}{2}\log(s \cdot {\sigma^2}^{(n)}(\phi')), \tag{14.50}
+$$
+
+Đáng chú ý là có thể dễ dàng chứng minh rằng, với $\phi$ cho trước, hệ số co giãn tối ưu $S$ trên một tập dữ liệu có thể được tính ở dạng đóng. Cụ thể, lời giải của bài toán này, vốn được đề xuất để hiệu chuẩn các bộ hồi quy, mang tên co giãn $\sigma$ ($\sigma$-scaling). Hệ số tỉ lệ tối ưu $s(\phi) = \frac{1}{N}\sum_{n=1}^{N}[(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi))^2 \cdot \sigma_n^{-2}(\phi)]$ có thể được tính như kỳ vọng của sai số bình phương chia cho phương sai. Chứng minh được để lại cho người đọc như một bài tập. Khi đó, bài toán của Phương trình 14.50 có thể được phát biểu thành một bài toán tối ưu đơn giản hơn:
+
+$$
+\phi = \arg\min_{\phi'} \frac{1}{N} \sum_{n=1}^{N} \frac{1}{2} \frac{(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi'))^2}{{\sigma^2}^{(n)}(\phi') \cdot s(\phi')} + \frac{1}{2}\log({\sigma^2}^{(n)}(\phi') \cdot s(\phi')). \tag{14.51}
+$$
+
+Tối ưu theo cách này có nghĩa là việc tìm kiếm không còn bị giới hạn trên một đường cong một chiều cố định mà được tự do đi khắp mặt hai chiều chứa đường cong hệ số co giãn tối ưu $s(\phi)$ đó, như minh họa trong Hình 14.1. Trong trường hợp không xét co giãn (scale-agnostic), việc tìm kiếm bị giới hạn trên lát cắt $s = 1$, và ngôi sao đánh dấu NLL tốt nhất (dưới tối ưu) có thể đạt được ở đó; ngược lại, việc co giãn thước đo độ bất định mở ra khả năng tiếp cận những vùng của mặt mà nếu không sẽ không thể với tới, cho ra một tỉ lệ dropout khác với NLL thấp hơn.
+
+<Figure caption="Hình 14.1: So sánh giữa cách phát biểu không xét co giãn và cách phát biểu có xét co giãn của bài toán tối ưu dropout được chèn, cho một MLP trên tập dữ liệu Boston Housing. Trái: NLL của Phương trình 14.49 như một hàm chỉ của tỉ lệ dropout ϕ. Phải: mặt NLL của Phương trình 14.50, xem như hàm của cả ϕ và hệ số co giãn s; đường nét đứt vạch ra hệ số co giãn tối ưu s(ϕ) của Phương trình 14.51, ngôi sao trắng tái hiện lời giải không xét co giãn và ngôi sao đen là điểm tối ưu toàn cục (ϕ, S). Bản tái hiện mang tính sơ đồ: các giá trị ở hình bên trái được đọc từ đồ thị gốc; mặt ở hình bên phải là một hàm minh họa có cùng các đặc điểm định tính (một đường cong các hệ số co giãn tối ưu, một cực tiểu dưới tối ưu trên lát cắt s = 1 và một điểm tối ưu toàn cục thấp hơn), không phải dữ liệu gốc; ngôi sao rỗng thay cho ngôi sao trắng và ngôi sao đặc thay cho ngôi sao đen.">
+  <Bdl14ScaleAwareDropout />
+</Figure>
+
+### 3.2 Chèn dropout cho bài toán phân loại
+
+Phần thảo luận về chèn dropout cho các bài toán hồi quy đã cho thấy sự tồn tại của một vấn đề liên quan đến thang độ (scale) của phân phối xấp xỉ. Điều thú vị là điều tương tự không xảy ra với các bài toán phân loại, như sẽ thấy rõ khi mô hình hóa cùng các điều kiện cho các bộ phân loại. Với các bài toán hồi quy, hàm $f(\mathbf{x}, \theta)$ cho ra một số vô hướng $\hat{\mathbf{y}} \in \mathbb{R}$: ở đây, đầu ra có thể được mô hình hóa bằng cách đặt một phân phối Gauss lên phân phối dự đoán $f(\mathbf{x}, \theta) \sim \mathcal{N}(\mu, \sigma^2)$. Ngược lại, trong trường hợp phân loại, hàm $f(\mathbf{x}, \theta)$ trả về một vector xác suất $p = \hat{\mathbf{y}} = \operatorname{softmax}(z)$, với $z \in \mathbb{R}^{C}$: trong trường hợp này, vì $\hat{\mathbf{y}}$ là một vector trên đơn hình $C$ chiều, phân phối Dirichlet là một lựa chọn thuận tiện để mô hình hóa phân phối hậu nghiệm $\hat{\mathbf{y}} \sim \operatorname{Dir}(\alpha)$.
+
+Khác biệt kiến trúc then chốt giữa các mô hình phân loại và hồi quy là việc dùng hàm kích hoạt softmax ở lớp cuối cho bài toán phân loại. Điều này cho phép thực hiện khớp mô-men (moment matching) trực tiếp trên các logit $z$, từ đó có thể ước lượng các tham số của phân phối Dirichlet. Thách thức chính của cách tiếp cận này nằm ở việc xác định một phân phối thích hợp trên các logit, sao cho các đầu ra sau phép biến đổi softmax tuân theo một phân phối Dirichlet. May mắn là các kết quả đã biết trong thống kê Bayes khẳng định rằng softmax của các biến gamma độc lập tuân theo một phân phối Dirichlet. Có thể khai thác kết quả này bằng cách mô hình hóa hàm mũ của mỗi logit bằng các phân phối Gamma độc lập:
+
+$$
+e^{z_i} \sim \Gamma\left(\alpha_i, \frac{1}{\lambda_i}\right), \ \forall i \in [1, C] \implies \operatorname{softmax}(z) \sim \operatorname{Dir}(\alpha). \tag{14.52}
+$$
+
+Giờ đây phép khớp mô-men có thể được thực hiện trực tiếp trên các phân phối Gamma độc lập, ước lượng cho mỗi phân phối một kỳ vọng thực nghiệm $\hat{\mu}_i$ và một phương sai thực nghiệm $\hat{\sigma}_i^2$ để suy ra tham số hình dạng $\alpha_i$ và tham số tỉ lệ $\frac{1}{\lambda_i}$:
+
+$$
+\begin{bmatrix} \alpha_i \lambda_i^{-1} \\ \alpha_i \lambda_i^{-2} \end{bmatrix} = \begin{bmatrix} \hat{\mu}_i \\ \hat{\sigma}_i^2 \end{bmatrix} \implies \alpha_i = \hat{\mu}_i^2 \hat{\sigma}_i^{-2}, \ \frac{1}{\lambda_i} = \hat{\sigma}_i^2 \hat{\mu}_i^{-1} \tag{14.53}
+$$
+
+Khi đó có thể suy ra các tham số của phân phối Dirichlet thu được trên các vector xác suất:
+
+$$
+p \sim \operatorname{Dir}(\hat{\mu}^2 \circ \hat{\sigma}^{-2}). \tag{14.54}
+$$
+
+Hệ quả của việc co giãn phương sai thực nghiệm trong thiết lập này là hiển nhiên. Hàm mũ của các logit giờ sẽ tuân theo một phân phối Gamma với các tham số hình dạng và tham số tốc độ đã được co giãn, làm thay đổi tương ứng các tham số Dirichlet trên vector xác suất đầu ra:
+
+$$
+\Gamma\left(\hat{\mu}_i^2 (s^{-1} \cdot \hat{\sigma}_i^{-2}), s \cdot \hat{\sigma}_i^2 \hat{\mu}_i^{-1}\right) \implies \operatorname{Dir}(\hat{\mu}^2 \circ (s^{-1} \cdot \hat{\sigma}^{-2})). \tag{14.55}
+$$
+
+Vì kỳ vọng của phân phối Dirichlet được bảo toàn khi co giãn, NLL cũng vậy. Do đó, đối với bài toán phân loại, việc co giãn phương sai thực nghiệm trên các logit không ảnh hưởng đến NLL.
+
+## 4. Nhận xét kết luận
+
+Chương này đã chỉ ra rằng một kỹ thuật được nghĩ ra để chính quy hóa có thể được diễn giải lại, dưới các giả định đúng đắn, như suy luận Bayes xấp xỉ. Chính sự đơn giản này làm cho phương pháp dùng được ở quy mô lớn: thật vậy, suy luận dựa trên dropout không đòi hỏi bất kỳ thay đổi nào về kiến trúc hay tối ưu, và toàn bộ chi phí ước lượng độ bất định dự đoán được dồn sang giai đoạn suy luận. Thêm vào đó, khả năng áp dụng kỹ thuật cho các mạng *đã* được huấn luyện mở ra nhiều tình huống thực tế, khiến suy luận dựa trên dropout trở thành một giải pháp nhanh cho cả chuyên gia lẫn người thực hành. Tuy nhiên, cần ghi nhớ rằng nhiều lượt truyền xuôi cần đến lúc suy luận là một trở ngại không thể bỏ qua, đặc biệt khi kích thước mô hình tăng lên, khi mà việc tính một dự đoán đơn lẻ không còn có thể xem là hiển nhiên.
+
+Để khép lại chương, cần lưu ý đến một đặc điểm riêng của suy luận dựa trên dropout: khác với các cách xử lý biến phân tường minh hơn, nó không đưa vào tham số biến phân nào ngoài những tham số mà một mạng tất định vốn đã có (ngoại trừ Concrete Dropout), và không gắn phân phối nào cho từng trọng số hay nơ-ron. Từ chương tiếp theo cho đến hết phần này, sẽ thấy rõ rằng đây là ngoại lệ chứ không phải quy tắc: các phương pháp tiếp theo làm tường minh đối tượng biến phân (được định nghĩa trên trọng số, trên hàm, hoặc thông qua một tập các hạt) và do đó đòi hỏi phải đặc tả, tối ưu hoặc lan truyền thêm các đại lượng khác.
+
+[^1]: Đến đây, người đọc tinh ý có thể hỏi tại sao nên chọn dropout thay vì bất kỳ SRT nào khác, và đó là một câu hỏi chính đáng! Không có lý do đặc biệt nào để dùng dropout thay vì, chẳng hạn, dropconnect, và quả thực có thể dẫn xuất một phép xấp xỉ Bayes từ các SRT khác. Vì lý do lịch sử, chỉ dropout được khảo sát, vì kỹ thuật gốc, thường được biết đến với tên "Monte Carlo Dropout", ban đầu được đề xuất cho dropout. Việc chứng minh một phép xấp xỉ Bayes khả dĩ bằng các SRT khác được để lại cho những người đọc tò mò nhất.
+
+[^2]: Một lần nữa, để đơn giản, phép xấp xỉ Bayes sẽ chỉ được bàn cho một trường hợp cụ thể, tức là hàm mục tiêu hồi quy. Các tính chất tương tự cũng đúng cho bài toán phân loại, dù cần một số sửa đổi; việc thảo luận trường hợp này được để lại cho người đọc như một bài tập.
+
+[^3]: Việc mở rộng cho $C$ đầu ra của MLP là trực tiếp và được bàn ở cuối mục.
+
+[^4]: Đọc chương này sau Chương 24 có thể làm nảy sinh câu hỏi: Phương trình 14.10 có phải là một hàm hiệp phương sai *hợp lệ* không? Câu trả lời là có, nhưng để đơn giản, chứng minh được lược bỏ. Về vấn đề này, những người đọc tò mò hơn được khuyến khích tìm hiểu sâu hơn các thảo luận về hàm nhân lấy biên (marginalized kernels).
+
+[^5]: Đến đây, có thể đặt câu hỏi một cách chính đáng: lại thêm một phép xấp xỉ nữa sao? Đáng tiếc là đúng vậy. Vì đi vào mức chi tiết này sẽ làm lập luận trở nên nặng nề, các phép xấp xỉ này không được bàn ở đây. Để có một trình bày đầy đủ hơn, xem dẫn xuất gốc của Gal và Ghahramani.

@@ -3495,3 +3495,518 @@ def bdl11_flat_sharp():
 bdl11_occam()
 bdl11_online()
 bdl11_flat_sharp()
+
+
+# ---------- Chapter 14: Dropout-based variational inference ----------
+# Figure 14.1: scale-agnostic (left) and scale-aware (right) dropout-injection optimization.
+# Left panel: NLL values read off the original plot (schematic reproduction).
+# Right panel: illustrative surface NLL(phi, s) = N*(phi) + 1/2 (A/s - 1 - ln(A/s)),
+# whose minimum over s lies on the curve s(phi) = A(phi); not the original data.
+
+def bdl14_star(cx, cy, r, cls):
+    pts = []
+    for k in range(10):
+        ang = -math.pi/2 + k*math.pi/5
+        rr = r if k % 2 == 0 else r*0.45
+        pts.append((cx + rr*math.cos(ang), cy + rr*math.sin(ang)))
+    d = ' '.join(('M' if i == 0 else 'L') + f'{x:.1f},{y:.1f}' for i, (x, y) in enumerate(pts)) + ' Z'
+    return f'  <path class="{cls}" d="{d}" />\n'
+
+def bdl14_figure():
+    b = ''
+    # ----- left panel -----
+    P = Plot(58, 34, 230, 196, (0.03, 0.52), (1.6, 3.2))
+    b += text(P.x0 + P.w/2, 20, 'Scale-agnostic optimization', 'middle')
+    b += P.axes([0.1, 0.2, 0.3, 0.4, 0.5], [1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0],
+                'Dropout rate ' + var('ϕ'), 'NLL')
+    data = [(0.056, 3.11), (0.111, 2.01), (0.167, 1.78), (0.222, 1.70), (0.278, 1.70),
+            (0.333, 1.73), (0.389, 1.78), (0.444, 1.84), (0.5, 1.91)]
+    b += line([(P.X(x), P.Y(y)) for x, y in data], 'thick')
+    for i, (x, y) in enumerate(data):
+        if i == 4:
+            continue
+        b += f'  <circle class="dot" cx="{P.X(x):.1f}" cy="{P.Y(y):.1f}" r="3.5" />\n'
+    b += bdl14_star(P.X(0.278), P.Y(1.70), 9, 'box')
+
+    # ----- right panel: projected surface -----
+    b += text(474, 20, 'Scale-aware optimization', 'middle')
+    f0, f1, u0, u1, z0, z1 = 0.05, 0.5, -0.5, 2.0, 1.0, 10.0
+    A = lambda f: (0.25/f)**1.5
+    Nst = lambda f: 1.35 + 3.0*(f - 0.17)**2
+    def nll(f, u):
+        r = A(f)/10**u
+        return min(z1, Nst(f) + 0.5*(r - 1 - math.log(r)))
+    def proj(f, u, z):
+        xn = (f - f0)/(f1 - f0); yn = (u - u0)/(u1 - u0); zn = (z - z0)/(z1 - z0)
+        return (340 + 170*xn + 95*yn, 196 + 46*xn - 62*yn - 120*zn)
+    # floor box edges and axes
+    b += line([proj(f0, u1, z0), proj(f0, u0, z0), proj(f1, u0, z0), proj(f1, u1, z0), proj(f0, u1, z0)], 'grid')
+    b += line([proj(f1, u1, z0), proj(f1, u1, z1)], 'grid')
+    b += line([proj(f0, u1, z0), proj(f0, u1, z1)], 'grid')
+    for z in (2, 4, 6, 8, 10):
+        b += line([proj(f0, u1, z), proj(f1, u1, z)], 'grid')
+        x, y = proj(f1, u1, z)
+        b += text(x + 6, y + 4, f'{z}', 'start', 'small')
+    x, y = proj(f1, u1, z1)
+    b += text(x + 4, y - 12, 'NLL', 'start', 'small')
+    # surface quads, back (large u) to front
+    nf, nu = 18, 14
+    fs = [f0 + i*(f1 - f0)/nf for i in range(nf + 1)]
+    us = [u0 + j*(u1 - u0)/nu for j in range(nu + 1)]
+    for j in reversed(range(nu)):
+        for i in range(nf):
+            q = [proj(fs[i], us[j], nll(fs[i], us[j])), proj(fs[i+1], us[j], nll(fs[i+1], us[j])),
+                 proj(fs[i+1], us[j+1], nll(fs[i+1], us[j+1])), proj(fs[i], us[j+1], nll(fs[i], us[j+1]))]
+            d = ' '.join(('M' if k == 0 else 'L') + f'{x:.1f},{y:.1f}' for k, (x, y) in enumerate(q)) + ' Z'
+            b += f'  <path class="box" style="stroke-width:0.5" d="{d}" />\n'
+    # optimal scale curve s(phi) = A(phi) on the surface
+    pts = []
+    for k in range(61):
+        f = 0.12 + k*(f1 - 0.12)/60
+        u = math.log10(A(f))
+        pts.append(proj(f, u, Nst(f)))
+    b += line(pts, 'thick', ' stroke-dasharray="7 5"')
+    # scale-agnostic optimum (slice u = 0) and global optimum
+    fb = min((0.05 + k*0.001 for k in range(451)), key=lambda f: nll(f, 0.0))
+    fg = min((0.05 + k*0.001 for k in range(451)), key=lambda f: Nst(f))
+    x, y = proj(fb, 0.0, nll(fb, 0.0)); b += bdl14_star(x, y, 9, 'box')
+    x, y = proj(fg, math.log10(A(fg)), Nst(fg)); b += bdl14_star(x, y, 9, 'dot')
+    # axis ticks
+    for f in (0.1, 0.2, 0.3, 0.4, 0.5):
+        x, y = proj(f, u0, z0)
+        b += text(x - 4, y + 16, f'{f:g}', 'middle', 'small')
+    x, y = proj(0.27, u0, z0)
+    b += text(x - 10, y + 36, 'Dropout rate ' + var('ϕ'), 'middle', 'small')
+    for u in (-0.5, 0.0, 0.5, 1.0, 1.5, 2.0):
+        x, y = proj(f1, u, z0)
+        b += text(x + 8, y + 5, f'{u:.1f}'.replace('-', '−'), 'start', 'small')
+    x, y = proj(f1, 0.6, z0)
+    b += text(x + 44, y + 8, 'log' + '<tspan class="sub" dy="3">10</tspan><tspan dy="-3"> </tspan>' + var('S'), 'start', 'small')
+
+    # ----- legend -----
+    ly = 322
+    b += line([(110, ly - 4), (140, ly - 4)], 'thick', ' stroke-dasharray="7 5"')
+    b += text(148, ly, 'optimal ' + var('s') + '(' + var('ϕ') + ')', 'start', 'small')
+    b += bdl14_star(272, ly - 4, 8, 'box')
+    b += text(286, ly, 'best unscaled ' + var('ϕ'), 'start', 'small')
+    b += bdl14_star(408, ly - 4, 8, 'dot')
+    b += text(422, ly, 'global optimum (' + var('ϕ') + ', ' + var('S') + ')', 'start', 'small')
+    svg('Bdl14ScaleAwareDropout', 660, 336,
+        'Scale-agnostic and scale-aware optimization of the injected dropout rate',
+        'Left: the negative log-likelihood as a function of the dropout rate alone falls steeply from about 3.1 at a rate of 0.05 to a minimum of about 1.70 near a rate of 0.28, marked by a hollow star, and rises again to about 1.9 at 0.5. Right: a surface of the negative log-likelihood over the dropout rate and the base-10 logarithm of the scale factor S. A dashed curve on the surface traces the optimal scale factor for each dropout rate, falling from high scale factors at small rates to scale factors below 1 at large rates. A hollow star marks the best value on the slice with scale factor 1 and a filled star marks the lower global optimum at a smaller dropout rate on the dashed curve.',
+        b)
+
+bdl14_figure()
+
+
+# ---------- Bdl15: Figure 15.1, IVON lands in a flat region away from the MAP ----------
+def bdl15_loss(w1, w2):
+    # Schematic two-parameter logistic-regression-like loss: a wedge of low loss
+    # opening to the upper right (directions between 25 and 65 degrees separate the data),
+    # a weak L2 term, and a narrow pit near the apex of the wedge (the sharp MAP solution).
+    a1, a2 = math.radians(25), math.radians(65)
+    u1 = (-math.sin(a1), math.cos(a1))
+    u2 = (math.sin(a2), -math.cos(a2))
+    def sp(z):
+        return z + math.log1p(math.exp(-z)) if z > 0 else math.log1p(math.exp(z))
+    k = 6.0
+    L = 0.0
+    for u in (u1, u2):
+        L += 4.0 * sp(-k * (w1 * u[0] + w2 * u[1]))
+    L += 0.04 * (w1 * w1 + w2 * w2)
+    L += 0.4
+    L -= 1.15 * math.exp(-(((w1 - 0.75) / 0.09) ** 2 + ((w2 - 0.62) / 0.09) ** 2))
+    return L
+
+def bdl15_flat_sharp():
+    xr, yr = (0.0, 4.0), (0.0, 4.0)
+    x0, y0, W, H = 70, 18, 300, 300
+    n = 75
+    X = lambda v: x0 + (v - xr[0]) / (xr[1] - xr[0]) * W
+    Y = lambda v: y0 + H - (v - yr[0]) / (yr[1] - yr[0]) * H
+    vmax = 20.0
+    nlev = 10
+    def level(v):
+        return min(nlev - 1, int(max(0.0, v) / vmax * nlev))
+    def opac(lv):
+        # darker (more opaque) for lower loss, as in the grey-scale original
+        return 0.82 * (1 - lv / nlev) + 0.04
+    cw, ch = W / n, H / n
+    o = '  <g style="fill: currentColor; stroke: none" shape-rendering="crispEdges">\n'
+    grid = {}
+    best = (1e9, None)
+    for j in range(n):
+        for i in range(n):
+            wx = xr[0] + (i + 0.5) * (xr[1] - xr[0]) / n
+            wy = yr[0] + (j + 0.5) * (yr[1] - yr[0]) / n
+            v = bdl15_loss(wx, wy)
+            grid[(i, j)] = v
+    for j in range(n):
+        i = 0
+        while i < n:
+            lv = level(grid[(i, j)])
+            k = i
+            while k + 1 < n and level(grid[(k + 1, j)]) == lv:
+                k += 1
+            o += f'    <rect x="{x0 + i * cw:.1f}" y="{y0 + H - (j + 1) * ch:.1f}" width="{(k - i + 1) * cw:.1f}" height="{ch:.1f}" fill-opacity="{opac(lv):.2f}" />\n'
+            i = k + 1
+    o += '  </g>\n'
+    # MAP: minimum of the loss on a fine grid around the pit
+    best = min(((bdl15_loss(0.5 + i * 0.005, 0.4 + j * 0.005), 0.5 + i * 0.005, 0.4 + j * 0.005)
+                for i in range(100) for j in range(100)))
+    mx, my = best[1], best[2]
+    # IVON-like solution: minimize the Gaussian-smoothed loss E_{N(m, s^2 I)}[L] with s = 0.35
+    s = 0.35
+    gh = [(-1.6507, 0.0813), (-0.5246, 0.8049), (0.5246, 0.8049), (1.6507, 0.0813)]
+    def smooth(m1, m2):
+        tot = 0.0
+        for z1, c1 in gh:
+            for z2, c2 in gh:
+                tot += c1 * c2 * bdl15_loss(m1 + math.sqrt(2) * s * z1, m2 + math.sqrt(2) * s * z2)
+        return tot / math.pi
+    sb = min(((smooth(0.2 + i * 0.05, 0.2 + j * 0.05), 0.2 + i * 0.05, 0.2 + j * 0.05)
+              for i in range(73) for j in range(73)))
+    ix, iy = sb[1], sb[2]
+    # posterior one-standard-deviation circle and mean
+    o += f'  <circle cx="{X(ix):.1f}" cy="{Y(iy):.1f}" r="{s / (xr[1] - xr[0]) * W:.1f}" style="fill: none; stroke: var(--bg); stroke-width: 3.5" />\n'
+    o += f'  <circle cx="{X(ix):.1f}" cy="{Y(iy):.1f}" r="5" style="fill: var(--bg); stroke: none" />\n'
+    d = 6
+    o += line([(X(mx) - d, Y(my) - d), (X(mx) + d, Y(my) + d)], 'ln', ' style="stroke: var(--bg); stroke-width: 2.5"')
+    o += line([(X(mx) - d, Y(my) + d), (X(mx) + d, Y(my) - d)], 'ln', ' style="stroke: var(--bg); stroke-width: 2.5"')
+    o += f'  <rect x="{x0}" y="{y0}" width="{W}" height="{H}" class="ln" />\n'
+    o += text(x0 + W / 2, y0 + H + 20, 'parameter ' + var('θ') + '<tspan class="sub" dy="3">1</tspan>', 'middle', 'small')
+    o += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate({x0 - 10} {y0 + H / 2:.1f}) rotate(-90)">parameter <tspan class="var">θ</tspan><tspan class="sub" dy="3">2</tspan></text>\n'
+    # color bar
+    bx, bw = x0 + W + 34, 16
+    o += '  <g style="fill: currentColor; stroke: none" shape-rendering="crispEdges">\n'
+    for lv in range(nlev):
+        yy = y0 + H - (lv + 1) * H / nlev
+        o += f'    <rect x="{bx}" y="{yy:.1f}" width="{bw}" height="{H / nlev:.1f}" fill-opacity="{opac(lv):.2f}" />\n'
+    o += '  </g>\n'
+    o += f'  <rect x="{bx}" y="{y0}" width="{bw}" height="{H}" class="ln" />\n'
+    for v in (0, 4, 8, 12, 16, 20):
+        yy = y0 + H - v / vmax * H
+        o += line([(bx + bw, yy), (bx + bw + 4, yy)])
+        o += text(bx + bw + 8, yy + 4, f'{v}', 'start', 'small')
+    o += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate({bx + bw + 40} {y0 + H / 2:.1f}) rotate(90)">Loss value</text>\n'
+    # legend
+    lx, ly = x0 + 14, y0 + 20
+    o += f'  <rect x="{lx - 8}" y="{ly - 14}" width="78" height="46" style="fill: var(--bg); stroke: currentColor; stroke-width: 1" />\n'
+    o += line([(lx - 4, ly - 4), (lx + 4, ly + 4)], 'ln') + line([(lx - 4, ly + 4), (lx + 4, ly - 4)], 'ln')
+    o += text(lx + 14, ly + 4, 'MAP', 'start', 'small')
+    o += f'  <circle cx="{lx}" cy="{ly + 20}" r="5" style="fill: none; stroke: currentColor; stroke-width: 1.5" />\n'
+    o += text(lx + 14, ly + 24, 'IVON', 'start', 'small')
+    svg('Bdl15IvonFlatMinimum', 490, 350, 'Loss landscape with the MAP solution in a sharp minimum and the IVON solution in a flat region',
+        'A shaded map of a two-parameter loss, with a color bar from 0 to 20 that gives the loss for each shade. The low-loss region is a wedge whose narrow tip lies near the lower left and which widens toward the upper right; outside the wedge the loss rises quickly. The MAP solution, a cross, sits in a small narrow pit near the tip of the wedge. The IVON solution, a dot surrounded by a circle that marks one posterior standard deviation, lies far inside the wide part of the wedge, where the loss stays low over the whole circle.',
+        o)
+
+# ---------- Bdl15: Figure 15.2, IVON vs. AdamW on ImageNet ----------
+def bdl15_imagenet():
+    P = Plot(70, 24, 470, 230, (0, 260), (15, 78))
+    o = ''
+    for v in (25, 50, 75):
+        o += line([(P.x0, P.Y(v)), (P.x0 + P.w, P.Y(v))], 'grid')
+        o += text(P.x0 - 8, P.Y(v) + 4, f'{v}', 'end', 'small')
+    for v in (0, 50, 100, 150, 200, 250):
+        if v:
+            o += line([(P.X(v), P.y0), (P.X(v), P.y0 + P.h)], 'grid', ' stroke-dasharray="2 3"')
+        o += text(P.X(v), P.y0 + P.h + 18, f'{v}', 'middle', 'small')
+    o += line([(P.x0, P.y0), (P.x0, P.y0 + P.h), (P.x0 + P.w, P.y0 + P.h)])
+    o += text(P.x0 + P.w / 2, P.y0 + P.h + 38, 'Train step (× 1,000)', 'middle', 'small')
+    o += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate({P.x0 - 40} {P.y0 + P.h / 2:.1f}) rotate(-90)">Validation error</text>\n'
+    # Curves traced by eye from the published figure (smooth approximations, not the measured data).
+    def bdl15_pchip(anchors):
+        xs = [a[0] for a in anchors]; ys = [a[1] for a in anchors]
+        n = len(xs)
+        d = [(ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]) for i in range(n - 1)]
+        m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else 2 / (1 / d[i - 1] + 1 / d[i]) for i in range(1, n - 1)] + [d[-1]]
+        def f(t):
+            for i in range(n - 1):
+                if xs[i] <= t <= xs[i + 1]:
+                    h = xs[i + 1] - xs[i]; u = (t - xs[i]) / h
+                    h00 = 2 * u ** 3 - 3 * u ** 2 + 1; h10 = u ** 3 - 2 * u ** 2 + u
+                    h01 = -2 * u ** 3 + 3 * u ** 2; h11 = u ** 3 - u ** 2
+                    return h00 * ys[i] + h10 * h * m[i] + h01 * ys[i + 1] + h11 * h * m[i + 1]
+            return ys[-1]
+        return f
+    ivon = bdl15_pchip([(1.2, 80), (3, 62), (5, 52), (8, 46), (12, 43), (20, 41), (50, 39.5), (100, 36.5), (150, 33), (200, 29), (222, 25.2), (252, 22)])
+    adamw = bdl15_pchip([(1.2, 80), (3, 60), (5, 50), (8, 44), (12, 41), (20, 38.5), (50, 36), (100, 33), (150, 30), (200, 27.3), (222, 25.6), (252, 24.5)])
+    def pts(f, t1):
+        out = []
+        for i in range(0, 501):
+            t = 1.2 + i * (t1 - 1.2) / 500
+            v = f(t)
+            if v > 78:
+                continue
+            out.append((P.X(t), P.Y(v)))
+        return out
+    o += line(pts(adamw, 252), 'acc')
+    o += line(pts(ivon, 252), 'thick')
+    for f, cls in ((adamw, 'acc'), (ivon, 'ln')):
+        o += f'  <circle cx="{P.X(252):.1f}" cy="{P.Y(f(252)):.1f}" r="4" style="fill: var(--bg); stroke: currentColor; stroke-width: 1.5" />\n'
+    for t, lab in ((105, '12h'), (222, '24h')):
+        yv = ivon(t)
+        o += text(P.X(t), P.Y(yv) - 26, lab, 'middle', 'small')
+        o += arrow([(P.X(t), P.Y(yv) - 22), (P.X(t), P.Y(yv) - 5)])
+    lx, ly = P.x0 + 60, P.y0 + 14
+    o += line([(lx, ly), (lx + 34, ly)], 'thick') + text(lx + 42, ly + 4, 'IVON', 'start', 'small')
+    o += line([(lx, ly + 20), (lx + 34, ly + 20)], 'acc') + text(lx + 42, ly + 24, 'AdamW', 'start', 'small')
+    svg('Bdl15IvonImagenet', 580, 320, 'Validation error of IVON and AdamW for a ResNet-50 on ImageNet over training',
+        'Validation error, from about 75 down to about 20, against the training step in thousands from 0 to 250. Both curves fall steeply in the first few thousand steps. For most of training the AdamW curve lies slightly below the IVON curve, at about 35 against 37 after 100,000 steps; toward the end the IVON curve drops faster and finishes below AdamW at about 23 against 25. Arrows mark the points reached after 12 hours, near step 105,000, and after 24 hours, near step 222,000. The curves are smooth approximations traced from the published figure.',
+        o)
+
+bdl15_flat_sharp()
+bdl15_imagenet()
+
+
+# ---------- Chapter 16 (Particle-Based Variational Inference) ----------
+# Figure 16.1: SVGD particles on a mixture of three Gaussians after 1, 10 and 50 iterations.
+# The particle positions are computed here by running SVGD (Algorithm 20 of the article):
+# 100 particles drawn from N(0, 0.5 I), RBF kernel with the median-heuristic bandwidth,
+# constant step size 0.5, target an equal-weight mixture of three isotropic Gaussians.
+import random as bdl16_random
+
+BDL16_MU = [(-2.5, 1.0), (2.0, 2.0), (2.0, -2.0)]
+BDL16_S2 = 0.36  # component variance (standard deviation 0.6)
+
+def bdl16_score(x, y):
+    lw = [-0.5*((x-mx)**2 + (y-my)**2)/BDL16_S2 for mx, my in BDL16_MU]
+    m = max(lw)
+    w = [math.exp(v - m) for v in lw]
+    s = sum(w)
+    gx = -sum(wi*(x-mx) for wi, (mx, my) in zip(w, BDL16_MU))/(s*BDL16_S2)
+    gy = -sum(wi*(y-my) for wi, (mx, my) in zip(w, BDL16_MU))/(s*BDL16_S2)
+    return gx, gy
+
+def bdl16_svgd_step(P, eps):
+    n = len(P)
+    d2 = [[(P[i][0]-P[j][0])**2 + (P[i][1]-P[j][1])**2 for j in range(n)] for i in range(n)]
+    flat = sorted(v for row in d2 for v in row)
+    med = 0.5*(flat[len(flat)//2 - 1] + flat[len(flat)//2])
+    h = med/math.log(n+1)
+    g = [bdl16_score(*p) for p in P]
+    out = []
+    for i in range(n):
+        fx = fy = 0.0
+        for j in range(n):
+            k = math.exp(-d2[i][j]/h)
+            # k(theta_j, theta_i) * score_j + grad_{theta_j} k(theta_j, theta_i)
+            fx += k*g[j][0] + (2/h)*(P[i][0]-P[j][0])*k
+            fy += k*g[j][1] + (2/h)*(P[i][1]-P[j][1])*k
+        out.append((P[i][0] + eps*fx/n, P[i][1] + eps*fy/n))
+    return out
+
+def bdl16_svgd_snapshots():
+    rng = bdl16_random.Random(0)
+    sd = math.sqrt(0.5)
+    P = [(rng.gauss(0, sd), rng.gauss(0, sd)) for _ in range(100)]
+    snaps = {}
+    for k in range(1, 51):
+        P = bdl16_svgd_step(P, 0.5)
+        if k in (1, 10, 50):
+            snaps[k] = P
+    return snaps
+
+def bdl16_panel(x0, y0, size, pts, label):
+    P = Plot(x0, y0, size, size, (-4.5, 4.5), (-4.5, 4.5))
+    o = ''
+    o += f'  <rect class="grid" x="{x0}" y="{y0}" width="{size}" height="{size}" />\n'
+    for v in (-4, -2, 0, 2, 4):
+        o += text(P.X(v), y0+size+14, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+        o += text(x0-5, P.Y(v)+4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+        o += line([(P.X(v), y0+size), (P.X(v), y0+size+3)], 'mut')
+        o += line([(x0, P.Y(v)), (x0-3, P.Y(v))], 'mut')
+    sc = size/9.0
+    for mx, my in BDL16_MU:
+        for r in (0.4, 0.8, 1.2, 1.6):
+            o += f'  <circle class="mut" cx="{P.X(mx):.1f}" cy="{P.Y(my):.1f}" r="{r*sc:.1f}" stroke-width="0.8" />\n'
+        cx, cy = P.X(mx), P.Y(my)
+        o += line([(cx-4, cy-4), (cx+4, cy+4)], 'mut')
+        o += line([(cx-4, cy+4), (cx+4, cy-4)], 'mut')
+    for (px, py) in pts:
+        if -4.5 < px < 4.5 and -4.5 < py < 4.5:
+            o += f'  <circle class="dot" cx="{P.X(px):.1f}" cy="{P.Y(py):.1f}" r="2.3" />\n'
+    o += text(x0+size/2, y0-8, label, 'middle', 'small')
+    o += text(x0+size/2, y0+size+30, var('x'), 'middle', 'small')
+    return o
+
+bdl16_snaps = bdl16_svgd_snapshots()
+b = ''
+for idx, k in enumerate((1, 10, 50)):
+    b += bdl16_panel(52 + idx*200, 26, 170, bdl16_snaps[k], f'SVGD particles, iteration {k}')
+b += text(6, 26+170/2+4, var('y'), 'start', 'small')
+svg('Bdl16SvgdParticles', 640, 236, 'SVGD particles on a mixture of three Gaussians after 1, 10 and 50 iterations',
+    'Three square panels share the same target: an equal-weight mixture of three isotropic Gaussians drawn as concentric contour circles centered near (−2.5, 1), (2, 2) and (2, −2), each center marked with a cross. One hundred particles start from a normal distribution with covariance 0.5 I at the origin. After 1 iteration they still form a single cloud near the origin. After 10 iterations most particles have reached the three modes but sit in tight clusters near their centers. After 50 iterations the kernel repulsion has spread them over the contours of each mode.',
+    b)
+
+
+# ===================== Chapter 18: Sequential variational inference =====================
+
+def bdl18_sub(t):
+    return f'<tspan class="sub" dy="4">{t}</tspan><tspan dy="-4"> </tspan>'
+
+def bdl18_node(cx, cy, label, observed, r=13, lx=None, ly=None, anchor='middle'):
+    o = ''
+    if observed:
+        o += f'  <circle class="band" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" />\n'
+    o += f'  <circle class="ln" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" />\n'
+    if lx is not None:
+        o += text(lx, ly, label, anchor)
+    return o
+
+def bdl18_edge(p0, p1, r=13):
+    # straight arrow between two node centres, trimmed to the circle borders
+    (x0, y0), (x1, y1) = p0, p1
+    d = math.hypot(x1 - x0, y1 - y0)
+    ux, uy = (x1 - x0) / d, (y1 - y0) / d
+    return arrow([(x0 + ux * r, y0 + uy * r), (x1 - ux * (r + 1), y1 - uy * (r + 1))])
+
+def bdl18_curve(p0, p1, bulge, r=13):
+    # curved arrow from p0 to p1 (both node centres), bulging to the right by `bulge` pixels
+    (x0, y0), (x1, y1) = p0, p1
+    cx, cy = (x0 + x1) / 2 + bulge, (y0 + y1) / 2
+    def trim(px, py, qx, qy, rr):
+        d = math.hypot(qx - px, qy - py)
+        return px + (qx - px) / d * rr, py + (qy - py) / d * rr
+    sx, sy = trim(x0, y0, cx, cy, r)
+    ex, ey = trim(x1, y1, cx, cy, r + 1)
+    return f'  <path class="ln" d="M{sx:.1f},{sy:.1f} Q{cx:.1f},{cy:.1f} {ex:.1f},{ey:.1f}" marker-end="ARROW" />\n'
+
+# ---------- Figure 18.1: state space model as a graphical model ----------
+b = ''
+ty, my, by = 40, 120, 200
+# (a) standard SSM
+ax = [70, 200]
+for k, x in enumerate(ax):
+    s = 't−1' if k == 0 else 't'
+    b += bdl18_node(x, ty, '', True)
+    b += text(x, ty - 20, var('u') + bdl18_sub(s), 'middle')
+    b += bdl18_node(x, my, '', False)
+    b += text(x - 18, my - 17, var('z') + bdl18_sub(s), 'end')
+    b += bdl18_node(x, by, '', True)
+    b += text(x, by + 32, var('y') + bdl18_sub(s), 'middle')
+    b += bdl18_edge((x, ty), (x, my))
+    b += bdl18_edge((x, my), (x, by))
+    b += bdl18_curve((x, ty), (x, by), 46)
+b += bdl18_edge((ax[0], my), (ax[1], my))
+b += text(135, by + 62, '(a)', 'middle', 'small')
+# (b) online parameter inference
+bx = [330, 460]
+for k, x in enumerate(bx):
+    s = 't−1' if k == 0 else 't'
+    b += bdl18_node(x + 20, ty, '', True)
+    b += text(x + 20, ty - 20, var('x') + bdl18_sub(s), 'middle')
+    b += bdl18_node(x, my, '', False)
+    b += text(x - 18, my - 17, var('θ') + bdl18_sub(s), 'end')
+    b += bdl18_node(x, by, '', True)
+    b += text(x, by + 32, var('y') + bdl18_sub(s), 'middle')
+    b += bdl18_edge((x, my), (x, by))
+    b += bdl18_curve((x + 20, ty), (x, by), 40)
+b += bdl18_edge((bx[0], my), (bx[1], my))
+b += text(395, by + 62, '(b)', 'middle', 'small')
+b += text(160, 290, 'shaded: observed', 'start', 'small')
+b += text(300, 290, 'unshaded: latent', 'start', 'small')
+svg('Bdl18SsmGraph', 540, 300, 'State space model as a graphical model, in a standard and a specialized form',
+    'Panel a, the standard state space model: for two consecutive steps, an observed input u points to the latent state z and, through a curved edge, to the observed output y; z points to y, and z at step t minus 1 points to z at step t. Panel b, the specialized version for online parameter inference: the observed input x points only to the output y, the latent parameters theta point to y, and theta at step t minus 1 points to theta at step t. Shaded nodes are observed and unshaded nodes are latent.',
+    b)
+
+# ---------- Figure 18.2: EKF applied to an MLP for 1d regression ----------
+import numpy as np
+
+def bdl18_ekf_mlp():
+    rng = np.random.default_rng(1)
+    H = 6                                   # hidden units of the 1-6-1 tanh MLP
+    P = 3 * H + 1                           # W1 (H), b1 (H), W2 (H), b2 (1)
+    def unpack(th):
+        return th[:H], th[H:2*H], th[2*H:3*H], th[3*H]
+    def f(th, x):
+        w1, b1, w2, b2 = unpack(th)
+        return np.tanh(np.outer(x, w1) + b1) @ w2 + b2
+    def jac(th, x):                          # derivative of the scalar output wrt theta
+        w1, b1, w2, b2 = unpack(th)
+        h = np.tanh(w1 * x + b1)
+        dh = (1 - h ** 2) * w2
+        return np.concatenate([dh * x, dh, h, [1.0]])
+    truth = lambda x: x - 10 * np.cos(x) * np.sin(x) + x ** 3
+    N = 200
+    xs = rng.uniform(-3, 3, N)
+    ys = truth(xs) + rng.normal(0, 3.0, N)
+    mu = rng.normal(0, 1, P)
+    Sig = np.eye(P) * 100.0
+    R, Q = 9.0, 1e-4
+    snaps = {}
+    for t in range(N):
+        Sig = Sig + Q * np.eye(P)                         # predict (identity dynamics)
+        C = jac(mu, xs[t])                                # update (linearised observation)
+        yhat = f(mu, np.array([xs[t]]))[0]
+        S = C @ Sig @ C + R
+        K = Sig @ C / S
+        mu = mu + K * (ys[t] - yhat)
+        Sig = Sig - np.outer(K, K) * S
+        Sig = (Sig + Sig.T) / 2
+        if t + 1 in (10, 20, 30, 200):
+            snaps[t + 1] = (mu.copy(), Sig.copy())
+    return xs, ys, snaps, f, rng
+
+xs18, ys18, snaps18, f18, rng18 = bdl18_ekf_mlp()
+b = ''
+grid = np.linspace(-3, 3, 49)
+panels = [(10, '(a)'), (20, '(b)'), (30, '(c)'), (200, '(d)')]
+for k, (step, lab) in enumerate(panels):
+    col, row = k % 2, k // 2
+    Pl = Plot(70 + col * 300, 34 + row * 260, 220, 170, (-3, 3), (-30, 30))
+    b += f'  <rect class="ln" x="{Pl.x0}" y="{Pl.y0}" width="{Pl.w}" height="{Pl.h}" />\n'
+    for v in (-20, 0, 20):
+        b += text(Pl.x0 - 6, Pl.Y(v) + 4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+    for v in (-2, 0, 2):
+        b += text(Pl.X(v), Pl.y0 + Pl.h + 16, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+    b += text(Pl.x0 + Pl.w / 2, Pl.y0 - 8, f'Step={step}', 'middle', 'small')
+    b += text(Pl.x0 + Pl.w / 2, Pl.y0 + Pl.h + 36, lab, 'middle', 'small')
+    mu, Sig = snaps18[step]
+    L = np.linalg.cholesky(Sig + 1e-9 * np.eye(len(mu)))
+    clip = lambda v: min(max(v, -30), 30)
+    for s in range(30):
+        th = mu + L @ rng18.normal(size=len(mu))
+        yy = f18(th, grid)
+        b += line([(Pl.X(x), Pl.Y(clip(y))) for x, y in zip(grid, yy)], 'mut', ' stroke-opacity="0.35" stroke-width="1"')
+    ym = f18(mu, grid)
+    b += line([(Pl.X(x), Pl.Y(clip(y))) for x, y in zip(grid, ym)], 'acc')
+    for x, y in zip(xs18[:step], ys18[:step]):
+        if -30 <= y <= 30:
+            b += f'  <circle class="ln" cx="{Pl.X(x):.1f}" cy="{Pl.Y(y):.1f}" r="3" stroke-width="1" />\n'
+svg('Bdl18EkfMlp', 600, 520, 'EKF posterior predictive samples for an MLP on a nonlinear one-dimensional regression problem',
+    'Four panels after 10, 20, 30 and 200 observations, inputs from minus 3 to 3 and outputs from minus 30 to 30. Faint lines are functions drawn from the EKF posterior over the network weights, a thick line is the function at the posterior mean, and circles are the observations seen so far. After 10 to 30 observations the sampled functions are widely spread; after 200 observations they concentrate around the data, which rise from about minus 30 to 30 with a wiggle near the origin.',
+    b)
+
+# ---------- Figure 18.3: predict-update-project cycle ----------
+b = ''
+def bdl18_lab(x, y, t):
+    return text(x, y, t, 'middle')
+pts = {
+    'q0': (60, 230), 'p10': (150, 140), 'p1': (230, 50), 'q1': (230, 230),
+    'p21': (330, 140), 'p2': (410, 50), 'q2': (410, 230),
+}
+b += bdl18_lab(48, 252, var('q') + bdl18_sub('t−1'))
+b += bdl18_lab(168, 146, var('p') + bdl18_sub('t|t−1'))
+b += bdl18_lab(230, 36, var('p') + bdl18_sub('t'))
+b += bdl18_lab(230, 258, var('q') + bdl18_sub('t'))
+b += bdl18_lab(348, 146, var('p') + bdl18_sub('t+1|t'))
+b += bdl18_lab(414, 36, var('p') + bdl18_sub('t+1'))
+b += bdl18_lab(414, 258, var('q') + bdl18_sub('t+1'))
+b += arrow([(66, 222), (138, 158)])
+b += arrow([(186, 126), (220, 62)])
+b += arrow([(236, 52), (236, 236)])
+b += arrow([(240, 222), (316, 158)])
+b += arrow([(366, 126), (400, 62)])
+b += arrow([(420, 52), (420, 236)])
+def bdl18_rot(x, y, t, ang):
+    return f'  <text class="small" x="{x:.1f}" y="{y:.1f}" text-anchor="middle" transform="rotate({ang} {x:.1f} {y:.1f})">{t}</text>\n'
+b += bdl18_rot(92, 182, 'Predict', -42)
+b += bdl18_rot(194, 86, 'Update', -62)
+b += bdl18_rot(250, 140, 'Project', 90)
+b += bdl18_rot(270, 182, 'Predict', -42)
+b += bdl18_rot(374, 86, 'Update', -62)
+b += bdl18_rot(434, 140, 'Project', 90)
+svg('Bdl18PredictUpdateProject', 480, 275, 'The predict-update-project cycle',
+    'Starting from the approximation q at step t minus 1, a predict arrow leads to p of t given t minus 1, an update arrow leads to the exact one-step posterior p t, and a project arrow leads down to the tractable approximation q t. The same predict, update and project sequence then leads from q t through p of t plus 1 given t and p t plus 1 to q t plus 1.',
+    b)

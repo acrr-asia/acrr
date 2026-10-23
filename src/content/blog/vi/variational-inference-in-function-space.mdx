@@ -1,0 +1,433 @@
+---
+title: "Suy luận biến phân trong không gian hàm"
+description: "Suy luận biến phân trên độ đo xác suất của hàm: ELBO không gian hàm, KL thay thế qua phân phối biên hữu hạn chiều, tiên nghiệm kỳ dị và mục tiêu Wasserstein."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - gaussian processes
+  - function space
+  - wasserstein distance
+series: bayesian-deep-learning
+seriesOrder: 21
+---
+
+## 1. Giới thiệu
+
+Mạng nơ-ron Bayes (Bayesian neural network, BNN) ban đầu được hình dung như một khuôn khổ có thể hợp nhất năng lực biểu diễn của học sâu với việc định lượng độ bất định có cơ sở chặt chẽ của suy luận Bayes. Thế nhưng, với một số họ xấp xỉ và bối cảnh thực nghiệm cụ thể, các xấp xỉ hậu nghiệm tiêu chuẩn trong không gian trọng số có thể kém hơn về độ chính xác dự đoán hoặc về hiệu chuẩn độ bất định. Một khó khăn then chốt của cách phát biểu biến phân tiêu chuẩn trong không gian trọng số nằm ở bản chất của suy luận trong không gian trọng số: ánh xạ từ tham số mạng sang hàm có tính phi tuyến rất mạnh và là ánh xạ nhiều – một, dẫn đến những cảnh quan hậu nghiệm phức tạp, đa mode. Điều này khiến cả việc xấp xỉ phân phối hậu nghiệm trong cách phát biểu này lẫn việc diễn giải hay mã hóa tri thức tiên nghiệm về quá trình sinh dữ liệu thông qua một tiên nghiệm trên không gian trọng số đều trở nên khó khăn.
+
+Những thách thức này thúc đẩy việc chuyển góc nhìn từ suy luận biến phân trong không gian tham số sang suy luận biến phân trong không gian hàm (function-space variational inference, FSVI). Ở cấp độ lý thuyết, thay vì thực hiện suy luận trên các trọng số của mạng nơ-ron, người ta làm việc với các độ đo xác suất (probability measure) trên các hàm, những đối tượng mô tả hành vi đầu vào – đầu ra và nắm bắt tự nhiên hơn các thiên hướng quy nạp (inductive bias) về bài toán học. Trong bối cảnh này, tiên nghiệm được định nghĩa trên các hàm (chẳng hạn như một quá trình Gauss), còn hàm hợp lý tác động lên các giá trị của hàm. FSVI tìm một độ đo hậu nghiệm xấp xỉ bằng cách cực tiểu hóa độ phân kỳ của nó so với độ đo hậu nghiệm. Tuy nhiên, các phương pháp thực tế luôn phải tiếp cận những độ đo này thông qua các biểu diễn hữu hạn chiều, hoặc qua tham số hoặc qua các phân phối biên hữu hạn chiều, vì không thể thao tác trên toàn bộ một luật phân phối vô hạn chiều.
+
+Sự thay đổi góc nhìn này có những hệ quả quan trọng cho cả cấu trúc toán học lẫn cấu trúc tính toán của suy luận biến phân. Thứ nhất, nó đòi hỏi các phát biểu theo lý thuyết độ đo của quy tắc Bayes và của độ phân kỳ Kullback–Leibler (KL) trong các không gian vô hạn chiều, nơi không tồn tại một độ đo tương tự độ đo Lebesgue. Thứ hai, nó bộc lộ những hạn chế của các hàm mục tiêu dựa trên KL: chúng có thể không tính trực tiếp được và có thể bằng vô cùng trong nhiều tình huống, chẳng hạn khi một mạng nơ-ron có tham số hữu hạn chiều biểu diễn một luật phân phối biến phân trên hàm còn tiên nghiệm là một quá trình Gauss không suy biến. Những khó khăn này thúc đẩy một loạt các xấp xỉ KL và các hàm mục tiêu tổng quát hóa dựa trên những độ sai khác (discrepancy) thay thế.
+
+Chương này phát triển góc nhìn không gian hàm. Chương hình thức hóa suy luận Bayes trên một không gian hàm đo được, dẫn ra các hàm mục tiêu biến phân tương ứng, và chỉ ra cách các xấp xỉ hữu hạn chiều làm cho chúng dùng được trong thực tế và gợi ý những phương pháp mới. Xuyên suốt chương, trọng tâm là sự tương tác giữa lý thuyết không gian hàm và việc hiện thực hóa nó trong thực tế với mạng nơ-ron và quá trình Gauss.
+
+## 2. Định lý Bayes trong không gian hàm
+
+Khó khăn then chốt khi làm việc với không gian hàm là không tồn tại một độ đo tương tự độ đo Lebesgue bất biến tịnh tiến (translation-invariant) và $\sigma$-hữu hạn mỗi khi không gian tương ứng là vô hạn chiều. Do đó, quy tắc Bayes không thể được viết dưới dạng "mật độ hậu nghiệm $\propto$ mật độ tiên nghiệm $\times$ hàm hợp lý" so với một độ đo Lebesgue cơ sở. Thay vào đó, cách phát biểu đúng là *theo lý thuyết độ đo*: phân phối hậu nghiệm được định nghĩa thông qua đạo hàm Radon–Nikodym (Radon–Nikodym derivative) của độ đo hậu nghiệm đối với độ đo tiên nghiệm. Một góc nhìn rộng hơn về cách phát biểu suy luận biến phân theo lý thuyết độ đo có thể tìm thấy trong các tài liệu về chủ đề đó.
+
+### 2.1 Bối cảnh và ký hiệu
+
+Cho $\mathcal{X}$ là một miền đầu vào đo được và $\mathcal{F} \subseteq \mathbb{R}^{\mathcal{X}}$ là một không gian các hàm giá trị thực được trang bị một $\sigma$-đại số ($\sigma$-algebra) $\mathfrak{F}$. Ký hiệu $m \in \mathbb{N}$ chỉ kích thước của một bộ (tuple) điểm định giá hữu hạn bất kỳ. Với $\mathbf{x} = (x_1, \dots, x_m) \in \mathcal{X}^m$, định nghĩa **ánh xạ định giá** (evaluation map)
+
+$$
+\operatorname{eval}_{\mathbf{x}} : \mathcal{F} \to \mathbb{R}^m, \qquad \operatorname{eval}_{\mathbf{x}}(f) := [f(x_1), \dots, f(x_m)]^\top.
+$$
+
+Hai ví dụ là: (i) $\mathcal{F} = \mathbb{R}^{\mathcal{X}}$ với $\sigma$-đại số trụ (cylinder $\sigma$-algebra), hay $\sigma$-đại số tích, tức là $\sigma$-đại số nhỏ nhất làm cho mọi ánh xạ định giá hữu hạn đều đo được; và (ii) một không gian Banach hoặc không gian Hilbert khả ly (separable) gồm các hàm, với $\sigma$-đại số Borel của nó. Các không gian Hilbert hàm nhân tái sinh (reproducing kernel Hilbert space, RKHS), được giới thiệu ở Chương 23, là những ví dụ thuận tiện vì các phép định giá tại điểm của chúng là các phiếm hàm tuyến tính liên tục và do đó đo được.
+
+Các ký hiệu $\mathfrak{p}$ và $\mathfrak{q}$ chỉ các độ đo xác suất trên $(\mathcal{F}, \mathfrak{F})$ (chẳng hạn một độ đo tiên nghiệm $\mathfrak{p}$ và một xấp xỉ biến phân $\mathfrak{q}$). Phân phối biên hữu hạn chiều ảnh đẩy tới (pushforward) của $\mathfrak{p}$ là $\mathfrak{p}_{\mathbf{x}} := (\operatorname{eval}_{\mathbf{x}})_\# \mathfrak{p}$.
+
+Cho $(\mathcal{Y}, \mathfrak{Y})$ ký hiệu không gian dữ liệu, được trang bị $\sigma$-đại số tương ứng $\mathfrak{Y}$. Một **phiếm hàm hợp lý** (likelihood functional) là một ánh xạ
+
+$$
+L(\,\cdot \mid f) : \mathcal{Y} \to [0, \infty], \qquad \text{such that } (f, y) \mapsto L(y \mid f) \text{ is } \mathfrak{F} \otimes \mathfrak{Y}\text{-measurable.}
+$$
+
+Chẳng hạn, nếu không gian dữ liệu là $\mathcal{Y} = \mathbb{R}^n$ thì $L(y \mid f)$ có thể là một mật độ $p(y \mid f)$ đối với độ đo Lebesgue trên $\mathbb{R}^n$, được tham số hóa bởi $f \in \mathcal{F}$.
+
+Trong học có giám sát, gọi $n$ là số quan sát, đặt $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^n$, và viết $\mathbf{x}_{\mathrm{tr}} = (x_1, \dots, x_n) \in \mathcal{X}^n$ và $y = (y_1, \dots, y_n) \in \mathcal{Y}$. Một hàm hợp lý phân tích thành tích thường gặp là
+
+$$
+L(y \mid f) = \prod_{i=1}^{n} p(y_i \mid f(x_i)) = \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f)),
+$$
+
+do đó hàm hợp lý chỉ phụ thuộc vào $f$ thông qua các giá trị của nó tại các đầu vào huấn luyện. Những bối cảnh khác cũng có thể xảy ra. Chẳng hạn, trong các mô hình quá trình Cox, $f$ tham số hóa cường độ của một quá trình Poisson và hàm hợp lý phụ thuộc vào các tích phân có chứa $f$.
+
+### 2.2 Định lý Bayes trong không gian hàm
+
+Cố định một quan sát $y \in \mathcal{Y}$ và gọi $\mathfrak{p}$ là độ đo xác suất tiên nghiệm. Khi đó *bằng chứng* (evidence), hay hàm hợp lý biên (marginal likelihood), là tích phân Lebesgue
+
+$$
+Z(y) \;:=\; \int_{\mathcal{F}} L(y \mid f)\, d\mathfrak{p} \;\in\; [0, \infty].
+$$
+
+Xuyên suốt chương này, giả sử rằng $0 < Z(y) < \infty$. Định nghĩa một hàm tập hợp trên $\mathfrak{F}$ bởi
+
+$$
+\mathfrak{p}(\, A \mid y \,) \;:=\; \frac{1}{Z(y)} \int_A L(y \mid f)\, d\mathfrak{p}, \qquad A \in \mathfrak{F}.
+$$
+
+Khi đó $\mathfrak{p}(\cdot \mid y)$ là một độ đo xác suất trên $(\mathcal{F}, \mathfrak{F})$, nó liên tục tuyệt đối (absolutely continuous) đối với $\mathfrak{p}$ (ký hiệu $\mathfrak{p}(\cdot \mid y) \ll \mathfrak{p}$), và đạo hàm Radon–Nikodym của nó là
+
+$$
+\frac{d\,\mathfrak{p}(\cdot \mid y)}{d\,\mathfrak{p}}(f) \;=\; \frac{L(y \mid f)}{Z(y)} \qquad \mathfrak{p}\text{-a.s.}
+$$
+
+Độ đo $\mathfrak{p}(\cdot \mid y)$ được gọi là *độ đo hậu nghiệm* (posterior measure) trên không gian hàm.
+
+Cần lưu ý ở đây rằng không hề có sự viện dẫn nào đến "mật độ hậu nghiệm" trên $\mathcal{F}$. Phân phối hậu nghiệm luôn được định nghĩa *tương đối so với tiên nghiệm* thông qua phiếm hàm hợp lý đo được.
+
+### 2.3 Dạng hữu hạn chiều (dạng định giá)
+
+Nếu hàm hợp lý chỉ phụ thuộc vào các giá trị tại dữ liệu huấn luyện, tức là
+
+$$
+L(y \mid f) = \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f)),
+$$
+
+thì định nghĩa bằng chứng hữu hạn chiều
+
+$$
+\widetilde{Z}(y) := \int_{\mathbb{R}^n} \widetilde{L}(y \mid \mathbf{u})\, d\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}(\mathbf{u}).
+$$
+
+Theo định nghĩa của tích phân theo độ đo ảnh đẩy tới, $\widetilde{Z}(y) = Z(y)$. Do đó, ngoài
+
+$$
+\frac{d\,\mathfrak{p}(\cdot \mid y)}{d\,\mathfrak{p}}(f) \;=\; \frac{\widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f))}{\widetilde{Z}(y)}, \qquad \mathfrak{p}\text{-a.s.},
+$$
+
+đẳng thức sau cũng đúng:
+
+$$
+\frac{d\,\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}(\cdot \mid y)}{d\,\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}}(\mathbf{u}) = \frac{\widetilde{L}(y \mid \mathbf{u})}{\widetilde{Z}(y)}, \qquad \mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}\text{-a.s.} \tag{17.1}
+$$
+
+Như vậy, phân phối biên hậu nghiệm tại $\mathbf{x}_{\mathrm{tr}}$ thu được bằng một phép tính hữu hạn chiều quen thuộc: đánh lại trọng số cho phân phối biên tiên nghiệm tương ứng $\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}$ bằng hàm hợp lý rồi chuẩn hóa lại. Tuy nhiên, mặc dù (17.1) cho phân phối biên hậu nghiệm đúng tại các đầu vào huấn luyện, riêng phân phối biên đó không xác định được toàn bộ độ đo hậu nghiệm $\mathfrak{p}(\cdot \mid y)$ trên $\mathcal{F}$.
+
+## 3. KL trong không gian hàm và các hàm mục tiêu biến phân
+
+### 3.1 Độ phân kỳ KL theo lý thuyết độ đo
+
+Độ phân kỳ Kullback–Leibler giữa hai độ đo xác suất $\mathfrak{q}$ và $\mathfrak{p}$ trên $(\mathcal{F}, \mathfrak{F})$ là
+
+$$
+\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) \;=\; \begin{cases} \displaystyle\int_{\mathcal{F}} \log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right) d\mathfrak{q}, & \text{if } \mathfrak{q} \ll \mathfrak{p}, \\[1ex] +\infty, & \text{otherwise,} \end{cases}
+$$
+
+trong đó $\frac{d\mathfrak{q}}{d\mathfrak{p}}$ ký hiệu đạo hàm Radon–Nikodym của $\mathfrak{q}$ đối với $\mathfrak{p}$. Lưu ý rằng $\mathrm{KL}(\mathfrak{q} \| \mathfrak{p})$ có thể bằng vô cùng ngay cả khi $\mathfrak{q} \ll \mathfrak{p}$. Tính liên tục tuyệt đối bảo đảm sự tồn tại của đạo hàm Radon–Nikodym $\frac{d\mathfrak{q}}{d\mathfrak{p}}$, nhưng không áp đặt điều kiện khả tích nào lên $\log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right)$ dưới $\mathfrak{q}$.
+
+### 3.2 ELBO trong không gian hàm
+
+Với dữ liệu $y$ cố định, từ đây độ đo hậu nghiệm $\mathfrak{p}(\cdot \mid y)$ được ký hiệu là $\widehat{\mathfrak{p}}$. Giả sử $\mathfrak{q} \ll \mathfrak{p}$, $\mathfrak{q} \ll \widehat{\mathfrak{p}}$ và cả $\mathrm{KL}\big(\mathfrak{q} \,\|\, \widehat{\mathfrak{p}}\big)$ lẫn $\mathrm{KL}\big(\mathfrak{q} \,\|\, \mathfrak{p}\big)$ đều hữu hạn. Khi đó có thể áp dụng quy tắc dây chuyền cho đạo hàm Radon–Nikodym:
+
+$$
+\begin{aligned}
+\mathrm{KL}\big(\mathfrak{q} \,\|\, \widehat{\mathfrak{p}}\big) &= \int \log\!\left(\frac{d\mathfrak{q}}{d\widehat{\mathfrak{p}}}\right) d\mathfrak{q} = \int \log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right) d\mathfrak{q} - \int \log\!\left(\frac{d\widehat{\mathfrak{p}}}{d\mathfrak{p}}\right) d\mathfrak{q} \\
+&= \int \log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right) d\mathfrak{q} - \int \log\!\left(\frac{L(y \mid f)}{Z(y)}\right) d\mathfrak{q} \\
+&= \underbrace{\mathrm{KL}(\mathfrak{q} \| \mathfrak{p})}_{\text{regularizer (KL to prior)}} - \underbrace{\mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)]}_{\text{data fit}} + \log Z(y).
+\end{aligned}
+$$
+
+Sắp xếp lại các số hạng cho cận dưới của bằng chứng (evidence lower bound, ELBO)
+
+$$
+\boxed{\log Z(y) \geq \mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)] - \mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) =: \mathrm{ELBO}(\mathfrak{q})} \tag{17.2}
+$$
+
+với dấu bằng xảy ra khi và chỉ khi $\mathfrak{q} = \widehat{\mathfrak{p}}$. Đây là *hàm mục tiêu biến phân trong không gian hàm*. Mục đích là xét các bài toán có dạng
+
+$$
+\max_{\mathfrak{q} \in \mathcal{Q}} \mathrm{ELBO}(\mathfrak{q}) \tag{17.3}
+$$
+
+với một họ biến phân (variational family) $\mathcal{Q}$ nào đó.
+
+### 3.3 Tính đặt chỉnh của bài toán cực đại hóa ELBO
+
+Một cách đơn giản để bảo đảm ELBO được xác định trên toàn bộ họ biến phân $\mathcal{Q}$ là đòi hỏi mọi $\mathfrak{q} \in \mathcal{Q}$ thỏa mãn $\mathfrak{q} \ll \mathfrak{p}$ và cả $\mathrm{KL}(\mathfrak{q} \| \mathfrak{p})$ lẫn $\mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)]$ đều hữu hạn. Điều này không phải lúc nào cũng dễ bảo đảm. Chẳng hạn, có thể KL so với tiên nghiệm là hữu hạn, tức là $\mathfrak{q} \ll \mathfrak{p}$ và $\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) < \infty$, trong khi KL so với hậu nghiệm thì không. Thật vậy, nếu $\mathfrak{q}$ đặt khối lượng dương vào nơi $d\widehat{\mathfrak{p}}/d\mathfrak{p} = 0$ thì $\mathrm{KL}\big(\mathfrak{q} \,\|\, \widehat{\mathfrak{p}}\big) = \infty$ và $\log L(y \mid f) = -\infty$ trên một tập có $\mathfrak{q}$-độ đo dương. Nếu thêm vào đó phần dương của $\log L(y \mid f)$ khả tích thì $\mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)] = -\infty$ và cận dưới (17.2) trở nên vô nghĩa; trong trường hợp ngược lại, log-hàm hợp lý kỳ vọng thậm chí có thể không xác định. Phải loại bỏ những ứng viên có log-hàm hợp lý kỳ vọng không xác định, còn một họ trong đó mọi ứng viên đều có ELBO bằng $-\infty$ cũng dẫn đến một bài toán cực đại hóa đặt không chỉnh (ill-posed).
+
+Nếu ngoài $0 < Z(y) < \infty$ còn giả sử
+
+$$
+0 < L(y \mid f) < \infty \quad \text{for } \mathfrak{p}\text{-almost every } f,
+$$
+
+thì
+
+$$
+\frac{d\widehat{\mathfrak{p}}}{d\mathfrak{p}}(f) = \frac{L(y \mid f)}{Z(y)} > 0 \qquad \mathfrak{p}\text{-a.s.},
+$$
+
+do đó $\widehat{\mathfrak{p}}$ và $\mathfrak{p}$ là các độ đo tương đương. Hệ quả là mọi $\mathfrak{q} \ll \mathfrak{p}$ cũng thỏa mãn $\mathfrak{q} \ll \widehat{\mathfrak{p}}$, mặc dù riêng sự tương đương này không làm cho các độ phân kỳ KL, log-hàm hợp lý kỳ vọng hay ELBO trở nên hữu hạn; vì vậy cần đặc biệt cẩn thận khi chọn họ biến phân. Một điều kiện đủ là với mọi luật phân phối biến phân được xét,
+
+$$
+\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) < \infty, \qquad \mathbb{E}_{\mathfrak{q}}[|\log L(y \mid f)|] < \infty.
+$$
+
+Gác lại khó khăn về việc hàm mục tiêu ELBO có được xác định hay không, vẫn còn thách thức là ước lượng nó và tính các gradient của nó một cách hiệu quả cho một họ biến phân cho trước. Mục tiếp theo thảo luận một đặc trưng dạng supremum của độ phân kỳ KL trong không gian hàm, đặc trưng này gợi ý các cách tiếp cận thực tế cho việc cực đại hóa ELBO.
+
+## 4. Đặc trưng dạng supremum của ELBO
+
+Cho $\mathfrak{p}$ và $\mathfrak{q}$ là các độ đo xác suất bất kỳ trên $\mathbb{R}^{\mathcal{X}}$ được trang bị $\sigma$-đại số trụ sinh bởi mọi ánh xạ định giá hữu hạn. Với một bộ hữu hạn $\mathbf{z} = (z_1, \dots, z_m)$, ký hiệu các phân phối biên ảnh đẩy tới của chúng là $\mathfrak{p}_{\mathbf{z}}$ và $\mathfrak{q}_{\mathbf{z}}$. Trên không gian đo được này, không cần thêm giả thiết nào về tô pô hay về tính chính quy của quỹ đạo mẫu, người ta đã chứng minh được rằng
+
+$$
+\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) \;=\; \sup_{m \in \mathbb{N},\, \mathbf{z} \in \mathcal{X}^m} \mathrm{KL}\big(\mathfrak{q}_{\mathbf{z}} \| \mathfrak{p}_{\mathbf{z}}\big). \tag{17.4}
+$$
+
+Đẳng thức này đúng vì $\sigma$-đại số trụ chứa đúng lượng thông tin sinh bởi các phép định giá hữu hạn. Lưu ý rằng không nên chuyển đẳng thức này sang một $\sigma$-đại số Borel lớn hơn hoặc sang các không gian hàm khác mà không có lập luận bổ sung.
+
+Với hàm hợp lý có giám sát đã giới thiệu ở trên, định nghĩa
+
+$$
+\mathrm{ELBO}_{\mathbf{z}}(\mathfrak{q}) := \mathbb{E}_{\mathfrak{q}}\Big[\log \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f))\Big] - \mathrm{KL}\big(\mathfrak{q}_{\mathbf{z}} \| \mathfrak{p}_{\mathbf{z}}\big).
+$$
+
+Thay vào ELBO trong không gian hàm thu được
+
+$$
+\mathrm{ELBO}(\mathfrak{q}) = \inf_{m \in \mathbb{N},\, \mathbf{z} \in \mathcal{X}^m} \mathrm{ELBO}_{\mathbf{z}}(\mathfrak{q}).
+$$
+
+Lưu ý rằng số hạng độ khớp dữ liệu phụ thuộc vào bộ huấn luyện cố định $\mathbf{x}_{\mathrm{tr}}$, chứ không phụ thuộc vào bộ phụ trợ $\mathbf{z}$ mà infimum được lấy theo. Tuy nhiên, infimum không nhất thiết đạt được, và giá trị của nó vẫn có thể bằng $-\infty$ khi KL trong không gian hàm bằng vô cùng.
+
+### 4.1 VI hàm đối kháng
+
+Giới hạn bộ $\mathbf{z}$ ở một kích thước cố định $m \in \mathbb{N}$ cho bài toán điểm yên ngựa (saddle problem) hữu hạn chiều
+
+$$
+\max_{\mathfrak{q}} \min_{\mathbf{z} \in \mathcal{X}^m} \mathrm{ELBO}_{\mathbf{z}}(\mathfrak{q}).
+$$
+
+Quá trình tối ưu luân phiên giữa cực tiểu hóa theo $\mathbf{z}$ và cực đại hóa theo $\mathfrak{q}$, tương tự một đối thủ có năng lực giới hạn trong mạng đối sinh (generative adversarial network, GAN). Hàm mục tiêu với số điểm định giá hữu hạn này nói chung không phải là một ELBO: nó chỉ còn giữ được cách diễn giải như một cận dưới của bằng chứng khi $\mathbf{z}$ chứa mọi đầu vào có giá trị hàm tham gia vào hàm hợp lý, ở đây là toàn bộ $\mathbf{x}_{\mathrm{tr}}$. Như đã được chỉ ra, lược đồ VI hàm đối kháng (adversarial functional VI) có thể tổng quát hóa kém. Các vị trí định giá mà nó chọn có khả năng nằm gần dữ liệu huấn luyện, và tiên nghiệm chỉ tham gia vào hàm mục tiêu thông qua số hạng KL, nên thông tin tiên nghiệm có thể không được dùng hiệu quả cho việc ngoại suy.
+
+### 4.2 VI hàm dựa trên lấy mẫu
+
+Để bảo đảm số hạng KL ràng buộc hành vi trong các vùng dự đoán, VI hàm dựa trên lấy mẫu (sampling-based functional VI) bổ sung vào một mẫu con ngẫu nhiên các đầu vào huấn luyện những vị trí định giá được rút từ miền dự đoán. Cho $\Pi_{\mathrm{tr}}$ là một phân phối xác định trên các bộ hữu hạn được lấy mẫu từ $\{x_1, \dots, x_n\}$, và cho $\nu^\star$ là một phân phối xác suất do người dùng chọn trên một miền dự đoán. Viết $\mathbf{x}_{\mathrm{sub}} \sim \Pi_{\mathrm{tr}}$ cho một bộ đầu vào huấn luyện ngẫu nhiên, $\mathbf{z}^\star \sim (\nu^\star)^{\otimes m_\star}$ cho $m_\star$ vị trí độc lập trong miền dự đoán, và $\oplus$ cho phép ghép nối các bộ. Hàm mục tiêu dựa trên lấy mẫu là
+
+$$
+\max_{\mathfrak{q}} \mathbb{E}_{\mathbf{x}_{\mathrm{sub}} \sim \Pi_{\mathrm{tr}}} \mathbb{E}_{\mathbf{z}^\star \sim (\nu^\star)^{\otimes m_\star}} \left[\mathrm{ELBO}_{\mathbf{x}_{\mathrm{sub}} \oplus \mathbf{z}^\star}(\mathfrak{q})\right].
+$$
+
+Số hạng độ khớp dữ liệu luôn được tính tại toàn bộ bộ huấn luyện $\mathbf{x}_{\mathrm{tr}}$; chỉ số hạng KL dùng bộ được lấy mẫu. Nhờ đó, lược đồ lấy mẫu khuyến khích sự phù hợp với tiên nghiệm cả trên lẫn ngoài tập huấn luyện. Tuy nhiên, infimum đã được thay bằng kỳ vọng, nên mối liên hệ với ELBO trong không gian hàm không còn trực tiếp. Trong trường hợp đặc biệt khi phân phối hậu nghiệm thực là một GP và mọi bộ định giá đều chứa toàn bộ các đầu vào huấn luyện, phân phối hậu nghiệm thực cực đại hóa cả hàm mục tiêu kỳ vọng trên các phép đo hữu hạn lẫn hàm mục tiêu đầy đủ trong không gian hàm, điều này cung cấp một lý do biện minh cho việc dùng kỳ vọng. Tiêu chí mới cho phép kết hợp các tiên nghiệm GP có cấu trúc (chẳng hạn hàm nhân tuần hoàn cộng hàm nhân RBF) với một họ biến phân BNN. Trong các thí nghiệm được báo cáo, sự kết hợp này đã khôi phục được cấu trúc tuần hoàn và ngoại suy tương đương với GP chính xác trong những ví dụ mà VI tiêu chuẩn trong không gian trọng số không ngoại suy được một cách hợp lý. Nghiên cứu này cũng báo cáo các kết quả cạnh tranh và có khả năng mở rộng trên các bộ dữ liệu UCI, và áp dụng phương pháp cho bài toán máy đánh bạc theo ngữ cảnh (contextual bandits). Trong các bối cảnh đã nghiên cứu đó, lược đồ dựa trên lấy mẫu cho hiệu năng tổng thể tốt hơn lược đồ đối kháng.
+
+### 4.3 Độ phân kỳ hàm trên lưới
+
+VI hàm dựa trên lấy mẫu thay supremum trong (17.4) bằng kỳ vọng của các độ phân kỳ KL biên nhưng giữ cố định kích thước của các bộ được lấy mẫu. Cách tiếp cận độ phân kỳ hàm trên lưới (grid-functional divergence) đẩy ý tưởng này đi xa hơn và ngẫu nhiên hóa cả kích thước bộ. Cho $M$ có hàm khối xác suất $\pi$ trên $\mathbb{N}$ với $\pi(m) > 0$ với mọi $m$, và, với điều kiện $M = m$, rút $\mathbf{z}_M \sim \nu_m^\star$ trên $\mathcal{X}^m$. Định nghĩa lưới tăng cường $\mathbf{u}_M = \mathbf{x}_{\mathrm{tr}} \oplus \mathbf{z}_M$ và
+
+$$
+\mathrm{KL}_{\mathrm{grid}}(\mathfrak{q} \| \mathfrak{p}) := \mathbb{E}_{M \sim \pi} \mathbb{E}_{\mathbf{z}_M \sim \nu_M^\star} \left[\mathrm{KL}\big(\mathfrak{q}_{\mathbf{u}_M} \| \mathfrak{p}_{\mathbf{u}_M}\big)\right]. \tag{17.5}
+$$
+
+Trong bối cảnh ban đầu của cách tiếp cận này, nơi $\mathcal{X}$ là một tập con compact của $\mathbb{R}^d$, giả sử mỗi $\nu_m^\star$ có giá đầy đủ trên $\mathcal{X}^m$. Vì $\pi(m) > 0$ với mọi $m$, Mệnh đề 1 khi đó cho $\mathrm{KL}_{\mathrm{grid}}(\mathfrak{q} \| \mathfrak{p}) = 0$ khi và chỉ khi $\mathfrak{q} = \mathfrak{p}$. Nếu $M = m$ được cố định thì chỉ các phân phối biên trên các bộ tăng cường $\mathbf{x}_{\mathrm{tr}} \oplus \mathbf{z}_m$ được so sánh; những luật phân phối quá trình khác nhau có thể trùng nhau trên mọi phân phối biên như vậy nhưng khác nhau trên các bộ lớn hơn. Tùy theo cách chọn $\pi$, kỳ vọng có thể vẫn hữu hạn ngay cả khi KL dạng supremum bằng vô cùng. Hơn nữa, vì mọi $\mathbf{u}_M$ đều chứa toàn bộ các đầu vào huấn luyện, Mệnh đề 3 của công trình gốc bảo đảm rằng vẫn thu được một cận dưới của bằng chứng,
+
+$$
+\log Z(y) \geq \mathbb{E}_{\mathfrak{q}}\Big[\log \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f))\Big] - \mathrm{KL}_{\mathrm{grid}}(\mathfrak{q} \| \mathfrak{p}). \tag{17.6}
+$$
+
+Bài báo kết hợp hàm mục tiêu này với các bộ sinh quá trình ngẫu nhiên (stochastic process generator), một họ biến phân phi Gauss linh hoạt, cùng các ước lượng giải tích và theo lô nhỏ (mini-batch). Trong các thí nghiệm được báo cáo, phương pháp thu được đã tái tạo cấu trúc định tính của phân phối hậu nghiệm đối với các tiên nghiệm ẩn (implicit prior) hằng từng khúc và tuyến tính từng khúc, và đạt kết quả tốt so với các phương pháp cơ sở (baseline) được chọn trong hồi quy UCI, bài toán máy đánh bạc theo ngữ cảnh, và phân loại ảnh kèm phát hiện dữ liệu ngoài phân phối (out-of-distribution detection).
+
+## 5. Độ đo ảnh đẩy tới của tham số
+
+Cho $\Theta \subset \mathbb{R}^d$ là một không gian tham số hữu hạn chiều với $\sigma$-đại số Borel $\mathcal{B}(\Theta)$. Cho $g : \Theta \to \mathcal{F}$ là một ánh xạ đo được từ tham số sang hàm, $g(\theta) = f(\cdot\,; \theta)$. Cho trước một *tiên nghiệm tham số* $P_\Theta$ và một *luật phân phối tham số biến phân* $Q_\Theta$ trên $(\Theta, \mathcal{B}(\Theta))$, định nghĩa các độ đo ảnh đẩy tới cảm sinh
+
+$$
+\mathfrak{p}^g \;:=\; g_\# P_\Theta, \qquad \mathfrak{q}^g \;:=\; g_\# Q_\Theta,
+$$
+
+sao cho $\mathfrak{p}^g(A) = P_\Theta(\{\theta : g(\theta) \in A\})$ và tương tự cho $\mathfrak{q}^g$.
+
+### 5.1 Bất đẳng thức xử lý dữ liệu
+
+Với mọi $g$ đo được, bất đẳng thức xử lý dữ liệu (data-processing inequality) cho
+
+$$
+\boxed{\mathrm{KL}\big(\mathfrak{q}^g \,\|\, \mathfrak{p}^g\big) \;\leq\; \mathrm{KL}\big(Q_\Theta \,\|\, P_\Theta\big).} \tag{17.7}
+$$
+
+Giả sử $Q_\Theta \ll P_\Theta$ và vế phải hữu hạn, và đặt $h = dQ_\Theta / dP_\Theta$. Dấu bằng xảy ra đúng khi $h$ đo được đối với $\sigma$-đại số sinh bởi $g$, tương đương với $h = \varphi \circ g$ $P_\Theta$-hầu chắc chắn với một $\varphi$ đo được nào đó. Như vậy, một điều kiện đủ cho dấu bằng là $g$ đơn ánh $P_\Theta$-hầu chắc chắn. Tuy nhiên, nói chung $g$ là ánh xạ nhiều – một và dấu bằng thường không xảy ra.
+
+Do đó, nếu chọn *tiên nghiệm trong không gian hàm* chính là luật phân phối $\mathfrak{p}^g$ do BNN cảm sinh và xấp xỉ nó bằng $\mathfrak{q}^g$ cảm sinh từ một luật phân phối tham số khác, thì KL trong không gian hàm không thể vượt quá KL trong không gian tham số. Với cùng một log-hàm hợp lý kỳ vọng, ELBO trong không gian hàm vì vậy lớn ít nhất bằng. Điều này hình thức hóa lý do tại sao làm việc trực tiếp trong không gian hàm có thể cho các hàm mục tiêu *chặt hơn* so với VI trong không gian tham số khi $g$ là ánh xạ nhiều – một (và dĩ nhiên các mô hình mạng nơ-ron sâu cho ra những ánh xạ nhiều – một). Bản thân sự so sánh giá trị hàm mục tiêu này không bảo đảm một xấp xỉ dự đoán tốt hơn, nhưng một hàm mục tiêu chặt hơn trong không gian hàm tránh được việc phạt những sai khác giữa các luật phân phối tham số cảm sinh cùng một luật phân phối hàm, nhờ đó làm cho việc chính quy hóa gắn chặt hơn với đối tượng dự đoán cần quan tâm.
+
+### 5.2 Ước lượng KL trong không gian hàm cho ảnh đẩy tới của tham số
+
+KL trong không gian hàm ở (17.7) hữu hạn mỗi khi $\mathrm{KL}(Q_\Theta \| P_\Theta) < \infty$. Dù vậy, nó là độ phân kỳ giữa những luật phân phối ảnh đẩy tới nói chung không chuẩn tắc và vẫn cần được xấp xỉ.
+
+Một xấp xỉ khả thi đã được đề xuất như sau. Với một bộ hữu hạn $\mathbf{z} = (z_1, \dots, z_m) \in \mathcal{X}^m$, viết $g_{\mathbf{z}}(\theta) = \operatorname{eval}_{\mathbf{z}}(g(\theta)) \in \mathbb{R}^m$. Với $G \in \{P_\Theta, Q_\Theta\}$, định nghĩa trung bình và hiệp phương sai tham số
+
+$$
+m_G := \mathbb{E}_{\theta \sim G}[\theta], \qquad S_G := \operatorname{Cov}_{\theta \sim G}(\theta).
+$$
+
+Giả sử $g_{\mathbf{z}}$ khả vi tại $m_G$ và định nghĩa ma trận Jacobi (Jacobian) của nó bởi
+
+$$
+J_{\mathbf{z}}(m_G) := \left[\left.\frac{\partial g(z_i, \theta)}{\partial \theta_j}\right|_{\theta = m_G}\right]_{\substack{1 \leq i \leq m \\ 1 \leq j \leq d}} \in \mathbb{R}^{m \times d}.
+$$
+
+Tuyến tính hóa $g_{\mathbf{z}}$ tại $m_G$:
+
+$$
+g_{\mathbf{z}}(\theta) \approx g_{\mathbf{z}}(m_G) + J_{\mathbf{z}}(m_G)(\theta - m_G).
+$$
+
+Đây chính là cách xây dựng cục bộ từ tham số sang hàm được dùng trong các xấp xỉ Laplace tuyến tính hóa; xem [Chương 8](/vi/blog/linearized-laplace-approximations). Nó cho các xấp xỉ biên Gauss
+
+$$
+(\mathfrak{p}^g)_{\mathbf{z}} \approx \mathcal{N}\big(\mu_P(\mathbf{z}), \Sigma_P(\mathbf{z})\big), \qquad (\mathfrak{q}^g)_{\mathbf{z}} \approx \mathcal{N}\big(\mu_Q(\mathbf{z}), \Sigma_Q(\mathbf{z})\big),
+$$
+
+trong đó
+
+$$
+\mu_G(\mathbf{z}) := g_{\mathbf{z}}(m_G), \qquad \Sigma_G(\mathbf{z}) := J_{\mathbf{z}}(m_G) S_G J_{\mathbf{z}}(m_G)^\top.
+$$
+
+Như vậy $m_G, S_G$ là các mô-men trong không gian tham số, còn $\mu_G, \Sigma_G$ là các mô-men của các giá trị hàm đã tuyến tính hóa.
+
+Thay supremum trong (17.4) bằng một giá trị cực đại trên các bộ chính quy hóa do người dùng chọn $\{\mathbf{z}^{(s)}\}_{s=1}^S$, hàm mục tiêu thay thế trong không gian hàm trở thành
+
+$$
+\begin{aligned}
+\widetilde{\mathcal{F}}(Q_\Theta) := {} & \mathbb{E}_{\theta \sim Q_\Theta}\Big[\log \widetilde{L}(y \mid g_{\mathbf{x}_{\mathrm{tr}}}(\theta))\Big] \\
+& - \max_{1 \leq s \leq S} \mathrm{KL}\Big(\mathcal{N}\big(\mu_Q(\mathbf{z}^{(s)}), \Sigma_Q(\mathbf{z}^{(s)})\big) \,\Big\|\, \mathcal{N}\big(\mu_P(\mathbf{z}^{(s)}), \Sigma_P(\mathbf{z}^{(s)})\big)\Big).
+\end{aligned}
+$$
+
+Các mô-men tiên nghiệm $m_P, S_P$ được cố định bởi $P_\Theta$, còn các mô-men của $Q_\Theta$ là các đại lượng biến phân. Trong thực tế, các mẫu từ $Q_\Theta$ được tái tham số hóa và các ma trận Jacobi được tính bằng vi phân tự động. Theo cách xây dựng, (i) bất đẳng thức xử lý dữ liệu bảo đảm một số hạng chính quy hóa (regularizer) đặt chỉnh trong không gian hàm khi KL trong không gian tham số hữu hạn, và (ii) phép tuyến tính hóa cung cấp các số hạng KL dạng đóng tại mỗi $\mathbf{z}$, cho ra một ước lượng có khả năng mở rộng, giữ được góc nhìn không gian hàm mà vẫn tương thích với ảnh đẩy tới của BNN.
+
+### 5.3 Tiên nghiệm diễn giải được và vấn đề kỳ dị
+
+Thường thì người ta không muốn dùng ảnh đẩy tới của tham số $\mathfrak{p}^g$ làm tiên nghiệm: không rõ những niềm tin tiên nghiệm về trọng số mạng nơ-ron biểu diễn điều gì. Thay vào đó, có thể đặc tả một tiên nghiệm GP không suy biến $\mathfrak{p}$ có hàm nhân hiệp phương sai thể hiện các giả định cấu trúc về hàm chưa biết, đồng thời giữ nguyên luật phân phối biến phân BNN $\mathfrak{q}^g$. Tiên nghiệm trong không gian hàm được thảo luận thêm ở Chương 31.
+
+Lựa chọn này nằm ngoài bối cảnh dùng chung một ánh xạ của (17.7). Nó cũng tạo ra sự không khớp về số chiều. Cố định $\mathbf{z} = (z_1, \dots, z_m)$ và xét
+
+$$
+g_{\mathbf{z}} : \theta \longmapsto \big(g(z_1, \theta), \dots, g(z_m, \theta)\big) \in \mathbb{R}^m.
+$$
+
+Giả sử $g_{\mathbf{z}}$ Lipschitz cục bộ, như trường hợp các mạng nơ-ron hữu hạn tiêu chuẩn với hàm kích hoạt Lipschitz cục bộ. Nếu $m > d$ thì ảnh của nó là hợp đếm được của các tập có số chiều Hausdorff không vượt quá $d$, và do đó có độ đo Lebesgue $m$ chiều bằng không. Phân phối biên $\mathfrak{q}^g_{\mathbf{z}} = (g_{\mathbf{z}})_\# Q_\Theta$ gán xác suất một cho ảnh này. Ngược lại, nếu ma trận hiệp phương sai của GP tại $\mathbf{z}$ xác định dương thì $\mathfrak{p}_{\mathbf{z}}$ có mật độ Lebesgue trên $\mathbb{R}^m$ và gán xác suất không cho ảnh đó. Về trực giác hình học, một mạng một tham số được định giá tại hai đầu vào vạch ra một đường cong trong mặt phẳng; một phân phối Gauss hai chiều không suy biến gán xác suất không cho đường cong đó.
+
+Vì thế $\mathfrak{q}^g_{\mathbf{z}}$ và $\mathfrak{p}_{\mathbf{z}}$ kỳ dị lẫn nhau (mutually singular) với một bộ như vậy, và đẳng thức trên không gian trụ (17.4) cho
+
+$$
+\mathrm{KL}\big(\mathfrak{q}^g \,\|\, \mathfrak{p}\big) = \sup_{m, \mathbf{z}} \mathrm{KL}\big(\mathfrak{q}^g_{\mathbf{z}} \,\|\, \mathfrak{p}_{\mathbf{z}}\big) = +\infty.
+$$
+
+Do đó, các hàm mục tiêu dựa trên KL không tương thích với bối cảnh mà mục đích là đặt ra một tiên nghiệm GP diễn giải được nhưng dùng một tham số hóa linh hoạt bằng mạng nơ-ron cho phân phối hậu nghiệm. Điều này thúc đẩy việc xét các độ sai khác không đòi hỏi tính liên tục tuyệt đối.
+
+## 6. Các hàm mục tiêu biến phân tổng quát hóa
+
+### 6.1 Động cơ
+
+Trong VI không gian hàm với tiên nghiệm diễn giải được, ELBO dựa trên KL có thể bằng $-\infty$ vì luật phân phối biến phân và tiên nghiệm có thể kỳ dị lẫn nhau; đặc biệt, các độ phân kỳ KL giữa một ảnh đẩy tới có tham số và một độ đo GP có thể bằng vô cùng theo cả hai chiều. Ngay cả khi dùng một độ đo biến phân liên tục tuyệt đối đối với tiên nghiệm, nói chung cũng không có cách dễ dàng để ước lượng KL trong các không gian vô hạn chiều. Điều này thúc đẩy các hàm mục tiêu biến phân có cấu trúc giải tích tốt hơn. Vì vậy, mục này tìm những độ sai khác thay thế vẫn hữu hạn và tính được với các phân phối phong phú trong không gian hàm.
+
+### 6.2 Hàm mục tiêu biến phân tổng quát hóa (GVO)
+
+Cho $(\mathcal{F}, \mathfrak{F})$ là một không gian hàm đo được, $\mathfrak{p}$ là một tiên nghiệm, và $L(y \mid f)$ là một hàm hợp lý dương. Thay số hạng chính quy hóa KL bằng một độ sai khác $D$ và định nghĩa một hàm mục tiêu biến phân tổng quát hóa (generalized variational objective, GVO) như sau:
+
+$$
+\mathcal{J}_D(\mathfrak{q}) := \mathbb{E}_{\mathfrak{q}}\big[\log L(y \mid f)\big] - D(\mathfrak{q}, \mathfrak{p}).
+$$
+
+Khi $D = \mathrm{KL}$, đây là ELBO thông thường. Lấy $D = \mathrm{KL}_{\mathrm{grid}}$ như định nghĩa ở (17.5) cho cách tiếp cận ở Mục 4.3. Xấp xỉ Gauss tuyến tính hóa ở Mục 5.2 cũng có thể được xem là một hàm mục tiêu tổng quát hóa trên các luật phân phối tham số, với giá trị cực đại của các số hạng KL Gauss trên phân phối biên hữu hạn chiều đóng vai trò một độ sai khác thay thế. Với $D$ tổng quát, $\mathcal{J}_D$ không nhất thiết là cận dưới của bằng chứng, và điểm tối ưu của nó không nhất thiết là phân phối hậu nghiệm Bayes thông thường. Thay vào đó, nó định nghĩa một phép cập nhật tổng quát hóa mà cách diễn giải phụ thuộc vào $D$.
+
+### 6.3 GVO Wasserstein-2 cho các độ đo Gauss trên không gian hàm
+
+Một lựa chọn đặc biệt hấp dẫn cho $D$ trong không gian hàm là bình phương khoảng cách 2-Wasserstein $W_2^2$, đại lượng này luôn hữu hạn với hai độ đo Gauss bất kỳ trong một không gian Hilbert khả ly và có biểu thức dạng đóng. Hơn nữa, khoảng cách 2-Wasserstein là một metric thực sự và đo hình học của việc vận chuyển một luật phân phối xác suất sang một luật phân phối khác.
+
+Kiến thức nền về độ đo Gauss (Gaussian measure) trong không gian Hilbert có thể tìm thấy trong các tài liệu; độ đo Gauss trên những không gian tuyến tính tổng quát hơn như không gian Banach hay không gian Fréchet cũng đã được nghiên cứu. Độ đo Gauss có liên hệ mật thiết với quá trình Gauss, nhưng khác ở chỗ chúng được định nghĩa tường minh trên một không gian hàm cụ thể, trong khi các quỹ đạo của một quá trình Gauss có thể được nhúng vào nhiều không gian hàm khác nhau.
+
+Giả sử $\mathcal{F}$ là một không gian Hilbert khả ly, chẳng hạn $L^2(\mathcal{X}, \rho)$ với một độ đo hữu hạn $\rho$, hoặc một không gian Hilbert hàm nhân tái sinh. Một toán tử $A$ trên $\mathcal{F}$ là *Hilbert–Schmidt* nếu $\sum_i \|A e_i\|_{\mathcal{F}}^2 < \infty$ với một cơ sở trực chuẩn $(e_i)_i$. Một toán tử dương $C$ thuộc *lớp vết* (trace-class) nếu $\operatorname{tr}(C) = \sum_i \langle C e_i, e_i \rangle_{\mathcal{F}} < \infty$. Mọi toán tử tự liên hợp dương $C$ đều có một căn bậc hai dương duy nhất, và $C$ thuộc lớp vết khi và chỉ khi $C^{1/2}$ là Hilbert–Schmidt. Các toán tử hiệp phương sai của độ đo Gauss trên $\mathcal{F}$ luôn dương, tự liên hợp và thuộc lớp vết.
+
+Giả sử $\mathfrak{p} = \mathcal{N}(m_{\mathfrak{p}}, C_{\mathfrak{p}})$ và $\mathfrak{q} = \mathcal{N}(m_{\mathfrak{q}}, C_{\mathfrak{q}})$ là các độ đo Gauss trên $\mathcal{F}$, với $m_{\mathfrak{p}}, m_{\mathfrak{q}} \in \mathcal{F}$. Khi đó
+
+$$
+W_2^2(\mathfrak{q}, \mathfrak{p}) = \big\|m_{\mathfrak{q}} - m_{\mathfrak{p}}\big\|_{\mathcal{F}}^2 \;+\; \operatorname{tr}\!\Big(C_{\mathfrak{q}} + C_{\mathfrak{p}} - 2\big(C_{\mathfrak{p}}^{1/2} C_{\mathfrak{q}} C_{\mathfrak{p}}^{1/2}\big)^{1/2}\Big). \tag{17.8}
+$$
+
+Đặt $B = C_{\mathfrak{p}}^{1/2} C_{\mathfrak{q}} C_{\mathfrak{p}}^{1/2}$. Vì $C_{\mathfrak{p}}^{1/2}$ và $C_{\mathfrak{q}}^{1/2}$ là Hilbert–Schmidt,
+
+$$
+\operatorname{tr}(B^{1/2}) = \|C_{\mathfrak{q}}^{1/2} C_{\mathfrak{p}}^{1/2}\|_{\mathsf{S}_1} \leq \|C_{\mathfrak{q}}^{1/2}\|_{\mathsf{S}_2} \|C_{\mathfrak{p}}^{1/2}\|_{\mathsf{S}_2} < \infty,
+$$
+
+trong đó $\mathsf{S}_1$ và $\mathsf{S}_2$ ký hiệu chuẩn lớp vết và chuẩn Hilbert–Schmidt. Như vậy, $W_2(\mathfrak{q}, \mathfrak{p})$ hữu hạn mà không cần bất kỳ giả thiết liên tục tuyệt đối nào.
+
+Định lý Feldman–Hájek phát biểu rằng hai độ đo Gauss trên một không gian Hilbert khả ly hoặc tương đương hoặc kỳ dị lẫn nhau. Sự tương đương chỉ xảy ra dưới những điều kiện tương thích chặt hơn đáng kể. Cụ thể, trên giá chung của các hiệp phương sai, nhiễu động hiệp phương sai tương đối $S = C_{\mathfrak{p}}^{-1/2} C_{\mathfrak{q}} C_{\mathfrak{p}}^{-1/2} - I$ phải có một mở rộng Hilbert–Schmidt, ngoài các điều kiện về miền giá trị của các hiệp phương sai và về hiệu của các trung bình. Nếu những điều kiện này không thỏa mãn, các độ đo kỳ dị lẫn nhau và độ phân kỳ KL giữa chúng bằng vô cùng. Điều này trái ngược với tính chất lớp vết tự động có được, vốn là điều cần cho số hạng chéo Wasserstein trong (17.8).
+
+Lưu ý rằng cả luật phân phối hàm tiên nghiệm lẫn luật phân phối hàm biến phân đều đã được đòi hỏi là độ đo Gauss. Các hàm hợp lý phi Gauss vẫn có thể tham gia qua $\mathbb{E}_{\mathfrak{q}}[\log L]$, nhưng luật phân phối biến phân không thể biểu diễn các phân phối hậu nghiệm phi Gauss. Do đó, tính linh hoạt cần được đưa vào thông qua cách tham số hóa hàm trung bình và toán tử hiệp phương sai.
+
+### 6.4 Suy luận Wasserstein tổng quát hóa với trung bình nơ-ron (GWI-net)
+
+Sau khi đã chọn khoảng cách Wasserstein-2, cần tham số hóa luật phân phối biến phân $\mathfrak{q}$. Một khả năng là xấp xỉ một ảnh đẩy tới của tham số $\mathfrak{q}^g = g_\# Q_\Theta$ bằng một độ đo Gauss trên $\mathcal{F}$. Một cách khác, mạng suy luận Wasserstein tổng quát hóa (generalized Wasserstein inference network, GWI-net) dùng một luật phân phối Gauss lai, có trung bình $m_{\mathfrak{q}} = f(\cdot\,; \theta)$ là một mạng nơ-ron sâu và có hiệp phương sai mang dạng GP biến phân thưa (sparse variational GP). Ở đây $\theta$ là một tham số biến phân tất định của hàm trung bình, không phải một trọng số BNN ngẫu nhiên.
+
+Trọng tâm ở đây là $\mathcal{F} = L^2(\mathcal{X}, \rho)$, trong đó $\rho$ là một độ đo xác suất tham chiếu được chọn (thường là luật phân phối của đầu vào).
+
+**Tiên nghiệm (độ đo Gauss).** Cho $\mathfrak{p} = \mathcal{N}(m_{\mathfrak{p}}, C_{\mathfrak{p}})$, với
+
+$$
+(C_{\mathfrak{p}} \phi)(x) = \int_{\mathcal{X}} k(x, x') \phi(x')\, d\rho(x'), \qquad \phi \in \mathcal{F},
+$$
+
+trong đó $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ là một hàm nhân (kernel) đối xứng xác định dương sao cho $C_{\mathfrak{p}}$ thuộc lớp vết.
+
+**Luật phân phối biến phân (độ đo Gauss).** Cho $\mathfrak{q} = \mathcal{N}(m_{\mathfrak{q}}, C_{\mathfrak{q}})$, với
+
+$$
+(C_{\mathfrak{q}} \phi)(x) = \int_{\mathcal{X}} r(x, x') \phi(x')\, d\rho(x'), \qquad \phi \in \mathcal{F},
+$$
+
+trong đó $r : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ là một hàm nhân đối xứng xác định dương được tham số hóa bởi các tham số biến phân bổ sung.
+
+Trung bình nơ-ron, các tham số hiệp phương sai, các vị trí cảm sinh và mọi tham số của hàm hợp lý được huấn luyện bằng cách cực đại hóa log-hàm hợp lý kỳ vọng trừ đi một xấp xỉ thực nghiệm của bình phương khoảng cách Wasserstein trong (17.8). Với hồi quy Gauss, $y_i \mid F \sim \mathcal{N}(F(x_i), \sigma^2)$, log-hàm hợp lý kỳ vọng có dạng giải tích; với các hàm hợp lý phi Gauss, nó có thể được xấp xỉ bằng cầu phương (quadrature) hoặc Monte Carlo. Luật phân phối Gauss đã khớp cung cấp các trung bình và hiệp phương sai dự đoán, còn hàm hợp lý quan sát cung cấp phần nhiễu dự đoán bổ sung nếu có.
+
+Để ước lượng khoảng cách Wasserstein, lưu ý rằng
+
+$$
+\begin{aligned}
+\|m_{\mathfrak{p}} - m_{\mathfrak{q}}\|_{\mathcal{F}}^2 &= \int_{\mathcal{X}} (m_{\mathfrak{p}}(x) - m_{\mathfrak{q}}(x))^2\, d\rho(x), \\
+\operatorname{tr}(C_{\mathfrak{p}}) &= \int_{\mathcal{X}} k(x, x)\, d\rho(x), \qquad \operatorname{tr}(C_{\mathfrak{q}}) = \int_{\mathcal{X}} r(x, x)\, d\rho(x),
+\end{aligned}
+$$
+
+dưới các điều kiện vết thông thường đối với hàm nhân (trace-kernel conditions). Thay $\rho$ bằng độ đo thiết kế thực nghiệm (empirical design measure) $\widehat{\rho}_n = n^{-1} \sum_{i=1}^n \delta_{x_i}$ biến các số hạng này thành các trung bình mẫu. Các trung bình này là ước lượng Monte Carlo không chệch với các hàm dưới dấu tích phân cố định khi $x_1, \dots, x_n$ độc lập cùng phân phối (i.i.d.) theo $\rho$; với một thiết kế cố định, chúng lại định nghĩa một phép rời rạc hóa tại các đầu vào huấn luyện.
+
+Số hạng chéo còn lại được ước lượng từ một mẫu con phổ (spectral subsample) $\mathbf{x}_S = (x_{s_j})_{j=1}^{n_S}$ gồm $n_S \ll n$ đầu vào huấn luyện. Viết
+
+$$
+r(\mathbf{x}_S, \mathbf{x}_{\mathrm{tr}}) = \big(r(x_{s_j}, x_i)\big)_{j,i}, \qquad k(\mathbf{x}_{\mathrm{tr}}, \mathbf{x}_S) = \big(k(x_i, x_{s_j})\big)_{i,j}.
+$$
+
+Xấp xỉ GWI-net là
+
+$$
+\begin{aligned}
+\widehat{W}_2^2 = {} & \frac{1}{n} \sum_{i=1}^n \big(m_{\mathfrak{p}}(x_i) - m_{\mathfrak{q}}(x_i)\big)^2 + \frac{1}{n} \sum_{i=1}^n k(x_i, x_i) \\
+& + \frac{1}{n} \sum_{i=1}^n r(x_i, x_i) - \frac{2}{\sqrt{n n_S}} \sum_{j=1}^{n_S} \sqrt{\lambda_j\big(r(\mathbf{x}_S, \mathbf{x}_{\mathrm{tr}}) k(\mathbf{x}_{\mathrm{tr}}, \mathbf{x}_S)\big)}.
+\end{aligned} \tag{17.9}
+$$
+
+Phổ ma trận này là một xấp xỉ Nyström thực nghiệm cho phép hợp thành của các toán tử hiệp phương sai. Tăng $n_S$ cải thiện độ phân giải phổ với chi phí ma trận lớn hơn; đã có một nghiên cứu thực nghiệm trong điều kiện phổ suy giảm nhanh, nhưng chưa có kết quả nào chứng minh tính không chệch hay tính vững (consistency). Với độ đo thiết kế thực nghiệm, hành vi ở xa các đầu vào huấn luyện được xác định gián tiếp bởi các hàm nhân và trung bình nơ-ron; thay vào đó, có thể dùng thêm các điểm được rút từ một độ đo tham chiếu rộng hơn trong phép rời rạc hóa.
+
+Có nhiều cách tham số hóa $r$. Theo GWI-net, cho $\mathbf{Z} = (z_1, \dots, z_M) \in \mathcal{X}^M$ là các vị trí cảm sinh (inducing locations), và định nghĩa
+
+$$
+\mathbf{k}_Z(x) := [k(z_1, x), \dots, k(z_M, x)]^\top, \qquad \mathbf{K}_{ZZ} := \big(k(z_i, z_j)\big)_{i,j=1}^M.
+$$
+
+Với một thừa số tam giác dưới tự do $L \in \mathbb{R}^{M \times M}$ và $\mathbf{K}_{ZZ}$ khả nghịch, đặt
+
+$$
+r(x, x') = k(x, x') - \mathbf{k}_Z(x)^\top \mathbf{K}_{ZZ}^{-1} \mathbf{k}_Z(x') + \mathbf{k}_Z(x)^\top L L^\top \mathbf{k}_Z(x'). \tag{17.10}
+$$
+
+Đây là cách xây dựng hiệp phương sai của GP biến phân thưa; các biến thể ngẫu nhiên theo lô nhỏ đã được phát triển, và Chương 38 trình bày chi tiết hơn về các phương pháp điểm cảm sinh (inducing-point methods).
+
+Trong các thí nghiệm được báo cáo, GWI-net được đánh giá trên các ví dụ tổng hợp, hồi quy UCI, phân loại ảnh và phát hiện dữ liệu ngoài phân phối. Bài báo báo cáo thứ hạng trung bình tốt nhất trong phép so sánh trên UCI, kết quả phân loại tốt, và hiệu năng phát hiện dữ liệu ngoài phân phối không đồng đều giữa các bộ dữ liệu. Phương pháp vẫn bị giới hạn bởi họ biến phân Gauss, bởi xấp xỉ dựa trên sự suy giảm phổ, và bởi độ nhạy số trong cách tham số hóa điểm cảm sinh.
+
+## 7. Thảo luận
+
+Suy luận biến phân trong không gian hàm đặt lại học sâu Bayes ở cấp độ nơi thiên hướng quy nạp thực sự tồn tại: các phân phối trên hàm. Góc nhìn này cho một ELBO theo lý thuyết độ đo, làm rõ vì sao các KL trong không gian trọng số có thể gây hiểu lầm trong không gian vô hạn chiều, và gợi ý những đại lượng thay thế dùng được (từ các hàm mục tiêu dạng supremum trên các phân phối biên và các hàm mục tiêu dựa trên lấy mẫu đến các độ phân kỳ hàm trên lưới). Nó cũng giải thích, thông qua bất đẳng thức xử lý dữ liệu, khi nào ảnh đẩy tới của tham số là quá hạn chế, và cách các xấp xỉ Gauss tuyến tính hóa trên phân phối biên hữu hạn chiều có thể khôi phục những số hạng chính quy hóa khả thi. Ở mức rộng nhất, các hàm mục tiêu tổng quát hóa có thể thay KL bằng những độ sai khác khác, như KL trên lưới hay Wasserstein-2, vẫn hữu hạn và tính được trong một phạm vi bối cảnh rộng hơn, cho phép các luật phân phối biến phân lai ghép phân phối hậu nghiệm nơ-ron với tiên nghiệm diễn giải được dạng GP. Những cách tiếp cận này mở đường hướng tới một bộ công cụ giữ được tính kỷ luật Bayes trong khi đem lại khả năng ngoại suy, hiệu chuẩn và khả năng mở rộng mà các ứng dụng hiện đại đòi hỏi. Tuy nhiên, trong thực tế, các phép rời rạc hóa hữu hạn, các hạn chế của họ biến phân Gauss, các xấp xỉ thực nghiệm và độ nhạy số giới hạn các phương pháp này, và các tài liệu hiện nay chưa xác lập được những bảo đảm tổng quát về khả năng ngoại suy, hiệu chuẩn hay khả năng mở rộng. Nhìn về phía trước, các cơ hội then chốt là những ước lượng chặt hơn cho các độ sai khác trong không gian hàm, những cách tham số hóa họ biến phân phong phú hơn, và việc tích hợp có nguyên tắc các tiên nghiệm theo lĩnh vực về những đối tượng cần quan tâm (như tính bất biến, tính đơn điệu hoặc tính lồi, và các ràng buộc bảo toàn) được mã hóa trực tiếp trong không gian hàm để hướng suy luận tới những lời giải hợp lý về mặt khoa học.

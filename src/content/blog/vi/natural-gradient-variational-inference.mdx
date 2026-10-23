@@ -1,0 +1,388 @@
+---
+title: "Suy luận biến phân dựa trên gradient tự nhiên"
+description: "Suy luận biến phân bằng gradient tự nhiên: quy tắc học Bayes, Bayes tổng quát và các bộ tối ưu VON, VOGN, IVON để huấn luyện các mạng nơ-ron lớn."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - natural gradient
+  - optimization
+series: bayesian-deep-learning
+seriesOrder: 19
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl15IvonFlatMinimum from '../../../components/diagrams/Bdl15IvonFlatMinimum.astro';
+import Bdl15IvonImagenet from '../../../components/diagrams/Bdl15IvonImagenet.astro';
+
+Suy luận biến phân (variational inference) có thể làm cho việc tối ưu các mạng nơ-ron Bayes lớn trở nên khả thi về tính toán bằng cách giới hạn việc tối ưu trong một lớp phân phối cụ thể. Chương này bàn về các phương pháp dựa trên gradient tự nhiên (natural gradient), trong đó gradient được co giãn lại theo thông tin bậc hai để điều chỉnh cho phù hợp với hình học khi tối ưu theo các phân phối. Dùng các khung lý thuyết Bayes tổng quát (Generalized Bayes) và quy tắc học Bayes (Bayesian learning rule), chương này chỉ ra rằng các bộ tối ưu mạng nơ-ron tiêu chuẩn có thể được dẫn xuất như những trường hợp riêng của hạ gradient tự nhiên ứng với các họ phân phối cụ thể. Cuối cùng, chương dẫn xuất các thuật toán tối ưu thực tế dựa trên gradient tự nhiên, rất giống với các bộ tối ưu mạng nơ-ron tiêu chuẩn này và có thể được dùng để huấn luyện hiệu quả các mạng nơ-ron lớn với hàm mất mát bất kỳ.
+
+## 1. Hạ gradient tự nhiên
+
+Như đã giới thiệu ở [Chương 12](/vi/blog/introduction-to-variational-inference), suy luận biến phân xấp xỉ một phân phối hậu nghiệm $p(\boldsymbol{\theta} \mid \mathcal{D})$ trên các tham số mạng nơ-ron $\boldsymbol{\theta} \in \mathbb{R}^P$ khi biết dữ liệu $\mathcal{D} = \{(x_t, y_t)\}_{t=1..N}$ bằng cách cực tiểu hóa một hàm mất mát log hàm hợp lý âm có chính quy hóa, giới hạn trong một lớp (con) phân phối $\mathcal{Q}$:
+
+$$
+q_*(\boldsymbol{\theta}) = \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[-\log p(\mathcal{D} \mid \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0). \tag{15.1}
+$$
+
+Ở đây, $p_0$ là niềm tin tiên nghiệm trên các trọng số mạng nơ-ron, được bàn chi tiết ở Chương 28, và $\mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0)$ là độ phân kỳ Kullback–Leibler (KL). Với một mô hình được đặc tả đúng (well-specified), và nếu $\mathcal{Q}$ là không gian của mọi phân phối, thì lời giải $q_*(\boldsymbol{\theta})$ là phân phối hậu nghiệm Bayes:
+
+$$
+q_*(\boldsymbol{\theta}) \propto p_0(\boldsymbol{\theta}) \prod_{i=1}^{N} p(\mathcal{D}_i \mid \boldsymbol{\theta}), \tag{15.2}
+$$
+
+ở đây được viết dưới dạng phân tích thành tích theo từng mẫu dữ liệu. Thoạt đầu điều này có vẻ đáng ngạc nhiên, vì hàm mục tiêu rất giống các hàm mục tiêu học sâu thông thường; số hạng thứ nhất tương ứng với độ khớp dữ liệu, còn độ phân kỳ KL tương tự một số hạng chính quy hóa (regularizer). Về sau, mối liên hệ này được đào sâu hơn, và chương sẽ chỉ ra rằng nhiều bộ tối ưu học sâu thông thường hiện có thực ra giải một phiên bản của Phương trình 15.1 với một lựa chọn cụ thể của $\mathcal{Q}$. Các bộ tối ưu mới cho Phương trình 15.1 cũng được dẫn xuất, và các phương pháp này được tổng quát hóa cho các hàm mất mát bất kỳ, vượt ra ngoài các hàm mục tiêu dựa trên hàm hợp lý. Khi đó, thuật ngữ học biến phân (variational learning) được dùng thay cho thuật ngữ suy luận biến phân. Các bộ tối ưu mới này dùng hạ gradient tự nhiên nhưng vẫn có dạng tương tự các thuật toán tối ưu thông thường.
+
+Khác biệt giữa hạ gradient tự nhiên và hạ gradient tiêu chuẩn nằm ở cách chúng đo độ gần nhau. Để minh họa điều này, hàm mục tiêu trong Phương trình 15.1 được viết lại theo các tham số biến phân (variational parameters) $\boldsymbol{\lambda}$. Ký hiệu chúng là $\boldsymbol{\lambda}$, định nghĩa hàm mất mát sau:
+
+$$
+\mathcal{L}(\boldsymbol{\lambda}) := \mathbb{E}_q\left[-\log p(\mathcal{D} \mid \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0). \tag{15.3}
+$$
+
+Theo trực giác, có thể muốn tối ưu hàm mất mát này bằng hạ gradient ngẫu nhiên (stochastic gradient descent, SGD) trên các tham số $\boldsymbol{\lambda}$, vì các chiến lược như vậy đã được kiểm chứng và hoạt động tốt cho học sâu. Chiến lược này đã được dùng trong các thuật toán suy luận biến phân trước đây cho mạng nơ-ron, chẳng hạn Bayes-by-Backprop, vốn cho kết quả hứa hẹn trong các thí nghiệm với mạng nơ-ron nhỏ hơn. Khi đó, SGD tương ứng với việc dùng quy tắc sau,
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t \nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t), \tag{15.4}
+$$
+
+trong đó gradient $\nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t)$ có thể được tính trên các lô nhỏ (mini-batch) và kích thước bước (step size) là $\rho_t > 0$.
+
+Theo Khan và Rue, có thể chỉ ra rằng Phương trình 15.4 giải hàm mục tiêu sau:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \operatorname*{arg\,min}_{\boldsymbol{\lambda}} \langle \nabla_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{\lambda}_t), \boldsymbol{\lambda} \rangle + \frac{1}{2\rho_t} \|\boldsymbol{\lambda} - \boldsymbol{\lambda}_t\|_2^2, \tag{15.5}
+$$
+
+điều này cho thấy một số hạng phạt Euclid trên các tham số $\boldsymbol{\lambda}_t$. Tuy nhiên, như sẽ chỉ ra tiếp theo, đây có thể là một lựa chọn tồi để so sánh các phân phối, chẳng hạn để hiểu một $q(\boldsymbol{\theta})$ gần một bước lặp trước $q_t(\boldsymbol{\theta})$ hay gần phân phối hậu nghiệm "thật" $p(\boldsymbol{\theta} \mid \mathcal{D})$ đến mức nào.
+
+Để minh họa điều này, xét một ví dụ kinh điển trong tài liệu, trong đó hai cặp phân phối Gauss được so sánh bằng bình phương khoảng cách Euclid. Một cặp, $\mathcal{N}(\mu_1 = 0, \sigma_1 = 0.01)$ và $\mathcal{N}(\mu_2 = 0.1, \sigma_2 = 0.01)$, theo trực giác là khác nhau: $\mu_2$ cách $\mu_1$ nhiều lần $\sigma_1$ và $\sigma_2$. Tuy vậy, khoảng cách Euclid giữa các tham số của chúng $\|\boldsymbol{\lambda}_1 - \boldsymbol{\lambda}_2\|_2^2 = (\mu_1 - \mu_2)^2 + (\sigma_1 - \sigma_2)^2 = 0.01$ lại nhỏ. Cặp còn lại gồm $\mathcal{N}(\mu_1 = 10, \sigma_1 = 1000)$ và $\mathcal{N}(\mu_2 = 0, \sigma_2 = 1000)$. Cả hai đều có phương sai lớn và theo trực giác phải giống nhau hơn, nhưng khoảng cách Euclid là 100. Điều này là động lực để chọn một hàm mục tiêu đo độ gần nhau theo các phân phối. Ví dụ cũng cho thấy các phương pháp thu được có lẽ nên gắn với thông tin bậc hai, vì khác biệt giữa các phân phối phụ thuộc phần lớn vào phương sai của chúng. Thật vậy, Mục 3 chỉ ra rằng hạ gradient tự nhiên gắn liền với các phương pháp bậc hai.
+
+Thay vì khoảng cách Euclid, hạ gradient tự nhiên dùng độ phân kỳ Kullback–Leibler (KL) để so sánh các phân phối. Giả sử cho trước một phân phối hậu nghiệm xấp xỉ $q(\boldsymbol{\theta})$ và một tiên nghiệm $p_0(\boldsymbol{\theta})$. Khi đó, độ phân kỳ KL giữa chúng được định nghĩa là:
+
+$$
+\mathbb{D}_{\mathrm{KL}}(q(\boldsymbol{\theta}) \,\|\, p_0(\boldsymbol{\theta})) := \mathbb{E}_q\left[\log\left(\frac{q(\boldsymbol{\theta})}{p_0(\boldsymbol{\theta})}\right)\right] = \mathbb{E}_q[\log q(\boldsymbol{\theta})] - \mathbb{E}_q[\log p_0(\boldsymbol{\theta})], \tag{15.6}
+$$
+
+trong đó phần thứ nhất thực ra là số đối của entropy $\mathcal{H}(q) := -\mathbb{E}_q[\log q(\boldsymbol{\theta})]$ của $q$, còn phần thứ hai được gọi là entropy chéo (cross-entropy). Thay bình phương khoảng cách Euclid bằng KL, cuối cùng thu được:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \operatorname*{arg\,min}_{\boldsymbol{\lambda}} \langle \nabla_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{\lambda}_t), \boldsymbol{\lambda} \rangle + \frac{1}{\rho_t} \mathbb{D}_{\mathrm{KL}}(q_{\boldsymbol{\lambda}}(\boldsymbol{\theta}) \,\|\, q_t(\boldsymbol{\theta})), \tag{15.7}
+$$
+
+Bằng cách dùng khai triển bậc hai sau,
+
+$$
+\mathbb{D}_{\mathrm{KL}}(q_{t+1}(\boldsymbol{\theta}) \,\|\, q_t(\boldsymbol{\theta})) \approx \frac{1}{2} (\boldsymbol{\lambda}_{t+1} - \boldsymbol{\lambda}_t)^T F(\boldsymbol{\lambda}_t) (\boldsymbol{\lambda}_{t+1} - \boldsymbol{\lambda}_t), \tag{15.8}
+$$
+
+có thể dẫn xuất một quy tắc cập nhật mới dùng gradient tự nhiên:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t). \tag{15.9}
+$$
+
+Quy tắc cập nhật này chính là quy tắc học Bayes khi tối ưu hàm hợp lý, với điều kiện $\boldsymbol{\lambda}$ là các tham số tự nhiên của các phân phối thuộc họ mũ (exponential family), như Mục 2 sẽ chỉ ra. Gradient tự nhiên là gradient được tiền điều kiện hóa bằng ma trận thông tin Fisher (Fisher information matrix):
+
+$$
+\widetilde{\nabla}_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{\lambda}_t) := F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}_t} \mathcal{L}(\boldsymbol{\lambda}_t). \tag{15.10}
+$$
+
+Ma trận Fisher tính đến sự tương tác giữa các chiều khác nhau của $\boldsymbol{\lambda}$, điều này trở nên rõ ràng khi viết nó dưới dạng hiệp phương sai của hàm điểm (score function) của $q$:
+
+$$
+F(\boldsymbol{\lambda}) = \operatorname{Cov}_{q(\boldsymbol{\theta})}[\nabla_{\boldsymbol{\lambda}} \log q(\boldsymbol{\theta})]. \tag{15.11}
+$$
+
+Hệ quả là suy luận biến phân dựa trên gradient tự nhiên có thể hội tụ nhanh hơn các phương pháp dựa trên hạ gradient thông thường khi ma trận Fisher có điều kiện tốt (well-conditioned). Cuối cùng, hạ gradient tự nhiên trong Phương trình 15.9 bất biến đối với cách tham số hóa, điều không phải lúc nào cũng đúng khi dùng khoảng cách Euclid.
+
+Dù vậy, việc nghịch đảo ma trận Fisher và thực tế là kích thước của nó tăng theo bình phương số chiều của mạng nơ-ron có vẻ là vấn đề. Mục tiếp theo, Mục 2, chỉ ra rằng có thể vượt qua những vấn đề này bằng cách dùng các phân phối thuộc họ mũ. Mục đó trước hết giới thiệu họ mũ, rồi dùng các phân phối thuộc họ mũ để giới thiệu các bộ tối ưu bậc hai thực tế cho hạ gradient tự nhiên.
+
+### 1.1 Phân biệt với các phương pháp gradient tự nhiên cho ước lượng hợp lý cực đại
+
+Trước đó, cần lưu ý rằng gradient tự nhiên được trình bày ở đây khác với gradient tự nhiên cho ước lượng hợp lý cực đại (maximum likelihood estimation) của $p(\mathcal{D} \mid \boldsymbol{\theta})$. Trong trường hợp đó, ý tưởng là dùng gradient tự nhiên để so sánh các phân phối đầu ra của một mạng nơ-ron với một ước lượng điểm của các tham số $\boldsymbol{\theta} \in \mathbb{R}^P$, thay vì so sánh các phân phối trên các cấu hình tham số. Khi đó, bước cập nhật chỉ được viết theo $\boldsymbol{\theta}$:
+
+$$
+\boldsymbol{\theta}_{t+1} \leftarrow \boldsymbol{\theta}_t - \rho_t F(\boldsymbol{\theta}_t)^{-1} \nabla_{\boldsymbol{\theta}_t}[-\log p(y_t \mid x_t, \boldsymbol{\theta}_t)]. \tag{15.12}
+$$
+
+Cách này thường được dùng cho tối ưu bậc hai. Khi đó, ma trận Fisher được định nghĩa dựa trên dữ liệu và gradient tự nhiên tương ứng là $F(\boldsymbol{\theta}_t)^{-1} \nabla_{\boldsymbol{\theta}_t}[-\log p(y_t \mid x_t, \boldsymbol{\theta}_t)]$. Để phân biệt, một số tác giả gọi cách này là *gradient tự nhiên cho ước lượng điểm* (natural gradient for point estimation) và gradient tự nhiên được bàn ở đây là *gradient tự nhiên cho suy luận biến phân* (natural gradient for variational inference).
+
+## 2. Bayes tổng quát và quy tắc học Bayes
+
+Mục trước đã trình bày hàm mục tiêu biến phân cho suy luận trong Phương trình 15.1, đã bàn rằng nó tách thành số hạng độ khớp dữ liệu và số hạng chính quy hóa, và đã chỉ ra cách tối ưu nó bằng các phương pháp dựa trên gradient tự nhiên. Tuy nhiên, số hạng độ khớp dữ liệu trong Phương trình 15.1 được định nghĩa với giả định rằng hàm hợp lý $p(\mathcal{D} \mid \boldsymbol{\theta})$ được đặc tả đúng, theo nghĩa với một $\boldsymbol{\theta}^* \in \Theta$ nào đó, $p(\mathcal{D} \mid \boldsymbol{\theta}^*)$ bằng phân phối sinh dữ liệu thật. Ngoài ra, còn giả định rằng đây là điều người thực hành muốn tối ưu. Tuy nhiên, trong thực tế điều này thường không đúng. Chẳng hạn, trong dịch máy, có thể muốn tối ưu một điểm đánh giá chất lượng do một người đánh giá gán cho bản dịch, hoặc trong giai đoạn hậu huấn luyện LLM, có thể muốn tối ưu một phần thưởng do một LLM khác gán cho một kết quả sinh của LLM. Những ví dụ này là động lực để mở rộng suy luận biến phân thành cái thường được gọi là Bayes tổng quát, hay còn gọi là học biến phân, trong đó có thể dùng các hàm mất mát bất kỳ. Phân phối hậu nghiệm khi đó được gọi là hậu nghiệm tổng quát (generalized posterior), vốn cũng có thể liên hệ với các hậu nghiệm Gibbs (Gibbs posterior) có mối liên hệ với nhiệt động lực học.
+
+Trước hết, viết lại phân phối hậu nghiệm $q_*(\boldsymbol{\theta})$ từ Phương trình 15.2 bằng hàm mất mát $\ell(\mathcal{D}_i, \boldsymbol{\theta}) = -\log p(\mathcal{D}_i \mid \boldsymbol{\theta})$ cho một hàm hợp lý dữ liệu $p(\mathcal{D}_i \mid \boldsymbol{\theta})$ như sau:
+
+$$
+q_*(\boldsymbol{\theta}) \propto p_0(\boldsymbol{\theta}) \prod_{i=1}^{N} \exp\{-\ell(\mathcal{D}_i, \boldsymbol{\theta})\}. \tag{15.13}
+$$
+
+Bằng cách dùng một $\ell(\mathcal{D}_i, \boldsymbol{\theta})$ tổng quát, thu được một hậu nghiệm tổng quát. Phương trình 15.13 là lời giải của hàm mục tiêu Bayes tổng quát sau nếu $\mathcal{Q}$ được chọn là không gian của mọi phân phối trên $\Theta$:
+
+$$
+q_*(\boldsymbol{\theta}) = \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[\ell(\mathcal{D}, \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0). \tag{15.14}
+$$
+
+Một lần nữa, $\ell : \mathcal{X} \times \mathcal{Y} \times \Theta \to \mathbb{R}$ có thể là bất kỳ hàm mất mát phù hợp nào, và với $\ell(\mathcal{D}, \boldsymbol{\theta}) \propto -\log p(\mathcal{D} \mid \boldsymbol{\theta})$ thì thu lại phân phối hậu nghiệm Bayes. Trong học biến phân, $\mathcal{Q}$ bị giới hạn trong một lớp phân phối cụ thể, nhưng lưu ý rằng phân phối tối ưu $q_* \in \mathcal{Q}$ có thể không trùng với lời giải thật, vì lời giải thật này có thể không nằm trong $\mathcal{Q}$. Điều này tương tự cái mà Hüllermeier và Waegeman gọi là độ bất định mô hình (model uncertainty) khi chọn một không gian giả thuyết cụ thể trong học máy nói chung.
+
+Hàm mục tiêu trong Phương trình 15.14 làm cho sự tương đồng giữa việc tối ưu tiêu chuẩn mạng nơ-ron và các phương pháp biến phân tổng quát trở nên cụ thể hơn: cả hai đều tối ưu một số hạng mất mát và một số hạng chính quy hóa, nhưng trong các phương pháp Bayes, hàm mất mát dùng một kỳ vọng trên các giá trị tham số khả dĩ để tính đến độ bất định và dùng một độ phân kỳ KL để so sánh các phân phối, còn tối ưu tiêu chuẩn dùng một hàm mất mát dựa trên ước lượng điểm và các số hạng phạt Euclid. Theo trực giác, học biến phân có vẻ tổng quát hơn, và thật vậy, một quy tắc học Bayes cho phép thu lại các bộ tối ưu tiêu chuẩn sẽ được dẫn xuất tiếp theo.
+
+### 2.1 Các phân phối thuộc họ mũ
+
+Mục này giới thiệu các phân phối thuộc họ mũ, bao gồm phân phối Gauss, Poisson và các phân phối khác. Mục này chỉ ra rằng các phân phối thuộc họ mũ thuận tiện cho việc tối ưu hàm mục tiêu Bayes tổng quát trong Phương trình 15.14.
+
+**Định nghĩa 15.1.** (Họ mũ tối thiểu) *Cho các tham số tự nhiên* $\boldsymbol{\lambda}$, *các thống kê đủ (sufficient statistics)* $\boldsymbol{T}(\boldsymbol{\theta})$, *độ đo cơ sở* $h(\boldsymbol{\theta})$ *và hàm log phân hoạch (log-partition function)* $Z(\boldsymbol{\lambda})$, *một phân phối thuộc họ mũ tối thiểu (minimal exponential family) được định nghĩa là:*
+
+$$
+q_{\boldsymbol{\lambda}}(\boldsymbol{\theta}) = h(\boldsymbol{\theta}) \exp[\boldsymbol{\lambda}^T \boldsymbol{T}(\boldsymbol{\theta}) - Z(\boldsymbol{\lambda})]. \tag{15.15}
+$$
+
+*Ánh xạ song ánh* $\boldsymbol{\mu}(\boldsymbol{\lambda}) = \mathbb{E}_{q_{\boldsymbol{\lambda}}}[\boldsymbol{T}(\boldsymbol{\theta})]$ *được gọi là tham số kỳ vọng (expectation parameter).*
+
+Chẳng hạn, với các phân phối Gauss đường chéo có dạng $\mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{s})$, các tham số tự nhiên là $\boldsymbol{\lambda} = (\boldsymbol{s}\boldsymbol{m}, -\frac{1}{2}\boldsymbol{s})^\top$, trong đó $\boldsymbol{s} := (\boldsymbol{\sigma}^2)^{-1}$ được gọi là độ chính xác (precision).
+
+### 2.2 Quy tắc học Bayes
+
+Mục này mô tả quy tắc học Bayes (Bayesian learning rule, BLR), một thuật toán hạ gradient tự nhiên tối ưu Phương trình 15.14 bằng các phân phối thuộc họ mũ. Trước hết, viết lại Phương trình 15.14 bằng cách nhận xét rằng, khi chọn một tiên nghiệm $p_0 \propto \exp[-r(\boldsymbol{\theta})]$ tỉ lệ với một số hạng chính quy hóa $r(\boldsymbol{\theta})$, số hạng KL có thể được biểu diễn qua entropy $\mathcal{H}(q)$ như sau, sai khác một hằng số cộng không phụ thuộc $q$ đã được bỏ đi:
+
+$$
+\mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0) = \mathbb{E}_q[r(\boldsymbol{\theta})] - \mathcal{H}(q) + \text{const}. \tag{15.16}
+$$
+
+Điều này dẫn đến hàm mục tiêu sau, trong đó $\bar{\ell}$ được định nghĩa lại là $\bar{\ell}(\mathcal{D}, \boldsymbol{\theta}) := \sum_{i=1}^{N} \ell(\mathcal{D}_i, \boldsymbol{\theta}) + r(\boldsymbol{\theta})$:
+
+$$
+\begin{aligned}
+q_*(\boldsymbol{\theta}) &= \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[\ell(\mathcal{D}, \boldsymbol{\theta})\right] + \mathbb{D}_{\mathrm{KL}}(q \,\|\, p_0) && (15.17) \\
+&= \operatorname*{arg\,min}_{q(\boldsymbol{\theta}) \in \mathcal{Q}} \mathbb{E}_q\left[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta})\right] - \mathcal{H}(q). && (15.18)
+\end{aligned}
+$$
+
+Hàm mục tiêu có thể được diễn giải lại là sự cân bằng giữa hàm mất mát và entropy của $q$.
+
+Dùng cách phát biểu này, BLR cập nhật các tham số tự nhiên $\boldsymbol{\lambda}$ của một phân phối thuộc họ mũ như sau, trong đó gradient tự nhiên từ Phương trình 15.9 giờ được định nghĩa theo một hàm mất mát bất kỳ với một số hạng chính quy hóa học sâu tiêu chuẩn:
+
+$$
+\begin{aligned}
+&\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}} \left[\mathbb{E}_{q_t}[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta})] - \mathcal{H}(q)\right] && (15.19) \\
+\Leftrightarrow\; &\boldsymbol{\lambda}_{t+1} \leftarrow \boldsymbol{\lambda}_t - \rho_t \nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \left[\mathbb{E}_{q_t}[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta})] - \mathcal{H}(q)\right]. && (15.20)
+\end{aligned}
+$$
+
+Hai bước cập nhật này tương đương vì với các phân phối thuộc họ mũ, đẳng thức sau đúng:
+
+$$
+F(\boldsymbol{\lambda}_t)^{-1} \nabla_{\boldsymbol{\lambda}} \mathbb{E}_{q_t}[\cdot] = \nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \mathbb{E}_{q_t}[\cdot]. \tag{15.21}
+$$
+
+Điều này đơn giản hóa việc tính toán vì không còn cần nghịch đảo ma trận Fisher nhờ ánh xạ giữa tham số tự nhiên và tham số kỳ vọng. Bước quan trọng tiếp theo là biểu diễn số hạng $\nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \mathbb{E}_{q_t}[\cdot]$ theo một cách thuận tiện cho các thuật toán học sâu.
+
+### 2.3 Hạ gradient ngẫu nhiên (SGD) từ quy tắc học Bayes (BLR)
+
+Với phân phối Gauss $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{\Sigma})$, bước cập nhật BLR được đơn giản hóa thành:
+
+$$
+\boldsymbol{\lambda}_{t+1} \leftarrow (1 - \rho_t) \boldsymbol{\lambda}_t - \rho_t \nabla_{\boldsymbol{\mu}(\boldsymbol{\lambda})} \mathbb{E}_q[\bar{\ell}(\mathcal{D}, \boldsymbol{\theta}) + \log h(\boldsymbol{\theta})]. \tag{15.22}
+$$
+
+Để minh họa cách dùng BLR để thu lại và thiết kế các thuật toán tối ưu, phần sau phác thảo ngắn gọn cách xem SGD như một trường hợp riêng của Phương trình 15.20, theo các dẫn xuất của Khan và Rue. Dẫn xuất bắt đầu bằng việc thay một phân phối hậu nghiệm Gauss đẳng hướng (isotropic) $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, I)$ vào Phương trình 15.22. Khi đó, $\boldsymbol{\mu}(\boldsymbol{\theta}) = \boldsymbol{m} = \boldsymbol{\lambda}$ và $\mathbb{E}_q[\log h] = -\boldsymbol{m}^\top \boldsymbol{m}/2 + \text{const}$. Hệ quả là Phương trình 15.20 rút gọn thành:
+
+$$
+\boldsymbol{m}_{t+1} \leftarrow \boldsymbol{m}_t - \rho_t \nabla_{\boldsymbol{m}} \mathbb{E}_{q_t}[\bar{\ell}(\mathcal{D}_t, \boldsymbol{m}_t)] \,|_{\boldsymbol{m} = \boldsymbol{m}_t}, \tag{15.23}
+$$
+
+trong đó $\boldsymbol{m}_t$ là các tham số mô hình tại bước $t$ và phương sai được giữ cố định bằng ma trận đơn vị. Đây là hạ gradient, nhưng gradient được làm trơn thông qua kỳ vọng. Để thu được hạ gradient thông thường, phương pháp delta (delta method) được sử dụng, như Khan và Rue trình bày chi tiết, trong đó một kỳ vọng được xấp xỉ bằng kỳ vọng của khai triển Taylor bậc nhất của nó, tức là
+
+$$
+\mathbb{E}_q[f(\boldsymbol{\theta})] \approx \mathbb{E}_q[f(\boldsymbol{m}) + (\boldsymbol{\theta} - \boldsymbol{m})^T \nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})|_{\boldsymbol{\theta} = \boldsymbol{m}}] = f(\boldsymbol{m}). \tag{15.24}
+$$
+
+Phương pháp delta có thể được dùng để chuyển từ các phương pháp Bayes sang ước lượng điểm. Thay điều này vào Phương trình 15.23 lập tức cho SGD. Tiếp theo, chương chuyển sang một phần thực tiễn hơn và dùng các dẫn xuất tương tự để dẫn xuất các bộ tối ưu suy luận biến phân gradient tự nhiên (NGVI) có thể hoạt động tốt ngay cả với các mô hình học sâu lớn.
+
+## 3. Các phương pháp Newton trực tuyến biến phân
+
+Mục này bàn về các bộ tối ưu học sâu thực tế dựa trên gradient tự nhiên có thể được dẫn xuất từ quy tắc học Bayes. Các bộ tối ưu này liên hệ với phương pháp Newton vì chúng dùng thông tin bậc hai. Phương pháp thứ nhất thường được gọi là Newton trực tuyến biến phân (Variational Online Newton, VON) và dùng một xấp xỉ Gauss $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{\Sigma})$. Thông thường, người ta đưa ra một giả định trường trung bình (mean-field) ([Chương 13](/vi/blog/gaussian-mean-field-variational-inference)) với các phân phối Gauss đường chéo $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \operatorname{diag}(\boldsymbol{\sigma}^2))$, nhưng cách trình bày ở đây tổng quát hơn, ít nhất là ở phần đầu.
+
+Cách trình bày theo các dẫn xuất của Khan và cộng sự và của Khan và Rue, và nêu những điểm chính. Một hàm mất mát phân tích thành tổng $\ell(\mathcal{D}, \boldsymbol{\theta}) = \frac{1}{N} \sum_{i=1}^{N} \ell(\mathcal{D}_i, \boldsymbol{\theta})$ dẫn đến:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \mathbb{E}_{q(\boldsymbol{\theta})}[N \cdot \ell(\mathcal{D}_i, \boldsymbol{\theta})] + \mathbb{D}_{\mathrm{KL}}(q(\boldsymbol{\theta}) \,\|\, p_0(\boldsymbol{\theta})). \tag{15.25}
+$$
+
+Kích thước của $\mathcal{D}$ cân bằng giữa độ khớp dữ liệu và chính quy hóa, điều này hợp với trực giác vì quan sát nhiều dữ liệu hơn có nghĩa là có thể dựa nhiều hơn vào độ khớp dữ liệu, và điều này về sau được khai thác để tinh chỉnh.
+
+Dùng quy tắc dây chuyền để biểu diễn $\nabla_{\boldsymbol{\mu}}$ theo $\boldsymbol{m}$ và $\boldsymbol{\Sigma}$, Phương trình 15.22 có thể được viết lại:
+
+$$
+\begin{aligned}
+\boldsymbol{\Sigma}_{t+1}^{-1} &= \boldsymbol{\Sigma}_t^{-1} - 2\rho_t [\nabla_{\boldsymbol{\Sigma}} \mathcal{L}(\boldsymbol{\theta})] && (15.26) \\
+\boldsymbol{m}_{t+1} &= \boldsymbol{m}_t + \rho_t \boldsymbol{\Sigma}_{t+1} [\nabla_{\boldsymbol{m}} \mathcal{L}(\boldsymbol{\theta})]. && (15.27)
+\end{aligned}
+$$
+
+Dù điều này đã giống một thuật toán thực tế, vẫn phải xử lý gradient của kỳ vọng ẩn bên trong $\mathcal{L}(\boldsymbol{\theta})$. Tiếp theo, định lý Bonnet và định lý Price được giới thiệu, cho phép đưa gradient vào bên trong các kỳ vọng.
+
+**Định lý 15.1.** (Định lý Bonnet) *Cho* $f : \Theta \to \mathbb{R}$ *khả vi một lần,* $q = \mathcal{N}(\boldsymbol{m}, \boldsymbol{\Sigma})$, *và* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Khi đó:*
+
+$$
+\nabla_{\boldsymbol{m}} \mathbb{E}_q[f(\boldsymbol{\theta})] = \mathbb{E}_q[\nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})]. \tag{15.28}
+$$
+
+**Định lý 15.2.** (Định lý Price) *Cho* $f : \Theta \to \mathbb{R}$ *khả vi hai lần,* $q = \mathcal{N}(\boldsymbol{m}, \boldsymbol{\Sigma})$, *và* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Khi đó:*
+
+$$
+\nabla_{\boldsymbol{\Sigma}} \mathbb{E}_q[f(\boldsymbol{\theta})] = \frac{1}{2} \mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 f(\boldsymbol{\theta})]. \tag{15.29}
+$$
+
+Định lý Price cho thấy phương sai liên hệ trực tiếp với ma trận Hesse (Hessian).
+
+Khi đó các bước cập nhật có thể được viết như sau, dùng $\delta > 0$:[^1]
+
+$$
+\begin{aligned}
+\boldsymbol{\Sigma}_{t+1}^{-1} &\leftarrow (1 - \rho_t) \boldsymbol{\Sigma}_t^{-1} + \rho_t \left[N \cdot \mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}_t, \boldsymbol{\theta})] + \delta I\right] && (15.30) \\
+\boldsymbol{m}_{t+1} &\leftarrow \boldsymbol{m}_t - \rho_t \boldsymbol{\Sigma}_{t+1} \left[N \cdot \mathbb{E}_q[\nabla_{\boldsymbol{\theta}} \ell(\mathcal{D}_t, \boldsymbol{\theta})] + \delta \boldsymbol{m}_t\right], && (15.31)
+\end{aligned}
+$$
+
+Các kỳ vọng $\mathbb{E}_q[\cdot]$ có thể được xấp xỉ bằng các phương pháp Monte Carlo với các mẫu $\boldsymbol{\theta}_t \sim \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_t, \boldsymbol{\Sigma}_t)$ ở mỗi bước lặp. Điều này tương tự việc huấn luyện mạng nơ-ron tiêu chuẩn, nhưng nhiễu được cộng vào kỳ vọng đang học $\boldsymbol{m}_t$, qua đó tạo ra sự khám phá (exploration) trong không gian tham số.
+
+Ngoài các kỳ vọng, cần tìm các xấp xỉ dễ tính của ma trận Hesse $H(\boldsymbol{\theta}) := \nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}_t, \boldsymbol{\theta}) \in \mathbb{R}^{P \times P}$. Dù một xấp xỉ trường trung bình dùng $\mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_t, \operatorname{diag}(\boldsymbol{\sigma}^2))$ giảm chi phí lưu trữ xuống bằng chi phí lưu trữ kỳ vọng, vẫn cần tính $\operatorname{diag}(H(\boldsymbol{\theta}))$ một cách hiệu quả. Để làm điều này, bổ đề Stein cho phân phối Gauss nhiều chiều được sử dụng như trình bày bởi Lin và cộng sự, rồi áp dụng để tính ma trận Hesse.
+
+**Bổ đề 15.1.** (Bổ đề Stein cho phân phối Gauss nhiều chiều) *Cho* $q(\boldsymbol{\theta}) = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}, \boldsymbol{\Sigma})$, $f : \Theta \to \mathbb{R}$, *liên tục, ACL cục bộ, và* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Khi đó, đẳng thức sau đúng:*
+
+$$
+\mathbb{E}_q[\boldsymbol{\Sigma}^{-1} (\boldsymbol{\theta} - \boldsymbol{m}) f(\boldsymbol{\theta})] = \mathbb{E}_q[\nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})]. \tag{15.32}
+$$
+
+Hệ quả là định lý Price có thể được viết lại như sau.
+
+**Định lý 15.3.** (Định lý Price, xét lại) *Cho* $f : \Theta \to \mathbb{R}$ *khả vi một lần,* $q = \mathcal{N}(\boldsymbol{m}, \boldsymbol{\Sigma})$, *và* $\mathbb{E}_q[\|f(\boldsymbol{\theta})\|] < \infty$. *Khi đó:*
+
+$$
+\nabla_{\boldsymbol{\Sigma}} \mathbb{E}_q[f(\boldsymbol{\theta})] = \frac{1}{2} \mathbb{E}_q[\boldsymbol{\Sigma}^{-1} (\boldsymbol{\theta} - \boldsymbol{m}) \nabla_{\boldsymbol{\theta}} f(\boldsymbol{\theta})]. \tag{15.33}
+$$
+
+Giờ đây $f$ chỉ cần khả vi một lần. Tương tự, định lý Bonnet cũng có thể được viết lại để thu được một bộ ước lượng gradient ngay cả cho các hàm không khả vi. Áp dụng định lý Price cho hàm mất mát $\ell(\mathcal{D}, \boldsymbol{\theta})$ cho:
+
+$$
+\mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}, \boldsymbol{\theta})] = \mathbb{E}_q[\boldsymbol{\Sigma}^{-1} (\boldsymbol{\theta} - \boldsymbol{m}) \nabla_{\boldsymbol{\theta}} \ell(\mathcal{D}, \boldsymbol{\theta})]. \tag{15.34}
+$$
+
+Nghĩa là, ma trận Hesse của hàm mất mát có thể được tính bằng các gradient bậc nhất. Một ước lượng Monte Carlo của Phương trình 15.34 là một ước lượng không chệch của ma trận Hesse kỳ vọng.
+
+Tiếp theo, VON được trình bày với một mẫu Monte Carlo và các phân phối Gauss đường chéo. Phương sai trong VON có thể được định nghĩa là $\boldsymbol{\sigma}^2 := 1/[N(\boldsymbol{h} + \delta)]$ với một ước lượng ma trận Hesse $\boldsymbol{h}$ và hệ số suy giảm trọng số (weight decay) $\delta$. Ma trận Hesse đường chéo $\boldsymbol{h}$ được xấp xỉ bằng định lý Price kết hợp với bổ đề Stein, vốn chỉ đòi hỏi các gradient bậc nhất. Các gradient này được ước lượng bằng một mẫu tham số không chệch rút từ $q_t$. Khi đó, VON có thể được hiện thực bằng thuật toán sau cho lô nhỏ $\mathcal{B} \subset \mathcal{D}$, trong đó ký hiệu viết tắt $\ell_i(\boldsymbol{\theta})$ được dùng cho hàm mất mát của mẫu thứ i trong một lô nhỏ:
+
+$$
+\begin{aligned}
+\hat{\boldsymbol{g}} &\leftarrow \frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \nabla_{\boldsymbol{\theta}_t} \ell_i(\boldsymbol{\theta}_t) \quad \text{where } \boldsymbol{\theta}_t \sim q_t(\boldsymbol{\theta}) && (15.35) \\
+\hat{\boldsymbol{h}} &\leftarrow (\boldsymbol{\theta}_t - \boldsymbol{m}_t) \hat{\boldsymbol{g}} / \boldsymbol{\sigma}_t^2 && (15.36) \\
+\boldsymbol{g} &\leftarrow \beta_1 \boldsymbol{g} + (1 - \beta_1) \hat{\boldsymbol{g}} && (15.37) \\
+\boldsymbol{h}_{t+1} &\leftarrow \beta_2 \boldsymbol{h}_t + (1 - \beta_2) \hat{\boldsymbol{h}} && (15.38) \\
+\boldsymbol{m}_{t+1} &\leftarrow \boldsymbol{m}_t - \rho_t \left(\boldsymbol{g} + \delta \boldsymbol{m}_t\right) / (\boldsymbol{h}_{t+1} + \delta) && (15.39) \\
+\boldsymbol{\sigma}_{t+1}^2 &\leftarrow 1/N(\boldsymbol{h}_{t+1} + \delta) && (15.40)
+\end{aligned}
+$$
+
+Bộ tiền điều kiện (preconditioner) trong VON dùng ma trận Hesse mà không lấy căn bậc hai, vốn được dùng trong các thuật toán kiểu Adam, và ma trận Hesse được tính trực tuyến (online). Dù vậy, nhờ sự tương đồng với các bộ tối ưu thông thường, VON dễ hiện thực trong các framework học sâu tiêu chuẩn.
+
+Tuy nhiên, cho đến giờ chưa có gì bảo đảm rằng ma trận Hesse sẽ luôn dương trong VON. Nếu ma trận Hesse không dương, $q$ không còn thuộc họ các phân phối Gauss đường chéo, vì không thể nghịch đảo hiệp phương sai. Dù Khan và cộng sự lưu ý rằng có thể dùng kỹ thuật quay lui (backtracking) để ngăn ma trận Hesse trở nên âm, chiến lược này chậm. Điều này là động lực cho các mục tiếp theo về VOGN và IVON: trước hết dùng một bộ ước lượng ma trận Hesse khác bảo đảm tính dương, rồi quay lại VON với một số hạng hiệu chỉnh xác định dương đưa $q$ trở lại tập khả thi (feasible set) của Phương trình 15.18.
+
+### 3.1 VOGN
+
+Để tối ưu hàm mục tiêu biến phân, cần bảo đảm rằng các lời giải luôn nằm trong tập khả thi gồm các phân phối hợp lệ $q \in \mathcal{Q}$. Trong trường hợp Gauss, điều này có nghĩa là $\boldsymbol{\Sigma} \in \mathbb{R}^{P \times P}$ phải khả nghịch. Với VON, mối quan hệ $\boldsymbol{\sigma}^2 = 1/[N(\boldsymbol{h} + \delta)]$ giữa phương sai và ma trận Hesse đã được xác định, nhưng VON không bảo đảm rằng $\boldsymbol{h} + \delta$ luôn dương. Mục này trình bày phương pháp Gauss–Newton trực tuyến biến phân (Variational Online Gauss-Newton, VOGN) dựa trên công trình của Khan và cộng sự và của Osawa và cộng sự, dùng một phân phối Gauss trường trung bình với một xấp xỉ ma trận Hesse xác định dương.
+
+Phép xấp xỉ dựa trên ma trận Gauss–Newton tổng quát (generalized Gauss–Newton, GGN). Để định nghĩa GGN, phân tích ma trận Hesse bằng cách ký hiệu đầu ra của một mạng nơ-ron với các tham số $\boldsymbol{\theta} \in \mathbb{R}^P$ là $f_{\boldsymbol{\theta}}(x)$. Kết quả sau đã được thu được trước đây và cũng được bàn ở những nơi khác trong tài liệu. Nó phát biểu rằng ma trận Hesse gồm:
+
+$$
+\nabla_{\boldsymbol{\theta}}^2 \ell_i(\boldsymbol{\theta}) = \underbrace{(\nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i))^T \nabla_f^2 \ell_i(\boldsymbol{\theta}) \nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i)}_{\text{GGN}} + \underbrace{\nabla_{\boldsymbol{\theta}}^2 f_{\boldsymbol{\theta}}(x_i) \nabla_z \ell(y_i, z)_{|z = f(x_i)}}_{\text{residual}}, \tag{15.41}
+$$
+
+trong đó $\nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i)$ là ma trận Jacobi (Jacobian). Bỏ số hạng thứ hai trong phép phân tích cho xấp xỉ GGN của ma trận Hesse. GGN giữ lại độ cong do hàm mất mát gây ra đối với các đầu ra của mạng nhưng bỏ đi độ cong do cách tham số hóa phi tuyến của mạng. Trong nhiều bối cảnh, có thể chỉ ra rằng GGN và ma trận Fisher trùng nhau. Có thể tìm thấy một thảo luận trong tài liệu.
+
+Rõ ràng, bản thân GGN lại đòi hỏi tính một ma trận Hesse và một ma trận Jacobi. Riêng điều này đã có thể tốn kém quá mức, vì với một mạng nơ-ron có $P$ tham số và $C$ lớp đầu ra, $\nabla_{\boldsymbol{\theta}} f_{\boldsymbol{\theta}}(x_i) \in \mathbb{R}^{P \times C}$. Chẳng hạn, với các LLM, $C$ thường ở cỡ hàng chục nghìn vì nó gồm mọi token khả dĩ trong bộ từ vựng. Tuy nhiên, may mắn là có những bộ ước lượng GGN dễ tính và tương đối nhanh, chỉ dựa trên các gradient bậc nhất. Bộ ước lượng dùng trong VOGN được Graves trình bày và chỉ đơn giản lấy trung bình các bình phương gradient của các mẫu trong một lô nhỏ:
+
+$$
+\hat{\boldsymbol{h}} \approx \frac{1}{|\mathcal{B}|} \sum_{i=1}^{|\mathcal{B}|} [\nabla_{\boldsymbol{\theta}} \ell_i(\boldsymbol{\theta})]^2. \tag{15.42}
+$$
+
+Bộ ước lượng này được bảo đảm không âm, nhưng các thư viện học sâu phổ biến tính trực tiếp tổng các gradient trên lô nhỏ, và các gradient theo từng mẫu (per-example gradients) chỉ có thể thu được với chi phí tính toán và chi phí phụ trội bổ sung. Thật vậy, Shen và cộng sự báo cáo chi phí phụ trội gần 1.8x trong một bài toán phân loại ảnh khi so với bộ ước lượng dùng trong VON. Do đó, có vẻ tự nhiên khi chỉ cần bình phương trực tiếp gradient của lô nhỏ, tức là đưa phép lấy trung bình vào trong bình phương:
+
+$$
+\hat{\boldsymbol{h}}^{\mathrm{GM}} \approx \left[\frac{1}{|\mathcal{B}|} \sum_{i=1}^{|\mathcal{B}|} \nabla_{\boldsymbol{\theta}} \ell_i(\boldsymbol{\theta})\right]^2. \tag{15.43}
+$$
+
+Cách này thường được gọi là xấp xỉ độ lớn gradient (gradient magnitude approximation), và Khan và cộng sự dùng nó để dẫn xuất một phiên bản biến phân của RMSprop gọi là Vprop. Hai ước lượng được so sánh trong một định lý của Khan và cộng sự, được phát biểu lại ngay sau đây.
+
+**Định lý 15.4.** (Độ chệch của xấp xỉ độ lớn gradient) *Cho các lô nhỏ* $\mathcal{B}$ *kích thước* $M$ *được rút đều từ* $p(\mathcal{B})$ *trên mọi lô nhỏ có thể tạo từ* $\mathcal{D}$ *kích thước* $N$, *GGN* $\boldsymbol{h}$ *tính trên toàn bộ dữ liệu, xấp xỉ độ lớn gradient* $\hat{\boldsymbol{h}}$, *và các gradient* $\boldsymbol{g}$ *trên toàn bộ dữ liệu. Với* $w = \frac{1}{M}(N - M)/(N - 1)$, *đẳng thức sau đúng:*
+
+$$
+\mathbb{E}_{p(\mathcal{B})}[\hat{\boldsymbol{h}}^{GM}] = w\boldsymbol{h} + (1 - w)\boldsymbol{g}^2. \tag{15.44}
+$$
+
+Chỉ $M = 1$ cho một ước lượng không chệch, và độ chệch tăng theo $M$.
+
+Tương tự Osawa và cộng sự, VOGN khi đó có thể được hiện thực đơn giản bằng cách thay bộ ước lượng ma trận Hesse trong VON bằng:
+
+$$
+\hat{\boldsymbol{h}} \leftarrow \frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} [\nabla_{\boldsymbol{\theta}_t} \ell_i(\boldsymbol{\theta}_t)]^2. \tag{15.45}
+$$
+
+Dùng một số hạng tắt dần (damping) dương ngặt cho ma trận Hesse bảo đảm một ước lượng dương ngặt. Các tác giả của VOGN báo cáo kết quả hứa hẹn, đạt độ chính xác gần bằng hoặc tốt hơn SGD và Adam, với khả năng hiệu chuẩn được cải thiện. Tuy nhiên, họ báo cáo một chi phí phụ trội tính toán đáng kể, khoảng 1.7x, do cần các gradient theo từng mẫu, tương tự chi phí phụ trội mà Shen và cộng sự báo cáo. Trong nhiều ứng dụng hiện đại, nơi việc huấn luyện có thể kéo dài nhiều ngày, nhiều tuần hay nhiều tháng, điều này có thể quá đắt. Tiếp theo, bộ tối ưu Newton trực tuyến biến phân cải tiến (Improved Variational Online Newton, IVON) được mô tả; nó nhanh vì dùng cùng bộ ước lượng như trong VON và bảo đảm rằng $q$ luôn nằm trong tập khả thi.
+
+### 3.2 Newton trực tuyến biến phân cải tiến (IVON)
+
+Ở đầu mục này, thuật toán VON đã được giới thiệu như một bộ tối ưu thực tế cho mạng nơ-ron với một xấp xỉ hậu nghiệm Gauss trường trung bình. Tuy nhiên, VON không ràng buộc $q$ là phân phối Gauss, điều đòi hỏi hiệp phương sai phải xác định dương (còn $\boldsymbol{m}$ không bị ràng buộc). Ràng buộc này có thể không được thỏa mãn khi chạy VON trên một hàm mất mát không lồi $\ell(\mathcal{D}_i, \boldsymbol{\theta})$, vì trong Phương trình 15.30, ma trận Hesse $\mathbb{E}_q[\nabla_{\boldsymbol{\theta}}^2 \ell(\mathcal{D}_t, \boldsymbol{\theta})]$ có thể không xác định dấu nếu $\ell$ không lồi. Điều này cũng đúng với Phương trình 15.40, nơi thủ thuật tái tham số hóa (reparameterization trick) được dùng để ước lượng ma trận Hesse.
+
+IVON khắc phục điều này bằng cách thêm một số hạng hiệu chỉnh xác định dương vào bước cập nhật ma trận Hesse, theo công trình của Lin và cộng sự. Công trình của họ đưa ra một dẫn xuất chi tiết; ở đây chỉ kết quả chính của họ được dùng, trong bối cảnh IVON. Trong IVON, mỗi bước cập nhật bắt đầu với một phân phối hậu nghiệm xấp xỉ hiện tại $q_t = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_t, \boldsymbol{\sigma}_t^2)$. IVON dùng quy tắc cập nhật sau cho ma trận Hesse, trong đó số hạng hiệu chỉnh xác định dương được đánh dấu bằng một dấu ngoặc dưới:
+
+$$
+\begin{aligned}
+\hat{\boldsymbol{g}} &\leftarrow \frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \nabla_{\boldsymbol{\theta}_t} \ell_i(\boldsymbol{\theta}_t) \quad \text{where } \boldsymbol{\theta}_t \sim q_t(\boldsymbol{\theta}) && (15.46) \\
+\hat{h} &\leftarrow \hat{\boldsymbol{g}} \cdot (\boldsymbol{\theta}_t - \boldsymbol{m}_t) / \boldsymbol{\sigma}_t^2 && (15.47) \\
+\boldsymbol{h}_{t+1} &\leftarrow \beta_2 \boldsymbol{h}_t + (1 - \beta_2) \hat{\boldsymbol{h}} + \underbrace{\frac{1}{2} (1 - \beta_2)^2 (h_t - \hat{h})^2 / (h_t + \delta)}_{\text{correction}}. && (15.48)
+\end{aligned}
+$$
+
+**Thuật toán 19** Newton trực tuyến biến phân cải tiến (IVON)
+
+```text
+Inputs : learning rates {ρₜ}; gradient momentum β₁ ∈ [0, 1); Hessian momentum β₂ ∈ [0, 1); weight
+         decay δ > 0; scaling parameter λ > 0; Hessian initialization h₀ > 0
+Outputs: mean parameter mₜ₊₁ and variance σ²ₜ₊₁
+initialize m ← (NN weight init), h ← h₀ · I, σ² ← 1/(λ(h + δ)), g ← 0, t ← 1, and αₜ ← (h₀ + δ)αₜ for all
+    t
+repeat
+    ĝ ← (1/|𝓑|) Σ_{i∈𝓑} ∇_θₜ ℓᵢ(θₜ), where θₜ ∼ qₜ(θ) = 𝒩(θ; mₜ, diag(σₜ²))
+    ĥ ← ĝ · (θₜ − mₜ)/σₜ²
+    g ← β₁ g + (1 − β₁) ĝ
+    h ← β₂ hₜ + (1 − β₂) ĥ + ½ (1 − β₂)² (hₜ − ĥ)²/(hₜ + δ)
+    ḡ ← g/(1 − β₁ᵗ)
+    mₜ₊₁ ← mₜ − αₜ (ḡ + δ mₜ)/(h + δ)
+    σ²ₜ₊₁ ← 1/(λ(h + δ))
+until convergence
+return mₜ₊₁, σ²ₜ₊₁
+```
+
+<Figure caption="Hình 15.1: Lời giải mà IVON tìm được nằm trong một vùng phẳng, cách xa điểm MAP. Hình được tái hiện từ mã nguồn của Shen và cộng sự. (Bản tái hiện mang tính sơ đồ, được tính cho trang này: một hàm mất mát hai tham số có một vùng hình nêm với mất mát thấp và một hố hẹp gần mũi nêm; điểm MAP là cực tiểu của hàm mất mát, còn lời giải IVON là cực tiểu của hàm mất mát được lấy trung bình theo một phân phối Gauss với độ lệch chuẩn cố định 0.35, có vẽ đường tròn bán kính một độ lệch chuẩn. Các giá trị không phải của hình gốc.)">
+  <Bdl15IvonFlatMinimum />
+</Figure>
+
+<Figure caption="Hình 15.2: IVON so với AdamW trên ImageNet, lấy từ Shen và cộng sự với sự cho phép. (Bản tái hiện mang tính sơ đồ, được vẽ lại cho trang này: các đường cong trơn được vạch bằng mắt theo hình đã công bố, không phải dữ liệu đo.)">
+  <Bdl15IvonImagenet />
+</Figure>
+
+Số hạng hiệu chỉnh $\frac{1}{2}(1 - \beta_2)^2 (\boldsymbol{h}_t - \hat{\boldsymbol{h}})^2 / (\boldsymbol{h}_t + \delta) >^{\text{a.s.}} 0$ bảo đảm rằng phân phối hậu nghiệm xấp xỉ hiện tại $q_{t+1} = \mathcal{N}(\boldsymbol{\theta}; \boldsymbol{m}_{t+1}, \operatorname{diag}(\boldsymbol{\sigma}_{t+1}^2))$ vẫn là một phân phối Gauss hợp lệ, vì $\boldsymbol{h}_{t+1}$ luôn xác định dương nếu $\boldsymbol{h}_t$ xác định dương, theo Lin và cộng sự. Một chứng minh cho bối cảnh tổng quát với hiệp phương sai đầy đủ có trong công trình của Lin và cộng sự.
+
+Ngoài ra, IVON dùng một phương sai đường chéo hơi khác, $\boldsymbol{\sigma}^2 = 1/\lambda(\boldsymbol{h} + \delta)$, trong đó $\boldsymbol{h} = h_0 \cdot \boldsymbol{I}$ với $h_0 > 0$ ở bước lặp đầu tiên, $\delta$ là một tham số suy giảm trọng số đến từ việc dùng một tiên nghiệm có phương sai vô hướng, và $\lambda$ là cỡ mẫu hiệu dụng (effective sample size) có thể được tinh chỉnh như một siêu tham số (hyperparameter). Tinh chỉnh $\lambda$ có thể hữu ích trong nhiều tình huống, chẳng hạn khi huấn luyện nhiều epoch trên ít dữ liệu, có thể đặt $\lambda > N$ để mô phỏng một bối cảnh có nhiều dữ liệu hơn. Một ví dụ khác là khi dự đoán bằng phân phối hậu nghiệm: khi lấy mẫu từ $q(\boldsymbol{\theta})$ cuối cùng, có thể giảm $\lambda$ để lấy mẫu các mô hình đa dạng hơn (xa $\boldsymbol{m}$ hơn) hoặc tăng $\lambda$ để lấy mẫu các mô hình ít đa dạng hơn. Chương 43 bàn sâu hơn về điều này trong bối cảnh các mô hình ngôn ngữ lớn. Các bước cập nhật cuối cùng của IVON được nêu trong Thuật toán 19. IVON cũng có thể được dùng với nhiều mẫu MC để ước lượng gradient. Trong trường hợp này, gradient chỉ đơn giản được lấy trung bình trên các mẫu MC, và ước lượng $\hat{\boldsymbol{h}}$ cũng được lấy trung bình trên nhiều mẫu.
+
+Nhiễu trong IVON có thể hữu ích cho việc chính quy hóa quá trình huấn luyện, vì IVON liên tục khám phá các lời giải mới theo mức nhiễu đã chọn trong lúc huấn luyện. Điều này khiến nó "bật" ra khỏi các lời giải nhọn, vì chỉ cần thêm một chút nhiễu ở đó cũng sẽ làm hàm mất mát tăng mạnh, để hướng về các cực tiểu phẳng hơn, như minh họa trong Hình 15.1 trên một bài toán hồi quy logistic nhỏ, trong đó bài toán hậu nghiệm cực đại (maximum a posteriori, MAP) tìm được một cực tiểu nhọn (sharp minimum) còn IVON tìm được một cực tiểu phẳng (flat minimum). Các cực tiểu phẳng hơn từ lâu đã được liên hệ với khả năng tổng quát hóa tốt hơn và các ước lượng độ bất định tốt hơn. Hơn nữa, các gai gradient (gradient spike) có thể được làm trơn khi dùng nhiều mẫu MC nhờ hiệu ứng làm trơn Gauss.
+
+Tóm lại, IVON cho phép mở rộng hạ gradient tự nhiên với các phương pháp Newton trực tuyến cho các bài toán lớn. Hình 15.2 cho thấy kết quả trên ImageNet cho một ResNet-50, thu được trong Shen và cộng sự, và ở Chương 43, Mục 2 trình bày kết quả huấn luyện trước (pretraining) GPT-2 với 773M tham số từ đầu. Trong thí nghiệm ImageNet, IVON đạt độ chính xác tốt hơn hoặc tương đương AdamW, cải thiện khả năng hiệu chuẩn và độ bất định, và chỉ đòi hỏi chi phí phụ trội tính toán 1.0-1.2x (tùy kích thước mô hình) do bước lấy mẫu tham số bổ sung. Điều này cho thấy học biến phân cho các mô hình lớn là khả thi, và nhờ các kỹ thuật được trình bày trong chương này, cũng dễ hiện thực và sử dụng.
+
+## 4. Nhận xét kết luận
+
+Chương này đã trình bày các thuật toán hạ gradient tự nhiên để học hậu nghiệm tổng quát trong khung học biến phân, trong đó có thể dùng các hàm mất mát bất kỳ. Để dẫn xuất các thuật toán này, quy tắc học Bayes đã được giới thiệu cùng với nhiều kỹ thuật thuận tiện, chẳng hạn để ước lượng thông tin bậc hai. Nhiều thuật toán đã được giới thiệu, có thể dùng các kỹ thuật này để học các phân phối trên tham số mạng nơ-ron một cách hiệu quả, với yêu cầu tính toán tương tự các bộ tối ưu mạng nơ-ron thông thường.
+
+[^1]: Trong Khan và cộng sự, $\delta = \delta'/N$, trong đó $\delta'$ là độ chính xác tiên nghiệm của $p_0 = \mathcal{N}(\boldsymbol{\theta}; 0, \boldsymbol{I}/\delta')$.

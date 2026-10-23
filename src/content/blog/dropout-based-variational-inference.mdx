@@ -1,0 +1,414 @@
+---
+title: "Dropout-Based Variational Inference"
+description: "How dropout becomes approximate Bayesian inference: the Gaussian process derivation of Monte Carlo dropout, Concrete Dropout and dropout injection."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - dropout
+  - uncertainty estimation
+series: bayesian-deep-learning
+seriesOrder: 18
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl14ScaleAwareDropout from '../../components/diagrams/Bdl14ScaleAwareDropout.astro';
+
+As seen so far, performing variational inference requires optimizing an approximating variational distribution. Interestingly, in the search for a suitable approximation, one can leverage a concept originally introduced for model regularization: stochastic regularization. This strategy relies on a simple intuition: injecting stochastic perturbations into the inference process at training time prevents any subset of parameters from co-adapting, forcing the network to distribute the learned representation across redundant pathways. Stochastic regularization thus effectively acts as an implicit sampling mechanism: each perturbed configuration is nothing but a draw from an underlying distribution over network configurations. This chapter will indeed show that the intersection of stochastic regularization techniques and Monte Carlo (MC) sampling can, under certain conditions, lead to an effective approximate variational distribution.
+
+## 1. Monte Carlo dropout
+
+As in all the VI strategies discussed in this book, a suitable Bayesian approximation must be found to minimize the KL-divergence and deliver all the nice properties discussed in the introduction ([Chapter 12](/blog/introduction-to-variational-inference)). Since a Bayesian approach is adopted within the Deep Learning context (and thus, neural networks are dealt with in many different ways), a strategy should be sought to treat the network's parameters probabilistically. But wait, the literature on neural networks already explored randomization inside the model: can one not just exploit those strategies to lay the foundation for the Bayesian approximation? Of course, one can, and the method explored in this chapter is, indeed, based upon well-known pieces of math that have been around for many years: **stochastic regularization techniques (SRTs)**. As the name may suggest, SRTs serve as a regularization mechanism for the model, achieved by introducing stochasticity in the predictive process. This randomization approach can be used directly to derive the approximate distribution sought throughout this chapter. This section now discusses how it is possible to obtain a Bayesian approximation using one of the most renowned SRTs: **dropout**.[^1]
+
+### 1.1 The dropout objective
+
+Dropout is a powerful and popular SRT that is based on a simple, intuitive principle: randomly shutting neurons down during training. What does it mean, and why should one do such a thing? Shutting down here literally means *nullifying* the contribution a given neuron delivers to the output computation. For the sake of simplicity, consider a single hidden layer NN, with weight matrix $\mathbf{W}_h \in \mathbb{R}^{D \times Q}$ and biases $\mathbf{b}_h \in \mathbb{R}^{Q}$ (connecting the input to the *hidden* layer) and weight matrix $\mathbf{W}_l \in \mathbb{R}^{Q \times C}$ (connecting the hidden layer to the *last*, output layer). Under regular conditions, a given neuron $z^{(i)}$ on the hidden layer should account for a quantity which equals a nonlinearly activated linear combination of the input and the vector $\mathbf{W}_h^{(i)}$ plus a constant $b_h^{(i)}$, i.e., $z^{(i)} = \sigma(\mathbf{x}^\top \mathbf{W}_h^{(i)} + b_h^{(i)})$. If dropout is applied on the hidden layer, some of the layer's neurons $z^{(i)}$ will preserve their original value $\sigma(\mathbf{x}^\top \mathbf{W}_h^{(i)} + b_h^{(i)})$, while the remaining ones will be set to zero. Which and how many of these neurons will be zeroed out depends upon a parameter known as the **dropout rate**, which is the probability that a given neuron will be dropped out. Formally, this is equivalent to updating each hidden neuron by multiplying $\sigma(\mathbf{x}^\top \mathbf{W}_h^{(i)} + b_h^{(i)}) \cdot o^{(i)}$ with a random variable $o^{(i)} \sim \mathcal{B}(1 - \phi)$, so that the neuron is zeroed with probability $\phi$ (the dropout rate mentioned earlier). The same mechanism can be applied to the input layer, dropping individual input components. This procedure will affect the final output $\hat{\mathbf{y}}$ of the predictor, and results in:
+
+$$
+\hat{\mathbf{y}} = \left(\sigma\left(\mathbf{W}_h^\top (\mathbf{x} \circ \mathbf{o}_h) + \mathbf{b}_h\right) \circ \mathbf{o}_l\right)^\top \cdot \mathbf{W}_l, \tag{14.1}
+$$
+
+where $\mathbf{o}_h = [o_h^{(i)}]_{i=1}^{D}$ and $\mathbf{o}_l = [o_l^{(i)}]_{i=1}^{Q}$ are the vectors containing the realizations $o_h^{(i)} \sim \mathcal{B}(1-\phi)$ and $o_l^{(i)} \sim \mathcal{B}(1-\phi)$ for every input $\mathbf{x}^{(i)}$ and hidden neuron $z^{(i)}$, and $\circ$ represents the Hadamard product. When the hidden neurons pass through the last layer of the example model, the final output no longer contains all the original information of the hidden layer, but only the contribution delivered by the unaltered neurons.
+
+Now that it is clear how dropout works, the main question is why one should use it: is it not unfavorable to drop some information out during the forward passes? Not really, if one remembers that dropout is a regularizer that works on a neural network at training time. During training, dropping out some neurons would have the effect of forcing the predictor not to rely entirely on a tiny subset of neurons, because they can eventually not always be available. This behavior avoids sparsity and encourages a dense knowledge distribution across the layer. During the learning process, the loss formulation will not be different from the usual one, with the exception that the output $\hat{\mathbf{y}}$ has been derived using dropout. As an example, in the regression case, the squared error loss can be used:
+
+$$
+\mathcal{L}_{\mathrm{dr}}(\mathcal{D}, \theta) \coloneqq \frac{1}{2N} \sum_{n=1}^{N=|\mathcal{D}|} \|\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}\|_2^2, \tag{14.2}
+$$
+
+where $\theta$ denotes the model's parameters (i.e., $\mathbf{W}_h$, $\mathbf{b}_h$ and $\mathbf{W}_l$), used to compute the prediction $\hat{\mathbf{y}}^{(n)}$.
+
+Starting from this dropout objective, the following shows how it is possible to derive its Bayesian approximation.[^2] Nevertheless, before diving into the details, a final ingredient must be added to the objective to balance the accounts, that is, the $L_2$ regularization on the network's weights:
+
+$$
+\mathcal{L}_{\mathrm{dr}}(\mathcal{D}, \theta) \coloneqq \underbrace{\frac{1}{2N} \sum_{n=1}^{N=|\mathcal{D}|} \|\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}\|_2^2}_{\text{Mean Squared Error}} + \underbrace{\lambda_{\mathbf{W}_h}\|\mathbf{W}_h\|_2^2 + \lambda_{\mathbf{W}_l}\|\mathbf{W}_l\|_2^2 + \lambda_{\mathbf{b}_h}\|\mathbf{b}_h\|_2^2}_{L_2}, \tag{14.3}
+$$
+
+where $\lambda_{\mathbf{W}_h}$, $\lambda_{\mathbf{W}_l}$ and $\lambda_{\mathbf{b}_h}$ are the weight decay coefficients.
+
+As discussed later in the chapter, including this term is a fundamental step for obtaining a principled approximation; luckily, this does not represent a practical obstacle since introducing this type of regularization is a common practice in neural network optimization.
+
+In what follows, dropout is presented as a Bayesian approximation by following the original derivation of Gal and Ghahramani, which grounds the argument in Gaussian Processes. This is not the only possible route: an alternative derivation dispenses with GPs altogether and works directly in weight space, casting dropout as variational inference in a Bayesian neural network with a mixture-of-Gaussians approximating distribution, and generalizing the argument to the whole family of stochastic regularization techniques. Although the GP-based derivation is followed here, since it makes the equivalence with the dropout objective of Equation 14.2 explicit, the reader should bear in mind that the Bayesian interpretation of dropout does not necessarily depend on the GP machinery.
+
+### 1.2 Gaussian Processes: the cornerstone of the approximation
+
+In order to ascertain whether the dropout objective is a Bayesian approximation, it is necessary to briefly anticipate a useful non-parametric model: the **Gaussian Processes**. For the sake of simplicity, only the aspects strictly needed for the derivation are covered; for a broader treatment of Gaussian Processes and kernels, see Chapter 23.
+
+Gaussian Processes (GPs) are useful statistical tools that allow one to define distributions over functions. Let $\mathrm{f} : \mathbb{R}^{D} \to \mathbb{R}$ be a *single-output* regressor;[^3] accordingly, $\mathbf{y} \in \mathbb{R}^{N}$ denotes the vector of scalar targets and $\mathbf{f} = [\mathrm{f}(\mathbf{x}^{(n)})]_{n=1}^{N} \in \mathbb{R}^{N}$ the vector collecting the evaluations of $\mathrm{f}$ at the $N$ inputs. So far, it is sufficient to assume the existence of a specific prior $p(\mathrm{f})$ over the elements of the hypotheses space, indicating which regressor $\mathrm{f}$ is more or less likely to have generated the data. Following from Bayes rule, the posterior distribution can be obtained as:
+
+$$
+p(\mathrm{f}|\mathbf{X}, \mathbf{y}) = \frac{p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X})}{p(\mathbf{y}|\mathbf{X})} = \frac{p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X})}{\int p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X})\, \mathrm{d}\mathrm{f}} \propto p(\mathbf{y}|\mathbf{X}, \mathrm{f})\, p(\mathrm{f}|\mathbf{X}). \tag{14.4}
+$$
+
+It is precisely now that GPs come into play, allowing the posterior to be computed analytically. For doing so, GPs exploit a clever intuition: similar inputs $\mathbf{x}$'s should result in similar outputs $\mathrm{f}(\mathbf{x})$'s; in a sense, the desired model is one that makes the input $\mathbf{x}$'s co-vary. This behavior can be implemented by employing a covariance function $k(\mathbf{x}_a, \mathbf{x}_b)$, which defines the similarity between two given inputs. The covariance function allows one to place a Gaussian distribution over the function values:
+
+$$
+\mathbf{f}|\mathbf{X} \sim \mathcal{N}(0, K(\mathbf{X}, \mathbf{X})) \tag{14.5}
+$$
+
+$$
+\mathbf{y}|\mathbf{f} \sim \mathcal{N}(\mathbf{f}, \tau^{-1}\mathbf{I}_N), \tag{14.6}
+$$
+
+where $K(\mathbf{X}, \mathbf{X})$ is an $N \times N$ covariance matrix defined using the covariance function $k(\mathbf{x}_a, \mathbf{x}_b)$ and $\tau^{-1}\mathbf{I}_N$ is the inherent predictive noise of the function, obtained by multiplying the inverse of the precision parameter $\tau$ with an $N \times N$ identity matrix $\mathbf{I}_N$. Note that the GP prior is defined over the function $\mathrm{f}$, whereas Equation 14.5 states the distribution it induces over the finite set of evaluations $\mathbf{f}$ at the observed inputs; this is precisely what makes the model tractable.
+
+The extension to the $C$-dimensional outputs of the MLP is immediate: it is sufficient to model each output component with its own regressor $\mathrm{f}_c : \mathbb{R}^{D} \to \mathbb{R}$, $c = 1, \dots, C$, placing an independent GP on each of them, all sharing the same covariance function. To keep the notation compact, targets and function evaluations are collected into two $N \times C$ matrices
+
+$$
+\mathbf{Y} = \begin{bmatrix} \mathbf{y}_1 & \cdots & \mathbf{y}_C \end{bmatrix} \in \mathbb{R}^{N \times C}, \qquad \mathbf{F} = \begin{bmatrix} \mathbf{f}_1 & \cdots & \mathbf{f}_C \end{bmatrix} \in \mathbb{R}^{N \times C}, \tag{14.7}
+$$
+
+whose $c$-th columns $\mathbf{y}_c, \mathbf{f}_c \in \mathbb{R}^{N}$ gather, respectively, the $c$-th target component and the $c$-th function evaluations $[\mathrm{f}_c(\mathbf{x}^{(n)})]_{n=1}^{N}$ across the $N$ samples; the $n$-th rows, denoted by $\mathbf{y}^{(n)}, \mathbf{f}^{(n)} \in \mathbb{R}^{C}$, gather instead the $C$ output components of the $n$-th sample. With this notation, Equation 14.5 holds column-wise,
+
+$$
+\mathbf{f}_c|\mathbf{X} \sim \mathcal{N}(0, K(\mathbf{X}, \mathbf{X})) \tag{14.8}
+$$
+
+$$
+\mathbf{y}_c|\mathbf{f}_c \sim \mathcal{N}(\mathbf{f}_c, \tau^{-1}\mathbf{I}_N), \tag{14.9}
+$$
+
+with the $\mathbf{f}_c$'s mutually independent given the covariance function. In the following, this set of $C$ independent models is written compactly as $\mathbf{F}|\mathbf{X} \sim \mathcal{N}(0, K(\mathbf{X}, \mathbf{X}))$ and $\mathbf{Y}|\mathbf{F} \sim \mathcal{N}(\mathbf{F}, \tau^{-1}\mathbf{I}_N)$, where the Gaussian is understood to act on each column separately. No further details on GPs are needed for the present purpose.
+
+At this point, a question remains unanswered: why is it necessary to introduce GPs at all? The reason is that GPs play a pivotal role in deriving the Bayesian approximation. Recall the ELBO derivation of [Chapter 12](/blog/introduction-to-variational-inference), maximizing the ELBO is equivalent to minimizing the KL divergence between the real and the approximated distribution. For the dropout Bayesian approximation, it must be proved that the dropout objective is, in some sense, maximizing the evidence lower bound. Starting from a GP on which the ELBO can be derived and using an appropriate covariance function, one can ultimately show that the ELBO objective is, indeed, equivalent to the dropout objective of Equation 14.2.
+
+### 1.3 Dropout as a Bayesian approximation
+
+Now that all the ingredients are in place, the details of the chapter's core can be discussed: the use of dropout as a Bayesian approximation. The idea consists of three steps:
+
+1. Modeling the structure of the MLP introduced in Section 1.1 using a Gaussian Process with convenient priors and covariance function;
+2. Defining a suitable approximate distribution which simulates the effect of the dropout;
+3. Finally, showing how maximizing the ELBO leads to a natural equivalence with the dropout objective described in Equation 14.2.
+
+#### Gaussian Process approximation of the MLP
+
+The starting point is a Gaussian Process with a convenient covariance function; in particular, the GP should be constructed in such a way that its approximation will be equivalent to optimizing an MLP with dropout objective. Consider the following covariance function:
+
+$$
+k_{p(\mathbf{w}_h), p(b_h)}(\mathbf{x}_a, \mathbf{x}_b) = \int\!\!\int \sigma(\mathbf{w}_h^\top \mathbf{x}_a + b_h)\, \sigma(\mathbf{w}_h^\top \mathbf{x}_b + b_h)\, p(\mathbf{w}_h)\, p(b_h)\, \mathrm{d}\mathbf{w}_h\, \mathrm{d}b_h, \tag{14.10}
+$$
+
+where, for convenience, the symbols $\mathbf{w}_h \in \mathbb{R}^{D}$ and $b_h \in \mathbb{R}$ are used to represent a generic weight vector and bias term.[^4] Here the notation denotes a specific covariance function (thus, a function which takes two inputs $\mathbf{x}_a$ and $\mathbf{x}_b$) but which also depends upon some probability distributions $p(\mathbf{w}_h)$ and $p(b_h)$. Throughout this chapter, standard normal priors are taken, $p(\mathbf{w}_h) = \mathcal{N}(0, \mathbf{I}_D)$ and $p(b_h) = \mathcal{N}(0, 1)$; this choice will be needed later, when evaluating the KL divergence in closed form. By sampling from these distributions one can consider a MC approximation of the integral, which can shift the dependence upon the distribution toward the dependence upon $Q$ realizations drawn from these distribution. With $Q$ samples $\mathbf{W}_h^{(q)} \sim p(\mathbf{w}_h)$ and $b_h^{(q)} \sim p(b_h)$ extracted from the prior probabilities, and with $\mathbf{W}_h = [\mathbf{W}_h^{(q)}]_{q=1}^{Q}$ and $\mathbf{b}_h = [b_h^{(q)}]_{q=1}^{Q}$, Equation 14.10 can be approximated as:
+
+$$
+k_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{x}_a, \mathbf{x}_b) = \frac{1}{Q} \sum_{q=1}^{Q} \sigma\left({\mathbf{W}_h^{(q)}}^\top \mathbf{x}_a + b_h^{(q)}\right) \sigma\left({\mathbf{W}_h^{(q)}}^\top \mathbf{x}_b + b_h^{(q)}\right). \tag{14.11}
+$$
+
+Then, $\mathbf{W}_h$ and $\mathbf{b}_h$ are used for deriving a graphical model analogously to Equation 14.5:
+
+$$
+\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h \sim \mathcal{N}(0, K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X})) \tag{14.12}
+$$
+
+$$
+\mathbf{y}_c|\mathbf{f}_c \sim \mathcal{N}(\mathbf{f}_c, \tau^{-1}\mathbf{I}_N), \tag{14.13}
+$$
+
+where $K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X})$, as in Equation 14.5, denotes an $N \times N$ covariance matrix derived from applying the function $k_{\mathbf{W}_h, \mathbf{b}_h}$ to each input pair in $(\mathbf{X}, \mathbf{X})$. Having placed an independent GP on each output component, conditioning on $\mathbf{W}_h$ and $\mathbf{b}_h$ makes the columns of $\mathbf{Y}$ conditionally independent, so that $p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)$ factorizes over the components $\mathbf{y}_c$; this gives the density of the whole matrix $\mathbf{Y}$, from which $p(\mathbf{Y}|\mathbf{X})$ can be derived from marginalizing $\mathbf{W}_h$ and $\mathbf{b}_h$:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h \tag{14.14}
+$$
+
+$$
+\phantom{p(\mathbf{Y}|\mathbf{X})} = \int\!\!\int \prod_{c=1}^{C} p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.15}
+$$
+
+Then, the density function $p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)$ can be obtained from marginalizing $\mathbf{f}_c$, which allows $p(\mathbf{Y}|\mathbf{X})$ to be expanded as:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int \left( \int \prod_{c=1}^{C} p(\mathbf{y}_c|\mathbf{f}_c, \mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, p(\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, \mathrm{d}\mathbf{f}_c \right) p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h \tag{14.16}
+$$
+
+$$
+\phantom{p(\mathbf{Y}|\mathbf{X})} = \int\!\!\int \left( \prod_{c=1}^{C} \int p(\mathbf{y}_c|\mathbf{f}_c)\, p(\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, \mathrm{d}\mathbf{f}_c \right) p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.17}
+$$
+
+Each term $p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h) = \int p(\mathbf{y}_c|\mathbf{f}_c)\, p(\mathbf{f}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{b}_h)\, \mathrm{d}\mathbf{f}_c$ can then be computed analytically using Equation 14.12, as $\mathcal{N}(0, K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X}) + \tau^{-1}\mathbf{I}_N)$, and $p(\mathbf{Y}|\mathbf{X})$ can be rewritten as:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int \prod_{c=1}^{C} \mathcal{N}(\mathbf{y}_c; 0, K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X}) + \tau^{-1}\mathbf{I}_N)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.18}
+$$
+
+The graphical model encodes now the parameters $\mathbf{W}_h$ and $\mathbf{b}_h$; to bring this formulation closer to the one used for a multi-layer perceptron, auxiliary variables need to be introduced. The covariance matrix can be factorized as an outer product $\Psi\Psi^\top$, where $\Psi = [\psi(\mathbf{x}^{(n)}, \mathbf{W}_h, \mathbf{b}_h)^\top]_{n=1}^{N} \in \mathbb{R}^{N \times Q}$ is the matrix built from the $Q$-dimensional vectors $\psi(\mathbf{x}, \mathbf{W}_h, \mathbf{b}_h) = \sqrt{\frac{1}{Q}}\, \sigma(\mathbf{W}_h^\top \mathbf{x} + \mathbf{b}_h)$, so that $K_{\mathbf{W}_h, \mathbf{b}_h}(\mathbf{X}, \mathbf{X}) = \Psi\Psi^\top$. Replacing this in Equation 14.18 yields:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int \prod_{c=1}^{C} \mathcal{N}(\mathbf{y}_c; 0, \Psi\Psi^\top + \tau^{-1}\mathbf{I}_N)\, p(\mathbf{W}_h)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{b}_h. \tag{14.19}
+$$
+
+For each element on this product, a $Q \times 1$ variable $\mathbf{w}_c \sim \mathcal{N}(0, \mathbf{I}_Q)$ is introduced:
+
+$$
+\mathcal{N}(\mathbf{y}_c; 0, \Psi\Psi^\top + \tau^{-1}\mathbf{I}_N) = \int \mathcal{N}(\mathbf{y}_c; \Psi\mathbf{w}_c, \tau^{-1}\mathbf{I}_N)\, \mathcal{N}(\mathbf{w}_c; 0, \mathbf{I}_Q)\, \mathrm{d}\mathbf{w}_c. \tag{14.20}
+$$
+
+Note that now the mean of the independent $\mathbf{y}_c$'s has the form $\Psi\mathbf{w}_c$, with $\psi(\mathbf{x}^{(n)}, \mathbf{W}_h, \mathbf{b}_h)^\top \mathbf{w}_c$ for the $n$-th sample; collecting the auxiliary variables in matrix notation as $\mathbf{W}_l = [\mathbf{w}_c]_{c=1}^{C}$ recovers the mean prediction $\mathbf{Y} = \Psi\mathbf{W}_l$, which is now more similar to the original MLP formulation. $p(\mathbf{Y}|\mathbf{X})$ can then be written as a marginalization over $\mathbf{W}_h$, $\mathbf{W}_l$ and $\mathbf{b}_h$:
+
+$$
+p(\mathbf{Y}|\mathbf{X}) = \int\!\!\int\!\!\int p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)\, p(\mathbf{W}_h)\, p(\mathbf{W}_l)\, p(\mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{W}_l\, \mathrm{d}\mathbf{b}_h. \tag{14.21}
+$$
+
+#### Approximated distribution prior
+
+Once the GP is defined, the approximated distribution for the model parameters must be constructed. The idea should be to find a suitable distribution $q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$ which can minimize the KL divergence with the true distribution $p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$. Since the parameters $\mathbf{W}_h$, $\mathbf{W}_l$ and $\mathbf{b}_h$ were assumed to be mutually independent, the approximated distribution $q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$ can be derived as a product of each individual approximated component:
+
+$$
+q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) = q(\mathbf{W}_h)\, q(\mathbf{W}_l)\, q(\mathbf{b}_h). \tag{14.22}
+$$
+
+Now, remember the main goal of this whole section: the aim is not a generic approximation, but a *dropout-based* one. In a sense, the independent $q(\mathbf{W}_h)$, $q(\mathbf{W}_l)$, and $q(\mathbf{b}_h)$ should be modeled as the product of a stochastic process involving dropout. But how does the effect of dropout impacts the parameters' probability distribution? Dropping an input neuron $\mathbf{x}_d^{(n)}$ is equivalent to setting to zero all the weights connecting that neuron to the hidden layer. Hence, if the same dropout rate $\phi$ is set for all the neurons on a given layer, the individual $\mathbf{W}_h^{(i)}$ and $\mathbf{W}_l^{(i)}$ are approximated using a mixture of Gaussians with shared covariance and individual mean vectors, and a simple Gaussian for the biases $b_h^{(i)}$:
+
+$$
+q(\mathbf{W}_h^{(i)}) = (1 - \phi)\, \mathcal{N}(\mathbf{M}_h^{(i)}, \sigma^2\mathbf{I}_Q) + \phi\, \mathcal{N}(0, \sigma^2\mathbf{I}_Q), \tag{14.23}
+$$
+
+$$
+q(\mathbf{W}_l^{(i)}) = (1 - \phi)\, \mathcal{N}(\mathbf{M}_l^{(i)}, \sigma^2\mathbf{I}_C) + \phi\, \mathcal{N}(0, \sigma^2\mathbf{I}_C), \tag{14.24}
+$$
+
+$$
+q(\mathbf{b}_h) = \mathcal{N}(\mathbf{m}_h, \sigma^2\mathbf{I}_Q). \tag{14.25}
+$$
+
+The matrices $\mathbf{M}_h = [\mathbf{M}_h^{(i)}]_{i=1}^{D}$ and $\mathbf{M}_l = [\mathbf{M}_l^{(i)}]_{i=1}^{Q}$, in a sense, encode the network weights in absence of dropout: the probabilistic weights $\mathbf{W}_h$ and $\mathbf{W}_l$ are thus obtained by drawing from a mixture having $1 - \phi$ probability of returning the "actual weight", and $\phi$ probability of zeroing them out.
+
+Starting from Equation 14.23, the probabilities over $\mathbf{W}_h$, $\mathbf{W}_l$ and $\mathbf{b}_h$ can finally be reparametrized with respect to Bernoulli random variables, precisely as it happens by using dropout. With the same approach of the reparametrization trick used for AutoEncoders, the stochasticity can be reduced to simple events (noise generation and dropout) and the probability on the parameters composed directly with respect to them. First, the Bernoulli random variables need to be generated. A vector $\boldsymbol{o}_h \in \{0, 1\}^{D}$ can be generated where each element $\boldsymbol{o}_h^{(i)} \sim \mathcal{B}(1 - \phi)$ follows the Bernoulli distribution with probability $1 - \phi$; then, it is sufficient to multiply this random vector by the mean matrix $\operatorname{diag}(\boldsymbol{o}_h) \cdot \mathbf{M}_h$ for zeroing the rows corresponding to the dropped units. An analogous approach can be implemented for modeling dropout on the hidden layer, by introducing a vector $\boldsymbol{o}_l \in \{0, 1\}^{Q}$. Secondly, the noise in Equation 14.23 is generated by introducing the support random variables $\boldsymbol{R}_h \sim \mathcal{N}(0, \mathbf{I}_{D \times Q})$, $\boldsymbol{R}_l \sim \mathcal{N}(0, \mathbf{I}_{Q \times C})$ and $\mathrm{r}_h \sim \mathcal{N}(0, \mathbf{I}_Q)$ for computing the additive noise. By combining these two steps, $\mathbf{W}_h$, $\mathbf{W}_l$ and $\mathbf{b}_h$ can be derived as a function of $\boldsymbol{o}_h$, $\boldsymbol{o}_l$, $\boldsymbol{R}_h$, $\boldsymbol{R}_l$ and $\mathrm{r}_h$:
+
+$$
+\mathbf{W}_h(\boldsymbol{o}_h, \boldsymbol{R}_h) = \operatorname{diag}(\boldsymbol{o}_h) \cdot (\mathbf{M}_h + \sigma\boldsymbol{R}_h) + \operatorname{diag}(1 - \boldsymbol{o}_h) \cdot \sigma\boldsymbol{R}_h \tag{14.26}
+$$
+
+$$
+\mathbf{W}_l(\boldsymbol{o}_l, \boldsymbol{R}_l) = \operatorname{diag}(\boldsymbol{o}_l) \cdot (\mathbf{M}_l + \sigma\boldsymbol{R}_l) + \operatorname{diag}(1 - \boldsymbol{o}_l) \cdot \sigma\boldsymbol{R}_l \tag{14.27}
+$$
+
+$$
+\mathbf{b}_h(\mathrm{r}_h) = \mathbf{m}_h + \sigma\mathrm{r}_h. \tag{14.28}
+$$
+
+Note that the sampled weights still carry the Gaussian perturbation $\sigma\boldsymbol{R}_h$ and $\sigma\boldsymbol{R}_l$: the equivalence with dropout is recovered in the limit $\sigma \to 0$, for which $\mathbf{W}_h(\boldsymbol{o}_h, \boldsymbol{R}_h) \to \operatorname{diag}(\boldsymbol{o}_h) \cdot \mathbf{M}_h$ and $\mathbf{W}_l(\boldsymbol{o}_l, \boldsymbol{R}_l) \to \operatorname{diag}(\boldsymbol{o}_l) \cdot \mathbf{M}_l$, i.e. exactly the masked weights of Section 1.1.
+
+These new reparametrizations can finally be exploited for evaluating the evidence lower bound.
+
+#### Evaluating the ELBO
+
+The notation introduced in Equation 14.26 (thus, separating the random variables from the actual network parameters) is fundamental for facilitating the computation of the ELBO. Recalling again the ELBO derivation of [Chapter 12](/blog/introduction-to-variational-inference) gives:
+
+$$
+\begin{aligned}
+\mathcal{L}_{GP\text{-}VI} \coloneqq{}& \int\!\!\int\!\!\int q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)\, \mathrm{d}\mathbf{W}_h\, \mathrm{d}\mathbf{W}_l\, \mathrm{d}\mathbf{b}_h \\
+&- \mathrm{KL}(q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \| p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)).
+\end{aligned} \tag{14.29}
+$$
+
+Begin by computing the $\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)$ term; for doing so, the independence between the $\mathbf{y}_c$'s can be exploited:
+
+$$
+\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) = \log \prod_{c=1}^{C} p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \tag{14.30}
+$$
+
+$$
+\phantom{\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)} = \sum_{c=1}^{C} \log p(\mathbf{y}_c|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \tag{14.31}
+$$
+
+$$
+\phantom{\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)} = \sum_{c=1}^{C} \log \mathcal{N}(\mathbf{y}_c; \Psi\mathbf{W}_l^{(c)}, \tau^{-1}\mathbf{I}_N) \tag{14.32}
+$$
+
+$$
+\phantom{\log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)} = -\frac{NC}{2}\log(2\pi) + \frac{NC}{2}\log(\tau) - \sum_{c=1}^{C} \frac{\tau}{2}\|\mathbf{y}_c - \Psi\mathbf{W}_l^{(c)}\|_2^2. \tag{14.33}
+$$
+
+Now, let $\hat{\mathbf{Y}} = \Psi\mathbf{W}_l$, with $\hat{\mathbf{y}}^{(n)} = \psi(\mathbf{x}^{(n)}, \mathbf{W}_h, \mathbf{b}_h)^\top \mathbf{W}_l$: by doing so, one obtains a prediction matrix $\hat{\mathbf{Y}} \in \mathbb{R}^{N \times C}$, and can thus sum over the first dimension of this matrix:
+
+$$
+\sum_{c=1}^{C} \|\mathbf{y}_c - \hat{\mathbf{y}}_c\|_2^2 = \sum_{n=1}^{N} \|\mathbf{y}_n - \hat{\mathbf{y}}_n\|_2^2. \tag{14.34}
+$$
+
+The first term in the integral of the $\mathcal{L}_{GP\text{-}VI}$ objective can thus be rewritten as a sum over the samples:
+
+$$
+q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \log p(\mathbf{Y}|\mathbf{X}, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) = \tag{14.35}
+$$
+
+$$
+= \sum_{n=1}^{N} q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \log p(\mathbf{y}_n|\mathbf{x}_n, \mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \tag{14.36}
+$$
+
+$$
+= \sum_{n=1}^{N} q(\boldsymbol{o}_h, \boldsymbol{R}_h, \boldsymbol{o}_l, \boldsymbol{R}_l, \mathrm{r}_h) \log p(\mathbf{y}_n|\mathbf{x}_n, \mathbf{W}_h(\boldsymbol{o}_h, \boldsymbol{R}_h), \mathbf{W}_l(\boldsymbol{o}_l, \boldsymbol{R}_l), \mathbf{b}_h(\mathrm{r}_h)). \tag{14.37}
+$$
+
+Now, the integral in Equation 14.29 can be approximated using MC integration. Specifically, instead of integrating over $\mathbf{W}_h$, $\mathbf{W}_l$ and $\mathbf{b}_h$, one now sums over a set of realizations $\tilde{\mathbf{W}}_h$, $\tilde{\mathbf{W}}_l$ and $\tilde{\mathbf{b}}_h$.
+
+$$
+\mathcal{L}_{GP\text{-}MC} \coloneqq \sum_{n=1}^{N} \log p(\mathbf{y}^{(n)}|\mathbf{x}^{(n)}, \tilde{\mathbf{W}}_h^{(n)}, \tilde{\mathbf{W}}_l^{(n)}, \tilde{\mathbf{b}}_h^{(n)}) - \mathrm{KL}(q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \| p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)). \tag{14.38}
+$$
+
+Lastly, the KL divergence between the real and the approximated distribution must be computed. The main obstacle here is represented by the absence of an analytic solution that solves the problem, since a mixture of Gaussians would be compared against a single Gaussian distribution. Since both $q$ and $p$ factorize over $\mathbf{W}_h$, $\mathbf{W}_l$ and $\mathbf{b}_h$, however, the divergence splits *exactly* into the sum of three independent terms:
+
+$$
+\begin{aligned}
+&\mathrm{KL}(q(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h) \| p(\mathbf{W}_h, \mathbf{W}_l, \mathbf{b}_h)) \\
+&= \mathrm{KL}(q(\mathbf{W}_h) \| p(\mathbf{W}_h)) + \mathrm{KL}(q(\mathbf{W}_l) \| p(\mathbf{W}_l)) + \mathrm{KL}(q(\mathbf{b}_h) \| p(\mathbf{b}_h)),
+\end{aligned} \tag{14.39}
+$$
+
+so that the only approximation needed concerns the two mixture terms.[^5] For a large enough $Q$, the KL on $\mathbf{W}_h$ and $\mathbf{W}_l$ can be approximated as:
+
+$$
+\mathrm{KL}(q(\mathbf{W}_h) \| p(\mathbf{W}_h)) \approx \frac{DQ}{2}(\sigma^2 - \log(\sigma^2) - 1) + \frac{1 - \phi}{2} \sum_{d=1}^{D} {\mathbf{M}_h^{(d)}}^\top \mathbf{M}_h^{(d)} + \text{const} \tag{14.40}
+$$
+
+$$
+\mathrm{KL}(q(\mathbf{W}_l) \| p(\mathbf{W}_l)) \approx \frac{QC}{2}(\sigma^2 - \log(\sigma^2) - 1) + \frac{1 - \phi}{2} \sum_{q=1}^{Q} {\mathbf{M}_l^{(q)}}^\top \mathbf{M}_l^{(q)} + \text{const}. \tag{14.41}
+$$
+
+The bias term can be evaluated analytically as:
+
+$$
+\mathrm{KL}(q(\mathbf{b}_h) \| p(\mathbf{b}_h)) = \frac{1}{2}\left({\mathbf{m}_h}^\top \mathbf{m}_h + Q(\sigma^2 - \log(\sigma^2) - 1)\right) + \text{const} \tag{14.42}
+$$
+
+By combining the individual KL terms for the weights and biases terms, ignoring $\sigma$ (which do not affect the optimization over $\mathbf{M}_h$, $\mathbf{M}_l$, and $\mathbf{m}_h$) and rescaling by $\frac{1}{N\tau}$, the MC Bayesian approximation is finally obtained as:
+
+$$
+\mathcal{L}_{GP\text{-}MC} \propto -\frac{\tau}{2} \sum_{n=1}^{N} \|\mathbf{y}_n - \hat{\mathbf{y}}_n\|_2^2 - \frac{1 - \phi}{2}(\|\mathbf{M}_h\|_2^2 + \|\mathbf{M}_l\|_2^2) - \frac{1}{2}\|\mathbf{m}_h\|_2^2 \tag{14.43}
+$$
+
+$$
+\phantom{\mathcal{L}_{GP\text{-}MC}} \propto -\frac{1}{2N} \sum_{n=1}^{N} \|\mathbf{y}_n - \hat{\mathbf{y}}_n\|_2^2 - \frac{1 - \phi}{2N\tau}(\|\mathbf{M}_h\|_2^2 + \|\mathbf{M}_l\|_2^2) - \frac{1}{2N\tau}\|\mathbf{m}_h\|_2^2. \tag{14.44}
+$$
+
+Since maximizing $\mathcal{L}_{GP\text{-}MC}$ is equivalent to minimizing $-\mathcal{L}_{GP\text{-}MC}$, the expression above recovers the dropout objective in Equation 14.3 for the choice $\lambda_{\mathbf{W}_h} = \lambda_{\mathbf{W}_l} = \frac{1 - \phi}{2N\tau}$ and $\lambda_{\mathbf{b}_h} = \frac{1}{2N\tau}$. Note that this correspondence fixes the model precision $\tau$ once the weight decay has been chosen. This shows that using a dropout objective along with a proper regularization is, indeed, a proper Bayesian approximation.
+
+## 2. Concrete Dropout: dropout rate as a variational parameter
+
+The derivation above shows that dropout *is* a Bayesian approximation, but it says nothing about how the "optimal" value of the dropout rate $\phi$ should be chosen. A related question, for a neural network with several layers, is whether *different* rates should be used across layers (or even, at the extreme, across individual neurons). An apparently reasonable approach is a grid-search procedure over a given set of candidate dropout rates, to estimate the best value for each layer. This procedure is however an unfeasible solution: it is prohibitively expensive for large models, also taking into account that the number of per-layer dropout configurations grows exponentially with the number of layers (let alone the combinatorial blow-up of a per-neuron configuration!). Moreover, it becomes altogether impractical in settings where the amount of available data changes over time, such as in a reinforcement learning or lifelong learning, since the optimal rate would have to be re-tuned as training progresses.
+
+An alternative and more feasible approach is to *learn* the dropout rate itself, alongside the network weights, using gradient descent, by minimizing a suitable objective function. To this aim, the variational interpretation of dropout, which takes the name of **Concrete Dropout**, provides an elegant solution: since the dropout rate parametrizes the approximating distribution of Equation 14.23, it is a variational parameter on exactly the same footing as $\mathbf{M}_h$, $\mathbf{M}_l$ and $\mathbf{m}_h$, and the ELBO itself is the objective to be optimized with respect to it. Writing it for a generic $L$-layer network with per-layer rates $\phi_l$ and mean weight matrices $\mathbf{M}_l$, and normalizing by $N$, gives
+
+$$
+\widehat{\mathcal{L}} = -\frac{1}{N} \sum_{n=1}^{N} \log p(\mathbf{y}^{(n)}|\mathbf{x}^{(n)}, \hat{\boldsymbol{\omega}}_n) + \frac{1}{N} \sum_{l=1}^{L} \mathrm{KL}\left(q_{\phi_l}(\mathbf{W}_l) \,\|\, p(\mathbf{W}_l)\right), \tag{14.45}
+$$
+
+where $\hat{\boldsymbol{\omega}}_n \sim q$ denotes a single set of weights sampled through the dropout masks, and the per-layer divergence takes the form
+
+$$
+\mathrm{KL}\left(q_{\phi_l}(\mathbf{W}_l) \,\|\, p(\mathbf{W}_l)\right) \propto \frac{1 - \phi_l}{2}\|\mathbf{M}_l\|_2^2 - K_l\, \mathcal{H}(\phi_l), \tag{14.46}
+$$
+
+with $K_l$ the number of units of layer $l$ and
+
+$$
+\mathcal{H}(\phi_l) = -\phi_l \log \phi_l - (1 - \phi_l)\log(1 - \phi_l) \tag{14.47}
+$$
+
+the entropy of a Bernoulli random variable of rate $\phi_l$. The dropout rate therefore ceases to be a hyperparameter to be searched for, and becomes the outcome of the optimization itself. This, however, is only possible if the gradient of Equation 14.45 with respect to $\phi_l$ can actually be computed, which is not the case for the discrete masks used so far.
+
+The key idea for overcoming this issue is to reparametrize the dropout mask itself, so that one can legitimately backpropagate through the "randomized" neurons (that is, through the very units switched off by the dropout layer). Such reparametrization tricks, which also lay the groundwork for techniques like Variational Autoencoders (VAEs), will be treated in detail in later chapters; here the discussion is limited to the Gumbel-softmax trick, which is precisely what allows the dropout rate to be treated as an actual variational parameter during optimization. Since in the case of dropout the parameters of a *discrete* Bernoulli distribution have to be optimized, the original reparametrization trick cannot be applied directly: sampling a binary mask is not differentiable with respect to the dropout rate $\phi$. A continuous relaxation is therefore required, such as the Concrete distribution, originally proposed for latent random variables in deep generative models. The Concrete distribution replaces the $\arg\max$ appearing in the Gumbel-max reparametrization of a discrete variable with a temperature-controlled softmax, thus yielding a continuous, differentiable random variable which concentrates on the vertices of the simplex as the temperature $t \to 0$. This allows a discrete, and thus non-differentiable, random variable $\mathbf{z}$ to be rewritten as $\tilde{\mathbf{z}} = g(\phi, \varepsilon)$ where the whole stochasticity is carried by a random variable $\varepsilon$ which does not depend on $\phi$, and $g$ is deterministic and differentiable in $\phi$. Such a factorization is precisely what is needed in the present case: the dropout masks make the units of the network random variables, and applying the above trick to them allows the gradient to be back-propagated onto the variational parameter $\phi$ that is being optimized. In the binary case of interest here, the softmax reduces to the sigmoid $\sigma(\cdot)$, and the relaxed mask reads
+
+$$
+\tilde{\mathbf{z}} = \sigma\left(\frac{1}{t}\left(\log\phi - \log(1 - \phi) + \log u - \log(1 - u)\right)\right), \tag{14.48}
+$$
+
+where $u \sim \mathcal{U}[0, 1]$ is a uniformly distributed variable which does not depend on the parameter $\phi$. Gradients therefore flow only through the terms involving $\phi$, whereas $u$ acts as an external source of noise, making now $\tilde{\mathbf{z}}$ differentiable with respect to $\phi$.
+
+## 3. Dropout injection
+
+The original MC Dropout formulation envisages activating dropout at inference time on a neural network which uses dropout for regularization during training. If, on the one hand, this technique yields a solution with minimal implementation overhead, on the other hand, its integration within already trained neural networks would require retraining the model. This is often infeasible, either because the original training pipeline or data is no longer available, or because retraining risks degrading the performance of a deployed model that has already undergone a validation process. As a solution to this issue, recent work shows that such a strategy can be applied to arbitrary NNs, regardless of whether or not dropout was used during training; this technique is known as **Dropout Injection**. Such a strategy avoids the costs and pitfalls of retraining altogether, retrofitting uncertainty estimation onto an existing deterministic network without altering its weights or requiring further optimization. The first solution proposed in the literature stems from a simple idea, i.e., finding a suitable dropout rate $\phi$ *after training* by minimizing the Negative Log-Likelihood (NLL). Albeit intuitive in practice, injecting dropout into an already trained neural network hides subtle implications which have not been addressed in the original formulation. Specifically, a noteworthy drawback comes to light when using this strategy for regression problems.
+
+### 3.1 Dropout injection: the regression case
+
+In a regression problem, the predictor $f(\mathbf{x}, \theta)$ with parameters $\theta$ takes as input a $D$-dimensional $\mathbf{x}$ vector and outputs a real number $\mathbf{y}$. Consider now a Monte Carlo Variational Inference (MC-VI) regressor $f_{\text{MC-VI}} : \mathbb{R}^{D} \to \mathbb{R}^{M}$ which takes as input a $D$-dimensional vector and outputs, instead, $M$ MC predictions by sampling from a parameters' distribution $q(\theta|\phi)$ approximated using a dropout rate $\phi$. Following Loquercio et al., the main challenge of dropout injection would consist in finding the most suitable dropout rate $\phi$ which minimizes the NLL:
+
+$$
+\phi = \arg\min_{\phi'} \frac{1}{N} \sum_{n=1}^{N} \frac{1}{2} \frac{(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi'))^2}{{\sigma^2}^{(n)}(\phi')} + \frac{1}{2}\log({\sigma^2}^{(n)}(\phi')), \tag{14.49}
+$$
+
+where $\hat{\mathbf{y}}^{(n)}(\phi')$ and ${\sigma^2}^{(n)}(\phi')$ are the empirical mean and variance of the prediction computed using the MC-VI regressor; it is worth noting that both of them depend upon the dropout rate $\phi'$. Practically, too high $\phi'$ values will, at some point, lead to a severe degradation of the performances, since the Bayesian model average (BMA) $\frac{1}{M}\sum_{m=1}^{M} f(\mathbf{x}, \theta_m)$ would deviate too much from the prediction of the original, deterministic network $f(\mathbf{x}, \theta_{\text{MAP}})$. Hence, the range of suitable $\phi$ values shrinks to the interval $[0, \phi_{\max}]$, where $\phi_{\max}$ represents the dropout rate for which the performance degradation is tolerable.
+
+In this situation, however, a subtle complication may eventually occur. In principle, one can minimize the NLL either by minimizing the squared error or by making the uncertainty measure equal to the squared error for each sample. Hence, the problem arises when for the maximum value $\phi_{\max}$ the variances captured by ${\sigma^2}^{(n)}(\phi)$ are too small to accurately reflect the squared errors $(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi))^2$. In the context of dropout injection, where it is not possible to tune the predictions, the NLL minimization serves only to identify the value of $\phi$ which minimizes the distance between the squared error and the empirical variance $|{\sigma^2}^{(n)}(\phi) - (\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi))^2|$. But what happens if the range $[0, \phi_{\max}]$ is so small that it will always produce variances significantly lower than the corresponding squared errors? In such a situation, even though the uncertainty measure cannot accurately reflect the errors, one can approach the problem from a different angle: if the difficulties arise from the insufficient magnitude of the uncertainty measure, its rescaling provides a practical solution. By doing so, Equation 14.49 can be rewritten as a two-variable minimization problem, where the optimal $\phi$ and scale factor $S$ are searched for jointly:
+
+$$
+\phi, S = \arg\min_{\phi', s} \frac{1}{N} \sum_{n=1}^{N} \frac{1}{2} \frac{(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi'))^2}{s \cdot {\sigma^2}^{(n)}(\phi')} + \frac{1}{2}\log(s \cdot {\sigma^2}^{(n)}(\phi')), \tag{14.50}
+$$
+
+Notably, one can easily demonstrate that it is possible to compute the optimal scale factor $S$ over a set of data, given $\phi$, in closed form. Specifically and originally proposed for calibrating regressors, the solution to this problem takes the name of $\sigma$-scaling. The optimal scale factor $s(\phi) = \frac{1}{N}\sum_{n=1}^{N}[(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi))^2 \cdot \sigma_n^{-2}(\phi)]$ can be computed as the expectation of the squared error divided by the variance. The proof is left to the reader as an exercise. By doing so, the problem of Equation 14.50 can be formulated as a simpler optimization problem:
+
+$$
+\phi = \arg\min_{\phi'} \frac{1}{N} \sum_{n=1}^{N} \frac{1}{2} \frac{(\mathbf{y}^{(n)} - \hat{\mathbf{y}}^{(n)}(\phi'))^2}{{\sigma^2}^{(n)}(\phi') \cdot s(\phi')} + \frac{1}{2}\log({\sigma^2}^{(n)}(\phi') \cdot s(\phi')). \tag{14.51}
+$$
+
+Optimizing in this way means the search is no longer confined to a fixed one-dimensional curve, but ranges freely across the two-dimensional surface in which that optimal scale curve $s(\phi)$ is embedded, as illustrated in Figure 14.1. In the scale-agnostic case the search is confined to the slice $s = 1$, and the star marks the best (sub-optimal) NLL attainable there; rescaling the uncertainty measure instead grants access to regions of the surface that would otherwise remain unreachable, yielding a different dropout rate with a lower NLL.
+
+<Figure caption="Figure 14.1: Comparison between the scale-agnostic and the scale-aware formulations of the injected-dropout optimization problem, for an MLP on the Boston Housing data set. Left: the NLL of Equation 14.49 as a function of the dropout rate ϕ alone. Right: the NLL surface of Equation 14.50, considered as a function of both ϕ and the scale factor s; the dashed curve traces the optimal scale factor s(ϕ) of Equation 14.51, the white star reproduces the scale-agnostic solution and the black one the global optimum (ϕ, S). Schematic reproduction: the left-panel values are read off the original plot; the right-panel surface is an illustrative function with the same qualitative features (a curve of optimal scale factors, a sub-optimal minimum on the slice s = 1 and a lower global optimum), not the original data; the hollow star stands for the white one and the filled star for the black one.">
+  <Bdl14ScaleAwareDropout />
+</Figure>
+
+### 3.2 Dropout injection for classification
+
+The discussion of Dropout Injection for regression problems revealed the existence of an issue related to the scale of the approximated distribution. Interestingly, the same does not hold for classification problems, as it becomes evident when modeling the same conditions for classifiers. For regression problems, the function $f(\mathbf{x}, \theta)$ outputs a scalar $\hat{\mathbf{y}} \in \mathbb{R}$: Here, the output can be modeled by placing a Gaussian on the predictive distribution $f(\mathbf{x}, \theta) \sim \mathcal{N}(\mu, \sigma^2)$. For the classification case, instead, the function $f(\mathbf{x}, \theta)$ returns a probability vector $p = \hat{\mathbf{y}} = \operatorname{softmax}(z)$, with $z \in \mathbb{R}^{C}$: in this case, since $\hat{\mathbf{y}}$ represent a vector on the $C$-dimensional simplex, the Dirichlet distribution is a convenient choice for modeling the posterior $\hat{\mathbf{y}} \sim \operatorname{Dir}(\alpha)$.
+
+The key architectural difference between classification and regression models is the use of a softmax activation in the final layer for classification. This enables moment matching to be carried out directly on the logits $z$, which can then be used to estimate the parameters of the Dirichlet distribution. The main challenge in this approach lies in identifying an appropriate distribution over the logits, such that the softmax-transformed outputs follow a Dirichlet distribution. Thankfully, known results on Bayesian statistics state that the softmax of independent gamma variables follows a Dirichlet distribution. This result can be exploited by modeling the exponential of each logit using independent Gamma distributions:
+
+$$
+e^{z_i} \sim \Gamma\left(\alpha_i, \frac{1}{\lambda_i}\right), \ \forall i \in [1, C] \implies \operatorname{softmax}(z) \sim \operatorname{Dir}(\alpha). \tag{14.52}
+$$
+
+The moment matching operation can now be performed directly on the independent Gamma distributions, estimating, for each of them, an empirical mean $\hat{\mu}_i$ and variance $\hat{\sigma}_i^2$ for deriving the shape $\alpha_i$ and scale $\frac{1}{\lambda_i}$ parameters:
+
+$$
+\begin{bmatrix} \alpha_i \lambda_i^{-1} \\ \alpha_i \lambda_i^{-2} \end{bmatrix} = \begin{bmatrix} \hat{\mu}_i \\ \hat{\sigma}_i^2 \end{bmatrix} \implies \alpha_i = \hat{\mu}_i^2 \hat{\sigma}_i^{-2}, \ \frac{1}{\lambda_i} = \hat{\sigma}_i^2 \hat{\mu}_i^{-1} \tag{14.53}
+$$
+
+The parameters of the resulting Dirichlet on the probability vectors can then be derived:
+
+$$
+p \sim \operatorname{Dir}(\hat{\mu}^2 \circ \hat{\sigma}^{-2}). \tag{14.54}
+$$
+
+The consequence of scaling the empirical variance in this setup is straightforward. The exponential logits would now follow a Gamma distribution with scaled shape and rate parameters, changing the Dirichlet parameters on the output probability vector accordingly:
+
+$$
+\Gamma\left(\hat{\mu}_i^2 (s^{-1} \cdot \hat{\sigma}_i^{-2}), s \cdot \hat{\sigma}_i^2 \hat{\mu}_i^{-1}\right) \implies \operatorname{Dir}(\hat{\mu}^2 \circ (s^{-1} \cdot \hat{\sigma}^{-2})). \tag{14.55}
+$$
+
+Since the Dirichlet mean is preserved when scaling, so does the NLL. Hence, when dealing with classification, scaling the empirical variance on the logits do not affect the NLL.
+
+## 4. Concluding remarks
+
+This chapter showed that a technique devised for regularization can be reinterpreted, under the right assumptions, as approximate Bayesian inference. It is precisely this simplicity that makes the method usable at scale: indeed, dropout-based inference does not require any architectural or optimization change, and the entire cost of estimating the predictive uncertainty is deferred to the inference phase. On top of this, the possibility of applying the technique to networks that have *already* been trained opens the door to a wide range of practical scenarios, making dropout-based inference a quick solution for experts and practitioners alike. Nevertheless, it must be kept in mind that the multiple forward passes required at inference time represent a non-negligible obstacle, particularly as model size increases, where the computation of a single prediction can no longer be taken for granted.
+
+To close the chapter, it is worth drawing attention to a distinctive feature of dropout-based inference: unlike more explicit variational treatments, it introduces no variational parameters beyond those a deterministic network already possesses (with the exception of Concrete Dropout), and attaches no distribution to individual weights or neurons. From the next chapter until the end of this part, it will become clear that this is the exception rather than the rule: the methods that follow make the variational object explicit (defined over weights, over functions, or through a set of particles) and consequently require additional quantities to be specified, optimized, or propagated.
+
+[^1]: At this point in the chapter, acute readers could ask why one should pick dropout instead of any other SRT, which would be a legitimate question! There is no particular reason for using dropout instead of, for example, dropconnect, and it is indeed possible to derive a Bayesian approximation from other SRTs. For historical reasons, only dropout will be explored, since the original technique, commonly known as "Monte Carlo Dropout", was originally proposed for dropout. The demonstration of a possible Bayesian approximation using different SRTs is left to the most curious among the readers.
+
+[^2]: Again, for the sake of simplicity, the Bayesian approximation will be discussed only for a specific case, i.e., the regression objective. The same properties apply for classification, even though some modifications are needed; a discussion of this case is left to the reader as an exercise.
+
+[^3]: The extension to the $C$ outputs of the MLP is immediate, and is discussed at the end of the section.
+
+[^4]: Reading this chapter after Chapter 24 may rise the question: is Equation 14.10 a *valid* covariance function? The answer is yes, but for the sake of simplicity, the proof is omitted. In this regard, the more curious among the readers are encouraged to delve deeper into the discussion around Marginalized Kernels.
+
+[^5]: At this stage, one could legitimately ask: yet another approximation? Unfortunately, yes. Since going into this level of detail would weigh the argument down, these approximations are not discussed here. For a more comprehensive treatment, please refer to the original derivation of Gal and Ghahramani.

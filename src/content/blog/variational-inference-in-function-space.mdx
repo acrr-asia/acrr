@@ -1,0 +1,433 @@
+---
+title: "Variational Inference in Function Space"
+description: "Variational inference over probability measures on functions: the function-space ELBO, finite-marginal KL surrogates, singular priors and Wasserstein objectives."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - gaussian processes
+  - function space
+  - wasserstein distance
+series: bayesian-deep-learning
+seriesOrder: 21
+---
+
+## 1. Introduction
+
+Bayesian neural networks (BNNs) were initially envisioned as a framework that could unify the representational power of deep learning with the principled uncertainty quantification of Bayesian inference. Yet, for particular approximation families and experimental settings, standard weight-space posterior approximations can underperform in terms of predictive accuracy or uncertainty calibration. A key difficulty of the standard weight-space variational formulation lies in the nature of inference in weight space: the map from network parameters to functions is highly nonlinear and many-to-one, leading to complex, multimodal posterior landscapes. This makes it hard both to approximate posteriors in this formulation and to interpret or encode prior knowledge about the data-generating process through a weight-space prior.
+
+These challenges motivate a shift of perspective from parameter-space to function-space variational inference (FSVI). At the theoretical level, rather than performing inference over neural-network weights, one works with probability measures over functions, objects that describe input–output behavior and more naturally capture inductive biases about the learning problem. In this setting, the prior is defined over functions (for instance, as a Gaussian process), and the likelihood operates on function evaluations. FSVI seeks an approximate posterior measure by minimizing its divergence from the posterior measure. Practical methods, however, always must access these measures through finite-dimensional representations either through parameters or through finite-dimensional marginals since it is infeasible to manipulate an infinite-dimensional law in its entirety.
+
+This change in perspective has important implications for both the mathematical and computational structure of variational inference. First, it requires measure-theoretic formulations of Bayes' rule and Kullback–Leibler (KL) divergence in infinite-dimensional spaces, where no analog of Lebesgue measure exists. Second, it exposes limitations of KL-based objectives: they may be intractable to evaluate directly and can be infinite in many situations, e.g., when a finite-dimensional parameterized neural network represents a variational function law and the prior is a non-degenerate Gaussian process. These difficulties motivate a range of KL approximations and generalized objectives based on alternative discrepancies.
+
+This chapter develops the function-space perspective. It formalizes Bayesian inference on a measurable function space, derives the associated variational objectives, and shows how finite-dimensional approximations make them usable and motivate new methods. Throughout, the emphasis is on the interplay between function-space theory and its practical realization in neural networks and Gaussian processes.
+
+## 2. Function-space Bayes theorem
+
+The key difficulty when working with function spaces is that there is no analog of a translation-invariant, $\sigma$-finite Lebesgue measure whenever the corresponding space is infinite-dimensional. Consequently, Bayes' rule cannot be written as "posterior density $\propto$ prior density $\times$ likelihood" relative to a base Lebesgue measure. Instead, the correct formulation is *measure-theoretic*: the posterior is defined via the Radon–Nikodym derivative of the posterior measure with respect to the prior measure. A broader perspective on the measure-theoretic formulation of variational inference can be found in the literature on that subject.
+
+### 2.1 Setting and notation
+
+Let $\mathcal{X}$ be a measurable input domain and let $\mathcal{F} \subseteq \mathbb{R}^{\mathcal{X}}$ be a space of real-valued functions equipped with a $\sigma$-algebra $\mathfrak{F}$. The symbol $m \in \mathbb{N}$ denotes the size of an arbitrary finite evaluation tuple. For $\mathbf{x} = (x_1, \dots, x_m) \in \mathcal{X}^m$, define the **evaluation map**
+
+$$
+\operatorname{eval}_{\mathbf{x}} : \mathcal{F} \to \mathbb{R}^m, \qquad \operatorname{eval}_{\mathbf{x}}(f) := [f(x_1), \dots, f(x_m)]^\top.
+$$
+
+Two examples are: (i) $\mathcal{F} = \mathbb{R}^{\mathcal{X}}$ with the cylinder, or product, $\sigma$-algebra, namely the smallest $\sigma$-algebra making every finite evaluation map measurable; and (ii) a separable Banach or Hilbert space of functions with its Borel $\sigma$-algebra. Reproducing kernel Hilbert spaces (RKHSs), introduced in Chapter 23, are convenient examples because their point evaluations are continuous linear functionals and hence measurable.
+
+The symbols $\mathfrak{p}$ and $\mathfrak{q}$ denote probability measures on $(\mathcal{F}, \mathfrak{F})$ (e.g., a prior measure $\mathfrak{p}$ and a variational approximation $\mathfrak{q}$). The pushforward finite-dimensional marginal of $\mathfrak{p}$ is $\mathfrak{p}_{\mathbf{x}} := (\operatorname{eval}_{\mathbf{x}})_\# \mathfrak{p}$.
+
+Let $(\mathcal{Y}, \mathfrak{Y})$ denote the data space, equipped with the corresponding $\sigma$-algebra $\mathfrak{Y}$. A **likelihood functional** is a map
+
+$$
+L(\,\cdot \mid f) : \mathcal{Y} \to [0, \infty], \qquad \text{such that } (f, y) \mapsto L(y \mid f) \text{ is } \mathfrak{F} \otimes \mathfrak{Y}\text{-measurable.}
+$$
+
+For example, if the data space is $\mathcal{Y} = \mathbb{R}^n$, then $L(y \mid f)$ may be a density $p(y \mid f)$ with respect to Lebesgue measure on $\mathbb{R}^n$, parameterized by $f \in \mathcal{F}$.
+
+In supervised learning, let $n$ denote the number of observations, let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^n$, and write $\mathbf{x}_{\mathrm{tr}} = (x_1, \dots, x_n) \in \mathcal{X}^n$ and $y = (y_1, \dots, y_n) \in \mathcal{Y}$. A common factorized likelihood is
+
+$$
+L(y \mid f) = \prod_{i=1}^{n} p(y_i \mid f(x_i)) = \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f)),
+$$
+
+so the likelihood depends on $f$ only through its values at the training inputs. Other settings are possible. For example, in Cox process models, $f$ parameterizes a Poisson-process intensity and the likelihood depends on integrals involving $f$.
+
+### 2.2 Function-space Bayes theorem
+
+Fix an observation $y \in \mathcal{Y}$ and let $\mathfrak{p}$ denote the prior probability measure. Then the *evidence* (marginal likelihood) is the Lebesgue integral
+
+$$
+Z(y) \;:=\; \int_{\mathcal{F}} L(y \mid f)\, d\mathfrak{p} \;\in\; [0, \infty].
+$$
+
+Throughout this chapter it is assumed that $0 < Z(y) < \infty$. Define a set function on $\mathfrak{F}$ by
+
+$$
+\mathfrak{p}(\, A \mid y \,) \;:=\; \frac{1}{Z(y)} \int_A L(y \mid f)\, d\mathfrak{p}, \qquad A \in \mathfrak{F}.
+$$
+
+Then $\mathfrak{p}(\cdot \mid y)$ is a probability measure on $(\mathcal{F}, \mathfrak{F})$, it is absolutely continuous with respect to $\mathfrak{p}$ (denoted $\mathfrak{p}(\cdot \mid y) \ll \mathfrak{p}$), and its Radon–Nikodym derivative is
+
+$$
+\frac{d\,\mathfrak{p}(\cdot \mid y)}{d\,\mathfrak{p}}(f) \;=\; \frac{L(y \mid f)}{Z(y)} \qquad \mathfrak{p}\text{-a.s.}
+$$
+
+The measure $\mathfrak{p}(\cdot \mid y)$ is called the *posterior measure* on the function space.
+
+Note here that there is no appeal to "posterior densities" on $\mathcal{F}$. The posterior is always defined *relative to the prior* via the measurable likelihood functional.
+
+### 2.3 Finite-dimensional (evaluation) form
+
+If the likelihood depends only on the training evaluations, i.e.
+
+$$
+L(y \mid f) = \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f)),
+$$
+
+define the finite-dimensional evidence
+
+$$
+\widetilde{Z}(y) := \int_{\mathbb{R}^n} \widetilde{L}(y \mid \mathbf{u})\, d\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}(\mathbf{u}).
+$$
+
+By the definition of a pushforward integral, $\widetilde{Z}(y) = Z(y)$. Thus, in addition to
+
+$$
+\frac{d\,\mathfrak{p}(\cdot \mid y)}{d\,\mathfrak{p}}(f) \;=\; \frac{\widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f))}{\widetilde{Z}(y)}, \qquad \mathfrak{p}\text{-a.s.},
+$$
+
+the following also holds:
+
+$$
+\frac{d\,\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}(\cdot \mid y)}{d\,\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}}(\mathbf{u}) = \frac{\widetilde{L}(y \mid \mathbf{u})}{\widetilde{Z}(y)}, \qquad \mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}\text{-a.s.} \tag{17.1}
+$$
+
+Thus the posterior marginal at $\mathbf{x}_{\mathrm{tr}}$ is obtained using a familiar finite-dimensional calculation: by reweighting the corresponding prior marginal $\mathfrak{p}_{\mathbf{x}_{\mathrm{tr}}}$ with the likelihood and renormalizing. However, although (17.1) gives the correct posterior marginal at the training inputs, that single marginal does not determine the full posterior measure $\mathfrak{p}(\cdot \mid y)$ on $\mathcal{F}$.
+
+## 3. Function-space KL and variational objectives
+
+### 3.1 Measure-theoretic KL divergence
+
+The Kullback–Leibler divergence between two probability measures $\mathfrak{q}$ and $\mathfrak{p}$ on $(\mathcal{F}, \mathfrak{F})$ is
+
+$$
+\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) \;=\; \begin{cases} \displaystyle\int_{\mathcal{F}} \log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right) d\mathfrak{q}, & \text{if } \mathfrak{q} \ll \mathfrak{p}, \\[1ex] +\infty, & \text{otherwise,} \end{cases}
+$$
+
+where $\frac{d\mathfrak{q}}{d\mathfrak{p}}$ denotes the Radon–Nikodym derivative of $\mathfrak{q}$ with respect to $\mathfrak{p}$. Note that $\mathrm{KL}(\mathfrak{q} \| \mathfrak{p})$ may be infinite even when $\mathfrak{q} \ll \mathfrak{p}$. Absolute continuity guarantees the existence of the Radon–Nikodym derivative $\frac{d\mathfrak{q}}{d\mathfrak{p}}$, but imposes no integrability conditions on $\log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right)$ under $\mathfrak{q}$.
+
+### 3.2 Function-space ELBO
+
+For fixed data $y$, the posterior measure $\mathfrak{p}(\cdot \mid y)$ is henceforth denoted by $\widehat{\mathfrak{p}}$. Suppose $\mathfrak{q} \ll \mathfrak{p}$, $\mathfrak{q} \ll \widehat{\mathfrak{p}}$ and both $\mathrm{KL}\big(\mathfrak{q} \,\|\, \widehat{\mathfrak{p}}\big)$ and $\mathrm{KL}\big(\mathfrak{q} \,\|\, \mathfrak{p}\big)$ are finite. Then the chain rule for Radon–Nikodym derivatives can be applied:
+
+$$
+\begin{aligned}
+\mathrm{KL}\big(\mathfrak{q} \,\|\, \widehat{\mathfrak{p}}\big) &= \int \log\!\left(\frac{d\mathfrak{q}}{d\widehat{\mathfrak{p}}}\right) d\mathfrak{q} = \int \log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right) d\mathfrak{q} - \int \log\!\left(\frac{d\widehat{\mathfrak{p}}}{d\mathfrak{p}}\right) d\mathfrak{q} \\
+&= \int \log\!\left(\frac{d\mathfrak{q}}{d\mathfrak{p}}\right) d\mathfrak{q} - \int \log\!\left(\frac{L(y \mid f)}{Z(y)}\right) d\mathfrak{q} \\
+&= \underbrace{\mathrm{KL}(\mathfrak{q} \| \mathfrak{p})}_{\text{regularizer (KL to prior)}} - \underbrace{\mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)]}_{\text{data fit}} + \log Z(y).
+\end{aligned}
+$$
+
+Rearranging yields the evidence lower bound
+
+$$
+\boxed{\log Z(y) \geq \mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)] - \mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) =: \mathrm{ELBO}(\mathfrak{q})} \tag{17.2}
+$$
+
+with equality if and only if $\mathfrak{q} = \widehat{\mathfrak{p}}$. This is the *variational objective in function space*. The aim is to consider problems of the form
+
+$$
+\max_{\mathfrak{q} \in \mathcal{Q}} \mathrm{ELBO}(\mathfrak{q}) \tag{17.3}
+$$
+
+for some variational family $\mathcal{Q}$.
+
+### 3.3 Well-posedness of ELBO maximization
+
+A simple way to ensure that the ELBO is well defined throughout the variational family $\mathcal{Q}$ is to require that every $\mathfrak{q} \in \mathcal{Q}$ satisfies $\mathfrak{q} \ll \mathfrak{p}$ and that both $\mathrm{KL}(\mathfrak{q} \| \mathfrak{p})$ and $\mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)]$ are finite. This is not always straightforward to ensure. For example, it is possible that the KL to the prior is finite, i.e. $\mathfrak{q} \ll \mathfrak{p}$ and $\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) < \infty$, while the KL to the posterior is not. Indeed, if $\mathfrak{q}$ puts positive mass where $d\widehat{\mathfrak{p}}/d\mathfrak{p} = 0$, then $\mathrm{KL}\big(\mathfrak{q} \,\|\, \widehat{\mathfrak{p}}\big) = \infty$ and $\log L(y \mid f) = -\infty$ on a set of positive $\mathfrak{q}$-measure. If, in addition, the positive part of $\log L(y \mid f)$ is integrable, then $\mathbb{E}_{\mathfrak{q}}[\log L(y \mid f)] = -\infty$ and the lower bound (17.2) is vacuous; otherwise the expected log-likelihood may even be undefined. Candidates with an undefined expected log-likelihood must be excluded, whereas a family for which every candidate has ELBO equal to $-\infty$ also yields an ill-posed maximization problem.
+
+If, in addition to $0 < Z(y) < \infty$, one assumes
+
+$$
+0 < L(y \mid f) < \infty \quad \text{for } \mathfrak{p}\text{-almost every } f,
+$$
+
+then
+
+$$
+\frac{d\widehat{\mathfrak{p}}}{d\mathfrak{p}}(f) = \frac{L(y \mid f)}{Z(y)} > 0 \qquad \mathfrak{p}\text{-a.s.},
+$$
+
+so $\widehat{\mathfrak{p}}$ and $\mathfrak{p}$ are equivalent measures. Consequently, any $\mathfrak{q} \ll \mathfrak{p}$ also satisfies $\mathfrak{q} \ll \widehat{\mathfrak{p}}$, although this equivalence alone does not make the KL divergences, the expected log-likelihood, or the ELBO finite; hence particular care needs to be taken in choosing the variational family. A sufficient condition is that for every variational law under consideration,
+
+$$
+\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) < \infty, \qquad \mathbb{E}_{\mathfrak{q}}[|\log L(y \mid f)|] < \infty.
+$$
+
+Leaving aside the difficulty of whether the ELBO objective is well defined, there remains the challenge of efficiently estimating it and computing its gradients for a given variational family. The next section discusses a supremum characterization of the function-space KL divergence that motivates practical approaches to ELBO maximization.
+
+## 4. Supremum characterization of the ELBO
+
+Let $\mathfrak{p}$ and $\mathfrak{q}$ be arbitrary probability measures on $\mathbb{R}^{\mathcal{X}}$ equipped with the cylinder $\sigma$-algebra generated by all finite evaluation maps. For a finite tuple $\mathbf{z} = (z_1, \dots, z_m)$, denote their pushforward marginals by $\mathfrak{p}_{\mathbf{z}}$ and $\mathfrak{q}_{\mathbf{z}}$. On this measurable space, with no additional topology or sample-path regularity assumptions, it has been shown that
+
+$$
+\mathrm{KL}(\mathfrak{q} \| \mathfrak{p}) \;=\; \sup_{m \in \mathbb{N},\, \mathbf{z} \in \mathcal{X}^m} \mathrm{KL}\big(\mathfrak{q}_{\mathbf{z}} \| \mathfrak{p}_{\mathbf{z}}\big). \tag{17.4}
+$$
+
+The identity follows because the cylinder $\sigma$-algebra contains precisely the information generated by finite evaluations. Note that one should not transfer the identity without further argument to a larger Borel $\sigma$-algebra or to other function spaces.
+
+For the supervised likelihood introduced above, define
+
+$$
+\mathrm{ELBO}_{\mathbf{z}}(\mathfrak{q}) := \mathbb{E}_{\mathfrak{q}}\Big[\log \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f))\Big] - \mathrm{KL}\big(\mathfrak{q}_{\mathbf{z}} \| \mathfrak{p}_{\mathbf{z}}\big).
+$$
+
+Substitution in the function-space ELBO gives
+
+$$
+\mathrm{ELBO}(\mathfrak{q}) = \inf_{m \in \mathbb{N},\, \mathbf{z} \in \mathcal{X}^m} \mathrm{ELBO}_{\mathbf{z}}(\mathfrak{q}).
+$$
+
+Note that the data-fit term depends on the fixed training tuple $\mathbf{x}_{\mathrm{tr}}$, not on the auxiliary tuple $\mathbf{z}$ over which the infimum is taken. The infimum need not be attained, however, and its value may still be $-\infty$ when the function-space KL is infinite.
+
+### 4.1 Adversarial functional VI
+
+Restricting the tuple $\mathbf{z}$ to a fixed size $m \in \mathbb{N}$ gives the finite-dimensional saddle problem
+
+$$
+\max_{\mathfrak{q}} \min_{\mathbf{z} \in \mathcal{X}^m} \mathrm{ELBO}_{\mathbf{z}}(\mathfrak{q}).
+$$
+
+Optimization alternates between minimizing over $\mathbf{z}$ and maximizing over $\mathfrak{q}$, in analogy with a capacity-limited adversary in a generative adversarial network. This finite-evaluation objective is not generally an ELBO: it retains an evidence-lower-bound interpretation only when $\mathbf{z}$ contains every input whose function value enters the likelihood, here all of $\mathbf{x}_{\mathrm{tr}}$. As has been pointed out, the adversarial scheme can generalize poorly. Its selected evaluation locations are likely to remain close to the training data, and the prior enters the objective only through the KL term, so prior information may not be used effectively for extrapolation.
+
+### 4.2 Sampling-based functional VI
+
+To ensure that the KL term constrains behavior in prediction regions, sampling-based functional VI augments a random subsample of training inputs with evaluation locations drawn from the prediction domain. Let $\Pi_{\mathrm{tr}}$ be a specified distribution on finite tuples sampled from $\{x_1, \dots, x_n\}$, and let $\nu^\star$ be a user-chosen probability distribution on a prediction domain. Write $\mathbf{x}_{\mathrm{sub}} \sim \Pi_{\mathrm{tr}}$ for a random training-input tuple, $\mathbf{z}^\star \sim (\nu^\star)^{\otimes m_\star}$ for $m_\star$ independent prediction-domain locations, and $\oplus$ for tuple concatenation. The sampling-based objective is
+
+$$
+\max_{\mathfrak{q}} \mathbb{E}_{\mathbf{x}_{\mathrm{sub}} \sim \Pi_{\mathrm{tr}}} \mathbb{E}_{\mathbf{z}^\star \sim (\nu^\star)^{\otimes m_\star}} \left[\mathrm{ELBO}_{\mathbf{x}_{\mathrm{sub}} \oplus \mathbf{z}^\star}(\mathfrak{q})\right].
+$$
+
+The data-fit term is always evaluated at the full training tuple $\mathbf{x}_{\mathrm{tr}}$; only the KL term uses the sampled tuple. The sampling scheme thereby encourages agreement with the prior both on and off the training set. However, the infimum has been replaced with expectation, so the connection to the function-space ELBO is no longer direct. In the special case where the true posterior is a GP and every evaluation tuple contains all the training inputs, the true posterior maximizes both the expected finite-measurement objective and the full function-space objective, providing a justification for using expectation. The new criterion makes it possible to combine structured GP priors (e.g., periodic plus RBF kernels) with a BNN variational family. In the reported experiments, this combination recovered periodic structure and extrapolated comparably to exact GPs in examples where standard weight-space VI failed to extrapolate sensibly. The study also reports competitive and scalable results on UCI data sets and applies the method to contextual bandits. In those studied settings, the sampling-based scheme yielded better overall performance than the adversarial scheme.
+
+### 4.3 Grid-functional divergence
+
+Sampling-based functional VI replaces the supremum in (17.4) by an expectation of marginal KL divergences but keeps the size of the sampled tuples fixed. The grid-functional approach takes this idea further and also randomizes the tuple size. Let $M$ have a probability mass function $\pi$ on $\mathbb{N}$ with $\pi(m) > 0$ for every $m$, and, conditionally on $M = m$, draw $\mathbf{z}_M \sim \nu_m^\star$ on $\mathcal{X}^m$. Define the augmented grid $\mathbf{u}_M = \mathbf{x}_{\mathrm{tr}} \oplus \mathbf{z}_M$ and
+
+$$
+\mathrm{KL}_{\mathrm{grid}}(\mathfrak{q} \| \mathfrak{p}) := \mathbb{E}_{M \sim \pi} \mathbb{E}_{\mathbf{z}_M \sim \nu_M^\star} \left[\mathrm{KL}\big(\mathfrak{q}_{\mathbf{u}_M} \| \mathfrak{p}_{\mathbf{u}_M}\big)\right]. \tag{17.5}
+$$
+
+In the original setting of this approach, where $\mathcal{X}$ is a compact subset of $\mathbb{R}^d$, suppose each $\nu_m^\star$ has full support on $\mathcal{X}^m$. Since $\pi(m) > 0$ for every $m$, Proposition 1 then gives $\mathrm{KL}_{\mathrm{grid}}(\mathfrak{q} \| \mathfrak{p}) = 0$ if and only if $\mathfrak{q} = \mathfrak{p}$. If $M = m$ is fixed, only the marginals on augmented tuples $\mathbf{x}_{\mathrm{tr}} \oplus \mathbf{z}_m$ are compared; distinct process laws can agree on all such marginals while differing on larger tuples. Depending on the choice of $\pi$, the expectation can remain finite even when the supremum KL is infinite. Moreover, because every $\mathbf{u}_M$ contains all training inputs, Proposition 3 of the original work ensures that a lower bound on the evidence is still obtained,
+
+$$
+\log Z(y) \geq \mathbb{E}_{\mathfrak{q}}\Big[\log \widetilde{L}(y \mid \operatorname{eval}_{\mathbf{x}_{\mathrm{tr}}}(f))\Big] - \mathrm{KL}_{\mathrm{grid}}(\mathfrak{q} \| \mathfrak{p}). \tag{17.6}
+$$
+
+The paper combines this objective with stochastic process generators, a flexible non-Gaussian variational family, and analytic and mini-batch estimators. In the reported experiments, the resulting method reproduced the qualitative posterior structure of piecewise-constant and piecewise-linear implicit priors and performed strongly against the selected baselines on UCI regression, contextual bandits, and image classification with out-of-distribution detection.
+
+## 5. Parameter pushforward measures
+
+Let $\Theta \subset \mathbb{R}^d$ be a finite-dimensional parameter space with Borel $\sigma$-algebra $\mathcal{B}(\Theta)$. Let $g : \Theta \to \mathcal{F}$ be a measurable parameter-to-function map, $g(\theta) = f(\cdot\,; \theta)$. Given a *parameter prior* $P_\Theta$ and a *variational parameter law* $Q_\Theta$ on $(\Theta, \mathcal{B}(\Theta))$, define the induced pushforward measures
+
+$$
+\mathfrak{p}^g \;:=\; g_\# P_\Theta, \qquad \mathfrak{q}^g \;:=\; g_\# Q_\Theta,
+$$
+
+so that $\mathfrak{p}^g(A) = P_\Theta(\{\theta : g(\theta) \in A\})$ and likewise for $\mathfrak{q}^g$.
+
+### 5.1 Data-processing inequality
+
+For any measurable $g$, the data-processing inequality gives
+
+$$
+\boxed{\mathrm{KL}\big(\mathfrak{q}^g \,\|\, \mathfrak{p}^g\big) \;\leq\; \mathrm{KL}\big(Q_\Theta \,\|\, P_\Theta\big).} \tag{17.7}
+$$
+
+Suppose $Q_\Theta \ll P_\Theta$ and the right-hand side is finite, and let $h = dQ_\Theta / dP_\Theta$. Equality holds precisely when $h$ is measurable with respect to the $\sigma$-algebra generated by $g$, equivalently when $h = \varphi \circ g$ $P_\Theta$-a.s. for some measurable $\varphi$. Thus, a sufficient condition for equality is $P_\Theta$-almost-sure injectivity of $g$. In general, however, $g$ is many-to-one and equality typically does not hold.
+
+Thus, if one chooses the *function-space prior* to be the *same* BNN-induced law $\mathfrak{p}^g$ and approximates it with $\mathfrak{q}^g$ induced by a different parameter law, the function-space KL cannot exceed the parameter-space KL. For the same expected log-likelihood, the function-space ELBO is therefore at least as large. This formalizes why working directly in function space can give *tighter* objectives than parameter-space VI when $g$ is many-to-one (and, of course, deep neural network models yield many-to-one mappings). This comparison of objective values does not, by itself, guarantee a better predictive approximation, but a tighter function-space objective avoids penalizing discrepancies between parameter laws that induce the same function law, thereby aligning the regularization more closely with the predictive object of interest.
+
+### 5.2 Estimating function-space KL for parameter pushforwards
+
+The function-space KL in (17.7) is finite whenever $\mathrm{KL}(Q_\Theta \| P_\Theta) < \infty$. It is nevertheless a divergence between generally non-standard pushforward laws and still requires approximation.
+
+One tractable approximation has been proposed as follows. For a finite tuple $\mathbf{z} = (z_1, \dots, z_m) \in \mathcal{X}^m$, write $g_{\mathbf{z}}(\theta) = \operatorname{eval}_{\mathbf{z}}(g(\theta)) \in \mathbb{R}^m$. For $G \in \{P_\Theta, Q_\Theta\}$, define the parameter mean and covariance
+
+$$
+m_G := \mathbb{E}_{\theta \sim G}[\theta], \qquad S_G := \operatorname{Cov}_{\theta \sim G}(\theta).
+$$
+
+Assume that $g_{\mathbf{z}}$ is differentiable at $m_G$ and define its Jacobian by
+
+$$
+J_{\mathbf{z}}(m_G) := \left[\left.\frac{\partial g(z_i, \theta)}{\partial \theta_j}\right|_{\theta = m_G}\right]_{\substack{1 \leq i \leq m \\ 1 \leq j \leq d}} \in \mathbb{R}^{m \times d}.
+$$
+
+Linearize $g_{\mathbf{z}}$ at $m_G$:
+
+$$
+g_{\mathbf{z}}(\theta) \approx g_{\mathbf{z}}(m_G) + J_{\mathbf{z}}(m_G)(\theta - m_G).
+$$
+
+This is the same local parameter-to-function construction used in linearized Laplace approximations; see [Chapter 8](/blog/linearized-laplace-approximations). It gives the Gaussian marginal approximations
+
+$$
+(\mathfrak{p}^g)_{\mathbf{z}} \approx \mathcal{N}\big(\mu_P(\mathbf{z}), \Sigma_P(\mathbf{z})\big), \qquad (\mathfrak{q}^g)_{\mathbf{z}} \approx \mathcal{N}\big(\mu_Q(\mathbf{z}), \Sigma_Q(\mathbf{z})\big),
+$$
+
+where
+
+$$
+\mu_G(\mathbf{z}) := g_{\mathbf{z}}(m_G), \qquad \Sigma_G(\mathbf{z}) := J_{\mathbf{z}}(m_G) S_G J_{\mathbf{z}}(m_G)^\top.
+$$
+
+Thus $m_G, S_G$ are moments in parameter space, whereas $\mu_G, \Sigma_G$ are moments of the linearized function values.
+
+Replacing the supremum in (17.4) by a maximum over user-chosen regularization tuples $\{\mathbf{z}^{(s)}\}_{s=1}^S$, the surrogate function-space objective becomes
+
+$$
+\begin{aligned}
+\widetilde{\mathcal{F}}(Q_\Theta) := {} & \mathbb{E}_{\theta \sim Q_\Theta}\Big[\log \widetilde{L}(y \mid g_{\mathbf{x}_{\mathrm{tr}}}(\theta))\Big] \\
+& - \max_{1 \leq s \leq S} \mathrm{KL}\Big(\mathcal{N}\big(\mu_Q(\mathbf{z}^{(s)}), \Sigma_Q(\mathbf{z}^{(s)})\big) \,\Big\|\, \mathcal{N}\big(\mu_P(\mathbf{z}^{(s)}), \Sigma_P(\mathbf{z}^{(s)})\big)\Big).
+\end{aligned}
+$$
+
+The prior moments $m_P, S_P$ are fixed by $P_\Theta$, while the moments of $Q_\Theta$ are variational quantities. In practice, samples from $Q_\Theta$ are reparameterized and the Jacobians are obtained by automatic differentiation. By construction, (i) the data-processing inequality ensures a well-posed function-space regularizer when the parameter-space KL is finite, and (ii) the linearization supplies closed-form KL terms at each $\mathbf{z}$, yielding a scalable estimator that preserves the function-space viewpoint while remaining compatible with BNN pushforwards.
+
+### 5.3 Interpretable priors and the singularity issue
+
+Often the parameter pushforward $\mathfrak{p}^g$ is not wanted as the prior: it is not clear what prior beliefs on neural network weights represent. Instead, one may specify a non-degenerate GP prior $\mathfrak{p}$ whose covariance kernel expresses structural assumptions about the unknown function, while retaining the BNN variational law $\mathfrak{q}^g$. Function-space priors are discussed further in Chapter 31.
+
+This choice falls outside the common-map setting of (17.7). It also creates a dimension mismatch. Fix $\mathbf{z} = (z_1, \dots, z_m)$ and consider
+
+$$
+g_{\mathbf{z}} : \theta \longmapsto \big(g(z_1, \theta), \dots, g(z_m, \theta)\big) \in \mathbb{R}^m.
+$$
+
+Assume that $g_{\mathbf{z}}$ is locally Lipschitz, as is the case for standard finite neural networks with locally Lipschitz activations. If $m > d$, its image is a countable union of sets with Hausdorff dimension at most $d$, and therefore has $m$-dimensional Lebesgue measure zero. The marginal $\mathfrak{q}^g_{\mathbf{z}} = (g_{\mathbf{z}})_\# Q_\Theta$ assigns probability one to this image. By contrast, if the GP covariance matrix at $\mathbf{z}$ is positive definite, $\mathfrak{p}_{\mathbf{z}}$ has a Lebesgue density on $\mathbb{R}^m$ and assigns probability zero to the image. For geometric intuition, a one-parameter network evaluated at two inputs traces a curve in the plane; a non-degenerate bivariate Gaussian assigns zero probability to that curve.
+
+Hence $\mathfrak{q}^g_{\mathbf{z}}$ and $\mathfrak{p}_{\mathbf{z}}$ are mutually singular for such a tuple, and the cylinder-space identity (17.4) yields
+
+$$
+\mathrm{KL}\big(\mathfrak{q}^g \,\|\, \mathfrak{p}\big) = \sup_{m, \mathbf{z}} \mathrm{KL}\big(\mathfrak{q}^g_{\mathbf{z}} \,\|\, \mathfrak{p}_{\mathbf{z}}\big) = +\infty.
+$$
+
+KL-based objectives are hence incompatible with the setting where the aim is to posit an interpretable GP prior but to use a flexible neural network parameterization of the posterior. This motivates considering discrepancies that do not require absolute continuity.
+
+## 6. Generalized variational objectives
+
+### 6.1 Motivation
+
+In function-space VI with interpretable priors, the KL-based ELBO may equal $-\infty$ because the variational law and the prior may be mutually singular; in particular, the KL divergences between a parametric pushforward and a GP measure can be infinite in both directions. Even if a variational measure that is absolutely continuous with respect to the prior were used instead, there is generally no easy way to estimate KL in infinite-dimensional spaces. This motivates variational objectives with better analytical structure. Consequently, this section seeks alternative discrepancies that remain finite and tractable for rich function-space distributions.
+
+### 6.2 Generalized variational objective (GVO)
+
+Let $(\mathcal{F}, \mathfrak{F})$ be a measurable function space, let $\mathfrak{p}$ be a prior, and let $L(y \mid f)$ be a positive likelihood. Replace the KL regularization by a discrepancy $D$ and define a generalized variational objective (GVO) as:
+
+$$
+\mathcal{J}_D(\mathfrak{q}) := \mathbb{E}_{\mathfrak{q}}\big[\log L(y \mid f)\big] - D(\mathfrak{q}, \mathfrak{p}).
+$$
+
+When $D = \mathrm{KL}$, this is the ordinary ELBO. Taking $D = \mathrm{KL}_{\mathrm{grid}}$ as defined in (17.5) yields the approach of Section 4.3. The linearized Gaussian approximation in Section 5.2 can likewise be viewed as a generalized objective over parameter laws, with the maximum of its finite-marginal Gaussian KL terms serving as a surrogate discrepancy. For a general $D$, $\mathcal{J}_D$ need not lower-bound the evidence, and its optimizer need not be the ordinary Bayesian posterior. It instead defines a generalized update whose interpretation depends on $D$.
+
+### 6.3 Wasserstein-2 GVO for Gaussian measures on function spaces
+
+A particularly attractive choice for $D$ in function space is the squared 2-Wasserstein distance $W_2^2$, which remains finite for any two Gaussian measures in a separable Hilbert space and has a closed form expression. Moreover, the 2-Wasserstein distance is a genuine metric and measures the geometry of transporting one probability law to another.
+
+Background on Gaussian measures in Hilbert spaces can be found in the literature; Gaussian measures on more general linear spaces such as Banach or Fréchet spaces have also been treated. Gaussian measures are closely related to Gaussian processes, but differ in that they are explicitly defined on a specific function space, whereas trajectories of a Gaussian process can be embedded into multiple function spaces.
+
+Assume that $\mathcal{F}$ is a separable Hilbert space, such as $L^2(\mathcal{X}, \rho)$ for a finite measure $\rho$ or a reproducing kernel Hilbert space. An operator $A$ on $\mathcal{F}$ is *Hilbert–Schmidt* if $\sum_i \|A e_i\|_{\mathcal{F}}^2 < \infty$ for an orthonormal basis $(e_i)_i$. A positive operator $C$ is *trace-class* if $\operatorname{tr}(C) = \sum_i \langle C e_i, e_i \rangle_{\mathcal{F}} < \infty$. Every positive self-adjoint operator $C$ has a unique positive square root, and $C$ is trace-class if and only if $C^{1/2}$ is Hilbert–Schmidt. Covariance operators of Gaussian measures on $\mathcal{F}$ are always positive, self-adjoint, and trace-class.
+
+Suppose $\mathfrak{p} = \mathcal{N}(m_{\mathfrak{p}}, C_{\mathfrak{p}})$ and $\mathfrak{q} = \mathcal{N}(m_{\mathfrak{q}}, C_{\mathfrak{q}})$ are Gaussian measures on $\mathcal{F}$, with $m_{\mathfrak{p}}, m_{\mathfrak{q}} \in \mathcal{F}$. Then
+
+$$
+W_2^2(\mathfrak{q}, \mathfrak{p}) = \big\|m_{\mathfrak{q}} - m_{\mathfrak{p}}\big\|_{\mathcal{F}}^2 \;+\; \operatorname{tr}\!\Big(C_{\mathfrak{q}} + C_{\mathfrak{p}} - 2\big(C_{\mathfrak{p}}^{1/2} C_{\mathfrak{q}} C_{\mathfrak{p}}^{1/2}\big)^{1/2}\Big). \tag{17.8}
+$$
+
+Let $B = C_{\mathfrak{p}}^{1/2} C_{\mathfrak{q}} C_{\mathfrak{p}}^{1/2}$. Since $C_{\mathfrak{p}}^{1/2}$ and $C_{\mathfrak{q}}^{1/2}$ are Hilbert–Schmidt,
+
+$$
+\operatorname{tr}(B^{1/2}) = \|C_{\mathfrak{q}}^{1/2} C_{\mathfrak{p}}^{1/2}\|_{\mathsf{S}_1} \leq \|C_{\mathfrak{q}}^{1/2}\|_{\mathsf{S}_2} \|C_{\mathfrak{p}}^{1/2}\|_{\mathsf{S}_2} < \infty,
+$$
+
+where $\mathsf{S}_1$ and $\mathsf{S}_2$ denote the trace-class and Hilbert–Schmidt norms. Thus, $W_2(\mathfrak{q}, \mathfrak{p})$ is finite without any absolute-continuity assumptions.
+
+The Feldman–Hájek theorem states that two Gaussian measures on a separable Hilbert space are either equivalent or mutually singular. Equivalence holds only under substantially stricter compatibility conditions. In particular, on the common covariance support, the relative covariance perturbation $S = C_{\mathfrak{p}}^{-1/2} C_{\mathfrak{q}} C_{\mathfrak{p}}^{-1/2} - I$ must admit a Hilbert–Schmidt extension, in addition to conditions on the covariance ranges and the difference of the means. If these conditions fail, the measures are mutually singular and their KL divergence is infinite. This is in contrast to the automatic trace-class property needed for the Wasserstein cross term in (17.8).
+
+Note that both the prior and variational function laws have been required to be Gaussian measures. Non-Gaussian likelihoods can still enter through $\mathbb{E}_{\mathfrak{q}}[\log L]$, but the variational law cannot represent non-Gaussian posteriors. Hence flexibility needs to be introduced through the parametrization of the mean function and the covariance operator.
+
+### 6.4 Generalized Wasserstein inference with a neural mean (GWI-net)
+
+Having selected the Wasserstein-2 distance, the variational law $\mathfrak{q}$ needs to be parameterized. One possibility is to approximate a parameter pushforward $\mathfrak{q}^g = g_\# Q_\Theta$ by a Gaussian measure on $\mathcal{F}$. Alternatively, the generalized Wasserstein inference network (GWI-net) uses a hybrid Gaussian law whose mean $m_{\mathfrak{q}} = f(\cdot\,; \theta)$ is a deep neural network and whose covariance has a sparse variational GP form. Here $\theta$ is a deterministic variational parameter of the mean function, not a random BNN weight.
+
+The focus here is on $\mathcal{F} = L^2(\mathcal{X}, \rho)$, where $\rho$ is a chosen reference probability measure (typically the input law).
+
+**Prior (Gaussian measure).** Let $\mathfrak{p} = \mathcal{N}(m_{\mathfrak{p}}, C_{\mathfrak{p}})$, with
+
+$$
+(C_{\mathfrak{p}} \phi)(x) = \int_{\mathcal{X}} k(x, x') \phi(x')\, d\rho(x'), \qquad \phi \in \mathcal{F},
+$$
+
+where $k : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ is a symmetric positive-definite kernel such that $C_{\mathfrak{p}}$ is trace-class.
+
+**Variational law (Gaussian measure).** Let $\mathfrak{q} = \mathcal{N}(m_{\mathfrak{q}}, C_{\mathfrak{q}})$, with
+
+$$
+(C_{\mathfrak{q}} \phi)(x) = \int_{\mathcal{X}} r(x, x') \phi(x')\, d\rho(x'), \qquad \phi \in \mathcal{F},
+$$
+
+where $r : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ is a symmetric positive-definite kernel parameterized by additional variational parameters.
+
+The neural mean, covariance parameters, inducing locations, and any likelihood parameters are trained by maximizing the expected log-likelihood minus an empirical approximation of the squared Wasserstein distance in (17.8). For Gaussian regression, $y_i \mid F \sim \mathcal{N}(F(x_i), \sigma^2)$, the expected log-likelihood is analytic; for non-Gaussian likelihoods it can be approximated by quadrature or Monte Carlo. The fitted Gaussian law supplies predictive means and covariances, with the observation likelihood providing any additional predictive noise.
+
+To estimate the Wasserstein distance, note that
+
+$$
+\begin{aligned}
+\|m_{\mathfrak{p}} - m_{\mathfrak{q}}\|_{\mathcal{F}}^2 &= \int_{\mathcal{X}} (m_{\mathfrak{p}}(x) - m_{\mathfrak{q}}(x))^2\, d\rho(x), \\
+\operatorname{tr}(C_{\mathfrak{p}}) &= \int_{\mathcal{X}} k(x, x)\, d\rho(x), \qquad \operatorname{tr}(C_{\mathfrak{q}}) = \int_{\mathcal{X}} r(x, x)\, d\rho(x),
+\end{aligned}
+$$
+
+under the usual trace-kernel conditions. Replacing $\rho$ by the empirical design measure $\widehat{\rho}_n = n^{-1} \sum_{i=1}^n \delta_{x_i}$ turns these terms into sample averages. These averages are Monte Carlo-unbiased for fixed integrands when $x_1, \dots, x_n$ are i.i.d. from $\rho$; for a fixed design, they instead define a discretization at the training inputs.
+
+The remaining cross term is estimated from a spectral subsample $\mathbf{x}_S = (x_{s_j})_{j=1}^{n_S}$ of $n_S \ll n$ training inputs. Write
+
+$$
+r(\mathbf{x}_S, \mathbf{x}_{\mathrm{tr}}) = \big(r(x_{s_j}, x_i)\big)_{j,i}, \qquad k(\mathbf{x}_{\mathrm{tr}}, \mathbf{x}_S) = \big(k(x_i, x_{s_j})\big)_{i,j}.
+$$
+
+The GWI-net approximation is
+
+$$
+\begin{aligned}
+\widehat{W}_2^2 = {} & \frac{1}{n} \sum_{i=1}^n \big(m_{\mathfrak{p}}(x_i) - m_{\mathfrak{q}}(x_i)\big)^2 + \frac{1}{n} \sum_{i=1}^n k(x_i, x_i) \\
+& + \frac{1}{n} \sum_{i=1}^n r(x_i, x_i) - \frac{2}{\sqrt{n n_S}} \sum_{j=1}^{n_S} \sqrt{\lambda_j\big(r(\mathbf{x}_S, \mathbf{x}_{\mathrm{tr}}) k(\mathbf{x}_{\mathrm{tr}}, \mathbf{x}_S)\big)}.
+\end{aligned} \tag{17.9}
+$$
+
+The matrix spectrum is an empirical Nyström approximation to the covariance-operator composition. Increasing $n_S$ improves spectral resolution at greater matrix cost; an empirical study under rapid spectral decay is available, but no unbiasedness or consistency results have been shown. With the empirical design measure, behavior away from the training inputs is determined indirectly by the kernels and neural mean; additional points drawn from a broader reference measure can instead be used in the discretization.
+
+Many parameterizations of $r$ are possible. Following GWI-net, let $\mathbf{Z} = (z_1, \dots, z_M) \in \mathcal{X}^M$ be inducing locations, and define
+
+$$
+\mathbf{k}_Z(x) := [k(z_1, x), \dots, k(z_M, x)]^\top, \qquad \mathbf{K}_{ZZ} := \big(k(z_i, z_j)\big)_{i,j=1}^M.
+$$
+
+For a free lower-triangular factor $L \in \mathbb{R}^{M \times M}$ and nonsingular $\mathbf{K}_{ZZ}$, set
+
+$$
+r(x, x') = k(x, x') - \mathbf{k}_Z(x)^\top \mathbf{K}_{ZZ}^{-1} \mathbf{k}_Z(x') + \mathbf{k}_Z(x)^\top L L^\top \mathbf{k}_Z(x'). \tag{17.10}
+$$
+
+This is the sparse variational GP covariance construction; stochastic mini-batch variants have been developed, and Chapter 38 gives further details on inducing-point methods.
+
+In the reported experiments, GWI-net was evaluated on synthetic examples, UCI regression, image classification, and out-of-distribution detection. The paper reports the best mean rank in its UCI comparison, strong classification results, and mixed out-of-distribution performance across data sets. The method remains limited by its Gaussian variational family, the spectral-decay approximation, and numerical sensitivity in the inducing-point parameterization.
+
+## 7. Discussion
+
+Function-space variational inference reframes Bayesian deep learning at the level where inductive bias lives: distributions over functions. This perspective yields a measure-theoretic ELBO, clarifies why weight-space KLs can mislead in infinite dimensions, and motivates workable surrogates (from supremum-over-marginals and sampling-based objectives to grid-functional divergences). It also explains, via data-processing, when parameter pushforwards are overly restrictive and how linearized, finite-marginal Gaussian approximations can recover tractable regularizers. Most broadly, generalized objectives can replace KL with alternative discrepancies, such as grid-based KL or Wasserstein-2, that remain finite and computable in a broader range of settings, enabling hybrid variational laws that pair neural posteriors with interpretable GP-like priors. These approaches pave the way towards a toolkit that preserves Bayesian discipline while delivering the extrapolation, calibration, and scalability modern applications demand. In practice, however, finite discretizations, Gaussian variational restrictions, empirical approximations and numerical sensitivity limit these methods, and the current literature does not establish general guarantees of extrapolation, calibration, or scalability. Looking ahead, the key opportunities are tighter estimators of function-space discrepancies, richer variational family parameterizations, and principled integration of domain priors about the objects of interest (such as invariances, monotonicity or convexity, and conservation constraints) encoded directly in function space to steer inference toward scientifically plausible solutions.

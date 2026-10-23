@@ -1,0 +1,249 @@
+---
+title: "Gaussian Mean-Field Variational Inference"
+description: "How the mean-field assumption makes the ELBO tractable: coordinate ascent, the reparameterization gradient, three worked examples and the limitations."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - mean-field approximation
+  - reparameterization gradient
+series: bayesian-deep-learning
+seriesOrder: 17
+---
+
+[Chapter 12](/blog/introduction-to-variational-inference) introduced the evidence lower bound (ELBO), a tractable objective that reframes Bayesian inference as an optimization problem. However, optimizing
+
+$$
+\mathcal{L}(\lambda) = \mathbb{E}_{q(\theta;\lambda)}[\log p(\mathcal{D} \mid \theta)] - \mathrm{D}_{\mathrm{KL}}(q(\theta;\lambda) \,\|\, p(\theta))
+\tag{13.1}
+$$
+
+still requires evaluating an expectation. Unless the likelihood, prior, and variational family have special conjugate or linear-Gaussian structure, this expectation is rarely available in closed form and is generally unavailable for neural-network likelihoods.
+
+To simplify optimization, a strong structural assumption known as the *mean-field* assumption is adopted: the variational distribution factorizes over the parameters, or over predefined groups of parameters. For $\theta = (\theta_1, \dots, \theta_P)$, the fully factorized form is
+
+$$
+q(\theta;\lambda) = \prod_{i=1}^{P} q_i(\theta_i;\lambda_i).
+\tag{13.2}
+$$
+
+Thus, the coordinates are independent under the approximation $q$, even though they are generally dependent under the true posterior $p(\theta \mid \mathcal{D})$. This assumption permits coordinate-wise updates, but it prevents $q$ from representing posterior correlations and often leads to underestimated marginal posterior variances.
+
+## 1. Coordinate ascent variational inference
+
+Under the mean-field assumption, the ELBO can be optimized by cyclically updating one factor $q_j$ while holding the remaining factors fixed. This procedure is known as coordinate ascent variational inference (CAVI). Define
+
+$$
+q_{-j}(\theta_{-j};\lambda_{-j}) := \prod_{i \neq j} q_i(\theta_i;\lambda_i).
+\tag{13.3}
+$$
+
+Substituting the factorized approximation into the ELBO and retaining only terms that depend on $q_j$ gives
+
+$$
+\log q_j^*(\theta_j) = \mathbb{E}_{q_{-j}(\theta_{-j};\lambda_{-j})}[\log p(\mathcal{D}, \theta)] + \text{const},
+\tag{13.4}
+$$
+
+where the additive constant normalizes $q_j^*$. Equivalently, the optimal factor is proportional to the exponentiated expected log-joint, with the expectation taken over the current approximation to all parameters other than $\theta_j$.
+
+The full procedure is given in Algorithm 17. Each exact coordinate update leaves the ELBO unchanged or increases it; under standard regularity conditions, repeated updates converge to a stationary point, but not necessarily to the global optimum. Closed-form CAVI updates are most readily available in conditionally conjugate models; otherwise, the expectation or the resulting update may itself require approximation.
+
+For a recent hybrid approach combining variational inference and MCMC, see Alexos et al.
+
+The mean-field assumption is now strengthened by taking each factor to be Gaussian:
+
+$$
+q_i(\theta_i;\lambda_i) = \mathcal{N}(\theta_i \mid \mu_i, \sigma_i^2), \qquad \sigma_i > 0.
+\tag{13.5}
+$$
+
+This is the *Gaussian mean-field* assumption. The variational parameters determine the per-coordinate means and positive standard deviations,
+
+$$
+\lambda = \{(\mu_i, \sigma_i)\}_{i=1}^{P}.
+\tag{13.6}
+$$
+
+**Algorithm 17** Coordinate ascent variational inference (CAVI).
+
+```text
+Result: Converged factors q₁(θ₁), …, q_P(θ_P)
+Initialize all factors qᵢ(θᵢ; λᵢ) for i = 1, …, P
+while the ELBO has not converged do
+    for j = 1, …, P do
+        Update q_j using the CAVI rule:
+
+            q_j(θ_j) ∝ exp( E_{q₋ⱼ(θ₋ⱼ; λ₋ⱼ)} [log p(𝒟, θ)] )
+
+    end
+end
+return converged factors q₁(θ₁), …, q_P(θ_P)
+```
+
+For gradient-based optimization, each positive standard deviation is typically represented through an unconstrained scale parameter. The variational parameters may be optimized by CAVI when closed-form updates are available or, more generally, by the stochastic-gradient methods introduced next.
+
+## 2. Stochastic gradient optimization
+
+When closed-form CAVI updates are unavailable, the ELBO can instead be maximized by stochastic gradient ascent. Writing
+
+$$
+g(\theta;\lambda) := \log p(\mathcal{D} \mid \theta) + \log p(\theta) - \log q(\theta;\lambda),
+\tag{13.7}
+$$
+
+one requires an estimator of
+
+$$
+\nabla_\lambda \mathcal{L}(\lambda) = \nabla_\lambda \mathbb{E}_{q(\theta;\lambda)}[g(\theta;\lambda)].
+\tag{13.8}
+$$
+
+The dependence of the sampling distribution $q(\theta;\lambda)$ on $\lambda$ prevents a naive interchange of the gradient and expectation.
+
+### 2.1 The reparameterization gradient estimator
+
+A standard low-variance approach is the *reparameterization gradient estimator*, also called the pathwise estimator. For the Gaussian mean-field family, draw parameter-free noise and transform it according to
+
+$$
+\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}), \qquad \theta = \boldsymbol{\mu} + \boldsymbol{\sigma} \odot \boldsymbol{\epsilon}.
+\tag{13.9}
+$$
+
+This gives
+
+$$
+\mathbb{E}_{q(\theta;\lambda)}[g(\theta;\lambda)] = \mathbb{E}_{\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})}[g(\theta(\lambda, \boldsymbol{\epsilon});\lambda)].
+\tag{13.10}
+$$
+
+Under the usual regularity conditions, differentiation can now be moved inside the expectation:
+
+$$
+\nabla_\lambda \mathbb{E}_{q(\theta;\lambda)}[g(\theta;\lambda)] = \mathbb{E}_{\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})}[\nabla_\lambda g(\theta(\lambda, \boldsymbol{\epsilon});\lambda)].
+\tag{13.11}
+$$
+
+Here $\nabla_\lambda$ is the total derivative through both $\theta(\lambda, \boldsymbol{\epsilon})$ and the explicit $\lambda$-dependence of $g$. Relative to score-function (REINFORCE) estimators, the reparameterization estimator is typically much lower variance while remaining unbiased under the stated regularity conditions. With mini-batches, the gradient is doubly stochastic because of both data subsampling and the draw of $\boldsymbol{\epsilon}$; larger mini-batches, multiple independent noise samples, and control variates can reduce variance at additional computational cost, while the resulting noise must be accounted for when selecting the step-size schedule. The pathwise construction also applies to other differentiably reparameterizable variational families.
+
+Algorithm 18 gives a single-sample stochastic-gradient step.
+
+**Algorithm 18** Reparameterization-gradient step for Gaussian mean-field variational inference.
+
+```text
+Input : Variational parameters λ determining μ and positive σ, learning rate ρ, mini-batch size b
+Result: Updated variational parameters λ
+Sample a mini-batch ℬ ⊆ {1, …, N} of size b uniformly without replacement
+Sample ϵ ∼ 𝒩(0, I)
+Compute θ = μ + σ ⊙ ϵ                                   /* Reparameterization */
+Compute the scaled mini-batch log-likelihood
+
+    ℓ̂_ℬ(θ) = (N / b) Σ_{n ∈ ℬ} log p(y_n | x_n, θ)
+
+Compute the gradient estimate
+
+    ĝ = ∇_λ [ ℓ̂_ℬ(θ) + log p(θ) − log q(θ; λ) ]
+
+Update λ ← λ + ρ ĝ
+return λ
+```
+
+## 3. Examples of Gaussian mean-field variational inference
+
+The examples begin with a conjugate linear model, then turn to Bayesian neural networks and variational autoencoders.
+
+### 3.1 Example 1: Bayesian linear regression
+
+Consider the Bayesian linear regression model
+
+$$
+y_n = \Phi(x_n)^\top \mathbf{w} + \epsilon_n, \qquad \epsilon_n \sim \mathcal{N}(0, \beta^{-1}),
+\tag{13.12}
+$$
+
+where $\beta$ is the noise precision, $\Phi(\cdot)$ is a feature map, and the model parameters are $\theta = \mathbf{w}$. The model uses
+
+- **Prior:** $p(\mathbf{w}) = \mathcal{N}(\mathbf{w} \mid \mathbf{0}, \alpha^{-1}\mathbf{I})$;
+- **Likelihood:** $p(y_n \mid x_n, \mathbf{w}) = \mathcal{N}(y_n \mid \Phi(x_n)^\top \mathbf{w}, \beta^{-1})$.
+
+The exact posterior is a full-covariance Gaussian, written as
+
+$$
+p(\mathbf{w} \mid \mathcal{D}) = \mathcal{N}(\mathbf{w} \mid \mathbf{m}, \mathbf{S}).
+\tag{13.13}
+$$
+
+It is approximated with the Gaussian mean-field family
+
+$$
+q(\mathbf{w};\lambda) = \prod_{i=1}^{P} \mathcal{N}(w_i \mid \mu_i, \sigma_i^2).
+\tag{13.14}
+$$
+
+In this conjugate setting, the coordinate updates are available in closed form. More precisely, the reverse-KL-optimal diagonal Gaussian has $\mu_i = m_i$ and $\sigma_i^2 = 1/(\mathbf{S}^{-1})_{ii}$. Thus, it discards the off-diagonal covariance terms, and $\sigma_i^2 \le S_{ii}$ shows explicitly how the mean-field approximation can underestimate the exact marginal variances when posterior correlations are present.
+
+### 3.2 Example 2: Bayesian neural networks (BNNs)
+
+Consider a Bayesian neural network whose parameters $\theta$ collect all weights and biases; the parameter count $P$ may be very large. The model is
+
+- **Prior:** $p(\theta) = \mathcal{N}(\theta \mid \mathbf{0}, \mathbf{I})$ (other prior choices are possible);
+- **Likelihood:** $p(\mathcal{D} \mid \theta) = \prod_{n=1}^{N} p(y_n \mid x_n, \theta)$.
+
+With the Gaussian mean-field approximation $q(\theta;\lambda) = \prod_{i=1}^{P} \mathcal{N}(\theta_i \mid \mu_i, \sigma_i^2)$, the ELBO is
+
+$$
+\mathcal{L}(\lambda) = \sum_{n=1}^{N} \mathbb{E}_{q(\theta;\lambda)}[\log p(y_n \mid x_n, \theta)] - \mathrm{D}_{\mathrm{KL}}(q(\theta;\lambda) \,\|\, p(\theta)).
+\tag{13.15}
+$$
+
+Because of the network's nonlinear transformations, the expected log-likelihood is generally unavailable in closed form, so the analytic CAVI updates above do not apply. The ELBO can instead be optimized using the reparameterization-gradient procedure in Algorithm 18, yielding the Bayes by Backprop approach. The same stochastic-gradient construction applies to any differentiably reparameterizable variational family, not only to Gaussian mean-field approximations.
+
+### 3.3 Example 3: Variational autoencoders
+
+Variational inference also applies to generative latent-variable models. In a variational autoencoder (VAE), VI approximates the posterior of a *local latent variable* $\mathbf{z}_n$ for each data point $x_n$, rather than a posterior over the decoder's global parameters. The generative model is
+
+1. **Prior:** $\mathbf{z} \sim p(\mathbf{z})$, for example $p(\mathbf{z}) = \mathcal{N}(\mathbf{z} \mid \mathbf{0}, \mathbf{I})$;
+2. **Likelihood:** $p_{\boldsymbol{\psi}}(x \mid \mathbf{z})$, represented by a decoder network with parameters $\boldsymbol{\psi}$.
+
+The goal is to maximize the marginal log-likelihood
+
+$$
+\log p_{\boldsymbol{\psi}}(x) = \log \int p_{\boldsymbol{\psi}}(x \mid \mathbf{z})\, p(\mathbf{z})\, \mathrm{d}\mathbf{z},
+\tag{13.16}
+$$
+
+which is generally intractable. For any distribution $q(\mathbf{z})$, the variational principle from [Chapter 12, Section 1.3](/blog/introduction-to-variational-inference#13-the-evidence-lower-bound-elbo) gives
+
+$$
+\log p_{\boldsymbol{\psi}}(x) \ge \mathcal{L}(q, \boldsymbol{\psi}; x) := \mathbb{E}_{q(\mathbf{z})}[\log p_{\boldsymbol{\psi}}(x \mid \mathbf{z})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{z}) \,\|\, p(\mathbf{z})).
+\tag{13.17}
+$$
+
+The bound is tight at the true posterior $q(\mathbf{z}) = p_{\boldsymbol{\psi}}(\mathbf{z} \mid x)$, but this posterior cannot generally be evaluated because its normalizing constant $p_{\boldsymbol{\psi}}(x)$ is intractable. An inference network $q_{\boldsymbol{\phi}}(\mathbf{z} \mid x)$, called the encoder, with parameters $\boldsymbol{\phi}$, is therefore introduced. It performs *amortized inference* by mapping each input to the parameters of its variational approximation.
+
+A diagonal-Gaussian encoder is used,
+
+$$
+q_{\boldsymbol{\phi}}(\mathbf{z} \mid x) = \mathcal{N}\big(\mathbf{z} \mid \boldsymbol{\mu}_{\boldsymbol{\phi}}(x), \operatorname{diag}\big(\boldsymbol{\sigma}_{\boldsymbol{\phi}}^2(x)\big)\big),
+\tag{13.18}
+$$
+
+where the encoder outputs the mean $\boldsymbol{\mu}_{\boldsymbol{\phi}}(x)$ and positive standard deviation $\boldsymbol{\sigma}_{\boldsymbol{\phi}}(x)$. For a single data point, the VAE objective is
+
+$$
+\mathcal{L}(\boldsymbol{\psi}, \boldsymbol{\phi}; x) = \underbrace{\mathbb{E}_{q_{\boldsymbol{\phi}}(\mathbf{z} \mid x)}[\log p_{\boldsymbol{\psi}}(x \mid \mathbf{z})]}_{\text{Expected reconstruction log-likelihood}} - \underbrace{\mathrm{D}_{\mathrm{KL}}(q_{\boldsymbol{\phi}}(\mathbf{z} \mid x) \,\|\, p(\mathbf{z}))}_{\text{Latent regularizer}}.
+\tag{13.19}
+$$
+
+The total ELBO $\sum_{n=1}^{N} \mathcal{L}(\boldsymbol{\psi}, \boldsymbol{\phi}; x_n)$ is maximized jointly over $\boldsymbol{\psi}$ and $\boldsymbol{\phi}$ by stochastic gradient ascent. The reconstruction term is estimated using reparameterized samples from $q_{\boldsymbol{\phi}}(\mathbf{z} \mid x)$, while the KL term is often available in closed form, as it is for two Gaussian distributions. This joint training of a decoder and an amortized inference network is the defining construction of the variational autoencoder.
+
+## 4. Limitations of Gaussian mean-field variational inference
+
+Gaussian mean-field variational inference is a fast and scalable approximation that supports complex models such as BNNs and VAEs, but its simplicity rests on strong assumptions:
+
+1. **Mean-field assumption:** the factorized approximation cannot represent posterior correlations between parameters and therefore loses the posterior's covariance structure.
+2. **Reverse-KL behavior:** minimizing $\mathrm{D}_{\mathrm{KL}}(q(\theta;\lambda) \,\|\, p(\theta \mid \mathcal{D}))$ strongly penalizes an approximation that assigns non-negligible probability to regions where the posterior density is low. This mode-seeking behavior can make $q$ concentrate too narrowly and often contributes to underestimated marginal posterior variances.
+3. **Gaussianity assumption:** a single Gaussian cannot represent skewness, heavy tails, or multimodality, and reverse-KL optimization will often select one mode of a multimodal posterior.
+
+These limitations motivate more expressive variational families, including structured approximations that relax the mean-field factorization and function-space methods that define the approximation over induced distributions on functions.

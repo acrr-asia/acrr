@@ -1,0 +1,141 @@
+---
+title: "Introduction to Variational Inference"
+description: "Variational inference recasts Bayesian inference as optimization: the KL divergence, the evidence lower bound, its trade-off and other lower bounds."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - evidence lower bound
+  - kl divergence
+series: bayesian-deep-learning
+seriesOrder: 16
+---
+
+In probabilistic machine learning, the goal is often not just to find a single "best" set of parameters for a model, but to quantify the uncertainty over all possible parameters. Bayesian inference accomplishes this.
+
+Let $\Theta \subseteq \mathbb{R}^P$ denote the parameter space, and let $\theta \in \Theta$ be the vector of all parameters in the model (e.g., the weights and biases of a neural network). Let $\mathcal{D} = \{(x_n, y_n)\}_{n=1}^N$ be the observed training data, consisting of $N$ input–target pairs. Bayesian inference updates the prior beliefs about the parameters, $p(\theta)$, after observing the data, yielding the *posterior* distribution $p(\theta \mid \mathcal{D})$.
+
+This update is governed by Bayes' theorem:
+
+$$
+p(\theta \mid \mathcal{D}) = \frac{p(\mathcal{D} \mid \theta)\, p(\theta)}{p(\mathcal{D})}. \tag{12.1}
+$$
+
+Here,
+
+- $p(\theta \mid \mathcal{D})$ is the **posterior distribution**, summarizing the updated beliefs about $\theta$ given the data;
+- $p(\mathcal{D} \mid \theta)$ is the **likelihood**, viewed as a function of $\theta$: for a given choice of parameters, it quantifies how likely the observed data are under the model;
+- $p(\theta)$ is the **prior distribution**, which encodes the beliefs about $\theta$ before observing any data; and
+- $p(\mathcal{D}) = \int p(\mathcal{D} \mid \theta)\, p(\theta)\, \mathrm{d}\theta$ is the **marginal likelihood**, also called the **evidence**.
+
+The central computational challenge in most modern Bayesian inference problems is evaluating $p(\mathcal{D})$, which requires integrating the joint distribution $p(\mathcal{D}, \theta)$ over the parameter space $\Theta$. For models such as Bayesian neural networks, this integral is high-dimensional and generally lacks an analytic closed-form solution. Consequently, the posterior density $p(\theta \mid \mathcal{D})$ usually cannot be evaluated in normalized form, motivating approximate inference methods. This chapter focuses on variational inference, also known as variational Bayes, a widely used family of scalable approximate inference methods.
+
+## 1. A variational approach: Bayesian inference as optimization
+
+The core idea of variational inference (VI) is to reframe Bayesian inference as an optimization problem. Instead of representing the generally intractable posterior $p(\theta \mid \mathcal{D})$ exactly, a tractable distribution $q(\theta; \lambda)$ is chosen from a variational family $\mathcal{Q}$, where $\lambda$ denotes its variational parameters. Concretely, $\mathcal{Q}$ could be a family of Gaussian distributions or a family of factorized distributions, as developed in [Chapter 13](/blog/gaussian-mean-field-variational-inference). The goal is to find the member $q(\theta; \lambda^*)$ that best approximates the posterior.
+
+### 1.1 The Kullback–Leibler divergence
+
+Following Kullback and Leibler, the **Kullback–Leibler (KL) divergence** from $q(\theta; \lambda)$ to the posterior $p(\theta \mid \mathcal{D})$ is
+
+$$
+\begin{aligned}
+\mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta \mid \mathcal{D})) &= \int q(\theta; \lambda) \log \frac{q(\theta; \lambda)}{p(\theta \mid \mathcal{D})}\, \mathrm{d}\theta \\
+&= \mathbb{E}_{q(\theta; \lambda)}[\log q(\theta; \lambda) - \log p(\theta \mid \mathcal{D})].
+\end{aligned} \tag{12.2}
+$$
+
+Because the KL divergence is asymmetric, its direction must be stated explicitly. VI seeks variational parameters satisfying
+
+$$
+\lambda^* \in \arg\min_{\lambda} \mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta \mid \mathcal{D})). \tag{12.3}
+$$
+
+### 1.2 Rewriting the KL objective
+
+Expanding the posterior in Equation (12.2) using Bayes' theorem gives
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta \mid \mathcal{D})) = \mathbb{E}_{q(\theta; \lambda)}[\log q(\theta; \lambda) - \log p(\mathcal{D}, \theta)] + \log p(\mathcal{D}). \tag{12.4}
+$$
+
+Although the KL divergence itself cannot generally be evaluated exactly because $\log p(\mathcal{D})$ is unavailable, the log-evidence term is constant with respect to $\lambda$ and therefore does not affect the optimizer in Equation (12.3). The remaining expectation does not require evaluating $p(\mathcal{D})$ and can be estimated using samples from $q(\theta; \lambda)$ whenever the joint density $p(\mathcal{D}, \theta)$ and variational density $q(\theta; \lambda)$ can be evaluated.
+
+### 1.3 The evidence lower bound (ELBO)
+
+Rearranging Equation (12.4) yields
+
+$$
+\log p(\mathcal{D}) = \underbrace{\mathbb{E}_{q(\theta; \lambda)}[\log p(\mathcal{D}, \theta) - \log q(\theta; \lambda)]}_{\mathcal{L}(\lambda)} + \underbrace{\mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta \mid \mathcal{D}))}_{\geq 0}. \tag{12.5}
+$$
+
+The first term defines the **evidence lower bound (ELBO)** $\mathcal{L}(\lambda)$. Because the KL divergence is non-negative,
+
+$$
+\mathcal{L}(\lambda) \leq \log p(\mathcal{D}). \tag{12.6}
+$$
+
+The gap between the ELBO and the log evidence is exactly $\mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta \mid \mathcal{D}))$; the closer the variational distribution is to the posterior in this divergence, the smaller the gap. Since $\log p(\mathcal{D})$ is constant with respect to $\lambda$, Equation (12.5) also gives
+
+$$
+\arg\max_{\lambda} \mathcal{L}(\lambda) = \arg\min_{\lambda} \mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta \mid \mathcal{D})). \tag{12.7}
+$$
+
+Thus, VI replaces evaluation of the posterior in normalized form with optimization of an objective that can be estimated under suitable choices of likelihood, prior, and variational family.
+
+### 1.4 Interpreting the ELBO
+
+Using $p(\mathcal{D}, \theta) = p(\mathcal{D} \mid \theta)\, p(\theta)$, the ELBO can be written as
+
+$$
+\mathcal{L}(\lambda) = \mathbb{E}_{q(\theta; \lambda)}[\log p(\mathcal{D} \mid \theta)] - \mathrm{D}_{\mathrm{KL}}(q(\theta; \lambda) \,\|\, p(\theta)). \tag{12.8}
+$$
+
+The alternative form in Equation (12.8) reveals a trade-off between two terms:
+
+- **Expected log-likelihood (data fit):** This term rewards variational distributions that place more probability in regions of parameter space where the observed data have high likelihood.
+- **KL penalty (regularization):** This term penalizes departures of $q(\theta; \lambda)$ from the prior $p(\theta)$ and can therefore be viewed as a complexity penalty.
+
+VI selects the member of $\mathcal{Q}$ that balances fit to the observed data against departure from the prior.
+
+### 1.5 Other lower bounds on the log-evidence
+
+The ELBO is one lower bound on $\log p(\mathcal{D})$. More generally, strictly positive unbiased estimators of $p(\mathcal{D})$ can induce lower bounds through Jensen's inequality; this optional subsection states the construction underlying importance-weighted and sequential Monte Carlo objectives.
+
+Assume that $q(\theta; \lambda) > 0$ whenever $p(\mathcal{D}, \theta) > 0$. Then
+
+$$
+\mathbb{E}_{q(\theta; \lambda)}\left[\frac{p(\mathcal{D}, \theta)}{q(\theta; \lambda)}\right] = \int p(\mathcal{D}, \theta)\, \mathrm{d}\theta = p(\mathcal{D}). \tag{12.9}
+$$
+
+For a concave function $\varphi$ and random variable $X$, Jensen's inequality states that $\varphi(\mathbb{E}[X]) \geq \mathbb{E}[\varphi(X)]$. Taking $\varphi = \log$ in Equation (12.9) gives
+
+$$
+\begin{aligned}
+\mathcal{L}(\lambda) &= \mathbb{E}_{q(\theta; \lambda)}\left[\log \frac{p(\mathcal{D}, \theta)}{q(\theta; \lambda)}\right] \\
+&\leq \log \mathbb{E}_{q(\theta; \lambda)}\left[\frac{p(\mathcal{D}, \theta)}{q(\theta; \lambda)}\right] = \log p(\mathcal{D}).
+\end{aligned} \tag{12.10}
+$$
+
+More generally, let $r(\mathbf{u}; \lambda)$ denote the sampling density of all random variables $\mathbf{u}$ used to construct a strictly positive unbiased estimator $g(\mathcal{D}; \mathbf{u}, \lambda)$ of $p(\mathcal{D})$, and suppose that $\mathbb{E}_{r(\mathbf{u}; \lambda)}[|\log g(\mathcal{D}; \mathbf{u}, \lambda)|] < \infty$. Then
+
+$$
+\mathbb{E}_{r(\mathbf{u}; \lambda)}[g(\mathcal{D}; \mathbf{u}, \lambda)] = p(\mathcal{D}). \tag{12.11}
+$$
+
+Jensen's inequality gives the lower bound
+
+$$
+\mathcal{L}_g(\lambda) := \mathbb{E}_{r(\mathbf{u}; \lambda)}[\log g(\mathcal{D}; \mathbf{u}, \lambda)] \leq \log p(\mathcal{D}). \tag{12.12}
+$$
+
+The standard ELBO is recovered by taking $\mathbf{u} = \theta$, $r(\theta; \lambda) = q(\theta; \lambda)$, and $g(\mathcal{D}; \theta, \lambda) = p(\mathcal{D}, \theta)/q(\theta; \lambda)$. For example, Burda et al. introduce the importance-weighted autoencoder (IWAE) objective, which uses $s$ independent samples $\theta_j \sim q(\cdot\,; \lambda)$ and the estimator
+
+$$
+g(\mathcal{D}; \mathbf{u}, \lambda) = \frac{1}{s} \sum_{j=1}^{s} \frac{p(\mathcal{D}, \theta_j)}{q(\theta_j; \lambda)}, \qquad \mathbf{u} = \{\theta_j\}_{j=1}^{s}. \tag{12.13}
+$$
+
+Related lower bounds can be constructed using sequential Monte Carlo. Although $\mathcal{L}_g(\lambda)$ may not be available in closed form, it can often be optimized using Monte Carlo gradient estimators. However, a tighter bound alone does not guarantee better optimization or predictive performance, because the signal-to-noise ratio and other properties of the associated gradient estimator also matter.
+
+In summary, VI approximates $p(\theta \mid \mathcal{D})$ by optimizing a distribution from a tractable family, with the ELBO providing an objective that balances data fit against departure from the prior. [Chapter 13](/blog/gaussian-mean-field-variational-inference) develops the mean-field construction in detail, and subsequent chapters consider further variational families and optimization methods.
