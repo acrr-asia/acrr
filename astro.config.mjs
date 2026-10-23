@@ -8,6 +8,7 @@ import { unified } from '@astrojs/markdown-remark';
 import rehypeMermaid from 'rehype-mermaid';
 import { remarkReadingTime } from './src/plugins/remark-reading-time.mjs';
 import { rehypeMermaidFigure } from './src/plugins/rehype-mermaid-figure.mjs';
+import { rehypeFootnoteLabel } from './src/plugins/rehype-footnote-label.mjs';
 
 // Set SITE_URL at build time to enable canonical URLs, sitemap and RSS links.
 // Falls back to a local placeholder so dev builds never invent a domain. The placeholder must
@@ -48,6 +49,8 @@ export default defineConfig({
         // so diagrams follow dark mode. A diagram with a syntax error fails the build.
         [rehypeMermaid, mermaidOptions],
         rehypeMermaidFigure,
+        // Vietnamese pages: "Chú thích" instead of GFM's English "Footnotes" heading.
+        rehypeFootnoteLabel,
       ],
     }),
     // Mermaid blocks are left to rehype-mermaid instead of Shiki.
