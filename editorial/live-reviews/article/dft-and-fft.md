@@ -87,7 +87,9 @@ Optional:
 
 | Finding | Re-checked on (URL, commit, date) | Acceptance condition met? | Closed |
 |---|---|---|---|
-| L1 | | | |
-| L3 | | | |
-| L2 | | | |
-| L4 | | | |
+| L1 | https://acrr.asia/blog/dft-and-fft, `8d96312`, 2026-10-23 (run 39979578015): desktop-light-07, mobile-light-12 and 13, mobile-dark-13 | Yes: both equations are shown in full, split over lines, at 1280 and 360 px, light and dark | Closed |
+| L3 | Same captures: desktop-light-12 | Yes: all six columns, with the header "ENBW (bins)" and its values, are readable at 1280 px; only the last cell's right border sits under the scroll shadow (cells have a 7rem minimum width, site styling) | Closed |
+| L2 | Same captures: mobile-light-13 | No: unchanged (site-level; not part of this revision) | Open, follow-up |
+| L4 | Not re-checked (not part of this revision) | No | Open, follow-up |
+
+Decision after re-review (2026-10-23): accepted with follow-up. The major finding is closed, the contract is delivered and the remaining findings are minor. `facts.json` for the new captures: HTTP 200 on all three viewports, no horizontal page scroll, 0 KaTeX errors, 0 console errors.

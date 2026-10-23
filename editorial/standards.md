@@ -1,6 +1,6 @@
 # ACRR Editorial Standards Manual
 
-Version 2.0, adopted 24 October 2026 (first edition 13 October 2026). Owner: the chief editor (Section 3). Changes follow Section 12.
+Version 2.0, adopted 23 October 2026 (first edition 13 October 2026). Owner: the chief editor (Section 3). Changes follow Section 12.
 
 This manual implements the governing editorial strategy, [`strategy.md`](strategy.md) (value before volume, the nine publication gates, the chief editor's live-site review, the editorial queue). Where the two differ, the strategy states the intent and this manual is corrected. The order in which the strategy is being put into effect, and what is not yet in effect, is in [`strategy-adoption-plan.md`](strategy-adoption-plan.md).
 
@@ -528,4 +528,4 @@ English is the original; Vietnamese translations under `/vi` follow `docs/transl
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-10-13 | First edition: roles, workflow, policies A-E, rubric, records, governance. |
-| 2.0 | 2026-10-24 | Adopts the editorial strategy (`strategy.md`): identity and audience; value before volume, reader-value contract, value categories and formats (2.4); strategy roles and the chief-editor decision of 23 October (3); nine gates, editorial queue and status model, live-site review, corrections and maintenance (4); assumptions and evidence proportional to the claim (5.7); answer first, explicit comparisons, specific limitations (6.1); templates by format (6.7); visual communication (6.8); live-site acceptance (9.5); queue and live reviews in the records (10). |
+| 2.0 | 2026-10-23 | Adopts the editorial strategy (`strategy.md`): identity and audience; value before volume, reader-value contract, value categories and formats (2.4); strategy roles and the chief-editor decision of 23 October (3); nine gates, editorial queue and status model, live-site review, corrections and maintenance (4); assumptions and evidence proportional to the claim (5.7); answer first, explicit comparisons, specific limitations (6.1); templates by format (6.7); visual communication (6.8); live-site acceptance (9.5); queue and live reviews in the records (10). |
