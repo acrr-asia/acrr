@@ -431,6 +431,47 @@ from the measurement sense *độ chụm*. In prose, "et al." is written *và c�
 | flat / sharp minimum, loss landscape | cực tiểu phẳng / nhọn (flat / sharp minimum), bề mặt hàm mất mát (loss landscape) |
 | overfitting, underfitting | quá khớp (overfitting), chưa khớp (underfitting) |
 | pruning (structured / unstructured), probing, invariance | tỉa (có cấu trúc / không cấu trúc), thăm dò (probing), tính bất biến (invariance) |
+| equally weighted (predictive) mixture, functionally distinct solutions | hỗn hợp (dự đoán) có trọng số bằng nhau, các nghiệm khác biệt về mặt hàm |
+| basin (short for basin of attraction), single-basin / multi-basin | miền hút (basin), một miền hút / đa miền hút |
+| high-fidelity reference, predictive marginalization | tham chiếu có độ trung thực cao, phép lấy biên dự đoán |
+| model combination | kết hợp mô hình (model combination); distinct from *lấy trung bình mô hình Bayes* |
+| stochastic weight averaging (SWA), SWAG, MultiSWAG | lấy trung bình trọng số ngẫu nhiên (Stochastic Weight Averaging, SWA), SWAG, MultiSWAG |
+| snapshot ensemble, fast geometric ensembling, anchored ensemble, BatchEnsemble | tổ hợp ảnh chụp nhanh (snapshot ensemble), tổ hợp hình học nhanh (fast geometric ensembling), tổ hợp có neo (anchored ensemble), BatchEnsemble |
+| wall-clock time | thời gian thực (wall-clock time) |
+| initialization / discretization / Monte Carlo error | sai số khởi tạo / rời rạc hóa / Monte Carlo |
+| typical set, posterior landscape, energy barrier | tập điển hình (typical set), cảnh quan hậu nghiệm, rào năng lượng (energy barrier) |
+| hybrid sampling, optimization-based initialization | lấy mẫu lai, khởi tạo dựa trên tối ưu hóa |
+| potential, drift, injected noise | thế năng (potential), số hạng trôi (drift), nhiễu được bơm vào |
+| unadjusted Langevin algorithm, No-U-Turn Sampler (NUTS) | thuật toán Langevin không hiệu chỉnh (unadjusted Langevin algorithm), bộ lấy mẫu không quay đầu (No-U-Turn Sampler, NUTS) |
+| Bayesian deep ensemble (BDE), pseudo-ensemble | tổ hợp sâu Bayes (BDE), giả tổ hợp (pseudo-ensemble) |
+| stochastic localization, denoiser, score-based | định vị ngẫu nhiên (stochastic localization), bộ khử nhiễu (denoiser), dựa trên hàm điểm (score-based) |
+| stacking | xếp chồng (stacking) |
+| ensemble learning, ensemble pruning | học tổ hợp (ensemble learning), tỉa tổ hợp (ensemble pruning) |
+| mixture of experts (MoE), expert, router, gating network, gating value | hỗn hợp chuyên gia (mixture of experts, MoE), chuyên gia, bộ định tuyến (router), mạng cổng (gating network), giá trị cổng |
+| shared / routed expert, token-to-expert affinity | chuyên gia dùng chung / được định tuyến, độ tương hợp giữa token và chuyên gia (token-to-expert affinity) |
+| routing diversity, routing collapse, load balancing, auxiliary loss | độ đa dạng định tuyến (routing diversity), sụp đổ định tuyến (routing collapse), cân bằng tải, mất mát phụ |
+| active / activated parameters | tham số hoạt động / được kích hoạt |
+| large language model (LLM), finetuning | mô hình ngôn ngữ lớn (large language model, LLM), tinh chỉnh (finetuning) |
+| reinforcement learning (RL), RLHF, reward model, policy | học tăng cường (RL), học tăng cường từ phản hồi của con người (RLHF), mô hình phần thưởng (reward model), chính sách (policy) |
+| model-based / model-free RL, offline / online RL, world model | RL dựa trên mô hình / không dựa trên mô hình, RL ngoại tuyến / trực tuyến, mô hình thế giới (world model) |
+| rollout, trust region, sample complexity | lượt triển khai (rollout), vùng tin cậy, độ phức tạp mẫu (sample complexity) |
+| relevance score, relevance accuracy / consistency | điểm liên quan (relevance score), độ chính xác / độ nhất quán liên quan |
+| model checkpoint | điểm lưu mô hình (model checkpoint) |
+| PAC-Bayesian analysis, frequentist | phân tích PAC-Bayes (PAC-Bayesian analysis), theo trường phái tần suất (frequentist) |
+| "prior" / "posterior" (PAC-Bayes sense) | "tiên nghiệm" / "hậu nghiệm" (in quotation marks as in the original) |
+| randomized classifier, (weighted) majority vote | bộ phân loại ngẫu nhiên hóa (randomized classifier), bỏ phiếu đa số (có trọng số) (weighted majority vote) |
+| expected / empirical loss (risk), zero-one loss | mất mát (rủi ro) kỳ vọng / thực nghiệm, mất mát không – một (zero-one loss) |
+| oracle bound, first / second order | cận oracle (oracle bound), bậc một / bậc hai |
+| tandem loss, tandem classifier | mất mát cặp đôi (tandem loss), bộ phân loại cặp đôi |
+| binary kl-divergence, PAC-Bayes-kl inequality | độ phân kỳ kl nhị phân (binary kl-divergence), bất đẳng thức PAC-Bayes-kl |
+| change of measure inequality, union bound | bất đẳng thức đổi độ đo (change of measure inequality), cận hợp (union bound) |
+| (refined) Pinsker's, Jensen's, (second order) Markov's, Chebyshev-Cantelli inequality | bất đẳng thức Pinsker (tinh chỉnh), Jensen, Markov (bậc hai), Chebyshev-Cantelli |
+| tight / loose bound, slack, fast / slow rate | cận chặt / lỏng, độ hở, tốc độ nhanh / chậm |
+| cancellation of errors (effect) | hiệu ứng triệt tiêu sai số |
+| alternating minimization, (strongly) quasi-convex | cực tiểu hóa luân phiên (alternating minimization), tựa lồi (mạnh) |
+| bagging, out-of-bag samples | bagging, mẫu ngoài túi (out-of-bag) |
+| moment (of a distribution), moment matching | mô-men (not *mômen*), khớp mô-men |
+| Lemma | Bổ đề |
 | Takeaways (box label) | Điểm cần ghi nhớ |
 | Equation N, Proposition, Definition, Theorem, Proof, Figure, Table, Algorithm | Phương trình N, Mệnh đề, Định nghĩa, Định lý, Chứng minh, Hình, Bảng, Thuật toán |
 | link text "Chapter K, Section j" | Chương K, Mục j (link to `/vi/blog/<slug>` without the `#` anchor) |

@@ -4010,3 +4010,477 @@ b += bdl18_rot(434, 140, 'Project', 90)
 svg('Bdl18PredictUpdateProject', 480, 275, 'The predict-update-project cycle',
     'Starting from the approximation q at step t minus 1, a predict arrow leads to p of t given t minus 1, an update arrow leads to the exact one-step posterior p t, and a project arrow leads down to the tractable approximation q t. The same predict, update and project sequence then leads from q t through p of t plus 1 given t and p t plus 1 to q t plus 1.',
     b)
+
+
+# ---------- Chapter 19 (Ensembles: Introduction and Connections with Approximate Bayesian Inference) ----------
+# Figure 19.1: schematic reproduction of the conceptual BMA figure (posterior, predictive, discrepancy).
+# The curves are qualitative shapes traced from the book's figure, not computed from data.
+def bdl19_bump(x, c, h, s):
+    return h*math.exp(-0.5*((x-c)/s)**2)
+
+BDL19_MODES = [(0.13, 0.80), (0.29, 0.84), (0.44, 0.70), (0.52, 0.95), (0.60, 0.82), (0.68, 0.78), (0.82, 0.82)]
+def bdl19_post(x):
+    return 0.04 + sum(bdl19_bump(x, c, h, 0.021) for c, h in BDL19_MODES)
+def bdl19_pred(x):
+    base = 0.22 + 0.55/(1 + math.exp(-(x-0.45)/0.012)) - 0.12/(1 + math.exp(-(x-0.76)/0.02))
+    return base + 0.05*math.sin(37*x) + 0.03*math.sin(91*x+1.0) - bdl19_bump(x, 0.38, 0.12, 0.012)
+def bdl19_dist(x):
+    v = 0.18 + bdl19_bump(x, 0.13, 0.62, 0.035) + bdl19_bump(x, 0.29, 0.6, 0.04) + bdl19_bump(x, 0.84, 0.62, 0.045)
+    v += 0.04*math.sin(53*x) + 0.025*math.sin(117*x)
+    v -= bdl19_bump(x, 0.54, 0.16, 0.03)
+    return max(v, 0.03)
+
+def bdl19_fill(P, f, n=300):
+    pts = [(P.X(P.xr[0] + i*(P.xr[1]-P.xr[0])/n), P.Y(f(P.xr[0] + i*(P.xr[1]-P.xr[0])/n))) for i in range(n+1)]
+    d = f'M{P.X(P.xr[0]):.1f},{P.Y(0):.1f} ' + ' '.join(f'L{x:.1f},{y:.1f}' for x, y in pts) + f' L{P.X(P.xr[1]):.1f},{P.Y(0):.1f} Z'
+    return f'  <path class="region" d="{d}" />\n'
+
+def bdl19_panel_axes(P, ylab, xlab):
+    o = arrow([(P.x0, P.y0+P.h), (P.x0, P.y0-6)])
+    o += arrow([(P.x0, P.y0+P.h), (P.x0+P.w+14, P.y0+P.h)])
+    o += text(P.x0-8, P.y0+8, ylab, 'end', 'small')
+    o += text(P.x0+P.w+14, P.y0+P.h+18, xlab, 'end', 'small')
+    return o
+
+BDL19_DE = [0.13, 0.29, 0.52, 0.82]
+BDL19_VI = [0.505, 0.52, 0.535]
+BDL19_MS = [d + o for d in BDL19_DE for o in (-0.022, -0.011, 0.011, 0.022)]
+
+def bdl19_marks(P, f, which):
+    o = ''
+    if 'ms' in which:
+        for w in BDL19_MS:
+            o += f'  <circle class="box" cx="{P.X(w):.1f}" cy="{P.Y(f(w)):.1f}" r="2.6" stroke-width="1" />\n'
+    if 'de' in which:
+        for w in BDL19_DE:
+            o += f'  <circle class="dot" cx="{P.X(w):.1f}" cy="{P.Y(f(w)):.1f}" r="5.5" />\n'
+            o += f'  <circle class="ln" cx="{P.X(w):.1f}" cy="{P.Y(f(w)):.1f}" r="5.5" stroke-width="1" />\n'
+    if 'vi' in which:
+        for w in BDL19_VI:
+            o += f'  <circle class="dot" cx="{P.X(w):.1f}" cy="{P.Y(f(w)):.1f}" r="2.8" />\n'
+            o += f'  <circle class="ln" cx="{P.X(w):.1f}" cy="{P.Y(f(w)):.1f}" r="2.8" stroke-width="0.8" />\n'
+    return o
+
+b = ''
+P1 = Plot(110, 24, 420, 150, (0, 1), (0, 1.05))
+b += bdl19_fill(P1, bdl19_post)
+b += P1.curve(bdl19_post, n=400, cls='thick')
+for w in BDL19_DE + BDL19_VI + BDL19_MS:
+    b += line([(P1.X(w), P1.Y(bdl19_post(w))), (P1.X(w), P1.Y(0))], 'mut', ' stroke-dasharray="3 3" stroke-width="0.9"')
+b += bdl19_marks(P1, bdl19_post, ('ms', 'vi', 'de'))
+b += bdl19_marks(P1, lambda w: 0, ('ms', 'vi', 'de'))
+b += bdl19_panel_axes(P1, var('p') + '(' + var('w') + '|' + var('D') + ')', var('w'))
+
+P2 = Plot(110, 210, 420, 70, (0, 1), (0, 1.0))
+b += bdl19_fill(P2, bdl19_pred)
+b += P2.curve(bdl19_pred, n=400, cls='ln')
+b += bdl19_marks(P2, bdl19_pred, ('ms', 'vi', 'de'))
+b += bdl19_panel_axes(P2, var('p') + '(' + var('y') + '|' + var('w') + ')', var('w'))
+
+P3 = Plot(110, 314, 420, 80, (0, 1), (0, 1.0))
+b += bdl19_fill(P3, bdl19_dist)
+b += P3.curve(bdl19_dist, n=400, cls='ln')
+b += bdl19_marks(P3, bdl19_dist, ('ms', 'vi', 'de'))
+b += bdl19_panel_axes(P3, 'dist(' + var('p') + ', ' + var('q') + ')', var('w'))
+b += text(P3.X(0.52), P3.y0+P3.h+18, var('ŵ'), 'middle')
+
+ly = 446
+b += f'  <rect class="grid" x="165" y="{ly-16}" width="310" height="26" />\n'
+b += f'  <circle class="dot" cx="182" cy="{ly-3}" r="5.5" />\n  <circle class="ln" cx="182" cy="{ly-3}" r="5.5" stroke-width="1" />\n'
+b += text(194, ly+2, 'Deep Ensembles', 'start', 'small')
+b += f'  <circle class="dot" cx="306" cy="{ly-3}" r="2.8" />\n  <circle class="ln" cx="306" cy="{ly-3}" r="2.8" stroke-width="0.8" />\n'
+b += text(314, ly+2, 'VI', 'start', 'small')
+b += f'  <circle class="box" cx="352" cy="{ly-3}" r="2.6" stroke-width="1" />\n'
+b += text(360, ly+2, 'Multi-SWAG', 'start', 'small')
+svg('Bdl19BmaApproximations', 600, 462, 'Finite approximations to the Bayesian model average',
+    'Three stacked panels share a horizontal parameter axis w. Top: a multimodal posterior p(w given D) with seven sharp peaks. Four large filled markers sit on top of four separated peaks (deep ensembles); three small filled markers sit close together on one peak (VI); small hollow markers are spread around each of the four marked peaks (Multi-SWAG). Dashed vertical lines drop from every marker to the axis. Middle: the predictive p(y given w) for one test input, low and wiggly over the two left modes, higher over the central modes and slightly lower again on the right. Bottom: the discrepancy dist(p, q) as a function of the location of one additional evaluation; it is high over the two left modes and the right mode and dips to its minimum around the already represented mode labeled w hat. A legend names the three marker types.',
+    b)
+
+# Figure 19.2: schematic reproduction of the one-dimensional regression comparison.
+# Synthetic data from bdl19_f with two gaps; band widths and discrepancy curves are qualitative.
+import random as bdl19_random
+def bdl19_f(x):
+    return 1.3 - 0.13*x + 0.55*math.sin(0.55*x)
+bdl19_rng = bdl19_random.Random(19)
+BDL19_X = [bdl19_rng.uniform(-9, -4.5) for _ in range(16)] + [bdl19_rng.uniform(-2.5, 1.5) for _ in range(14)] + [bdl19_rng.uniform(4.5, 9) for _ in range(14)]
+BDL19_Y = [bdl19_f(x) + bdl19_rng.gauss(0, 0.28) for x in BDL19_X]
+def bdl19_gapw(x):
+    # distance-to-data driven half-width (wide in gaps and at the edges)
+    d = min(abs(x - xi) for xi in BDL19_X)
+    return d
+def bdl19_sd_hmc(x):
+    return 0.32 + 0.22*min(bdl19_gapw(x), 3) + 0.06*max(abs(x) - 8, 0)
+def bdl19_sd_de(x):
+    return 0.30 + 0.19*min(bdl19_gapw(x), 3) + 0.05*max(abs(x) - 8, 0)
+def bdl19_sd_vi(x):
+    return 0.26 + 0.02*min(bdl19_gapw(x), 3)
+def bdl19_mean_de(x):
+    return bdl19_f(x) + 0.06*math.sin(1.3*x)
+def bdl19_mean_vi(x):
+    return 1.25 - 0.14*x + 0.42*math.sin(0.55*x)
+
+def bdl19_band(P, m, s, k):
+    xs = [P.xr[0] + i*(P.xr[1]-P.xr[0])/120 for i in range(121)]
+    cl = lambda v: min(max(v, P.yr[0]), P.yr[1])
+    up = [(P.X(x), P.Y(cl(m(x) + k*s(x)))) for x in xs]
+    lo = [(P.X(x), P.Y(cl(m(x) - k*s(x)))) for x in reversed(xs)]
+    d = 'M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in up + lo) + ' Z'
+    return f'  <path class="region" d="{d}" />\n'
+
+def bdl19_reg(x0, y0, mean, sd, lab):
+    P = Plot(x0, y0, 120, 120, (-10, 10), (-1, 4))
+    o = f'  <rect class="grid" x="{x0}" y="{y0}" width="120" height="120" />\n'
+    o += bdl19_band(P, mean, sd, 2)
+    o += bdl19_band(P, mean, sd, 1)
+    o += P.curve(mean, n=120, cls='thick')
+    for x, y in zip(BDL19_X, BDL19_Y):
+        o += f'  <circle class="box" cx="{P.X(x):.1f}" cy="{P.Y(y):.1f}" r="2.2" stroke-width="0.9" />\n'
+    for v in (-10, 0, 10):
+        o += text(P.X(v), y0+120+13, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+    for v in (0, 2, 4):
+        o += text(x0-4, P.Y(v)+4, f'{v:g}', 'end', 'small')
+    o += text(x0+60, y0+120+32, lab, 'middle', 'small')
+    return o
+
+def bdl19_strip(x0, y0, g):
+    P = Plot(x0, y0, 120, 26, (-10, 10), (0, 0.5))
+    o = f'  <rect class="grid" x="{x0}" y="{y0}" width="120" height="26" />\n'
+    o += P.curve(g, n=120, cls='ln')
+    o += text(x0-4, y0+10, var('W') + '<tspan class="sub" dy="3">x</tspan>', 'end', 'small')
+    return o
+
+b = ''
+b += bdl19_reg(36, 54, bdl19_f, bdl19_sd_hmc, '(a) HMC reference')
+b += bdl19_strip(196, 20, lambda x: abs(bdl19_sd_de(x) - bdl19_sd_hmc(x))*0.9 + 0.02 + 0.01*math.sin(2*x))
+b += bdl19_reg(196, 54, bdl19_mean_de, bdl19_sd_de, '(b) Deep ensemble')
+b += bdl19_strip(356, 20, lambda x: min(0.48, abs(bdl19_sd_vi(x) - bdl19_sd_hmc(x))*0.55 + abs(bdl19_mean_vi(x) - bdl19_f(x))*0.4 + 0.03))
+b += bdl19_reg(356, 54, bdl19_mean_vi, bdl19_sd_vi, '(c) Factorized VI')
+P = Plot(520, 30, 110, 144, (0, 50), (0.08, 0.18))
+b += f'  <rect class="grid" x="520" y="30" width="110" height="144" />\n'
+for v in (0.08, 0.12, 0.16):
+    b += text(516, P.Y(v)+4, f'{v:.2f}', 'end', 'small')
+for v in (0, 25, 50):
+    b += text(P.X(v), 174+13, f'{v:g}', 'middle', 'small')
+b += text(575, 174+46, '(d) Discrepancy from HMC', 'middle', 'small')
+b += text(575, 22, 'Avg ' + var('W') + '<tspan class="sub" dy="3">x</tspan>', 'middle', 'small')
+de = [(n, 0.088 + 0.075/n**0.9 + 0.002*math.sin(1.7*n)) for n in range(1, 51)]
+vi = [(n, 0.142 + 0.006*math.sin(0.9*n) + 0.003*math.sin(2.3*n) + (0.012 if n < 3 else 0)) for n in range(1, 51)]
+b += line([(P.X(n), P.Y(v)) for n, v in de], 'acc')
+b += line([(P.X(n), P.Y(v)) for n, v in vi], 'mut', ' stroke-dasharray="4 3"')
+b += line([(528, 41), (542, 41)], 'acc') + text(546, 45, 'Deep Ensembles', 'start', 'small')
+b += line([(528, 56), (542, 56)], 'mut', ' stroke-dasharray="4 3"') + text(546, 60, 'SVI', 'start', 'small')
+b += text(575, 174+28, '# samples', 'middle', 'small')
+svg('Bdl19RegressionHmc', 660, 230, 'Deep ensemble and factorized VI compared with an HMC reference on one-dimensional regression',
+    'Three regression panels with inputs from minus 10 to 10 show the same data in three clusters separated by two gaps, a thick predictive mean and shaded one and two standard deviation bands. (a) The HMC reference has narrow bands on the data and wider bands in the gaps and at the edges. (b) The deep ensemble looks very similar; the strip above it shows a small input-wise Wasserstein discrepancy. (c) Factorized VI keeps a narrow band everywhere, including between the data clusters; its strip shows a larger discrepancy, highest in the gaps. (d) Average Wasserstein discrepancy against the number of samples from 1 to 50: the deep-ensemble curve falls from about 0.16 to about 0.09, while the SVI curve stays near 0.14 to 0.15.',
+    b)
+
+# Figure 19.3: agreement with HMC (values read off the book's bar chart, approximate).
+BDL19_LAB = ['SGD', 'VI', 'SGLD', 'Deep Ens', 'SGHMC-CLR', 'HMC']
+BDL19_C10 = [85.5, 88.7, 91.6, 91.5, 92.7, 94.0]
+BDL19_C10C = [72.0, 75.5, 78.0, 79.3, 81.0, 86.0]
+def bdl19_bars(y0, h, vals, yr, ticks, ylab):
+    P = Plot(90, y0, 480, h, (0, 6), yr)
+    o = ''
+    for v in ticks:
+        o += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid')
+        o += text(P.x0-6, P.Y(v)+4, f'{v:g}', 'end', 'small')
+    for i, v in enumerate(vals):
+        x = P.X(i + 0.1); w = P.X(i + 0.9) - x
+        cls = 'band' if BDL19_LAB[i] == 'Deep Ens' else 'box'
+        o += f'  <rect class="{cls}" x="{x:.1f}" y="{P.Y(v):.1f}" width="{w:.1f}" height="{P.Y(yr[0]) - P.Y(v):.1f}" />\n'
+        o += f'  <rect class="ln" x="{x:.1f}" y="{P.Y(v):.1f}" width="{w:.1f}" height="{P.Y(yr[0]) - P.Y(v):.1f}" />\n'
+        o += text(x + w/2, P.Y(v) - 5, f'{v:g}', 'middle', 'small')
+    o += f'  <rect class="ln" x="{P.x0}" y="{P.y0}" width="{P.w}" height="{P.h}" fill="none" />\n'
+    cy = y0 + h/2
+    o += f'  <text class="small" x="40" y="{cy:.1f}" text-anchor="middle" transform="rotate(-90 40 {cy:.1f})">{ylab}</text>\n'
+    return o, P
+b = ''
+o, P = bdl19_bars(20, 130, BDL19_C10, (82, 97), (85, 90, 95), 'C-10 agreement (%)')
+b += o
+o, P = bdl19_bars(180, 130, BDL19_C10C, (70, 89), (70, 75, 80, 85), 'C-10-C agreement (%)')
+b += o
+for i, l in enumerate(BDL19_LAB):
+    b += text(P.X(i + 0.5), 330, l, 'middle', 'small')
+svg('Bdl19HmcAgreement', 600, 342, 'Agreement of approximate inference methods with an HMC reference on CIFAR-10 and CIFAR-10-C',
+    'Two bar charts with six bars each: SGD, VI, SGLD, Deep Ens, SGHMC-CLR and HMC. Upper chart, agreement on clean CIFAR-10 (approximate values read from the original figure): 85.5, 88.7, 91.6, 91.5, 92.7 and 94.0 percent. Lower chart, agreement on CIFAR-10-C: 72, 75.5, 78, 79.3, 81 and 86 percent. In both charts agreement rises from SGD to HMC; deep ensembles are well above VI, level with SGLD on clean data and slightly above it on corrupted data, and below SGHMC-CLR.',
+    b)
+
+
+# ---------- Chapter 20 (Hybrid Ensemble Sampling Methods) ----------
+# Figure 20.1: sampling the posterior of the overparameterized linear network f(x) = w1 w2 x.
+# Schematic reproduction. Unnormalized log-posterior used here (standard normal prior on each
+# weight, Gaussian likelihood of data generated with w1 w2 = 1):
+#   log p(w | D) = -A/2 (w1 w2 - 1)^2 - (w1^2 + w2^2)/2 + const,   A = BDL20_A,
+# whose maxima are w1 = w2 = +-sqrt(1 - 1/A) (about +-0.99), close to the chapter's w1 = w2 = 1 and -1. The samples are computed
+# with the unadjusted Langevin algorithm of Equation (20.2) (full gradient), not with NUTS.
+# The ground-truth panel evaluates the normalized density on a grid (numerical integration).
+import random as bdl20_random
+
+BDL20_A = 50.0
+BDL20_R = (-3.4, 3.4)
+
+def bdl20_logp(w1, w2):
+    return -0.5*BDL20_A*(w1*w2 - 1)**2 - 0.5*(w1*w1 + w2*w2)
+
+def bdl20_grad(w1, w2):
+    r = w1*w2 - 1
+    return (-BDL20_A*r*w2 - w1, -BDL20_A*r*w1 - w2)
+
+def bdl20_ula(start, n, eta, rng, every=1):
+    w1, w2 = start
+    out = []
+    s = math.sqrt(eta)
+    for k in range(1, n+1):
+        g1, g2 = bdl20_grad(w1, w2)
+        w1 = w1 + 0.5*eta*g1 + s*rng.gauss(0, 1)
+        w2 = w2 + 0.5*eta*g2 + s*rng.gauss(0, 1)
+        if k % every == 0:
+            out.append((w1, w2))
+    return out
+
+def bdl20_optimize(start, n=20000, lr=0.01):
+    w1, w2 = start
+    for _ in range(n):
+        g1, g2 = bdl20_grad(w1, w2)
+        w1 += lr*g1
+        w2 += lr*g2
+    return (w1, w2)
+
+def bdl20_frame(P, size_w, size_h, ticks=True):
+    o = f'  <rect class="grid" x="{P.x0}" y="{P.y0}" width="{size_w}" height="{size_h}" />\n'
+    for v in (-2, 0, 2):
+        o += line([(P.X(v), P.y0), (P.X(v), P.y0+size_h)], 'grid')
+        o += line([(P.x0, P.Y(v)), (P.x0+size_w, P.Y(v))], 'grid')
+        o += text(P.X(v), P.y0+size_h+13, f'{v:g}'.replace('-', '−'), 'middle', 'small')
+        o += text(P.x0-5, P.Y(v)+4, f'{v:g}'.replace('-', '−'), 'end', 'small')
+    o += text(P.x0+size_w/2, P.y0+size_h+28, var('w') + '<tspan class="sub" dy="3">1</tspan>', 'middle', 'small')
+    o += text(P.x0-30, P.y0+size_h/2+4, var('w') + '<tspan class="sub" dy="3">2</tspan>', 'start', 'small')
+    return o
+
+def bdl20_manifold(P, branches=(1, -1)):
+    o = ''
+    lo = 1/BDL20_R[1]
+    for sgn in branches:
+        pts = []
+        n = 120
+        for i in range(n+1):
+            a = lo + (BDL20_R[1]-lo)*(i/n)**2
+            pts.append((P.X(sgn*a), P.Y(sgn/a)))
+        o += line(pts, 'ln', ' stroke-width="1"')
+    return o
+
+def bdl20_in(P, w):
+    return BDL20_R[0] < w[0] < BDL20_R[1] and BDL20_R[0] < w[1] < BDL20_R[1]
+
+def bdl20_trace_panel(x0, y0, sz, pts, label):
+    P = Plot(x0, y0, sz, sz, BDL20_R, BDL20_R)
+    o = bdl20_frame(P, sz, sz)
+    o += bdl20_manifold(P)
+    n = len(pts)
+    o += '  <g class="dot">\n'
+    for i, w in enumerate(pts):
+        if bdl20_in(P, w):
+            op = 0.25 + 0.75*(n-1-i)/(n-1)   # early steps dark, late steps light
+            o += f'<circle cx="{P.X(w[0]):.1f}" cy="{P.Y(w[1]):.1f}" r="3.2" fill-opacity="{op:.2f}"/>\n'
+    o += '  </g>\n'
+    o += text(x0+sz/2, y0-8, label, 'middle', 'small')
+    return o
+
+def bdl20_legend(x, y):
+    o = text(x, y, 'Time', 'start', 'small') + text(x, y+13, 'step', 'start', 'small')
+    for j, t in enumerate((40, 30, 20, 10)):
+        op = 0.25 + 0.75*(40-t)/39
+        yy = y+22+j*18
+        o += f'  <rect class="dot" x="{x}" y="{yy}" width="12" height="18" style="fill-opacity:{op:.2f}" />\n'
+        o += text(x+17, yy+13, f'{t}', 'start', 'small')
+    return o
+
+def bdl20_cloud_panel(x0, y0, sz, pts, label):
+    P = Plot(x0, y0, sz, sz, BDL20_R, BDL20_R)
+    o = bdl20_frame(P, sz, sz)
+    o += bdl20_manifold(P)
+    o += '  <g class="dot" fill-opacity="0.5">\n'
+    for w in pts:
+        if bdl20_in(P, w):
+            o += f'<circle cx="{P.X(w[0]):.1f}" cy="{P.Y(w[1]):.1f}" r="1.4"/>\n'
+    o += '  </g>\n'
+    o += text(x0+sz/2, y0-8, label, 'middle', 'small')
+    return o
+
+def bdl20_density_panel(x0, y0, sz, label):
+    P = Plot(x0, y0, sz, sz, BDL20_R, BDL20_R)
+    o = bdl20_frame(P, sz, sz)
+    n = 85
+    d = (BDL20_R[1]-BDL20_R[0])/n
+    vals = []
+    for i in range(n):
+        for j in range(n):
+            w1 = BDL20_R[0] + (i+0.5)*d
+            w2 = BDL20_R[0] + (j+0.5)*d
+            vals.append((i, j, math.exp(bdl20_logp(w1, w2))))
+    z = sum(v for _, _, v in vals)*d*d          # numerical integration of the normalizer
+    vmax = max(v for _, _, v in vals)/z
+    cell = sz/n
+    levels = {}
+    for i, j, v in vals:
+        q = (v/z)/vmax
+        if q > 0.04:
+            lv = round(min(1, q**0.7)*12)/12        # 12 shading levels keep the markup small
+            levels.setdefault(lv, []).append((i, j))
+    for lv in sorted(levels):
+        o += f'  <g class="dot" fill-opacity="{lv:.2f}">\n'
+        for i, j in levels[lv]:
+            o += f'<rect x="{x0+i*cell:.1f}" y="{y0+sz-(j+1)*cell:.1f}" width="{cell+0.3:.1f}" height="{cell+0.3:.1f}"/>\n'
+        o += '  </g>\n'
+    o += text(x0+sz/2, y0-8, label, 'middle', 'small')
+    return o
+
+bdl20_rng = bdl20_random.Random(3)
+# Upper left: chain started from a draw far out in the prior's tail region, 40 recorded steps.
+bdl20_prior = bdl20_ula((2.9, 1.4), 40*25, 0.0004, bdl20_rng, every=25)
+# Upper right: start from the optimum found by gradient descent from a random point.
+bdl20_map = bdl20_optimize((0.4, 0.9))
+bdl20_opt = bdl20_ula(bdl20_map, 40*25, 0.0004, bdl20_rng, every=25)
+# Bottom centre: one long chain from the optimized start.
+bdl20_long = bdl20_ula(bdl20_map, 40000, 0.004, bdl20_rng, every=50)   # 800 of the 40,000 steps shown
+# Bottom right: two chains from two optimized starts (one per mode).
+bdl20_map2 = bdl20_optimize((-0.7, -0.2))
+bdl20_multi = (bdl20_ula(bdl20_map, 20000, 0.004, bdl20_rng, every=50)
+               + bdl20_ula(bdl20_map2, 20000, 0.004, bdl20_rng, every=50))
+
+b = ''
+b += bdl20_trace_panel(50, 26, 220, bdl20_prior, 'Prior initialized')
+b += bdl20_legend(278, 60)
+b += bdl20_trace_panel(370, 26, 220, bdl20_opt, 'Optimization initialized')
+b += bdl20_density_panel(50, 330, 160, 'Ground truth posterior')
+b += bdl20_cloud_panel(250, 330, 160, bdl20_long, 'Single long chain')
+b += bdl20_cloud_panel(450, 330, 160, bdl20_multi, 'Multi-chain, optimized starts')
+svg('Bdl20HybridSampling', 640, 530,
+    'Prior-initialized, optimization-initialized, single-chain and multi-chain sampling of the posterior of f(x) = w1 w2 x',
+    'Five square panels with axes w1 and w2 from about −3 to 3. In the sample panels a thin black line marks the symmetry manifold w1 w2 = 1, two hyperbola branches in the upper-right and lower-left quadrants. Upper left: 40 time steps of a chain started far out on the upper-right branch near w1 = 3; the dots, dark for early and light for late steps, drift only slowly along the branch toward the mode at (1, 1). Upper right: 40 time steps of a chain started at the optimum (1, 1); the dots stay around the mode. A legend maps shading to time steps 10 to 40. Bottom left: the ground-truth posterior density, two curved bands of high density along both hyperbola branches, brightest near (1, 1) and (−1, −1). Bottom centre: a long single chain started at (1, 1) covers the upper-right band only and never reaches the lower-left one. Bottom right: two chains started at the two optimized points (1, 1) and (−1, −1) cover both bands.',
+    b)
+
+
+# ---------- Bdl21: Mixture of Experts layer (Chapter 21, Figure 21.1) ----------
+def bdl21_dotarrow(pts):
+    d = ' '.join(('M' if i == 0 else 'L') + f'{x:.1f},{y:.1f}' for i, (x, y) in enumerate(pts))
+    return f'  <path class="ln" d="{d}" stroke-dasharray="2 4" marker-end="ARROW" />\n'
+def bdl21_dotline(pts):
+    return line(pts, 'ln', ' stroke-dasharray="2 4"')
+def bdl21_expert(x, y, w, h, selected):
+    if selected:
+        return f'  <rect class="box" x="{x}" y="{y}" width="{w}" height="{h}" rx="3" />\n'
+    return (f'  <rect class="region" x="{x}" y="{y}" width="{w}" height="{h}" rx="3" />\n'
+            f'  <rect class="mut" x="{x}" y="{y}" width="{w}" height="{h}" rx="3" />\n')
+b = ''
+cy = 158
+b += text(22, cy-10, 'inputs')
+b += arrow([(22, cy), (96, cy)])
+b += box(96, cy-26, 140, 52, 'router')
+# stacked experts: 2nd and 4th (front) are the two selected ones
+ew, eh = 150, 56
+xs = [(310 + 16*k, 82 + 22*k) for k in range(4)]
+for k, (x, y) in enumerate(xs):
+    b += bdl21_expert(x, y, ew, eh, k in (1, 3))
+fx, fy = xs[3]
+b += text(fx + ew/2, fy + eh/2 + 5, 'expert', 'middle')
+# router output branches into the experts
+b += line([(236, cy), (270, cy)])
+b += arrow([(270, cy), (xs[2][0], cy)])
+b += line([(270, cy), (270, fy + eh - 12)])
+b += arrow([(270, fy + eh - 12), (fx, fy + eh - 12)])
+# outputs of the two selected experts to the summing junction
+sx = 610
+b += line([(xs[1][0] + ew, xs[1][1] + 18), (sx, xs[1][1] + 18)])
+b += arrow([(sx, xs[1][1] + 18), (sx, cy + 30 - 14)])
+b += arrow([(fx + ew, cy + 30), (sx - 14, cy + 30)])
+b += summing(sx, cy + 30)
+b += arrow([(sx + 13, cy + 30), (680, cy + 30)])
+b += text(632, cy + 20, 'outputs')
+# gating weights (dotted)
+b += bdl21_dotline([(166, cy - 26), (166, 30), (586, 30)])
+b += bdl21_dotarrow([(586, 30), (586, xs[1][1] + 18 - 2)])
+b += bdl21_dotarrow([(560, 30), (560, cy + 30 - 2)])
+b += text(184, 50, 'gating weights', 'start', 'small')
+svg('Bdl21MixtureOfExperts', 700, 232, 'Mixture of Experts layer',
+    'An input enters a router. The router sends it to a stack of eight experts, of which two, drawn solid, are selected; the others are drawn faintly. The outputs of the two selected experts are combined at a summing junction that produces the layer output. Dotted arrows from the router carry the gating weights that scale the two selected expert outputs before the sum.',
+    b)
+
+
+# ---------- Chapter 22, Figure 22.1: PAC-Bayes ensemble on IMDb ----------
+# Values read off the book's figure (approximate, to the plotted resolution).
+bdl22_pac = [0.8672,0.8699,0.8716,0.8719,0.8728,0.8734,0.8734,0.8731,0.8730,0.8741,0.8736,0.8736,0.8742,0.8742,0.8738,
+             0.8745,0.8745,0.8744,0.8744,0.8747,0.8746,0.8747,0.8746,0.8742,0.8750,0.8748,0.8747,0.8749,0.8746]
+bdl22_val = [0.8633,0.8665,0.8685,0.8701,0.8706,0.8710,0.8718,0.8717,0.8716,0.8728,0.8726,0.8726,0.8723,0.8731,0.8730,
+             0.8733,0.8732,0.8732,0.8735,0.8736,0.8735,0.8738,0.8728,0.8733,0.8736,0.8737,0.8734,0.8738,0.8738]
+bdl22_uni = [0.8533,0.8534,0.8550,0.8550,0.8568,0.8578,0.8588,0.8563,0.8584,0.8595,0.8607,0.8596,0.8596,0.8602,0.8593,
+             0.8605,0.8615,0.8616,0.8614,0.8614,0.8611,0.8610,0.8612,0.8616,0.8615,0.8618,0.8616,0.8618,0.8608]
+bdl22_rho = [0.172,0.113,0.013,0.014,0.012,0.011,0.006,0.004,0.014,0.014,
+             0.075,0.114,0.028,0.008,0.005,0.026,0.007,0.009,0.003,0.011,
+             0.095,0.114,0.035,0.013,0.023,0.003,0.025,0.017,0.012,0.002]
+
+def bdl22_cross(x, y, cls='mut', r=3.2):
+    return line([(x-r, y-r), (x+r, y+r)], cls) + line([(x-r, y+r), (x+r, y-r)], cls)
+def bdl22_star(x, y, r=3.6):
+    pts = []
+    for i in range(10):
+        a = -math.pi/2 + i*math.pi/5
+        rr = r if i % 2 == 0 else r*0.45
+        pts.append(f'{x+rr*math.cos(a):.1f},{y+rr*math.sin(a):.1f}')
+    return f'  <polygon class="box" points="{" ".join(pts)}" />\n'
+
+b = ''
+P = Plot(62, 34, 250, 220, (1, 31), (0.852, 0.876))
+b += text(P.x0 + P.w/2, 18, 'Ensembles IMDb', 'middle')
+for v in (0.855, 0.860, 0.865, 0.870, 0.875):
+    b += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid')
+    b += text(P.x0-6, P.Y(v)+4, f'{v:.3f}', 'end', 'small')
+for v in (5, 10, 15, 20, 25, 30):
+    b += line([(P.X(v), P.y0), (P.X(v), P.y0+P.h)], 'grid')
+    b += text(P.X(v), P.y0+P.h+16, f'{v}', 'middle', 'small')
+b += line([(P.x0, P.y0), (P.x0, P.y0+P.h), (P.x0+P.w, P.y0+P.h)])
+b += text(P.x0+P.w/2, P.y0+P.h+36, 'Number of independent training trials (' + var('N') + '<tspan class="sub" dy="3">trials</tspan><tspan dy="-3">)</tspan>', 'middle', 'small')
+b += text(P.x0, P.y0-6, 'Accuracy', 'start', 'small')
+xs = list(range(2, 31))
+b += line([(P.X(x), P.Y(v)) for x, v in zip(xs, bdl22_uni)], 'ln', ' stroke-dasharray="5 3"')
+b += ''.join(bdl22_star(P.X(x), P.Y(v)) for x, v in zip(xs, bdl22_uni))
+b += line([(P.X(x), P.Y(v)) for x, v in zip(xs, bdl22_val)], 'mut', ' stroke-dasharray="7 3 2 3"')
+b += ''.join(bdl22_cross(P.X(x), P.Y(v)) for x, v in zip(xs, bdl22_val))
+b += line([(P.X(x), P.Y(v)) for x, v in zip(xs, bdl22_pac)], 'acc')
+b += ''.join(f'  <circle class="dot" cx="{P.X(x):.1f}" cy="{P.Y(v):.1f}" r="2.8" />\n' for x, v in zip(xs, bdl22_pac))
+# legend: one row below both panels
+ly = 322
+def bdl22_f(sup, sub):
+    return var('f') + f'<tspan class="sub" dy="-6">{sup}</tspan><tspan class="sub" dx="-{len(sup)*5.5:.0f}" dy="10">{sub}</tspan><tspan dy="-4"> </tspan>'
+lx = 4
+b += line([(lx, ly), (lx+26, ly)], 'ln', ' stroke-dasharray="5 3"') + bdl22_star(lx+13, ly)
+b += text(lx+32, ly+4, 'uniform ensemble ' + bdl22_f('all', 'uniform'), 'start', 'small')
+lx = 196
+b += line([(lx, ly), (lx+26, ly)], 'mut', ' stroke-dasharray="7 3 2 3"') + bdl22_cross(lx+13, ly)
+b += text(lx+32, ly+4, 'ensemble of best checkpoints ' + bdl22_f('val', 'uniform'), 'start', 'small')
+lx = 452
+b += line([(lx, ly), (lx+26, ly)], 'acc') + f'  <circle class="dot" cx="{lx+13:.1f}" cy="{ly:.1f}" r="2.8" />\n'
+b += text(lx+32, ly+4, 'PAC-Bayes ensemble ' + bdl22_f('all', 'ρ'), 'start', 'small')
+
+# right panel: rho distribution
+Q = Plot(392, 34, 236, 220, (0.5, 30.5), (0, 0.18))
+b += text(Q.x0 + Q.w/2, 18, 'PAC-Bayes ensemble ' + var('ρ') + ' distribution', 'middle')
+for v in (0, 0.05, 0.10, 0.15):
+    b += line([(Q.x0, Q.Y(v)), (Q.x0+Q.w, Q.Y(v))], 'grid')
+    b += text(Q.x0-6, Q.Y(v)+4, f'{v:.2f}', 'end', 'small')
+bw = Q.w/30
+for i, r in enumerate(bdl22_rho, start=1):
+    x = Q.X(i) - bw/2
+    cls = 'box' if i in (1, 11, 21) else 'dot'
+    b += f'  <rect class="{cls}" x="{x:.1f}" y="{Q.Y(r):.1f}" width="{bw:.1f}" height="{Q.Y(0)-Q.Y(r):.1f}" />\n'
+for v in (1, 4, 7, 10, 13, 16, 19, 22, 25, 28):
+    b += text(Q.X(v), Q.y0+Q.h+16, f'{v}', 'middle', 'small')
+b += line([(Q.x0, Q.y0), (Q.x0, Q.y0+Q.h), (Q.x0+Q.w, Q.y0+Q.h)])
+b += text(Q.x0+Q.w/2, Q.y0+Q.h+36, 'Ensemble members (1, …, ' + var('M') + ')', 'middle', 'small')
+b += text(Q.x0, Q.y0-6, var('ρ'), 'start', 'small')
+svg('Bdl22ImdbEnsembles', 640, 340, 'Accuracy of three ensembling strategies on IMDb and the optimized PAC-Bayes weighting',
+    'Left panel: test accuracy against the number of independent training trials, from 2 to 30. The PAC-Bayes ensemble of all checkpoints rises from about 0.867 to about 0.875 and is the highest curve throughout; '
+    'the uniform ensemble of the best checkpoints rises from about 0.863 to about 0.874, slightly below it; the uniform ensemble of all checkpoints stays much lower, rising from about 0.853 to about 0.861. '
+    'Right panel: the optimized weights rho over 30 ensemble members (3 trials of 10 checkpoints). The first two checkpoints of each trial carry most of the weight, members 1, 2, 11, 12, 21 and 22 having weights between about 0.07 and 0.17, '
+    'while the other members have weights below about 0.035. Members 1, 11 and 21, the checkpoints chosen by validation error, are drawn in a lighter fill.',
+    b)
