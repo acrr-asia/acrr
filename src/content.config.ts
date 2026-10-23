@@ -27,6 +27,11 @@ const blog = defineCollection({
     example: z.boolean().default(false),
     series: reference('series').optional(),
     seriesOrder: z.number().int().positive().optional(),
+    /**
+     * Language the article was written in. Only `src/content/blog/vi/` files may set "vi": such an
+     * article is a Vietnamese original with no English version yet (docs/translation-vi.md).
+     */
+    originalLang: z.enum(['en', 'vi']).default('en'),
   }),
 });
 

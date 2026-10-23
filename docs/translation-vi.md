@@ -16,7 +16,14 @@ for visitors.
 | Interface text | `src/i18n/ui.ts` (`en`) | `src/i18n/ui.ts` (`vi`) | every `/vi/...` page |
 
 A translation has the same file name (slug or id) as its original; the build fails if a
-translation has no original. An untranslated article or insight still appears in Vietnamese
+translation has no original. The one exception is a **Vietnamese original**: an article written in
+Vietnamese first, at the user's request, while its English version is still planned. It lives in
+`src/content/blog/vi/<slug>.mdx` with `originalLang: "vi"` in its frontmatter, appears only in
+Vietnamese listings and routes, and its series' English file lists it under `plannedEntries` while
+the Vietnamese file does not (the build checks that the English planned count equals the Vietnamese
+count plus the series' Vietnamese originals, and allows the two `status` values to differ). When the
+English version is written, remove `originalLang` from the Vietnamese file and the planned entry
+from the English series file; from then on it is an ordinary translation. An untranslated article or insight still appears in Vietnamese
 listings, marked as English and linking to the English page.
 
 ## What stays identical to the original
