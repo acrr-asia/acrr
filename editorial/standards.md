@@ -200,7 +200,7 @@ The result is a report, `editorial/live-reviews/<type>/<slug>.md`, in the form o
 
 The live review is performed by a reviewer who did not write or revise the page in that pass. Who may accept a page is set in Section 3.
 
-Captures of the live site are taken where the site can be reached (a GitHub Actions job or San's device); a local build is not the live page. Until the live-review workflow of the adoption plan (Phase 2) exists, items remain `published-awaiting-live-review`.
+Captures of the live site are taken by the `Live review captures` workflow (`.github/workflows/live-review.yml`, `scripts/live-capture.mjs`) after every deployment, for the pages that changed, and on demand; it publishes screen-sized screenshots and rendering facts to the `live-captures` branch. A local build is not the live page. The procedure is the `live-review` skill of the editorial-os plugin; decisions and findings are recorded with `eos queue review` and `eos queue finding`.
 
 ### 4.5 Monitoring, corrections and maintenance
 

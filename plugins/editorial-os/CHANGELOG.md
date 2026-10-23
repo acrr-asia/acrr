@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0 (2026-10-24)
+
+- Live review: skill `live-review` (the chief editor's review of the public page, report, findings, decision, re-review); `eos queue review <id> <decision>` (sets the chief-editor review and moves the queue status; refuses an acceptance with open critical or major findings, without a risk level, or of a high-risk item by a reviewer not in `queue.highRiskApprovers`) and `eos queue finding <id> add | <status> <finding>` (closing a finding needs a note on what was checked live). Accepted limitations no longer count as open findings.
+
 ## 1.1.0 (2026-10-24)
 
 - Editorial queue: `eos queue` (list), `queue init`, `queue set`, `queue validate`; schema `schema/queue-entry.schema.json` (workflow status from proposal to accepted after the live-site review, reader-value contract, format, value category, risk, live findings, disclosures, history). Config `queue` (`dir`, `enforce` off/warn/error, `contractRequiredFrom`, `highRiskApprovers`). `eos gate` reports or enforces queue problems according to `queue.enforce`; `eos status` shows each item's queue status.

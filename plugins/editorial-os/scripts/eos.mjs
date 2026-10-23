@@ -1034,7 +1034,7 @@ export function queueCheck(cfg) {
     if (item && item.draft && QUEUE_PUBLISHED.has(e.status)) errors.push(`${where}: status "${e.status}" but the item is a draft`);
     if (e.status === 'merged' && !e.mergedInto) errors.push(`${where}: merged without "mergedInto"`);
     if (e.status === 'retired' && !e.redirect) errors.push(`${where}: retired without "redirect" (the URL readers are sent to, or "none" with a note)`);
-    const open = (e.findings ?? []).filter((f) => f.status !== 'closed');
+    const open = (e.findings ?? []).filter((f) => f.status !== 'closed' && f.status !== 'accepted-limitation');
     for (const f of e.findings ?? []) {
       if (!FINDING_PRIORITIES.includes(f.priority)) errors.push(`${where}: finding ${f.id ?? '?'} has priority "${f.priority}"`);
       for (const k of ['location', 'problem', 'action', 'acceptance']) if (!f[k]) errors.push(`${where}: finding ${f.id ?? '?'} has no ${k}`);
@@ -1070,6 +1070,64 @@ function queueSet(cfg, id, next, opts) {
   e.history = [...(e.history ?? []), { at: new Date().toISOString().slice(0, 10), status: next, from: prev, by: opts.by ?? null, note: opts.note ?? '' }];
   writeQueueEntry(cfg, e);
   return { prev, entry: e };
+}
+
+const REVIEW_TO_STATUS = {
+  accepted: 'accepted', 'accepted-with-follow-up': 'accepted', 'revision-requested': 'revision-required-after-publication', blocked: 'blocked',
+};
+
+/** Record the chief editor's live-review decision; refuses an acceptance the queue rules would reject. */
+function queueReview(cfg, id, decision, opts) {
+  if (!CHIEF_EDITOR_STATUSES.includes(decision) || decision === 'none') throw new EosError(`Decision must be one of ${CHIEF_EDITOR_STATUSES.filter((d) => d !== 'none').join(', ')}.`, 2);
+  if (!opts.by) throw new EosError('--by <reviewer> is required.', 2);
+  if (decision !== 'in-review' && !opts.ref) throw new EosError('--ref <live-review report> is required.', 2);
+  if (opts.ref && !existsSync(path.join(cfg._root, opts.ref))) throw new EosError(`Report ${opts.ref} does not exist.`, 2);
+  const p = queuePath(cfg, id);
+  if (!existsSync(p)) throw new EosError(`No queue entry ${id}.`, 2);
+  const e = JSON.parse(readFileSync(p, 'utf8'));
+  const today = new Date().toISOString().slice(0, 10);
+  e.reviews = { ...(e.reviews ?? {}), chiefEditor: { status: decision, by: opts.by, at: today, ref: opts.ref ?? e.reviews?.chiefEditor?.ref ?? null } };
+  const next = REVIEW_TO_STATUS[decision];
+  if (next === 'accepted') {
+    const approvers = cfg.queue?.highRiskApprovers ?? [];
+    if (e.risk === 'high' && approvers.length && !approvers.includes(opts.by)) throw new EosError(`${id} is high risk; only ${approvers.join(', ')} may accept it.`, 1);
+    if (e.risk == null) throw new EosError(`${id} has no risk level; set "risk" (routine or high) before accepting it.`, 1);
+    const blocking = (e.findings ?? []).filter((f) => f.status !== 'closed' && f.status !== 'accepted-limitation' && f.priority !== 'minor');
+    if (blocking.length) throw new EosError(`${id} has open critical or major findings: ${blocking.map((f) => f.id).join(', ')}.`, 1);
+  }
+  const prev = e.status;
+  if (next && next !== prev) e.status = next;
+  e.history = [...(e.history ?? []), { at: today, status: e.status, from: prev, by: opts.by, note: `live review: ${decision}${opts.ref ? ` (${opts.ref})` : ''}${opts.note ? `; ${opts.note}` : ''}` }];
+  writeQueueEntry(cfg, e);
+  return { prev, entry: e };
+}
+
+/** Add a live-review finding, or change a finding's status. */
+function queueFinding(cfg, id, action, opts) {
+  const p = queuePath(cfg, id);
+  if (!existsSync(p)) throw new EosError(`No queue entry ${id}.`, 2);
+  const e = JSON.parse(readFileSync(p, 'utf8'));
+  const today = new Date().toISOString().slice(0, 10);
+  e.findings ??= [];
+  if (action === 'add') {
+    for (const k of ['priority', 'location', 'problem', 'action', 'acceptance']) if (!opts[k]) throw new EosError(`--${k} is required.`, 2);
+    if (!FINDING_PRIORITIES.includes(opts.priority)) throw new EosError(`--priority must be one of ${FINDING_PRIORITIES.join(', ')}.`, 2);
+    const fid = opts.id ?? `L${e.findings.length + 1}`;
+    if (e.findings.some((f) => f.id === fid)) throw new EosError(`${id} already has a finding ${fid}.`, 2);
+    e.findings.push({ id: fid, location: opts.location, problem: opts.problem, whyItMatters: opts.why ?? '', action: opts.action, priority: opts.priority, acceptance: opts.acceptance, status: 'open', opened: today, closed: null });
+    writeQueueEntry(cfg, e);
+    return fid;
+  }
+  const states = ['open', 'fixed-awaiting-re-review', 'closed', 'accepted-limitation'];
+  if (!states.includes(action)) throw new EosError(`Finding action must be add or one of ${states.join(', ')}.`, 2);
+  const f = e.findings.find((x) => x.id === opts.finding);
+  if (!f) throw new EosError(`${id} has no finding ${opts.finding}.`, 2);
+  if ((action === 'closed' || action === 'accepted-limitation') && !opts.note) throw new EosError('--note is required: say what was checked on the live page (or why the limitation is accepted).', 2);
+  f.status = action;
+  f.closed = action === 'closed' || action === 'accepted-limitation' ? today : null;
+  if (opts.note) f.resolution = opts.note;
+  writeQueueEntry(cfg, e);
+  return f.id;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1305,6 +1363,9 @@ const HELP = `editorial-os ${VERSION}: deterministic editorial checks and the pu
   eos queue init                   add a queue entry for every item that has none (never overwrites)
   eos queue validate               exit 1 if the queue has problems (also run by the gate when queue.enforce is set)
   eos queue set <id> <status> [--by name] [--note text]   change an item's workflow status (appends to its history)
+  eos queue review <id> <decision> --by name --ref report.md [--note text]   record the chief editor's live-review decision
+  eos queue finding <id> add --priority p --location l --problem t --action a --acceptance c [--why w] [--id L1]
+  eos queue finding <id> <open|fixed-awaiting-re-review|closed|accepted-limitation> <finding-id> [--note text]
   eos validate-site [dist] [--json]       rendering and accessibility checks on the built HTML
   eos refs [--json]                bibliography of every References section
   eos check-external [--json] [--strict]   fetch external URLs (unreachable = not verified, not broken)
@@ -1477,6 +1538,20 @@ async function main() {
       if (!id || !next) throw new EosError('Usage: eos queue set <type/slug> <status> [--by name] [--note text]', 2);
       const { prev } = queueSet(cfg, id, next, { by: args.by, note: args.note });
       console.log(`${id}: ${prev} -> ${next}`);
+      return;
+    }
+    if (sub === 'review') {
+      const [, , id, decision] = args._;
+      if (!id || !decision) throw new EosError('Usage: eos queue review <type/slug> <decision> --by <name> --ref <report> [--note text]', 2);
+      const { prev, entry } = queueReview(cfg, id, decision, { by: args.by, ref: args.ref, note: args.note });
+      console.log(`${id}: chief editor ${decision}; status ${prev}${entry.status !== prev ? ` -> ${entry.status}` : ' (unchanged)'}`);
+      return;
+    }
+    if (sub === 'finding') {
+      const [, , id, action, finding] = args._;
+      if (!id || !action) throw new EosError('Usage: eos queue finding <type/slug> add ... | <status> <finding-id>', 2);
+      const fid = queueFinding(cfg, id, action, { ...args, finding, id: args.id });
+      console.log(`${id}: finding ${fid} ${action === 'add' ? 'added' : `now ${action}`}`);
       return;
     }
     if (sub !== 'list' && sub !== 'validate') throw new EosError(`Unknown queue command "${sub}".\n\n${HELP}`, 2);
