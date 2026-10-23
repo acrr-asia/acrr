@@ -1,0 +1,636 @@
+---
+title: "Suy luận biến phân tuần tự"
+description: "Suy luận Bayes trực tuyến cho tham số mạng nơ-ron: mô hình không gian trạng thái, bộ lọc Kalman và Kalman mở rộng, VI tuần tự và thuật toán BONG."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - variational inference
+  - kalman filter
+  - online learning
+series: bayesian-deep-learning
+seriesOrder: 22
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl18SsmGraph from '../../../components/diagrams/Bdl18SsmGraph.astro';
+import Bdl18EkfMlp from '../../../components/diagrams/Bdl18EkfMlp.astro';
+import Bdl18PredictUpdateProject from '../../../components/diagrams/Bdl18PredictUpdateProject.astro';
+
+## 1. Giới thiệu
+
+Chương này bàn về suy luận Bayes tuần tự hay trực tuyến (online) cho các tham số của một mạng nơ-ron sâu. Nghĩa là, mục tiêu là tính đệ quy $p(\theta_t \mid \mathcal{D}_{1:t})$ khi dữ liệu lần lượt đến, trong đó $\mathcal{D}_t = (x_t, y_t)$ là điểm dữ liệu thứ $t$ và $\theta_t$ là các tham số tại thời điểm $t$. Đây là phiên bản trực tuyến của bài toán học sâu Bayes (Bayesian deep learning, BDL) tiêu chuẩn, và hữu ích cho những bối cảnh phải đưa ra quyết định ở mỗi bước (chẳng hạn bài toán máy đánh bạc theo ngữ cảnh, contextual bandits), và/hoặc những bối cảnh mà quá trình sinh dữ liệu không dừng (chẳng hạn học liên tục, continual learning). Chương này tiếp cận bài toán từ góc nhìn lọc Bayes (Bayesian filtering), đối lập với làm trơn (smoothing), vốn làm việc ngoại tuyến (offline) để tính $p(\theta_t \mid \mathcal{D}_{1:T})$ trong đó $\mathcal{D}_{1:T}$ là toàn bộ tập dữ liệu. Nếu giả sử các tham số không đổi theo thời gian (giả định được dùng lúc đầu để ký hiệu đơn giản), có thể thay $\theta_t$ bằng $\theta$.
+
+Đại lượng $p(\theta \mid \mathcal{D}_{1:t})$ được gọi là trạng thái niềm tin (belief state), vì nó biểu diễn niềm tin hiện tại về các tham số chưa biết khi đã có dữ liệu cho đến thời điểm đó. (Nó còn được gọi là phân phối lọc (filtering distribution), như đã nhắc đến ở [Chương 1, Mục 6](/vi/blog/introduction-to-sampling).) Đại lượng này có thể được tính bằng cách áp dụng lặp lại quy tắc Bayes:
+
+$$
+p(\theta \mid \mathcal{D}_{1:t}) = \frac{p(y_t \mid x_t, \theta)\, p(\theta \mid \mathcal{D}_{1:t-1})}{p(y_t \mid x_t, \mathcal{D}_{1:t-1})} \tag{18.1}
+$$
+
+trong đó tiên nghiệm $p(\theta \mid \mathcal{D}_{1:t-1})$ là trạng thái niềm tin trước đó, và mẫu số được cho bởi
+
+$$
+p(y_t \mid x_t, \mathcal{D}_{1:t-1}) \stackrel{\text{def}}{=} Z_t = \int p(y_t \mid x_t, \theta)\, p(\theta \mid \mathcal{D}_{1:t-1})\, \mathrm{d}\theta \tag{18.2}
+$$
+
+Lưu ý rằng, trong bối cảnh theo lô (ngoại tuyến), tích của các hệ số chuẩn hóa qua các bước tương ứng với hàm hợp lý biên (marginal likelihood) của dữ liệu:
+
+$$
+Z(\mathcal{D}) = p(y_{1:N} \mid x_{1:N}) = \prod_{n=1}^{N} Z_n \tag{18.3}
+$$
+
+Thách thức then chốt mà chương này tập trung vào là làm thế nào để tính hiệu quả trạng thái niềm tin mới $p(\theta \mid \mathcal{D}_{1:t})$ ở mỗi bước, khi các tham số chưa biết $\theta \in \mathbb{R}^P$ có số chiều cao và hàm hợp lý không liên hợp với tiên nghiệm. Để bài toán hiệu quả về mặt tính toán (điều đặc biệt quan trọng trong bối cảnh trực tuyến), chương này tập trung vào các phương pháp suy luận biến phân (variational inference, VI), vốn đã được giới thiệu (trong bối cảnh theo lô) ở [Chương 12](/vi/blog/introduction-to-variational-inference). Trạng thái niềm tin xấp xỉ ở mỗi bước được biểu diễn bởi $q_t = q(\theta \mid \mathcal{D}_{1:t})$. Trọng tâm là trường hợp đặc biệt khi phân phối biến phân này là một phân phối Gauss, $q_t = \mathcal{N}(\cdot \mid \mu_t, \Sigma_t)$, trong đó $\mu_t$ là trung bình hậu nghiệm và $\Sigma_t$ là hiệp phương sai hậu nghiệm. (Trong nhiều trường hợp, làm việc với ma trận độ chính xác (precision matrix) hậu nghiệm, ký hiệu $\Lambda_t = \Sigma_t^{-1}$, thuận tiện hơn.) Chương này thảo luận nhiều phương pháp để cập nhật hiệu quả các tham số biến phân này, những phương pháp thường đòi hỏi áp đặt thêm giả định lên $\Sigma_t$ (hoặc $\Lambda_t$) nhằm cân bằng giữa khả năng biểu đạt và hiệu quả. Chương cũng chỉ ra mối liên hệ giữa các phương pháp suy luận Bayes này với các thuật toán tối ưu, như hạ gradient tự nhiên (natural gradient descent, được thảo luận ở [Chương 15](/vi/blog/natural-gradient-variational-inference)) và các phương pháp bậc hai khác.
+
+## 2. Mô hình không gian trạng thái
+
+Các phương pháp được thảo luận trong chương này có thể áp dụng cho nhiều loại bài toán ước lượng trạng thái, không chỉ việc ước lượng tham số của mạng nơ-ron. Vì vậy, mục này bắt đầu bằng một trình bày tổng quát trước khi chuyên biệt hóa cho trường hợp BDL. Điều này giúp dễ nhận ra mối liên hệ với các tài liệu rộng hơn về lọc Bayes (chẳng hạn Särkkä và Svensson).
+
+### 2.1 Các giả định mô hình hóa
+
+<Figure caption="Hình 18.1: Mô hình không gian trạng thái (SSM) dưới dạng mô hình đồ thị (các nút tô đậm là quan sát được, các nút không tô là ẩn). (a) SSM tiêu chuẩn. (b) Phiên bản chuyên biệt cho suy luận tham số trực tuyến. Vẽ lại.">
+  <Bdl18SsmGraph />
+</Figure>
+
+Điểm xuất phát là định nghĩa mô hình không gian trạng thái (state-space model, SSM), một cách định nghĩa phân phối đồng thời trên một dãy trạng thái ẩn $z_t$ và các đầu ra quan sát được $y_t$, khi cho trước một tập các đầu vào hay tín hiệu điều khiển quan sát được $u_t$. Mô hình có dạng sau:
+
+$$
+p(y_{1:T}, z_{1:T} \mid u_{1:T}) = p(z_1)\, p(y_1 \mid z_1, u_1) \prod_{t=2}^{T} p(y_t \mid z_t, u_t)\, p(z_t \mid z_{t-1}, u_t) \tag{18.4}
+$$
+
+Xem Hình 18.1(a) để có minh họa.
+
+Phân phối $p(z_t \mid z_{t-1}, u_t)$ được gọi là mô hình động lực (dynamics model), hay mô hình chuyển trạng thái (transition model), và đặc tả cách trạng thái ẩn thay đổi theo thời gian. Phân phối $p(y_t \mid z_t, u_t)$ được gọi là mô hình quan sát (observation model), hay mô hình đo (measurement model), và đặc tả hàm hợp lý của các quan sát khi biết trạng thái ẩn (và tùy chọn cả các tín hiệu điều khiển).
+
+Với mô hình trên, bài toán suy luận trực tuyến (còn gọi là lọc Bayes) là việc cập nhật đệ quy trạng thái niềm tin để thu được $p(z_t \mid y_{1:t}, u_{1:t})$, tận dụng tính chất Markov của SSM. Các thuật toán để tính đại lượng này được thảo luận ở Mục 3. Trong bối cảnh ngoại tuyến, khi toàn bộ tập dữ liệu đã có sẵn, người ta có thể quan tâm đến bài toán làm trơn Bayes, tức tính $p(z_{1:T} \mid y_{1:T}, u_{1:T})$ hoặc các phân phối biên tương ứng, chẳng hạn $p(z_t \mid y_{1:T}, u_{1:T})$. Tuy nhiên, điều này nằm ngoài phạm vi của chương. (Về trường hợp này, xem chẳng hạn Courts và cộng sự, Dowling và cộng sự cho các phương pháp dựa trên VI, và Kamthe và cộng sự cho một phương pháp dựa trên lan truyền kỳ vọng (Expectation Propagation).)
+
+### 2.2 Ví dụ
+
+Xét một ví dụ cụ thể là bài toán theo dõi một vật thể chuyển động (như một máy bay) từ các quan sát có nhiễu về vị trí của nó. Trong trường hợp này, $z_t$ biểu diễn vị trí và vận tốc của vật thể, $y_t$ biểu diễn quan sát (chẳng hạn từ radar hoặc camera), và $u_t$ biểu diễn các tín hiệu điều khiển đầu vào do phi công chọn để lái máy bay. Trạng thái niềm tin biểu diễn một phân phối trên trạng thái của vật thể khi biết các quan sát có nhiễu thu được cho đến thời điểm hiện tại.
+
+Trong trường hợp ước lượng tham số của mạng nơ-ron, trạng thái ẩn $z_t$ tương ứng với các tham số $\theta_t$ của mạng, $y_t$ biểu diễn nhãn mục tiêu, và đầu vào $u_t$ biểu diễn các đặc trưng hay biến đồng thời (covariate) $x_t$ được đưa vào mạng. Trong ứng dụng này, các trạng thái ẩn (tham số mạng) được giả định là không chịu ảnh hưởng của đầu vào, nên không có cạnh từ $u_t$ đến $z_t$ trong mô hình đồ thị. Mô hình đơn giản hóa thu được được thể hiện ở Hình 18.1(b). Xem Mục 2.5 để biết thêm chi tiết.
+
+### 2.3 Hệ động lực tuyến tính
+
+Mục này xét một trường hợp đặc biệt quan trọng của SSM gọi là hệ động lực tuyến tính (Linear Dynamical System, LDS). Mô hình này được dùng rộng rãi vì nó cho phép suy luận chính xác, như được thảo luận ở Mục 3.2. Ngoài ra, nó sẽ là một khối xây dựng cho các thuật toán suy luận xấp xỉ được xét ở phần sau của chương.
+
+Trong một LDS, cả mô hình chuyển trạng thái lẫn mô hình động lực đều là các phân phối Gauss có điều kiện, có trung bình là hàm tuyến tính của đầu vào và có phương sai cố định. Chính xác hơn, mô hình giả định
+
+$$
+p(z_t \mid z_{t-1}, u_t) = \mathcal{N}(z_t \mid A_t z_{t-1} + B_t u_t + a_t, Q_t) \tag{18.5}
+$$
+
+$$
+p(y_t \mid z_t, u_t) = \mathcal{N}(y_t \mid C_t z_t + D_t u_t + c_t, R_t) \tag{18.6}
+$$
+
+Ở đây $Q_t$ là hiệp phương sai của nhiễu hệ thống, và $R_t$ là hiệp phương sai của nhiễu quan sát. Nếu quá trình là dừng thì các tham số mô hình $(A_t, B_t, C_t, D_t, a_t, c_t, Q_t, R_t)$ sẽ không phụ thuộc vào $t$.
+
+Cách phát biểu này được gọi là dạng affine của LDS (xem Särkkä và Svensson, Mục 6.4). Có thể loại bỏ số hạng $a_t$ bằng cách nối thêm giá trị 1 vào đầu vào $u_t$ và nối $a_t$ thành một cột của $B_t$. Tương tự, có thể loại bỏ $c_t$ bằng cách gộp nó vào $D_t$. Tuy nhiên, đôi khi việc đưa tường minh các số hạng độ chệch (bias), hay độ lệch (offset), này vào lại thuận tiện, giống như trong mạng nơ-ron. Một cách khác, vì các đầu vào là cố định, có thể gộp $B_t u_t$ vào $a_t$ và $D_t u_t$ vào $c_t$.
+
+### 2.4 Hệ động lực phi tuyến
+
+Giả định rằng SSM có mô hình động lực tuyến tính và mô hình quan sát tuyến tính (Phương trình 18.5–18.6) khá hạn chế. Tuy nhiên, có thể dễ dàng nới lỏng giả định này bằng cách định nghĩa một SSM Gauss có trung bình là hàm phi tuyến của đầu vào:
+
+$$
+p(z_t \mid z_{t-1}, u_t) = \mathcal{N}(z_t \mid d(u_t, z_{t-1}), Q_t) \tag{18.7}
+$$
+
+$$
+p(y_t \mid z_t, u_t) = \mathcal{N}(y_t \mid f(u_t, z_t), R_t) \tag{18.8}
+$$
+
+Lưu ý rằng, vì nhiễu là cộng tính, mô hình trên có thể được viết lại như sau:
+
+$$
+z_t = d_t(z_{t-1}) + \epsilon_t \tag{18.9}
+$$
+
+$$
+y_t = f_t(z_t) + \epsilon'_t \tag{18.10}
+$$
+
+trong đó $\epsilon_t \sim \mathcal{N}(0, Q_t)$ là nhiễu hệ thống, $\epsilon'_t \sim \mathcal{N}(0, R_t)$ là nhiễu quan sát, và các ký hiệu viết tắt $d_t(z_{t-1}) = d(u_t, z_{t-1})$ và $f_t(z_t) = f(u_t, z_t)$ đã được định nghĩa.
+
+### 2.5 SSM cho học sâu Bayes trực tuyến
+
+Mục này thảo luận cách phát biểu bài toán ước lượng trực tuyến tham số của mạng nơ-ron như một bài toán suy luận trong SSM, trong đó $z_t = \theta_t$ là các tham số chưa biết của mạng, $u_t = x_t$ là các đầu vào của mạng, và $y_t$ là các đầu ra quan sát được.
+
+#### Mô hình quan sát
+
+Mô hình quan sát $f$ tương ứng với mạng nơ-ron ánh xạ đầu vào sang đầu ra khi biết các tham số ẩn, nên $f_t(\theta_t) = f(x_t, \theta_t)$. Giả định phân phối đầu ra là Gauss thường hợp lý với các mục tiêu giá trị thực (mặc dù có thể muốn dùng các hàm mất mát bền vững hơn để xử lý giá trị ngoại lai, như được thảo luận trong Duran-Martin và cộng sự, Knoblauch và cộng sự). Trong trường hợp này, thường giả định $R_t = \sigma_r^2 I$, trong đó $\sigma_r > 0$ là một siêu tham số (hyperparameter).
+
+Tuy nhiên, khi các mục tiêu là nhãn rời rạc hoặc số đếm nguyên, phân phối quan sát Gauss nên được thay bằng một phân phối phù hợp hơn thuộc họ mũ (exponential family). Trong trường hợp này, giả sử $f_t(\theta_t)$ biểu diễn tham số trung bình (mean parameter) của phân phối đầu ra, còn $h_t(\theta_t)$ biểu diễn tham số tự nhiên.[^1] Chẳng hạn, xét bài toán phân loại bằng mạng nơ-ron. Trong trường hợp này, $f(x_t, \theta_t)$ biểu diễn xác suất của từng nhãn lớp, còn $h(x_t, \theta_t)$ biểu diễn các logit. Điều này cho
+
+$$
+p(y_t \mid \theta_t, x_t) = \operatorname{Cat}(y_t \mid f(x_t, \theta_t)) = \operatorname{Cat}(y_t \mid S(h(x_t, \theta_t))) \tag{18.11}
+$$
+
+trong đó $S$ là hàm softmax.
+
+#### Mô hình động lực
+
+Thường giả định (chẳng hạn Kurle và cộng sự, Titsias và cộng sự) rằng mô hình động lực là một quá trình Ornstein–Uhlenbeck, tức là
+
+$$
+p(\theta_t \mid \theta_{t-1}) = \mathcal{N}(\theta_t \mid d_t(\theta_{t-1}), Q_t) \tag{18.12}
+$$
+
+$$
+d_t(\theta_{t-1}) = \gamma_t \theta_{t-1} + (1 - \gamma_t)\mu_0 \tag{18.13}
+$$
+
+$$
+Q_t = (1 - \gamma_t^2)\Sigma_0 \tag{18.14}
+$$
+
+trong đó $0 \le \gamma_t \le 1$ là mức độ trôi (drift) và $\mathcal{N}(\theta_0 \mid \mu_0, \Sigma_0)$ là tiên nghiệm. Nếu $\gamma_t = 1$ thì động lực là hàm đồng nhất và không có nhiễu ($Q_t = 0$), nên các biến ẩn không đổi, tức là $p(\theta_t \mid \theta_{t-1}) = \delta(\theta_t - \theta_{t-1})$.
+
+Hệ số $(1 - \gamma_t^2)$ trong Phương trình 18.14 hàm ý một quá trình có các phân phối biên dừng $p(\theta_t) = \mathcal{N}(\theta_t \mid \mu_0, \Sigma_0)$. Một lựa chọn phổ biến khác là dùng một bước ngẫu nhiên (random walk) Gauss kiểu "bùng nổ phương sai" (variance exploding), trong đó $\gamma_t = 1$ nhưng $Q_t = \sigma_q^2 I$ với $\sigma_q > 0$. Điều này có thể cung cấp một dạng chính quy hóa. Trong trường hợp này, đại lượng $\sigma_q^2/\sigma_r^2$, tức tỉ số giữa độ chính xác của phép đo và độ chính xác của động lực, điều khiển tốc độ học của hệ. (Có thể thấy điều này khi xem dạng của ma trận độ lợi Kalman trong Phương trình 18.25; xem Ollivier để thảo luận thêm.) Cách chọn các siêu tham số này được thảo luận ở Mục 3.6.
+
+## 3. Suy luận trực tuyến
+
+Mục này thảo luận cách thực hiện suy luận tuần tự (trực tuyến) trong SSM bằng một số thuật toán tất định phổ biến. (Để có trình bày chi tiết hơn, xem chẳng hạn Särkkä và Svensson, Triantafyllopoulos.)
+
+### 3.1 Lọc Bayes
+
+Định nghĩa $\mathcal{D}_t = (u_t, y_t)$, trạng thái niềm tin $p(z_t \mid \mathcal{D}_{1:t}) = p(z_t \mid u_t, y_t, \mathcal{D}_{1:t-1})$ có thể được ước lượng đệ quy bằng một tổng quát hóa nhỏ của Phương trình 18.1, như sau:
+
+$$
+\underbrace{p(z_t \mid \mathcal{D}_{1:t-1}, u_t)}_{\text{posterior predictive}} = \int \underbrace{p(z_t \mid z_{t-1}, u_t)}_{\text{dynamics}}\, \underbrace{p(z_{t-1} \mid \mathcal{D}_{1:t-1})}_{\text{previous posterior}}\, \mathrm{d}z_{t-1} \tag{18.15}
+$$
+
+$$
+\underbrace{p(z_t \mid \mathcal{D}_{1:t})}_{\text{new posterior}} = \frac{1}{Z_t} \underbrace{p(y_t \mid z_t, u_t)}_{\text{likelihood}}\, \underbrace{p(z_t \mid \mathcal{D}_{1:t-1}, u_t)}_{\text{prior}} \tag{18.16}
+$$
+
+$$
+Z_t = \underbrace{p(y_t \mid \mathcal{D}_{1:t-1}, u_t)}_{\text{observation predictive}} \tag{18.17}
+$$
+
+Phương trình 18.15 được gọi là bước dự đoán (predict step). Bước này dùng phương trình Chapman–Kolmogorov để tính phân phối dự đoán một bước tới trước (one-step-ahead predictive distribution) cho trạng thái ẩn, trước khi thấy kết quả $y_t$; phân phối này trở thành tiên nghiệm cho bước $t$. Phương trình 18.16 được gọi là bước cập nhật (update step). Bước này dùng quy tắc Bayes để tính phân phối hậu nghiệm sau khi thấy kết quả $y_t$. Cuối cùng, Phương trình 18.17 là phân phối dự đoán một bước tới trước cho các quan sát, được tính tại $y_t$.[^2]
+
+### 3.2 Lọc Kalman
+
+Mục này trình bày bộ lọc Kalman (Kalman filter) nổi tiếng, áp dụng các phương trình lọc Bayes ở Mục 3 cho mô hình LDS được định nghĩa ở Mục 2.3. Kết quả là một thủ tục đệ quy để ước lượng trạng thái niềm tin $p(z_t \mid y_{1:t}, u_{1:t}) = \mathcal{N}(z_t \mid \mu_t, \Sigma_t)$. Phép dẫn xuất này đã quen thuộc và có thể tìm thấy trong nhiều sách giáo khoa (xem chẳng hạn Särkkä và Svensson, Mục 6.3, hoặc Murphy, Mục 8.2.2). Để ngắn gọn, phép lấy điều kiện theo các đầu vào $u_t$ được bỏ qua và chúng được gộp vào các số hạng độ chệch.
+
+Bước dự đoán như sau:
+
+$$
+p(z_t \mid y_{1:t-1}) = \mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1}) \tag{18.18}
+$$
+
+$$
+\mu_{t|t-1} = A_t \mu_{t-1} + a_t \tag{18.19}
+$$
+
+$$
+\Sigma_{t|t-1} = A_t \Sigma_{t-1} A_t^\top + Q_t \tag{18.20}
+$$
+
+Bước dự đoán tốn thời gian $O(P^3)$ (nhắc lại rằng $P$ là số chiều của trạng thái ẩn).
+
+Bước cập nhật như sau:
+
+$$
+p(z_t \mid y_{1:t}) = \mathcal{N}(z_t \mid \mu_t, \Sigma_t) \tag{18.21}
+$$
+
+$$
+\hat{y}_t = C_t \mu_{t|t-1} + c_t \tag{18.22}
+$$
+
+$$
+e_t = y_t - \hat{y}_t \tag{18.23}
+$$
+
+$$
+S_t = C_t \Sigma_{t|t-1} C_t^\top + R_t \tag{18.24}
+$$
+
+$$
+K_t = \Sigma_{t|t-1} C_t^\top S_t^{-1} \tag{18.25}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + K_t e_t \tag{18.26}
+$$
+
+$$
+\Sigma_t = \Sigma_{t|t-1} - K_t S_t K_t^\top = \Sigma_{t|t-1} - K_t C_t \Sigma_{t|t-1} \tag{18.27}
+$$
+
+Ở đây $e_t$ là phần đổi mới (innovation) hay sai số phần dư, $S_t$ là hiệp phương sai của phần đổi mới, và $K_t$ là ma trận độ lợi Kalman (Kalman gain matrix). Bước cập nhật tốn thời gian $O(P^2 C + P C^2 + C^3)$ (nhắc lại rằng $C$ là số chiều của quan sát).
+
+Như vậy, trung bình hậu nghiệm bằng trung bình dự đoán tiên nghiệm cộng với ma trận độ lợi nhân với phần dư, còn hiệp phương sai hậu nghiệm bằng hiệp phương sai tiên nghiệm trừ đi một số hạng xác định dương, cho thấy độ bất định thường giảm sau khi lấy điều kiện. Điều này thể hiện rõ hơn ở dạng thông tin (information form), dạng làm việc với các ma trận độ chính xác:
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} + C_t^\top R_t^{-1} C_t \tag{18.28}
+$$
+
+Phương trình này cho thấy độ chính xác hậu nghiệm bằng độ chính xác tiên nghiệm cộng với một số hạng phụ thuộc vào độ chính xác của các quan sát.
+
+Cuối cùng, lưu ý rằng phân phối dự đoán quan sát được cho bởi
+
+$$
+p(y_t \mid y_{1:t-1}) = \mathcal{N}(y_t \mid \hat{y}_t, S_t) \tag{18.29}
+$$
+
+từ đó có thể tính $Z_t$.
+
+### 3.3 Lọc Kalman mở rộng
+
+Mục này mở rộng các phương trình lọc Kalman cho trường hợp SSM phi tuyến (nhưng vẫn Gauss). Điều này được thực hiện bằng cách tuyến tính hóa cả mô hình động lực lẫn mô hình đo quanh trung bình tiên nghiệm hiện tại, rồi thực hiện một bước lọc Kalman. Phương pháp này được gọi là bộ lọc Kalman mở rộng (Extended Kalman filter, EKF), và được phát triển lần đầu tại NASA.
+
+Để giải thích phương pháp chi tiết hơn, xét một hàm phi tuyến $g(z)$. Có thể tính một xấp xỉ tuyến tính của hàm này quanh một điểm $\mu$ nào đó bằng khai triển chuỗi Taylor bậc nhất:
+
+$$
+\hat{g}(z) = g(\mu) + J(z - \mu) \tag{18.30}
+$$
+
+trong đó $J = \operatorname{Jac}(g)|_{\mu}$ là ma trận Jacobi (Jacobian) của $g$ tính tại $\mu$ (xem thêm [Chương 8, Mục 1](/vi/blog/linearized-laplace-approximations)). Nếu $g : \mathbb{R}^D \to \mathbb{R}^C$ thì việc tính $J$ tốn $O(C|g|)$ khi dùng vi phân tự động chế độ ngược (reverse mode), hoặc $O(D|g|)$ khi dùng chế độ xuôi (forward mode), trong đó $|g|$ là chi phí tính giá trị $g$. Phân phối Gauss có điều kiện ban đầu, với trung bình phi tuyến, giờ có thể được xấp xỉ bằng một phân phối Gauss có điều kiện có trung bình là hàm affine của đầu vào:
+
+$$
+\mathcal{N}(g(z), \Sigma) \approx \mathcal{N}(Az + b, \hat{\Sigma}) \tag{18.31}
+$$
+
+$$
+A = \operatorname{Jac}(g)|_{\mu} \tag{18.32}
+$$
+
+$$
+b = g(\mu) - A\mu \tag{18.33}
+$$
+
+$$
+\hat{\Sigma} = \Sigma \tag{18.34}
+$$
+
+Áp dụng điều này cho SSM cho kết quả sau:
+
+$$
+\hat{d}_t(z_{t-1}) = \mu_{t|t-1} + A_t(z_{t-1} - \mu_{t-1}) \tag{18.35}
+$$
+
+$$
+\mu_{t|t-1} = d_t(\mu_{t-1}) \tag{18.36}
+$$
+
+$$
+A_t = \operatorname{Jac}(d_t)(\mu_{t-1}) \tag{18.37}
+$$
+
+$$
+\hat{f}_t(z_t) = \hat{y}_t + C_t(z_t - \mu_{t|t-1}) \tag{18.38}
+$$
+
+$$
+\hat{y}_t = f_t(\mu_{t|t-1}) \tag{18.39}
+$$
+
+$$
+C_t = \operatorname{Jac}(f_t)(\mu_{t|t-1}) \tag{18.40}
+$$
+
+Sau đó áp dụng một bước lọc Kalman.
+
+EKF có thể được lặp, bằng cách tuyến tính hóa lại mô hình quanh trung bình hậu nghiệm đã cập nhật thay vì trung bình tiên nghiệm. Cách này tương đương với một phép tối ưu Gauss–Newton và có thể cải thiện độ chính xác của xấp xỉ.
+
+EKF có thể được áp dụng để ước lượng tham số của một mô hình hồi quy bằng mạng nơ-ron, như được thảo luận trong Puskorius và Feldkamp, Singhal và Wu. Xem Hình 18.2 để có một ví dụ. Tuy nhiên, nói chung cách này tốn thời gian $O(P^3)$ mỗi bước, điều không khả thi nếu số tham số lớn. Ngoài ra, phương pháp bị giới hạn ở các quan sát Gauss. Mục 4 trình bày những phương pháp nhanh hơn và tổng quát hơn.
+
+<Figure caption="Hình 18.2: EKF áp dụng cho một MLP trong một bài toán hồi quy phi tuyến một chiều. Các mẫu từ phân phối dự đoán hậu nghiệm trên không gian đầu ra được hiển thị sau khi thấy 10, 20, 30 và 200 quan sát đầu tiên. (Video về quá trình này: https://github.com/probml/probml-data/blob/main/data/ekf_mlp_demo.mp4.) Mã để dựng lại biểu đồ này (do Gerardo Duran-Martin viết) ở https://github.com/probml/JSL/blob/main/jsl/demos/ekf_mlp.py. Bản tái hiện mang tính sơ đồ: các khung được tính lại bằng cách chạy EKF trên một MLP tanh 1-6-1 với dữ liệu từ y = x − 10 cos(x) sin(x) + x³ cộng nhiễu Gauss, một thiết lập giả định khớp với hình dạng của biểu đồ gốc; các đường mờ là các mẫu hậu nghiệm, đường đậm là hàm trung bình hậu nghiệm và các vòng tròn là các quan sát.">
+  <Bdl18EkfMlp />
+</Figure>
+
+### 3.4 Hồi quy tuyến tính thống kê
+
+Mục này trình bày một cách khác để tuyến tính hóa một hệ Gauss phi tuyến, gọi là hồi quy tuyến tính thống kê (Statistical Linear Regression, SLR), có thể cho độ chính xác cao hơn nhưng với chi phí tính toán lớn hơn. Ý tưởng cơ bản là tính các tham số của xấp xỉ Gauss tuyến tính bằng cách cực tiểu hóa một hàm mất mát hồi quy kỳ vọng:
+
+$$
+\mathcal{N}(g(z), \Sigma) \approx \mathcal{N}(Az + b, \hat{\Sigma}) \tag{18.41}
+$$
+
+$$
+A, b = \arg\min \mathbb{E}_{y,z}\big[\|y - Az - b\|_2^2\big] = \arg\min \mathbb{E}_{z}\big[\|g(z) - Az - b\|_2^2\big] \tag{18.42}
+$$
+
+$$
+A = \operatorname{Cov}[y, z]\, \mathbb{V}[z]^{-1} \tag{18.43}
+$$
+
+$$
+b = \mathbb{E}[y] - A\, \mathbb{E}[z] \tag{18.44}
+$$
+
+$$
+\hat{\Sigma} = \mathbb{V}[y] - A\, \mathbb{V}[z]\, A^\top \tag{18.45}
+$$
+
+(Có thể dùng một phương pháp tương tự cho mô hình động lực, bằng cách thay $z$ và $y$ bởi $z_{t-1}$ và $z_t$.) Các tích phân cần thiết để tính các kỳ vọng và phương sai liên quan có thể được xấp xỉ bằng cầu phương Gauss (Gaussian quadrature). Điều này dẫn đến nhiều thuật toán phổ biến, bao gồm *Unscented* KF (còn gọi là lọc điểm sigma, sigma-point filtering), KF Gauss–Hermite, và KF cầu phương khối (cubature KF). Các phương pháp này cũng có thể được lặp, dẫn đến bộ lọc tuyến tính hóa hậu nghiệm (posterior linearization filter).
+
+Những kỹ thuật này đã được áp dụng cho việc ước lượng tham số của mạng nơ-ron (chẳng hạn de Lima và cộng sự), nhưng chúng còn kém khả năng mở rộng hơn các phương pháp dựa trên EKF. Vì vậy, giờ chương chuyển sang các phương pháp VI, vốn nhanh hơn nhiều.
+
+### 3.5 Suy luận biến phân
+
+Các phương pháp được thảo luận ở Mục 3.3 và 3.4 để tính một phân phối hậu nghiệm Gauss xấp xỉ không đưa ra bảo đảm nào rằng kết quả là xấp xỉ Gauss tối ưu. Vì vậy, chương chuyển sang các phương pháp suy luận biến phân, vốn giải tường minh để tìm xấp xỉ Gauss tối ưu.
+
+#### Bước dự đoán
+
+Ở bước dự đoán, tích phân trong phương trình Chapman–Kolmogorov 18.15 có thể được xấp xỉ bằng cách cực tiểu hóa KL thuận (forward KL):
+
+$$
+q_{t|t-1}(z_t) = \arg\min_{q \in \mathcal{Q}} D_{\mathrm{KL}}\big(p_{t|t-1}(z_t) \,\big\|\, q(z_t)\big) \tag{18.46}
+$$
+
+Như đã biết rõ, bài toán này có thể được giải bằng khớp mô-men (moment matching), cho ra
+
+$$
+q_{t|t-1}(z_t) = \mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1}) \tag{18.47}
+$$
+
+$$
+\mu_{t|t-1} = \mathbb{E}_{p_{t|t-1}}[z_t] \tag{18.48}
+$$
+
+$$
+\Sigma_{t|t-1} = \operatorname{Cov}_{p_{t|t-1}}[z_t] \tag{18.49}
+$$
+
+Trong trường hợp động lực phi tuyến, có thể dùng tuyến tính hóa (như trong EKF được thảo luận ở Mục 3.3) hoặc các phương pháp cầu phương Gauss (như trong UKF được thảo luận ở Mục 3.4) để xấp xỉ các mô-men này. Trong trường hợp BDL với tham số tĩnh, khi động lực là hàm đồng nhất và nhiễu hệ thống là $Q_t = \sigma_q^2 I$, bước dự đoán đơn giản hơn nhiều và rút gọn thành $\mu_{t|t-1} = \mu_{t-1}$ và $\Sigma_{t|t-1} = \Sigma_{t-1} + \sigma_q^2 I$.
+
+#### Bước cập nhật
+
+Ở bước cập nhật, một cách tiếp cận tự nhiên là lại cực tiểu hóa KL thuận:
+
+$$
+q_t(z_t) = \arg\min_{q \in \mathcal{Q}} D_{\mathrm{KL}}\big(p_{t|t}(z_t) \,\big\|\, q(z_t)\big) \tag{18.50}
+$$
+
+$$
+p_{t|t}(z_t) = \frac{1}{Z_t}\, p(y_t \mid z_t)\, q_{t|t-1}(z_t) \tag{18.51}
+$$
+
+Điều này có thể được diễn giải là lấy phân phối tiên nghiệm $q_{t|t-1}$, cập nhật nó bằng quy tắc Bayes, rồi chiếu phân phối hậu nghiệm thu được $p_{t|t}$ trở lại không gian các phân phối dễ tính $\mathcal{Q}$, như minh họa ở Hình 18.3. Cách này được gọi là lọc mật độ giả định (Assumed Density Filtering, ADF) hay lọc độ phân kỳ cực tiểu (Minimum Divergence Filtering). Trong bối cảnh ngoại tuyến (làm trơn), nó tương ứng với thuật toán lan truyền kỳ vọng (Expectation Propagation) (xem thêm Chương 25). Giống như ở bước dự đoán, cực tiểu hóa $D_{\mathrm{KL}}(p \,\|\, q)$ tương đương với khớp mô-men của hai phân phối.[^3]
+
+<Figure caption="Hình 18.3: Minh họa chu trình dự đoán – cập nhật – chiếu cho bước đo, trong đó pₜ = pₜ|ₜ. Bước dự đoán – chiếu tương ứng cho động lực, tính qₜ|ₜ₋₁ ≈ pₜ|ₜ₋₁, được lược bỏ vì thường dễ tính. Vẽ lại.">
+  <Bdl18PredictUpdateProject />
+</Figure>
+
+Phương pháp luận ADF đã được áp dụng cho việc huấn luyện trực tuyến mạng nơ-ron, chẳng hạn thuật toán lan truyền ngược kỳ vọng (expectation backpropagation) của Soudry và cộng sự, thuật toán lan truyền ngược xác suất (probabilistic backpropagation) của Hernandez-Lobato và Adams, và công trình của Ghosh và cộng sự. Tuy nhiên, trong không gian nhiều chiều, ADF không khả thi, vì trước tiên nó đòi hỏi tính phân phối hậu nghiệm một bước chính xác $p_{t|t}$ rồi mới trích xuất các mô-men của nó (việc này lại đòi hỏi tính các tích phân nhiều chiều).
+
+Vì vậy, chương chuyển sang phương pháp VI phổ biến hơn, phương pháp cực tiểu hóa KL ngược (reverse KL), tương ứng với phép chiếu thông tin (information projection) (dẫn đến hành vi tìm mode (mode-seeking) thay vì phủ mode (mode-covering)). Cách này khả thi hơn ADF và KL thuận vì các kỳ vọng được lấy theo phân phối được chọn $q$ thay vì theo phân phối hậu nghiệm thực $p$. Chính xác hơn, phép cập nhật tính
+
+$$
+\begin{aligned}
+q_t(z_t) &= \arg\min_{q} D_{\mathrm{KL}}\big(q(z_t) \,\big\|\, p_{t|t}(z_t)\big) && (18.52) \\
+&= \arg\min_{q} \mathbb{E}_q\left[\log \frac{q(z_t)}{p(y_t \mid z_t)\, q_{t|t-1}(z_t) / Z_t}\right] && (18.53) \\
+&= \arg\min_{q} \underbrace{D_{\mathrm{KL}}\big(q(z_t) \,\big\|\, q_{t|t-1}(z_t)\big) - \mathbb{E}_q[\log p(y_t \mid z_t)]}_{\mathcal{L}_{t|t}(\mu_t, \Sigma_t)} && (18.54)
+\end{aligned}
+$$
+
+trong đó hằng số $Z_t$ đã được bỏ khỏi dòng cuối vì nó không phụ thuộc vào $q$ và do đó không ảnh hưởng đến arg min. Hàm mục tiêu thu được có dạng quen thuộc của một hàm mất mát log-hàm hợp lý âm (negative log likelihood, NLL) kỳ vọng cộng với một số hạng chính quy hóa KL so với tiên nghiệm, và tương ứng với một phiên bản trực tuyến của ELBO âm (cận dưới của bằng chứng, evidence lower bound).
+
+Có thể chứng minh (chẳng hạn Cao và cộng sự, Jones và cộng sự, Lambert và cộng sự, Zeno và cộng sự) rằng các điểm bất động của hàm mục tiêu $\mathcal{L}_{t|t}$ thỏa mãn các điều kiện sau:
+
+$$
+\mu_t = \mu_{t|t-1} - \Sigma_{t|t-1}\, \mathbb{E}_{\mathcal{N}(z_t \mid \mu_t, \Sigma_t)}[\nabla_{z_t} \ell(z_t, y_t)] \tag{18.55}
+$$
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} + \mathbb{E}_{\mathcal{N}(z_t \mid \mu_t, \Sigma_t)}[\nabla^2_{z_t} \ell(z_t, y_t)] \tag{18.56}
+$$
+
+trong đó $\ell(z_t, y_t) = -\log p(y_t \mid z_t)$ là hàm mất mát NLL.
+
+Lưu ý rằng các tham số chưa biết $\mu_t, \Sigma_t$ xuất hiện ở cả vế trái lẫn vế phải của các phương trình trên, tạo thành một phép cập nhật ẩn (implicit update). Do đó, nói chung các phương trình này phải được lặp để tìm nghiệm. Các thuật toán phù hợp thuộc loại này được thảo luận ở Mục 4. Tuy nhiên, trong trường hợp hệ Gauss tuyến tính, có thể chứng minh rằng các kỳ vọng ở vế phải có nghiệm giải tích, nên phép cập nhật có thể được thực hiện trong một bước, dùng các phương trình lọc Kalman được thảo luận ở Mục 3.2.
+
+### 3.6 Ước lượng trạng thái và ước lượng tham số
+
+Cho đến giờ, các tham số biểu diễn mô hình động lực và mô hình quan sát được giả định là đã biết. Chính xác hơn, đại lượng được tính cho đến giờ là $p(z_t \mid \mathcal{D}_{1:t}, \phi_t)$, trong đó $\phi_t$ là các tham số của hàm động lực $d_t$ và hàm quan sát $f_t$. Bài toán này được gọi là "ước lượng trạng thái" (state estimation). Nếu các tham số chưa biết, có thể thêm chúng vào không gian trạng thái ẩn để thực hiện ước lượng đồng thời trạng thái và tham số, bằng cách tính $p(z_t, \phi_t \mid \mathcal{D}_{1:t})$. Bài toán này được gọi là "nhận dạng hệ thống" (system identification) và phức tạp hơn nhiều (xem chẳng hạn Courts và cộng sự, Dowling và cộng sự).
+
+May mắn là, trong trường hợp BDL, mô hình động lực và mô hình quan sát thường có rất ít tham số tự do (chẳng hạn $\phi_t = (\gamma_t, \sigma_q)$ đối với động lực OU ở Mục 2.5), vì các tham số chưa biết của mạng $\theta_t$ có thể được coi là các trạng thái ẩn $z_t$. Do đó các tham số $\phi$ có thể được coi là siêu tham số, có thể ước lượng bằng Bayes thực nghiệm (empirical Bayes) (tức là bằng cách tối ưu chúng theo hàm hợp lý biên). Chẳng hạn, Titsias và cộng sự tối ưu số hạng trôi $\gamma_t$ của động lực OU bằng cách cực đại hóa log-hàm hợp lý dự đoán một bước tới trước, $p(y_t \mid y_{1:t-1}, \gamma_t)$, đại lượng có thể tính từ hằng số chuẩn hóa $Z_t$ của phân phối hậu nghiệm xấp xỉ. Bằng cách tối ưu trực tuyến số hạng trôi $\gamma_t$, phương pháp của họ có thể thích nghi với tính không dừng của dữ liệu.
+
+## 4. Gradient tự nhiên trực tuyến Bayes
+
+Mục này trình bày thuật toán gradient tự nhiên trực tuyến Bayes (Bayesian Online Natural Gradient, BONG) của Jones và cộng sự, thuật toán cực tiểu hóa hàm mục tiêu VI trong Phương trình 18.54 bằng hạ gradient tự nhiên. BONG là một phiên bản của quy tắc học Bayes (Bayesian learning rule, BLR) của Khan và Rue (xem [Chương 15](/vi/blog/natural-gradient-variational-inference)) được điều chỉnh cho trường hợp trực tuyến. Phép cập nhật BLR cũng hoạt động bằng hạ gradient tự nhiên trên một ELBO âm, nhưng dùng một hàm mục tiêu theo lô thay vì hàm mục tiêu đệ quy trong Phương trình 18.54. Như vậy, BONG khác BLR ở chỗ tích hợp các công cụ suy luận trực tuyến được trình bày ở Mục 2–3, cụ thể là các mô hình động lực, các tiên nghiệm lặp, và các phép cập nhật kiểu lọc với cấu trúc dự đoán – cập nhật tuần tự.[^4] Ngoài ra, mục này thảo luận cách tính hiệu quả các kỳ vọng khác nhau mà những phép cập nhật này đòi hỏi. Ưu điểm chính của BONG là nó định nghĩa một phép cập nhật hiệu quả về tính toán cho mạng nơ-ron Bayes trong quá trình học trực tuyến, và cung cấp một khuôn khổ thống nhất bao trùm nhiều phương pháp hiện có.
+
+### 4.1 Kiến thức nền
+
+Trước hết, giới thiệu một số kiến thức nền. Giả sử $q_t$ thuộc họ mũ, trong đó $\psi_t$ là các tham số tự nhiên (natural parameter) và $\rho_t$ là các tham số đối ngẫu (mô-men) (dual (moment) parameters). Với một phân phối Gauss, các tham số tự nhiên và tham số mô-men được cho bởi
+
+$$
+\psi_t = \left(\Sigma_t^{-1}\mu_t, -\tfrac{1}{2}\Sigma_t^{-1}\right) \tag{18.57}
+$$
+
+$$
+\rho_t = \left(\mu_t, \mu_t \mu_t^\top + \Sigma_t\right) \tag{18.58}
+$$
+
+Có thể chứng minh rằng ma trận Jacobi của ánh xạ từ tham số đối ngẫu sang tham số tự nhiên với mọi phân phối thuộc họ mũ bằng ma trận thông tin Fisher:
+
+$$
+F_{\psi_t} = \frac{\partial \rho}{\partial \psi}\Big|_{\psi_t} \tag{18.59}
+$$
+
+Do đó, gradient tự nhiên theo các tham số tự nhiên bằng gradient thông thường theo các tham số đối ngẫu, tức là
+
+$$
+F_{\psi_t}^{-1} \nabla_{\psi_t} \ell(\psi) = \nabla_{\rho_t} \ell(\rho) \tag{18.60}
+$$
+
+Việc chuyển từ tham số tự nhiên sang tham số đối ngẫu có cùng chi phí tính toán như việc tính ma trận thông tin Fisher.
+
+Trạng thái ẩn tiếp tục được viết là $z_t$ và đầu vào hay tín hiệu điều khiển là $u_t$, để phản ánh rằng cách trình bày này áp dụng cho các bài toán ước lượng trạng thái tổng quát. Xin nhắc lại, với ước lượng trực tuyến tham số của mạng nơ-ron, $z_t = \theta_t$ được lấy là các tham số chưa biết của mạng và $u_t = x_t$ là các đầu vào của mạng.
+
+### 4.2 Bước cập nhật
+
+Phương trình 18.54 có thể được cực tiểu hóa, hay giá trị âm của nó được cực đại hóa, bằng các phép cập nhật lặp theo hướng gradient tự nhiên. Tại vòng lặp $i$, phép cập nhật trở thành
+
+$$
+\begin{aligned}
+\psi_t^{i} &= \psi_t^{i-1} + \alpha_t F_{\psi_t^{i-1}}^{-1} \nabla_{\psi_t^{i-1}} \Big( \mathbb{E}_{\psi_t^{i-1}}\Big[\log p(y_t \mid f_t(z_t)) - D_{\mathrm{KL}}\Big(q_{\psi_t^{i-1}} \,\Big\|\, q_{\psi_{t|t-1}}\Big)\Big]\Big) && (18.61) \\
+&= \psi_t^{i-1} + \alpha_t \nabla_{\rho_t^{i-1}} \Big( \mathbb{E}_{\psi_t^{i-1}}\Big[\log p(y_t \mid f_t(z_t)) - D_{\mathrm{KL}}\Big(q_{\psi_t^{i-1}} \,\Big\|\, q_{\psi_{t|t-1}}\Big)\Big]\Big) && (18.62)
+\end{aligned}
+$$
+
+trong đó $\alpha_t > 0$ là tốc độ học (learning rate). (Phương pháp Bayes By Backprop (BBB) của Blundell và cộng sự dùng một phép cập nhật tương tự, nhưng dùng gradient tiêu chuẩn cho $\psi_t$ thay vì gradient tự nhiên. Điều này đòi hỏi nhiều vòng lặp hơn do thiếu tiền điều kiện (preconditioning).)
+
+Nếu vòng lặp được khởi tạo với $\psi_t^0 = \psi_{t|t-1}$ và chỉ thực hiện một vòng lặp duy nhất, gradient của số hạng chính quy hóa KL triệt tiêu, và phép cập nhật chỉ còn là một phép cập nhật gradient trên log-hàm hợp lý kỳ vọng, như sau:
+
+$$
+\psi_t = \psi_{t|t-1} + \nabla_{\rho_{t|t-1}} \underbrace{\mathbb{E}_{\psi_{t|t-1}}[\log p(y_t \mid f_t(z_t))]}_{\bar{\mathcal{L}}_{t|t-1}} \tag{18.63}
+$$
+
+Đây là cách tiếp cận được dùng trong phương pháp BONG của Jones và cộng sự. Mặc dù số hạng KL đã bị bỏ, một dạng chính quy hóa ẩn (theo thuật toán) vẫn đang được dùng, nhờ khởi tạo $q_t$ tại tiên nghiệm và không đi xa khỏi nó (vì chỉ thực hiện một bước). Hơn nữa, có thể chứng minh rằng một bước gradient duy nhất với tốc độ học đơn vị ($\alpha_t = 1$) cho đúng phép cập nhật Bayes chính xác trong trường hợp liên hợp.
+
+Trong Jones và cộng sự, các tác giả chỉ ra rằng kết quả của phép cập nhật tường minh này được cho bởi:
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} - \underbrace{\mathbb{E}_{\mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1})}[\nabla^2_{z_t} \log p(y_t \mid f_t(z_t))]}_{G_t} \tag{18.64}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + \Sigma_t \underbrace{\mathbb{E}_{\mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1})}[\nabla_{z_t} \log p(y_t \mid f_t(z_t))]}_{g_t} \tag{18.65}
+$$
+
+**Thuật toán 22** Thuật toán BONG, giả sử tham số tĩnh
+
+```text
+for t = 1 to ∞ do
+    // Predict
+    μ_{t|t−1} ← μ_{t−1},  Σ_{t|t−1} ← Σ_{t−1}
+    // Update
+    define loss ℓ_t(z_t) ← −log p(y_t | u_t, z_t)
+    compute g_t and G_t using methods in Section 4.3 applied to ℓ_t
+    compute Σ_t^{−1} using Equation 18.64
+    compute μ_t using Equation 18.65
+```
+
+Xem Thuật toán 22 để biết mã giả thu được. Mục 4.3 giải thích cách tính các số hạng $g_t$ và $G_t$, còn Mục 4.4 thảo luận độ phức tạp tính toán của thuật toán. Điểm mấu chốt là, với một phân phối Gauss có hiệp phương sai đầy đủ, phương pháp tốn thời gian $O(P^2)$ hoặc $O(P^3)$, tùy theo các lựa chọn thuật toán, điều không khả thi với phần lớn ứng dụng. Vì vậy, Mục 4.5 xét một xấp xỉ đường chéo, chỉ tốn thời gian $O(P)$. Cuối cùng, Mục 4.6 xét việc dùng một biểu diễn hạng thấp, có khả năng biểu đạt cao hơn biểu diễn đường chéo nhưng vẫn tăng tuyến tính theo $P$.
+
+### 4.3 Tính các kỳ vọng
+
+Trong Cao và cộng sự, các tác giả xấp xỉ các kỳ vọng liên quan bằng cầu phương Gauss, rồi kết hợp với hạ gradient tự nhiên để được một phương pháp mà họ gọi là "NANO" (viết tắt của *natural gradient Gaussian approximation filter*, bộ lọc xấp xỉ Gauss bằng gradient tự nhiên). Tuy nhiên, cầu phương không mở rộng được cho số chiều cao.
+
+Một cách tiếp cận khác (được dùng chẳng hạn trong phương pháp RVGA của Lambert và cộng sự) là dùng xấp xỉ Monte Carlo, trong đó lấy mẫu $z_t^m \sim \mathcal{N}(\mu_{t|t-1}, \Sigma_{t|t-1})$ rồi tính
+
+$$
+g_t^{\mathrm{MC}} = \frac{1}{M} \sum_{m=1}^{M} g_t^m, \quad g_t^m = \nabla_{z_t^m} \log p(y_t \mid f_t(z_t)) \tag{18.66}
+$$
+
+$$
+G_t^{\mathrm{MC}} = \frac{1}{M} \sum_{m=1}^{M} G_t^m, \quad G_t^m = \nabla^2_{z_t^m} \log p(y_t \mid f_t(z_t)) \tag{18.67}
+$$
+
+Vì việc tính ma trận Hesse (Hessian) không khả thi trong không gian nhiều chiều, có thể thay $G_t^{\mathrm{MC}}$ bằng một xấp xỉ Fisher thực nghiệm (empirical Fisher, EF) (chẳng hạn Martens), được định nghĩa như sau:
+
+$$
+G_t^{\mathrm{MCEF}} = -\frac{1}{M} G_t^{1:M} (G_t^{1:M})^\top, \quad G_t^{1:M} = [g_t^1, \dots, g_t^M] \tag{18.68}
+$$
+
+Một cách tiếp cận khác là tuyến tính hóa mô hình quan sát, như trong EKF (Mục 3.3). Ngoài ra, phân phối quan sát được xấp xỉ bằng hai mô-men (có điều kiện) đầu tiên của nó, theo Ollivier, Tronarp và cộng sự. Nghĩa là, hàm hợp lý xấp xỉ sau được sử dụng:
+
+$$
+p_t^{\mathrm{LG}}(y_t \mid z_t) = \mathcal{N}(y_t \mid \hat{f}_t(z_t), R_t) \tag{18.69}
+$$
+
+$$
+\hat{f}_t(z_t) = \hat{y}_t + C_t(z_t - \mu_{t|t-1}) \tag{18.70}
+$$
+
+$$
+\hat{y}_t = f_t(\mu_{t|t-1}) \tag{18.71}
+$$
+
+$$
+C_t = \operatorname{Jac}(f_t)|_{\mu_{t|t-1}} \tag{18.72}
+$$
+
+$$
+R_t = \mathbb{V}\big[y_t \mid z_t = \mu_{t|t-1}\big] \tag{18.73}
+$$
+
+Điều này cho
+
+$$
+g_t^{\mathrm{Lin}} = C_t^\top R_t^{-1}(y_t - \hat{y}_t), \quad G_t^{\mathrm{LinHess}} = -C_t^\top R_t^{-1} C_t \tag{18.74}
+$$
+
+Để tránh phải tính ma trận Jacobi (việc tốn thời gian $O(C|f|)$, và do đó có thể chậm với các mục tiêu nhiều chiều), có thể dùng một xấp xỉ kiểu Fisher thực nghiệm:
+
+$$
+g_t^{\mathrm{LinEF}} = g_t^{\mathrm{Lin}}, \quad G_t^{\mathrm{LinEF}} = -g_t^{\mathrm{Lin}} (g_t^{\mathrm{Lin}})^\top \tag{18.75}
+$$
+
+Cuối cùng, các kỳ vọng có thể được xấp xỉ bằng một xấp xỉ thế trực tiếp (plugin) hay xấp xỉ delta, trong đó $\mathcal{N}(z_t \mid \mu_{t|t-1}, \Sigma_{t|t-1})$ được thay bằng $\delta(z_t - \mu_{t|t-1})$. Điều này cho
+
+$$
+g_t^{\delta} = \nabla_{z_t} \log p(y_t \mid f_t(z_t))\big|_{\mu_{t|t-1}}, \quad G_t^{\delta} = \nabla^2_{z_t} \log p(y_t \mid f_t(z_t))\big|_{\mu_{t|t-1}}, \tag{18.76}
+$$
+
+Xấp xỉ thế trực tiếp cũng có thể được kết hợp với tuyến tính hóa hoặc với xấp xỉ Fisher thực nghiệm để có những xấp xỉ rẻ hơn cho $G_t$:[^5]
+
+$$
+G_t^{\delta\mathrm{Lin}} = G_t^{\mathrm{LinHess}}, \quad G_t^{\delta\mathrm{EF}} = -g_t^{\delta} (g_t^{\delta})^\top \tag{18.77}
+$$
+
+Tóm lại, đã xác định được 4 cách xấp xỉ $g_t$: cầu phương, lấy mẫu, tuyến tính hóa và thế trực tiếp. Tương tự, đã xác định được 7 cách xấp xỉ $G_t$: cầu phương, lấy mẫu (có hoặc không có EF), tuyến tính hóa (có hoặc không có EF), và thế trực tiếp (có hoặc không có EF). Các phương pháp khác nhau đánh đổi giữa tốc độ và độ chính xác, như được thảo luận ở Mục 4.4.
+
+### 4.4 Độ phức tạp tính toán
+
+Mục này thảo luận ngắn gọn độ phức tạp tính toán (thời gian chạy) của các thuật toán trên. Thời gian phụ thuộc vào ba yếu tố: (1) dạng của phân phối hậu nghiệm biến phân $q$, (2) phương pháp được chọn để ước lượng $g_t$ và $G_t$, và (3) thực hiện một bước cập nhật trên hàm mục tiêu log-hàm hợp lý kỳ vọng (expected log likelihood, ELL) được chính quy hóa ngầm $\bar{\mathcal{L}}_{t|t-1}$ định nghĩa trong Phương trình 18.63, hay nhiều bước cập nhật trên hàm mục tiêu ELBO được chính quy hóa tường minh $\mathcal{L}_{t|t}$ định nghĩa trong Phương trình 18.54. Chi tiết có thể tìm thấy trong Jones và cộng sự, nhưng một số kết quả then chốt được tóm tắt ngắn gọn ở đây.
+
+Giả sử dùng một $q$ có hiệp phương sai đầy đủ, $g_t$ và $G_t$ được tính bằng cách tuyến tính hóa mô hình, như trong Phương trình 18.74, và thực hiện một bước cập nhật trên hàm mục tiêu ELL. Có thể chứng minh rằng phép cập nhật thu được tương đương với dạng thông tin của bộ lọc Kalman trình bày trong Phương trình 18.28:
+
+$$
+\Sigma_t^{-1} = \Sigma_{t|t-1}^{-1} - G_t = \Sigma_{t|t-1}^{-1} + C_t^\top R_t^{-1} C_t \tag{18.78}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + \Sigma_t g_t = \mu_{t|t-1} + \Sigma_t C_t^\top R_t^{-1}(y_t - \hat{y}_t) \tag{18.79}
+$$
+
+Để tránh phải chuyển từ $\Sigma_t^{-1}$ sang $\Sigma_t$, có thể dùng bổ đề nghịch đảo ma trận (matrix inversion lemma), cho ra dạng tiêu chuẩn của KF, được nhắc lại ở đây cho tiện theo dõi:
+
+$$
+K_t = \Sigma_{t|t-1} C_t^\top (R_t + C_t \Sigma_{t|t-1} C_t^\top)^{-1} \tag{18.80}
+$$
+
+$$
+\mu_t = \mu_{t|t-1} + K_t(y_t - \hat{y}_t) \tag{18.81}
+$$
+
+$$
+\Sigma_t = \Sigma_{t|t-1} - K_t C_t \Sigma_{t|t-1} \tag{18.82}
+$$
+
+Phương pháp này, tương đương với phương pháp CM-EKF của Ollivier, Tronarp và cộng sự, tốn thời gian $O(CP^2)$.
+
+Nếu $G_t$ được xấp xỉ bằng xấp xỉ EF Monte Carlo trong Phương trình 18.68, như trong phương pháp RVGA của Lambert và cộng sự, thời gian là $O(MP^2)$. Nếu $G_t$ được xấp xỉ bằng xấp xỉ EF tuyến tính hóa trong Phương trình 18.75, thời gian có thể giảm xuống $O(P^2)$. Mọi biến thể khác (bao gồm phương pháp BLR gốc của Khan và Rue) đều tốn thời gian $O(P^3)$. Vì vậy, các mục dưới đây thảo luận những cách tham số hóa hạn chế hơn cho $q$, để độ phức tạp có thể giảm xuống tuyến tính theo $P$.
+
+### 4.5 Trường hợp đường chéo
+
+Cách dễ nhất để tăng tốc thuật toán là giả định ma trận hiệp phương sai của phân phối hậu nghiệm biến phân là đường chéo, tức là dùng $\psi_t = (\sigma_t^{-2}\mu_t, -\frac{1}{2}\sigma_t^{-2})$, hay tương đương $\rho_t = (\mu_t, \operatorname{diag}(\mu_t^2 + \sigma_t^2))$, trong đó phép nhân và các số mũ được lấy theo từng phần tử. Các phương trình cập nhật liên quan có thể tìm thấy trong Jones và cộng sự (Mục E.3–E.4), nhưng tất cả đều thực hiện được trong thời gian $O(P)$.
+
+Khi kết hợp với xấp xỉ Hesse tuyến tính hóa của Phương trình 18.74 và áp dụng cho hàm mục tiêu ELL một bước, cách này khôi phục phương pháp EKF đường chéo biến phân (variational diagonal EKF) của Chang và cộng sự. Khi kết hợp với xấp xỉ Hesse MC của Phương trình 18.67 và áp dụng cho hàm mục tiêu ELBO nhiều bước, cách này khôi phục một phiên bản trực tuyến của thuật toán VON của Khan và cộng sự. Nếu thay vào đó dùng xấp xỉ EF MC của Phương trình 18.68, cách này khôi phục một phiên bản trực tuyến của thuật toán VOGN của Khan và cộng sự. (Xem thêm phương pháp VON được cải tiến gần đây trong Shen và cộng sự.) Nếu dùng hạ gradient tiêu chuẩn (thay vì NGD) và tối ưu các tham số trung bình $\rho_t$ thay vì $\psi_t$, cách này khôi phục một phiên bản trực tuyến của phương pháp BBB của Blundell và cộng sự.
+
+### 4.6 Trường hợp hạng thấp
+
+Cuối cùng, xét trường hợp ma trận độ chính xác hậu nghiệm có dạng đường chéo cộng hạng thấp (diagonal plus low rank, DLR), tức là $\Sigma_t^{-1} = D_t + W_t W_t^\top$, trong đó $D_t$ là một ma trận đường chéo cỡ $P \times P$, và $W_t$ là một ma trận cao và hẹp cỡ $P \times R$, với $R \ll P$ là hạng của xấp xỉ. Khác với biểu diễn đường chéo, biểu diễn này nắm bắt được tương quan giữa các tham số ẩn, nhưng vẫn tăng tuyến tính theo số chiều, như được chỉ ra dưới đây. (Cũng có thể dùng xấp xỉ DLR cho hiệp phương sai hậu nghiệm $\Sigma_t$, như được giải thích trong Tomczak và cộng sự.)
+
+Áp dụng trực tiếp NGD cho hàm mục tiêu ELL của Phương trình 18.63 hoặc hàm mục tiêu ELBO của Phương trình 18.54 là khó, vì ma trận thông tin Fisher của cách tham số hóa DLR không thể nghịch đảo một cách dễ dàng. Vì vậy, phép cập nhật trước tiên được dẫn ra cho các tham số tự nhiên với hiệp phương sai đầy đủ, khai thác việc tiên nghiệm $\Sigma_{t|t-1}^{-1}$ có dạng DLR để làm cho việc này hiệu quả, rồi dùng SVD để chiếu ma trận độ chính xác hậu nghiệm thu được trở lại dạng hạng thấp. Việc này có thể thực hiện trong thời gian $O(R^2 P)$; để biết chi tiết, xem Jones và cộng sự (Mục E.5).
+
+Nếu kết hợp phương pháp này với xấp xỉ Hesse tuyến tính hóa cho $G_t$ trong Phương trình 18.74 và áp dụng cho hàm mục tiêu ELL một bước, cách này khôi phục phương pháp LOFI (lọc hạng thấp, low-rank filtering) của Chang và cộng sự. Nếu thay vào đó dùng xấp xỉ MC-EF cho $G_t$ trong Phương trình 18.68[^6] và áp dụng cho hàm mục tiêu ELBO lặp, cách này khôi phục một biến thể trực tuyến của phương pháp SLANG của Mishkin và cộng sự. (SLANG dùng một thuật toán SVD ngẫu nhiên hóa của Halko và cộng sự, trong khi LOFI dùng một phương pháp SVD tất định.)
+
+Một phương án thay thế cho các phương pháp trên là dùng hạ gradient tiêu chuẩn để tối ưu cách tham số hóa DLR. Cách này tránh được việc phải tính ma trận thông tin Fisher. Theo những gì được biết, lược đồ đơn giản này (được gọi là "BBB-DLR" trong Jones và cộng sự) chưa được đánh giá bằng thực nghiệm.
+
+Cũng có thể bỏ số hạng đường chéo khỏi biểu diễn DLR, dẫn đến một ma trận hạng thấp suy biến. Đây là ý tưởng cơ bản đằng sau bộ lọc Kalman hạng thấp (low-rank Kalman filter, LRKF) và các biến thể được mô tả trong Duran-Martin và cộng sự. Chi tiết hơn, LRKF dùng xấp xỉ $\Sigma_t = W_t W_t^\top$. Lưu ý rằng trạng thái niềm tin thu được, $p(z_t \mid y_{1:t})$, không phải là một phân phối Gauss thực sự, vì ma trận hiệp phương sai suy biến, nhưng nó vẫn là một độ đo xác suất hợp lệ. Ngoài ra, phân phối dự đoán tương ứng trên các quan sát, $p(y_{t+1} \mid y_{1:t})$, nói chung là một phân phối Gauss thực sự. Mặc dù việc thiếu số hạng đường chéo có nghĩa là phải dùng hạng lớn hơn để đạt hiệu năng thống kê mong muốn, về mặt thực nghiệm thuật toán vẫn cho sự đánh đổi giữa tính toán và độ chính xác tốt hơn LOFI, phương pháp dựa trên biểu diễn DLR.
+
+### 4.7 Liên hệ với tối ưu bậc hai
+
+Mục này chỉ ra sự tương đương giữa thuật toán BONG (khi kết hợp với một số xấp xỉ nhất định và áp dụng cho trường hợp suy luận tham số tĩnh) và các thuật toán tối ưu bậc hai tiêu chuẩn. Cụ thể, xét phép cập nhật BONG cho $\Sigma_t$ trong Phương trình 18.64 và cho $\mu_t$ trong Phương trình 18.65. Với tham số tĩnh, $\mu_{t|t-1} = \mu_{t-1}$ và $\Sigma_{t|t-1} = \Sigma_{t-1}$, vì không có nhiễu được thêm vào. Kết hợp điều này với xấp xỉ hàm delta (thế trực tiếp) cho các kỳ vọng cho $g_t^{\delta}$ từ Phương trình 18.76 đối với gradient, và $G_t^{\delta\mathrm{EF}}$ từ Phương trình 18.77 đối với ma trận Hesse (giả sử cũng dùng xấp xỉ EF). Phép cập nhật thu được trở thành
+
+$$
+\Sigma_t^{-1} = \Sigma_{t-1}^{-1} + g_t g_t^\top \tag{18.83}
+$$
+
+$$
+\mu_t = \mu_{t-1} + \Sigma_t g_t \tag{18.84}
+$$
+
+Phép cập nhật trung bình tương đương với một phép cập nhật leo gradient (gradient ascent) có tiền điều kiện tiêu chuẩn. Hơn nữa, phép cập nhật độ chính xác là một tổng tích lũy các ma trận Hesse xấp xỉ, như trong phần lớn các bộ tối ưu bậc hai. Thực tế, nếu dùng $\Sigma_t^{\frac{1}{2}}$ làm bộ tiền điều kiện (preconditioner) trong Phương trình 18.84 và thêm một tốc độ học, cách này khôi phục chính xác Adagrad ma trận đầy đủ. Phần lớn các phương pháp gradient thích nghi (bao gồm Adagrad, Shampoo và Adam) dùng bộ tiền điều kiện căn bậc hai, nhưng hiệu năng có thể tương đương hoặc tốt hơn khi không dùng nó. Cũng có những liên hệ rất chặt chẽ giữa xấp xỉ (hàm delta) này của BONG và các phương pháp hạ gương (mirror descent) được dùng trong học trực tuyến (chẳng hạn Chérief-Abdellatif và cộng sự, Lyu và Tsang, van der Hoeven và cộng sự). Thêm nhiều liên hệ giữa VI và các phương pháp học dựa trên gradient phổ biến trong cộng đồng học sâu được thảo luận trong Khan và Rue (xem [Chương 15](/vi/blog/natural-gradient-variational-inference)).
+
+## 5. Kết luận
+
+Chương này đã chỉ ra cách các tham số của một mạng nơ-ron sâu có thể được học trực tuyến bằng các công cụ của lọc Bayes. Việc đưa một SSM vào cho động lực của tham số cho phép mô hình duy trì tính dẻo (plasticity) và đặc biệt phù hợp với các tác vụ không dừng hoặc học liên tục. Các quy tắc học thu được có cấu trúc hai bước: một bước dự đoán để tiến triển động lực và một bước cập nhật để đồng hóa quan sát tiếp theo vào trạng thái niềm tin. Tuyến tính hóa mạng (và động lực) làm cho các bước này khả thi về mặt giải tích và cho phép dùng các phương pháp lọc Kalman cổ điển. Tổng quát hơn, có thể dùng suy luận biến phân cho bước cập nhật để duy trì trạng thái niềm tin trong một họ tham số cho trước. Trong trường hợp Gauss, việc tối ưu hàm mục tiêu biến phân trực tuyến được xấp xỉ hiệu quả bằng một bước hạ gradient tự nhiên, được hình thức hóa trong phép cập nhật BONG. Việc làm cho phép cập nhật hiệu quả về tính toán dẫn đến một họ phương pháp được phân loại theo cách xấp xỉ các tích phân và ma trận Hesse liên quan (bao gồm Monte Carlo, cầu phương, tuyến tính hóa, thế trực tiếp, Fisher thực nghiệm) và cách biểu diễn hiệp phương sai hậu nghiệm (đường chéo, hạng thấp, DLR, hoặc hiệp phương sai đầy đủ). Các câu hỏi mở cho nghiên cứu tương lai bao gồm cách xác định sự đánh đổi tối ưu giữa hiệu quả tính toán và khả năng biểu đạt hay độ trung thực của mô hình cho một bài toán cho trước; các mô hình động lực phong phú hơn hoặc việc học động lực cho những lĩnh vực cụ thể; hiểu biết sâu hơn về mối liên hệ với các bộ tối ưu bậc hai; và liệu các họ biến phân khác ngoài Gauss có cho ra những phương pháp hiệu quả với một số bài toán nhất định hay không.
+
+[^1]: Lưu ý rằng trong Jones và cộng sự, các tác giả dùng $f$ cho các tham số tự nhiên và $h$ cho các tham số trung bình, ngược với quy ước được dùng ở đây.
+
+[^2]: Ở đây $p(y_t \mid u_t, \mathcal{D}_{1:t-1})$ được gọi là phân phối dự đoán quan sát (observation predictive), để phân biệt với $p(z_t \mid u_t, \mathcal{D}_{1:t-1})$, là phân phối dự đoán hậu nghiệm (posterior predictive). Có thể tính phân phối thứ nhất mà không cần phân phối thứ hai, như phương pháp luận hậu nghiệm martingale (martingale posterior) của Holmes và Walker nhấn mạnh.
+
+[^3]: Có một mối liên hệ thú vị giữa ADF và các phương pháp lọc Gauss (Gaussian Filtering, GF) được thảo luận ở Mục 3.3 và Mục 3.4. Như được ghi nhận trong Wüthrich và cộng sự, GF có thể được diễn giải là trước tiên tính một phân phối Gauss đồng thời xấp xỉ $q(z_t, \tilde{y}_t)$ bằng cách cực tiểu hóa $D_{\mathrm{KL}}(p(z_t, \tilde{y}_t \mid y_{1:t-1}) \,\|\, q)$ bằng khớp mô-men, rồi lấy điều kiện phân phối đồng thời này theo biến cố $\tilde{y}_t = y_t$, tương ứng với thủ tục cập nhật Gauss tiêu chuẩn, để thu được một xấp xỉ $q_t(z_t \mid y_{1:t})$. Ngược lại, ADF trước tiên tính phân phối hậu nghiệm chính xác (cục bộ) $p_t(z_t \mid y_{1:t})$ rồi xấp xỉ nó (bằng khớp mô-men) để tính $q_t(z_t \mid y_{1:t})$. Do đó ADF chính xác hơn nhưng cũng chậm hơn nhiều.
+
+[^4]: Khi dùng một phân phối hậu nghiệm có hiệp phương sai đầy đủ, như được chỉ ra dưới đây, BONG tốn thời gian $O(P^2)$ mỗi bước trong khi BLR tốn $O(P^3)$. Cả hai phương pháp đều có thể giảm xuống thời gian $O(P)$ mỗi bước trong trường hợp hiệp phương sai đường chéo, nhưng BONG vẫn nhanh hơn một hệ số hằng và hoàn toàn tất định.
+
+[^5]: Để định nghĩa $G_t^{\delta\mathrm{Lin}}$, các tham số tự nhiên của phân phối quan sát $h_t(z_t)$ được tuyến tính hóa thay cho các tham số trung bình $f_t(z_t)$ như trong Phương trình 18.69. Xem Jones và cộng sự để biết chi tiết và chứng minh rằng $G_t^{\delta\mathrm{Lin}} = G_t^{\mathrm{LinHess}}$.
+
+[^6]: Lưu ý rằng, để cài đặt phương pháp MC-EF, cần có khả năng lấy mẫu từ tiên nghiệm DLR mà không phải nghịch đảo toàn bộ ma trận. Một thuật toán hiệu quả cho việc này, dựa trên EM, được đưa ra trong bài báo LRVGA của Lambert và cộng sự. Thuật toán này tốn thời gian $O(R(R + M)P)$ để rút $M$ mẫu.
