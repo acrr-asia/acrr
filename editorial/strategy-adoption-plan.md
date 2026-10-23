@@ -97,6 +97,8 @@ Adds `editorial/strategy.md` (San's text, with a status line) and this plan. No 
 
 ### Phase 2. Live-review tooling
 
+*Status: tooling implemented 24 October 2026 (`scripts/live-capture.mjs`, `.github/workflows/live-review.yml`, skill `live-review`, `eos queue review` and `eos queue finding`). Captures go to the `live-captures` branch instead of a workflow artifact, because artifact downloads are blocked from the working container while `git fetch` is not. The acceptance condition (one item through the whole cycle) is met after merge.*
+
 - A `live-review` workflow (manual dispatch, and after each deploy for changed pages) that opens the public URL in Chromium, captures desktop and 360-pixel screenshots in light and dark mode, and records rendering facts (KaTeX errors, clipped or oversized figures, horizontal scroll, broken images, contents bar behaviour). Screenshots are uploaded as a workflow artifact; facts go to the job summary.
 - A chief-editor procedure (skill and agent) that reads the screenshots, the page and the queue entry, and writes `editorial/live-reviews/<type>/<slug>.md` in the A-G format, with each finding's location, problem, why it matters, required action, priority and acceptance condition, and updates the queue. Re-review closes a finding only against a new capture of the updated URL.
 - `deploy.yml` keeps `verify-live.mjs` as the deployment check; its summary states that it is not editorial acceptance.

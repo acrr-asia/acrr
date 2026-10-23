@@ -105,6 +105,9 @@ eos queue                     # editorial queue: workflow status per item, contr
 eos queue init                # add a queue entry for every item without one (never overwrites)
 eos queue set <id> <status> --by <who> --note <why>   # change a workflow status; appended to the history
 eos queue validate            # exit 1 on queue problems (the gate runs it when queue.enforce is warn or error)
+eos queue review <id> <decision> --by <who> --ref <report>   # chief editor's live-review decision (refuses invalid acceptances)
+eos queue finding <id> add --priority major --location ... --problem ... --action ... --acceptance ...
+eos queue finding <id> closed L1 --note "what was checked on the live page"
 ```
 
 A record is current only while the file's content hash matches the hash it was written for, so any edit after review sends the item back to `review-stale` and the gate fails until it is reviewed again. That is the mechanism that keeps the gate honest.

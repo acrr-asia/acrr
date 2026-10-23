@@ -54,6 +54,10 @@ When the config has a `queue` section, every item also has an entry in `<queue.d
 
 `eos queue validate` checks: every item has an entry; statuses and enums are valid; accepted items have a chief-editor acceptance with a reviewer and a report; high-risk items are accepted only by `queue.highRiskApprovers`; no accepted item has an open critical or major finding; items started or published from `queue.contractRequiredFrom` have an approved contract. `eos gate` adds these problems as failures when `queue.enforce` is `error`, reports them when it is `warn`, and ignores them when it is `off`.
 
+## Live review
+
+After deployment the chief editor reviews the public page (`skills/live-review`): captures of the live URL on a wide and a 360-pixel screen, light and dark, with rendering facts (ACRR: `.github/workflows/live-review.yml` and `scripts/live-capture.mjs`, published to the `live-captures` branch). The report (`templates/live-review-report.md`) goes to `editorial/live-reviews/<type>/<slug>.md`; findings are recorded with `eos queue finding`, the decision with `eos queue review`, which moves the queue status (`accepted`, `revision-required-after-publication`, `blocked`) and refuses an acceptance with open critical or major findings, without a risk level, or of a high-risk item by someone not in `queue.highRiskApprovers`. A finding is closed only after its acceptance condition is seen on new captures of the revised page.
+
 ## Review record
 
 `eos record <file> --from review.json` writes `editorial/records/<type>/<slug>.json`. The input names the result of each required stage, the seven rubric scores (0 to 4), any critical conditions, finding counts, claims that were not verified, the changes made and the reviewers. The engine computes the decision: `publish` only when every required stage passed, no critical condition is present, no finding is open, the total meets the type's minimum and no dimension is below the per-dimension minimum. It also stores the file's content hash and appends to the record's history, so the record is an audit trail.

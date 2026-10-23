@@ -1,0 +1,87 @@
+# Captures of the live site for the chief editor's live-site review (editorial/standards.md 4.4).
+# After each successful deployment it captures the pages whose content or code changed; on demand it
+# captures any list of routes, or every published item. The screenshots and rendering facts are
+# force-pushed to the `live-captures` branch (one commit, latest run only), where the live-review
+# stage reads them (plugins/editorial-os/skills/live-review). Captures are evidence for a review,
+# never an acceptance: nothing here changes the editorial queue.
+name: Live review captures
+
+on:
+  workflow_run:
+    workflows: ['Deploy to GitHub Pages']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      routes:
+        description: '"changed" (since the previous commit), "all" (every published item and the section pages), or space-separated routes such as /blog/dft-and-fft /vi/series/sensor-systems'
+        required: true
+        default: changed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-captures
+  cancel-in-progress: false
+
+env:
+  SITE_URL: https://acrr.asia
+
+jobs:
+  capture:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Choose routes
+        shell: bash
+        env:
+          ROUTES: ${{ github.event.inputs.routes || 'changed' }}
+        run: |
+          if [ "$ROUTES" = "changed" ]; then
+            node scripts/live-capture.mjs routes HEAD~1 HEAD > routes.txt
+          elif [ "$ROUTES" = "all" ]; then
+            node -e '
+              const fs = require("fs"), path = require("path");
+              const out = new Set(["/", "/blog", "/series", "/insights", "/learning", "/about", "/vi"]);
+              for (const t of fs.readdirSync("editorial/queue")) for (const f of fs.readdirSync(path.join("editorial/queue", t))) {
+                const e = JSON.parse(fs.readFileSync(path.join("editorial/queue", t, f), "utf8"));
+                if (e.url) out.add(new URL(e.url).pathname);
+              }
+              console.log([...out].sort().join("\n"));' > routes.txt
+          else
+            printf '%s\n' $ROUTES > routes.txt
+          fi
+          echo "$(wc -l < routes.txt) route(s):"; cat routes.txt
+      - name: Capture
+        shell: bash
+        run: |
+          if [ ! -s routes.txt ]; then echo "No reader-facing page changed; nothing to capture." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          node scripts/live-capture.mjs capture "$SITE_URL" captures --routes-file routes.txt
+      - name: Publish captures to the live-captures branch
+        if: always() && hashFiles('captures/index.md') != ''
+        shell: bash
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TOKEN: ${{ github.token }}
+        run: |
+          cp routes.txt captures/routes.txt
+          printf '{"commit":"%s","origin":"%s","run":"%s/%s/actions/runs/%s","capturedAt":"%s"}\n' \
+            "$SHA" "$SITE_URL" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$(date -u +%FT%TZ)" > captures/run.json
+          cd captures
+          git init -q -b live-captures
+          git add -A
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -qm "Live captures of $SITE_URL at ${SHA:0:7} (run $GITHUB_RUN_ID)"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" live-captures
+          echo "Captures pushed to the live-captures branch." >> "$GITHUB_STEP_SUMMARY"
