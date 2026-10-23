@@ -1,0 +1,848 @@
+---
+title: "Deep Kernel Processes and Deep Kernel Machines"
+description: "Deep kernel processes and deep kernel machines: Gaussian process background, deep Wishart processes, the representation learning limit and sparse DKMs."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - kernel methods
+  - deep kernel machines
+  - gaussian processes
+series: bayesian-deep-learning
+seriesOrder: 32
+---
+
+## 1. Introduction
+
+Neural networks have become the default choice for complex tasks such as computer vision and natural language processing due to their huge performance advantage over other methods. Due to their black-box nature, neural network design is almost entirely based on trial-and-error, and once deployed, it is very difficult to determine what factors contribute to a neural network's decisions; it is often found that neural networks are using unexpected and extraneous features for their predictions. To exacerbate the issue, the understanding of deep learning theory currently lags far behind practice. This leads to models that, although powerful, are time-consuming and finicky to design (e.g. compare He et al. and He et al., or consider the fact that neural architecture search is its own extensive research area), often more computationally expensive than necessary, and potentially unsuitable for use in safety-critical applications like medicine and autonomous systems.
+
+Kernel methods are a class of models that offer strong interpretability, since their operation explicitly computes similarities between datapoints. Furthermore, many theoretical models of neural networks reduce to kernel methods, allowing a cleaner analysis. Unfortunately, kernel methods largely fall short of neural networks in predictive performance on many important machine learning tasks.
+
+Recent developments in kernel method are capable of fixing this shortfall. These are Deep Kernel Processes (DKPs), and Deep Kernel Machines (DKMs).
+
+## 2. Background
+
+This chapter provides the necessary background to understand DKPs and DKMs. It first recaps Gaussian processes, before introducing the approximate sparse (inducing point) Gaussian processes that underlie DKPs/DKMs, as well as Deep Gaussian Processes (DGPs). It then introduces deep kernel processes, which are a "no-feature" view DGPs, and deep kernel machines, which are the infinite-width version of a DKPs. Note that the notation of this chapter differs from that of other chapters.
+
+### 2.1 Gaussian processes
+
+While neural networks have shown impressive abilities to learn features and generalize on complex tasks, the precise reasons for why they work so well in these settings is poorly understood, and in many scenarios, such as those with small amounts of data, neural networks can struggle compared to more traditional methods. Hence this section recaps Gaussian processes (or GPs) from Bayesian statistics, which are a type of Bayesian kernel method, and later sections will explore the relationship between neural networks and Gaussian processes. Gaussian processes were previously introduced in [Chapter 23](/blog/introduction-to-kernel-methods).
+
+A Gaussian process is a stochastic process (a collection of random variables) where any finite subset is multivariate Gaussian distributed. A Gaussian process is completely specified by its mean function $m(\cdot) \in \mathbb{R}^d \to \mathbb{R}$ and positive-definite covariance / kernel function $k(\cdot, \cdot) \in \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$, for which one writes,
+
+$$
+f(\cdot) \sim \mathcal{GP}(m(\cdot), k(\cdot, \cdot)). \tag{26.1}
+$$
+
+Gaussian processes are used to represent prior distributions over functions. Concretely, if $\mathbf{x}, \mathbf{x}' \in \mathbb{R}^{N_0}$ are two datapoints of dimensionality $N_0$, then for a function $f(\cdot) \sim \mathcal{GP}(m(\cdot), k(\cdot, \cdot))$, one has,
+
+$$
+\mathbb{E}[f(\mathbf{x})] = m(\mathbf{x}) \tag{26.2}
+$$
+
+$$
+\mathbb{E}[f(\mathbf{x}')] = m(\mathbf{x}') \tag{26.3}
+$$
+
+$$
+\operatorname{cov}(f(\mathbf{x}), f(\mathbf{x}')) = k(\mathbf{x}, \mathbf{x}'). \tag{26.4}
+$$
+
+In particular, given $P$ datapoints $\{\mathbf{x}_1, \dots, \mathbf{x}_P\}$, the joint distribution of the function values evaluated at those points is multivariate Gaussian:
+
+$$
+\begin{pmatrix} f(\mathbf{x}_1) \\ \vdots \\ f(\mathbf{x}_P) \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} m(\mathbf{x}_1) \\ \vdots \\ m(\mathbf{x}_P) \end{pmatrix}, \begin{pmatrix} k(\mathbf{x}_1, \mathbf{x}_1) & \cdots & k(\mathbf{x}_1, \mathbf{x}_P) \\ \vdots & \ddots & \vdots \\ k(\mathbf{x}_P, \mathbf{x}_1) & \cdots & k(\mathbf{x}_P, \mathbf{x}_P) \end{pmatrix} \right). \tag{26.5}
+$$
+
+Hence the mean function $m(\cdot)$ indicates the average / expected value of the function at a particular input point, and the kernel function $k(\cdot, \cdot)$ indicates how the function value at a particular point is influenced by the function value at nearby points. Probably the most intuitive class of kernels are the isotropic kernels, which can be computed as a function of the distance between two points, i.e. $k(\|\mathbf{x} - \mathbf{x}'\|)$. A very common example is the squared exponential kernel,
+
+$$
+k(\mathbf{x}, \mathbf{x}') = \exp\left(-\frac{\|\mathbf{x} - \mathbf{x}'\|^2}{2l^2}\right), \tag{26.6}
+$$
+
+where $l$ is a hyperparameter known as the "lengthscale", which controls how quickly covariances decay with distance (a bigger lengthscale represents smoother functions that capture broad trends, while a smaller lengthscale represents rapidly varying functions that capture local information). There are many other types of kernel function, such as periodic kernels whose covariance oscillates with distance, giving periodic functions, which are not discussed here. In many cases, there is no prior information about the mean of the function, so the mean function $\mathbf{m}(\cdot)$ will often be set to the zero function $\mathbf{m}(\mathbf{x}) = \mathbf{0}$ for all $\mathbf{x} \in \mathbb{R}^{N_0}$.
+
+Assuming targets $\{y_1, \dots, y_P\}$ and a likelihood function $p(y_i \mid f(x_i))$, with a Gaussian process prior, one can perform Bayesian inference for **non-parametric** (or "function-space") function approximation. This is in contrast to **parametric** / weight-space methods, which assume a parametric form for a function like $f(x_i) = w_1 x_i + w_2$ in Bayesian linear regression, and compute a posterior over the weights $p(w_1, w_2 \mid \{x_1, \dots, x_P\}, \{y_1, \dots, y_P\})$ (which itself could then be used to compute a predictive distribution).
+
+Specifically, given a new set of test points $\{\mathbf{x}_1^*, \dots, \mathbf{x}_{P_*}^*\}$, the goal is to compute the posterior $p(f(\mathbf{x}_1^*), \dots, f(\mathbf{x}_{P_*}^*) \mid \{x_1, \dots, x_{P_*}\}, \dots)$ over the value of the function at the new test point. This is made possible in certain cases due to the closed-form "partitioned Gaussian" formulae. Suppose there is a multivariate Gaussian random vector which is partitioned into two shorter vectors $\mathbf{a}$ and $\mathbf{b}$ in the following way:
+
+$$
+\begin{pmatrix} \mathbf{a} \\ \mathbf{b} \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \boldsymbol{\mu}_a \\ \boldsymbol{\mu}_b \end{pmatrix}, \begin{pmatrix} \boldsymbol{\Sigma}_{aa} & \boldsymbol{\Sigma}_{ab} \\ \boldsymbol{\Sigma}_{ba} & \boldsymbol{\Sigma}_{bb} \end{pmatrix} \right). \tag{26.7}
+$$
+
+Then the conditional distribution $p(\mathbf{b} \mid \mathbf{a})$ is also multivariate Gaussian, and has the form,
+
+$$
+\mathbf{b} \mid \mathbf{a} \sim \mathcal{N}\left(\boldsymbol{\mu}_b + \boldsymbol{\Sigma}_{ba}\boldsymbol{\Sigma}_{aa}^{-1}(\mathbf{a} - \boldsymbol{\mu}_a), \boldsymbol{\Sigma}_{bb} - \boldsymbol{\Sigma}_{ba}\boldsymbol{\Sigma}_{aa}^{-1}\boldsymbol{\Sigma}_{ab}\right). \tag{26.8}
+$$
+
+Assuming noiseless observations $y_i = f(x_i)$ (i.e. the latents $\mathbf{f}$ are observed directly), one can form a partitioned multivariate Gaussian prior using the train points $\{f(\mathbf{x}_1), \dots, f(\mathbf{x}_P)\}$ and the test points $\{f(\mathbf{x}_1^*), \dots, f(\mathbf{x}_{P_*}^*)\}$ as follows:
+
+$$
+\begin{pmatrix} \mathbf{f} \\ \mathbf{f}_* \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{m}(\mathbf{X}) \\ \mathbf{m}(\mathbf{X}_*) \end{pmatrix}, \begin{pmatrix} \mathbf{K}(\mathbf{X}, \mathbf{X}) & \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \\ \mathbf{K}(\mathbf{X}_*, \mathbf{X}) & \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) \end{pmatrix} \right) \tag{26.9}
+$$
+
+where $\mathbf{X} \in \mathbb{R}^{P \times N_0}, \mathbf{X}_* \in \mathbb{R}^{P_* \times N_0}$ are the vertically stacked inputs and $\mathbf{f} \in \mathbb{R}^P, \mathbf{f}_* \in \mathbb{R}^{P_*}$ are the vertically stacked function values evaluated at those inputs, $\mathbf{m}(\mathbf{X}), \mathbf{m}(\mathbf{X}_*)$ are the vertically stacked mean values for those inputs, and $\mathbf{K}(\mathbf{X}, \mathbf{X}) \in \mathbb{R}^{P \times P}, \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \in \mathbb{R}^{P \times P_*}, \mathbf{K}(\mathbf{X}_*, \mathbf{X}) \in \mathbb{R}^{P_* \times P}, \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) \in \mathbb{R}^{P_* \times P_*}$ are the "kernel matrices", formed by applying the kernel function $k(\cdot, \cdot)$ to all pairs of train vs. train, train vs. test, test vs. train, and test vs. test points, respectively. Note that since $k(\cdot, \cdot)$ is a symmetric positive-definite function, $\mathbf{K}(\mathbf{X}, \mathbf{X})$ and $\mathbf{K}(\mathbf{X}_*, \mathbf{X}_*)$ are symmetric positive-definite matrices, and $K(\mathbf{X}, \mathbf{X}_*) = K(\mathbf{X}_*, \mathbf{X})^T$.
+
+Applying the partitioned Gaussian formula allows the posterior predictive distribution to be computed as,
+
+$$
+\mathbf{f}_* \mid \mathbf{f} \sim \mathcal{N}\left(\mathbf{m}_* + \mathbf{K}_*^T\mathbf{K}^{-1}(\mathbf{f} - \mathbf{m}), \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_*\right), \tag{26.10}
+$$
+
+where the abbreviations $\mathbf{m} = \mathbf{m}(\mathbf{X}), \mathbf{m}_* = \mathbf{m}(\mathbf{X}_*), \mathbf{K} = \mathbf{K}(\mathbf{X}, \mathbf{X}), \mathbf{K}_* = \mathbf{K}(\mathbf{X}, \mathbf{X}_*), \mathbf{K}_{**} = \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*)$ are used. This is common in the Gaussian process literature. Hence there is a closed-form solution for the distribution of the test predictions $\mathbf{f}_*$. Note it is common to drop the conditioning on the inputs $\mathbf{X}$.
+
+A closed-form solution is also obtained when Gaussian noise is assumed on the data, i.e. $y_i = f(\mathbf{x}_i) + \epsilon$ with $\epsilon \sim \mathcal{N}(0, \sigma^2), \sigma^2 \in \mathbb{R}^+$. Since the sum of two Gaussians is itself Gaussian, the joint distribution over training labels $\mathbf{y} = \mathbf{f} + \boldsymbol{\epsilon}$ and test labels $\mathbf{y}_* = \mathbf{f}_* + \boldsymbol{\epsilon}$ (where $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \sigma^2\mathbf{I})$ becomes
+
+$$
+\begin{pmatrix} \mathbf{y} \\ \mathbf{y}_* \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{m}(\mathbf{X}) \\ \mathbf{m}(\mathbf{X}_*) \end{pmatrix}, \begin{pmatrix} \mathbf{K}(\mathbf{X}, \mathbf{X}) + \sigma^2\mathbf{I} & \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \\ \mathbf{K}(\mathbf{X}_*, \mathbf{X}) & \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) + \sigma^2\mathbf{I} \end{pmatrix} \right). \tag{26.11}
+$$
+
+One can form the posterior predictive distribution
+
+$$
+\mathbf{y}_* \mid \mathbf{y} \sim \mathcal{N}\left(\mathbf{m}_* + \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}(\mathbf{y} - \mathbf{m}), \mathbf{K}_{**} - \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}\mathbf{K}_* + \sigma^2\mathbf{I}\right). \tag{26.12}
+$$
+
+In the simple case of Gaussian noise regression, it is not uncommon to see texts present "prediction" as predicting the underlying latent $\mathbf{f}_*$, so the joint distribution between $\mathbf{y}$ and $\mathbf{f}_*$ is actually formed:
+
+$$
+\begin{pmatrix} \mathbf{y} \\ \mathbf{f}_* \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{m}(\mathbf{X}) \\ \mathbf{m}(\mathbf{X}_*) \end{pmatrix}, \begin{pmatrix} \mathbf{K}(\mathbf{X}, \mathbf{X}) + \sigma^2\mathbf{I} & \mathbf{K}(\mathbf{X}, \mathbf{X}_*) \\ \mathbf{K}(\mathbf{X}_*, \mathbf{X}) & \mathbf{K}(\mathbf{X}_*, \mathbf{X}_*) \end{pmatrix} \right), \tag{26.13}
+$$
+
+and hence the posterior over $\mathbf{f}_*$ can be computed as
+
+$$
+\mathbf{f}_* \mid \mathbf{y} \sim \mathcal{N}\left(\mathbf{m}_* + \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}(\mathbf{y} - \mathbf{m}), \mathbf{K}_{**} - \mathbf{K}_*^T(\mathbf{K} + \sigma^2\mathbf{I})^{-1}\mathbf{K}_*\right). \tag{26.14}
+$$
+
+In summary, the assumptions were a multivariate Gaussian prior $p(\mathbf{f})$ over the latents, and a Gaussian likelihood $p(\mathbf{y} \mid \mathbf{f}) = \mathcal{N}(y_i; \mathbf{f}, \sigma^2\mathbf{I})$.
+
+For completeness and to intuitively motivate GPs, one can think of a GP as an infinite-dimensional multivariate Gaussian, where the dimensions represent the function value at all possible points $\mathbf{x}$ in the input space. Specifically, it retains the property that all marginal and conditional distributions over subsets of variables are also Gaussian. Thus, the prior at a finite set of input locations $\mathbf{X}$ is a finite-dimensional multivariate Gaussian $p(\mathbf{f})$, and the "prior conditional" distribution at a set of finite set of input locations $\mathbf{X}_*$ given the known function values at a different set of inputs $\mathbf{X}$ is a multivariate Gaussian $p(\mathbf{f}_* \mid \mathbf{f})$, given by the conditional Gaussian formulae in Eq. 26.8. In the case of a Gaussian likelihood function, **the posterior process is also a Gaussian process**, i.e. the posterior distribution over the entire function $f(\cdot)$ has the form
+
+$$
+f(\cdot) \mid X_{\text{data}}, y_{\text{data}} \sim \mathcal{GP}(m_{\text{post}}(\cdot), k_{\text{post}}(\cdot, \cdot)) \tag{26.15}
+$$
+
+where
+
+$$
+m_{\text{post}}(x) = m(x) + k(x, X_{\text{data}})[K(X_{\text{data}}, X_{\text{data}}) + \sigma_n^2 I]^{-1}(y_{\text{data}} - m(X_{\text{data}})) \tag{26.16}
+$$
+
+$$
+k_{\text{post}}(x, x') = k(x, x') - k(x, X_{\text{data}})[K(X_{\text{data}}, X_{\text{data}}) + \sigma_n^2 I]^{-1}k(X_{\text{data}}, x'). \tag{26.17}
+$$
+
+That is, $m(\cdot), k(\cdot, \cdot)$ are the prior mean and kernel function, and $m_{\text{post}}(\cdot), k_{\text{post}}(\cdot, \cdot)$ are the posterior mean and kernel function. This is what makes the Gaussian process 'non-parametric'. The posterior is really over the infinite-dimensional Gaussian process, but in practice, one can only manipulate expressions involving finite sets of locations $\mathbf{X}$ and $\mathbf{X}_*$. As the next section shows, the posterior process is only a Gaussian process in the case of a Gaussian likelihood. When using a non-Gaussian likelihood (such as for classification), one must resort to approximations.
+
+### 2.2 Variational inference for Gaussian process classification
+
+Variational inference is discussed in depth in [Chapter 12](/blog/introduction-to-variational-inference), but a self-contained recap is provided here. Suppose the data are $\mathbf{x}_i \in \mathbb{R}^{N_0}$, with binary labels $y_i \in \{0, 1\}$. A Gaussian likelihood function is not appropriate here, as the labels take discrete values, whereas a Gaussian distribution has continuous and unbounded support. This is worked around by using a logistic / sigmoid function to form a Bernoulli likelihood by transforming the latents,
+
+$$
+p(y_i = 1 \mid f_i) = \sigma(f_i) = \frac{1}{1 + \exp(-f_i)}. \tag{26.18}
+$$
+
+More generally, if $y_i \in \{0, \dots, K\}$ are labels in a $K$-class classification task, one can use a Categorical likelihood with softmax probabilities computed from a vector latent $\mathbf{f}(\cdot) \in \mathbb{R}^K$,
+
+$$
+p(y_i = k \mid \mathbf{f}_i) = \operatorname{softmax}(\mathbf{f}_i)_k = \frac{\exp(f_{ik})}{\sum_{k'} \exp(f_{ik'})}. \tag{26.19}
+$$
+
+A problem is immediately encountered: given a multivariate Gaussian prior $p(\mathbf{f})$ over the latents, and a Bernoulli likelihood $p(\mathbf{y} \mid \mathbf{f})$, the posterior over the latents $p(\mathbf{f})$ is not closed-form. Even if it were closed-form, but not Gaussian, then the integral required to compute the predictive distribution $p(\mathbf{y}_* \mid \mathbf{y}) = \int p(\mathbf{y}_* \mid \mathbf{f}_*)p(\mathbf{f}_* \mid \mathbf{y})d\mathbf{f}_*$ almost certainly does not have a closed form solution.
+
+Hence approximation is necessary. There are many ways to go about this, but here variational inference is used to obtain an approximate posterior $q(\mathbf{f}_*)$, and then samples $\mathbf{f}_{*,(m)}$ from this approximate posterior are used to compute the Monte-Carlo average
+
+$$
+p(\mathbf{y}_* \mid \mathbf{y}) = \int p(\mathbf{y}_* \mid f_*)p(\mathbf{f}_* \mid \mathbf{y})d\mathbf{f}_* \approx \frac{1}{M}\sum_m^M \sigma\left(\mathbf{f}_{*,(m)}\right) \qquad \mathbf{f}_{*,(m)} \in \mathbb{R}^{P_*} \sim q(\mathbf{f}_*). \tag{26.20}
+$$
+
+In variational inference, the aim is to approximate an intractable posterior $p(\mathbf{f} \mid \mathbf{y})$ with an approximate posterior $q(\mathbf{f})$ which is easier to manipulate and sample from. A very common choice, is a multivariate Gaussian approximate posterior $q(\mathbf{f}) = \mathcal{N}(\mathbf{f}; \boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$ parametrized by learnable mean and covariance matrix $\boldsymbol{\mu}_q \in \mathbb{R}^P, \boldsymbol{\Sigma}_q \in \mathbb{R}^{P \times P}$. In VI, $q$ is called a 'variational approximate posterior', and $\boldsymbol{\mu}_q$ and $\boldsymbol{\Sigma}_q$ are 'variational parameters'. The main benefit of this approximation is that it allows closed-form expressions for the approximate predictive posterior $q(\mathbf{f}_*)$.
+
+If $q(\mathbf{f}) = \mathcal{N}(\mathbf{f}; \boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$ is the approximate posterior over the training latents, then a sensible choice of the approximate posterior over the test latents $\mathbf{f}_*$ is given by the integral,
+
+$$
+q(\mathbf{f}_*) = \int p(\mathbf{f}_* \mid \mathbf{f})q(\mathbf{f})d\mathbf{f}. \tag{26.21}
+$$
+
+This is sensible because it closely resembles the true posterior,
+
+$$
+p(\mathbf{f}_*) = \int p(\mathbf{f}_*, \mathbf{f})d\mathbf{f} = \int p(\mathbf{f}_* \mid \mathbf{f})p(\mathbf{f})d\mathbf{f}. \tag{26.22}
+$$
+
+Since $p(\mathbf{f}_* \mid \mathbf{f}) = \mathcal{N}\left(\mathbf{f}_*; \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{f}, \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_*\right)$ and $q(\mathbf{f}) = \mathcal{N}(\mathbf{f}; \boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$ are both Gaussian, it is a standard result that their integral will also be Gaussian, and the mean and variance can be computed using the laws of total expectation and total variance:
+
+$$
+\begin{aligned}
+\mathbb{E}_{q(\mathbf{f})}[\mathbf{f}_*] &= \mathbb{E}_{q(\mathbf{f})}\left[\mathbb{E}[\mathbf{f}_* \mid \mathbf{f}]\right] && (26.23) \\
+&= \mathbb{E}_{q(\mathbf{f})}[\mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{f}] && (26.24) \\
+&= \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\mu}_q && (26.25) \\
+\operatorname{Var}_{q(\mathbf{f})}[\mathbf{f}_*] &= \mathbb{E}_{q(\mathbf{f})}\left[\operatorname{Var}[\mathbf{f}_* \mid \mathbf{f}]\right] + \operatorname{Var}_{q(\mathbf{f})}\left[\mathbb{E}[\mathbf{f}_* \mid \mathbf{f}]\right] && (26.26) \\
+&= \mathbb{E}_{q(\mathbf{f})}\left[\mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_*\right] + \operatorname{Var}_{q(\mathbf{f})}\left[\mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{f}\right] && (26.27) \\
+&= \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_* + \mathbf{K}_*^T\mathbf{K}^{-1}\operatorname{Var}_{q(\mathbf{f})}[\mathbf{f}]\,\mathbf{K}^{-1}\mathbf{K}_* && (26.28) \\
+&= \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_* + \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\Sigma}_q\mathbf{K}^{-1}\mathbf{K}_*. && (26.29)
+\end{aligned}
+$$
+
+Note that for clarity the subscript $q(\mathbf{f})$ is used in the expectations and variances which integrate over the approximate posterior, and the subscripts are omitted in expressions that only involve the prior $p(\mathbf{f}* \mid \mathbf{f})$. Hence, given values for $\boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q$, one can generate samples from the approximate predictive distribution
+
+$$
+q(\mathbf{f}_*) = \mathcal{N}\left(\mathbf{f}_*; \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\mu}_q, \mathbf{K}_{**} - \mathbf{K}_*^T\mathbf{K}^{-1}\mathbf{K}_* + \mathbf{K}_*^T\mathbf{K}^{-1}\boldsymbol{\Sigma}_q\mathbf{K}^{-1}\mathbf{K}_*\right) \tag{26.30}
+$$
+
+and then compute Monte-Carlo averaged predictions for $p(\mathbf{y}_* \mid \mathbf{y})$ as in Eq. (26.20).
+
+All that remains is to determine the values for $\boldsymbol{\mu}_q \in \mathbb{R}^P, \boldsymbol{\Sigma}_q \in \mathbb{R}^{P \times P}$, that make the approximate posterior $q(\mathbf{f})$ as close to the true posterior $p(\mathbf{f} \mid \mathbf{y})$ as possible. In variational inference, the desired measure of "closeness" is the KL divergence:
+
+$$
+\boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q = \operatorname*{arg\,min}_{\boldsymbol{\mu}, \boldsymbol{\Sigma}} \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y})) = \operatorname*{arg\,min}_{\boldsymbol{\mu}, \boldsymbol{\Sigma}} \int q(\mathbf{f}) \log\frac{q(\mathbf{f})}{p(\mathbf{f} \mid \mathbf{y})}d\mathbf{f}. \tag{26.31}
+$$
+
+At first glance, this seems difficult because the true posterior $p(\mathbf{f} \mid \mathbf{y})$ is unknown. However, one can use a fairly common trick of rewriting the divergence in terms of the ELBO (Evidence Lower Bound Objective),
+
+$$
+\begin{aligned}
+&\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y})) && (26.32\text{a}) \\
+&= \int q(\mathbf{f}) \log\frac{q(\mathbf{f})}{p(\mathbf{f} \mid \mathbf{y})}d\mathbf{f} && (26.32\text{b}) \\
+&= \int q(\mathbf{f}) \log q(\mathbf{f})d\mathbf{f} - \int q(\mathbf{f}) \log p(\mathbf{f} \mid \mathbf{y})d\mathbf{f} && (26.32\text{c}) \\
+&= \int q(\mathbf{f}) \log q(\mathbf{f})d\mathbf{f} - \int q(\mathbf{f}) \log\frac{p(\mathbf{y} \mid \mathbf{f})p(\mathbf{f})}{p(\mathbf{y})}d\mathbf{f} && (26.32\text{d}) \\
+&= \int q(\mathbf{f})\left[\log q(\mathbf{f}) - \log p(\mathbf{f})\right]d\mathbf{f} - \int q(\mathbf{f}) \log p(\mathbf{y} \mid \mathbf{f})d\mathbf{f} + \int q(\mathbf{f}) \log p(\mathbf{y})d\mathbf{f} && (26.32\text{e}) \\
+&= \int q(\mathbf{f}) \log\frac{q(\mathbf{f})}{p(\mathbf{f})}d\mathbf{f} - \int q(\mathbf{f}) \log p(\mathbf{y} \mid \mathbf{f})d\mathbf{f} + \log p(\mathbf{y}) \int q(\mathbf{f})d\mathbf{f} && (26.32\text{f}) \\
+&= \underbrace{\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f})) - \mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y} \mid \mathbf{f})]}_{\text{Negative ELBO}} + \underbrace{\log p(\mathbf{y})}_{\text{Evidence}}. && (26.32\text{g})
+\end{aligned}
+$$
+
+Rearranging, in terms of the evidence,
+
+$$
+\log p(\mathbf{y}) = \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y})) + \underbrace{\mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y} \mid \mathbf{f})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f}))}_{\text{ELBO}}. \tag{26.33}
+$$
+
+The divergence between the approximate and true posteriors, $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f} \mid \mathbf{y}))$, is always positive, so the ELBO acts as a lower bound to the model evidence. When the data and model are fixed, the evidence is constant, and so maximizing the ELBO simultaneously minimizes the KL divergence between the approximate posterior and the true posterior, which is the overall goal. To see whether the ELBO can be optimized,
+
+$$
+\text{ELBO} = \underbrace{\mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y} \mid \mathbf{f})]}_{\text{Expected Log Likelihood (under } q)} - \underbrace{\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f}))}_{\text{KL between approx. post. and prior}}. \tag{26.34}
+$$
+
+Observe that the first term is the expected log-likelihood under the approximate posterior $q(\mathbf{f})$. As suggested earlier, this term can be estimated by taking samples from $q(\mathbf{f})$. Since the ELBO is to be differentiated in order to maximize it with gradient-ascent, the reparametrisation trick is used to detach the random sampling process from the computation graph. That is, the Gaussian random sample $\mathbf{f}$ will be written as a transformation of a standard Gaussian sample, so that all learnable parameters are in the deterministic transformation, rather than random variables,
+
+$$
+\mathbf{f} = \boldsymbol{\mu}_q + \mathbf{L}\mathbf{z} \qquad \text{where } \mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}) \text{ and } \boldsymbol{\Sigma} = \mathbf{L}\mathbf{L}^T. \tag{26.35}
+$$
+
+The second term is the KL divergence between the approximate posterior and the prior over $\mathbf{f}$. Since these are both Gaussian ($p(\mathbf{f}) = \mathcal{N}(\mathbf{0}, \mathbf{K})$ and $q(\mathbf{f}) = \mathcal{N}(\boldsymbol{\mu}_q, \boldsymbol{\Sigma}_q)$), this can be computed in closed form:
+
+$$
+\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}) \| p(\mathbf{f})) = \frac{1}{2}\left[\log\frac{|\mathbf{K}|}{|\boldsymbol{\Sigma}_q|} - P + \boldsymbol{\mu}_q\mathbf{K}^{-1}\boldsymbol{\mu}_q^T + \operatorname{tr}\left(\mathbf{K}^{-1}\boldsymbol{\Sigma}_q\right)\right] \tag{26.36}
+$$
+
+where $|\mathbf{A}|$ denotes the determinant of a matrix $\mathbf{A}$, and $\operatorname{tr}(\mathbf{A})$ the trace, and as a reminder, $P$ is the number of training datapoints, dictating the size of $\mathbf{K} \in \mathbb{R}^{P \times P}$.
+
+As a final point, note that since the ELBO is a lower bound to the model evidence, it is common to optimize model hyperparameters (i.e. hyperparameters of the prior $p(\mathbf{f})$) by maximizing the ELBO as a proxy to the model evidence.
+
+Having seen how variational inference can be used to do GP classification, consider how practical (or, rather, impractical) it is. The key problem is the dependence on the data set size $P$. The kernel matrix $\mathbf{K} \in \mathbb{R}^{P \times P}$ and the approximate posterior covariance $\boldsymbol{\Sigma}_q \in \mathbb{R}^{P \times P}$ both have $P^2$ elements, where $P$ is the number of training datapoints. To store $\boldsymbol{\Sigma}_q$ in memory for moderately sized data set with $P = 10^6$ datapoints using 32-bit floating-point numbers would requires $(10^6)^2 \times 4$ bytes, which equates to roughly 3,725GB of memory. Supposing that memory were not a concern, expensive operations must still be computed on the kernel matrix, such as its inverse $\mathbf{K}^{-1}$ and its determinant $|\mathbf{K}|$. Both of these operations are very expensive and are impractical for large $P$.
+
+The next section introduces "sparse" variational Gaussian processes, which replace the $P$ training points with $P_\text{i}$ "inducing points" which seek to summarize the datapoint, but with $P_\text{i} \ll P$ so that the operations become a practical $\mathcal{O}(P_\text{i}^3)$.
+
+### 2.3 Sparse variational Gaussian processes
+
+Sparse Gaussian processes seek to alleviate the $\mathcal{O}(P^2)$ space complexity and $\mathcal{O}(P^3)$ time complexity of Gaussian processes (where $P$ is the number of training points) by replacing the training points with a small set of $P_\text{i} \ll P$ "inducing points" that somehow summarize the data set. These inducing points may simply be a subset of the original training data, or they may be learnable parameters, optimized in some way. Here, the variational inducing point approach as introduced by Titsias and refined by Hensman et al. is followed, where inducing points are inserted via the approximate posterior.
+
+Concretely, let $\mathbf{X}_\text{i} \in \mathbb{R}^{P_\text{i} \times N_0}$ be a set of "inducing inputs", that is, a set of $P_\text{i}$ input datapoints, and let $\mathbf{f}_\text{i} \in \mathbb{R}^{P_\text{i}}$ be the "inducing values", i.e. function values evaluated at those inducing inputs. Furthermore, for absolute clarity, new notation $\mathbf{f}_\text{t} \in \mathbb{R}^{P_\text{t}}$ is introduced for the set of $P_\text{t}$ training points.
+
+As always, the joint distribution between function evaluations is multivariate Gaussian due to the Gaussian process prior. This means the joint prior over the inducing points $\mathbf{f}_\text{i}$ and the train points $\mathbf{f}_\text{t}$ is multivariate Gaussian:
+
+$$
+\mathbf{f} = \begin{pmatrix} \mathbf{f}_\text{i} \\ \mathbf{f}_\text{t} \end{pmatrix} \sim \mathcal{N}\left( \begin{pmatrix} \mathbf{0} \\ \mathbf{0} \end{pmatrix}, \begin{pmatrix} \mathbf{K}_\text{ii} & \mathbf{K}_\text{it} \\ \mathbf{K}_\text{ti} & \mathbf{K}_\text{tt} \end{pmatrix} \right). \tag{26.37}
+$$
+
+Here, $\mathbf{f} \in \mathbb{R}^{P_\text{i} + P_\text{t}}$ denotes the concatenation of the inducing and train points, $\mathbf{K}_\text{ii} = \mathbf{K}(\mathbf{X}_\text{i}, \mathbf{X}_\text{i}) \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$ is the kernel matrix formed by applying the kernel to all pairs of inducing points, $\mathbf{K}_\text{ti} = \mathbf{K}_\text{it}^T = \mathbf{K}(\mathbf{X}_\text{t}, \mathbf{X}_\text{i}) \in \mathbb{R}^{P_\text{t} \times P_\text{i}}$ is the kernel matrix formed by applying the kernel to all pairs of train vs. inducing points, and $\mathbf{K}_\text{tt} = \mathbf{K}(\mathbf{X}_\text{t}, \mathbf{X}_\text{t}) \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$ is the kernel matrix formed by applying the kernel to all pairs of train points.
+
+The approximate posterior is assumed to factorize as follows,
+
+$$
+q(\mathbf{f}) = q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) = p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i}), \qquad q(\mathbf{f}_\text{i}) = \mathcal{N}(\boldsymbol{\mu}_\text{i}, \boldsymbol{\Sigma}_\text{ii}). \tag{26.38}
+$$
+
+In other words, an approximate posterior $q(\mathbf{f}_\text{i})$ is modeled only on the inducing points, and the prior conditional $p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})$ is used to give the implied distribution over train points. Note that, unlike in the previous chapter, the approximate posterior is no longer over the train latents alone, but also the inducing latents $\mathbf{f}_\text{i}$. The implied approximate posterior over just the train latents $\mathbf{f}_\text{t}$ is obtained by marginalising out the inducing points,
+
+$$
+q(\mathbf{f}_\text{t}) = \int p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})d\mathbf{f}_\text{i}. \tag{26.39}
+$$
+
+Since this is a Gaussian integral, it has a closed form solution, which is essentially identical to Eq. (26.30), i.e.
+
+$$
+q(\mathbf{f}_\text{t}) = \mathcal{N}\left(\mathbf{f}_\text{t}; \mathbf{K}_\text{ti}^T\mathbf{K}_\text{ii}^{-1}\boldsymbol{\mu}_\text{i}, \mathbf{K}_\text{tt} - \mathbf{K}_\text{ti}^T\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{it} + \mathbf{K}_\text{ti}^T\mathbf{K}_\text{ii}^{-1}\boldsymbol{\Sigma}_\text{ii}\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{it}\right) \tag{26.40}
+$$
+
+and so the ELBO given by performing variational inference over just the training latents, as in the previous section, is
+
+$$
+\text{ELBO} = \mathbb{E}_{q(\mathbf{f}_\text{t})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t})) \tag{26.41}
+$$
+
+with $p(\mathbf{f}_\text{t}) = \mathcal{N}(\mathbf{f}_\text{t}; \mathbf{0}, \mathbf{K}_\text{tt})$ the prior over the training latents.
+
+However, there is a problem with this ELBO. The KL divergence involves inverting the matrix $\mathbf{K}_\text{tt} \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$, which is very expensive; the inducing point scheme was introduced to avoid such operations.
+
+Titsias proposed an alternative ELBO, by directly performing variational inference over the joint distributions $q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})$ and $p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})$. This results in,
+
+$$
+\begin{aligned}
+\text{ELBO}_{\text{Titsias}} &= \mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) && (26.42) \\
+&= \mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] - \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i})) && (26.43)
+\end{aligned}
+$$
+
+where the second equality holds since
+
+$$
+\begin{aligned}
+\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) &= \mathrm{D}_{\mathrm{KL}}(p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})p(\mathbf{f}_\text{i})) && (26.44) \\
+&= \mathbb{E}_{q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})}\left[\log\frac{p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})p(\mathbf{f}_\text{i})}\right] && (26.45) \\
+&= \mathbb{E}_{q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})}\left[\log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}\right] && (26.46) \\
+&= \int\int p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i}) \log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}d\mathbf{f}_\text{t}d\mathbf{f}_\text{i} && (26.47) \\
+&= \int q(\mathbf{f}_\text{i}) \log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}\left(\int p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})d\mathbf{f}_\text{t}\right)d\mathbf{f}_\text{i} && (26.48) \\
+&= \int q(\mathbf{f}_\text{i}) \log\frac{q(\mathbf{f}_\text{i})}{p(\mathbf{f}_\text{i})}d\mathbf{f}_\text{i} && (26.49) \\
+&= \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i})). && (26.50)
+\end{aligned}
+$$
+
+Critically, when variational inference is performed over the joint process, the KL divergence simplifies to only include the inducing point distributions, which have covariance matrices of size $P_\text{i}$, resulting in $\mathcal{O}(P_\text{i}^3)$ computations which are much more tractable than $\mathcal{O}(P_\text{t}^3)$.
+
+Furthermore, as shown in Hensman et al., an i.i.d. likelihood function means the expected log-likelihood term decomposes into a sum over training datapoints,
+
+$$
+\begin{aligned}
+\mathbb{E}_{q(\mathbf{f})}[\log p(\mathbf{y}_\text{t} \mid \mathbf{f}_\text{t})] &= \sum_{p=1}^{P_\text{t}} \mathbb{E}_{q(\mathbf{f})}\left[\log p(y_p^\text{t} \mid f_p^\text{t})\right] && (26.51) \\
+&= \sum_{p=1}^{P_\text{t}} \mathbb{E}_{p(f_p^\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})}\left[\log p(y_p^\text{t} \mid f_p^\text{t})\right], && (26.52)
+\end{aligned}
+$$
+
+where $f_p^\text{t}$ denotes the $p^\text{th}$ training latent. The second equality points out that each expectation term does not rely on the joint $q(\mathbf{f}) = p(\mathbf{f}_\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})$ over all training points but only the marginal $p(f_p^\text{t} \mid \mathbf{f}_\text{i})q(\mathbf{f}_\text{i})$ over a single training point (which can be obtained using a similar marginalisation process to Eq. (26.39)). In other words, when using inducing points, the training latents are conditionally independent given the inducing latents, unlike in the non-sparse approximate posterior in Section 2.2, where the training latents are conditional on all the other training latents. Crucially, this means that each term in the sum can be estimated independently of all other datapoints, and hence the expected log-likelihood can be estimated with minibatches of data. This is similar to minibatching in neural networks, which allow training on very large data sets without exceeding device memory or requiring the entire data set for a single step of gradient descent.
+
+In summary, even when using the same form of approximate posterior (Eq. 26.38), there is a choice on which objective function (i.e. which ELBO) to optimize it with. Marginalising out the inducing points first and minimizing the KL divergence $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t} \mid \mathbf{y}_\text{t}))$ between the approximate posterior and the true posterior over the training latents can be rewritten as an ELBO that requires computing the KL divergence $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t}))$ between the marginalised approximate posterior and the prior over training latents, which is an $\mathcal{O}(P_\text{t}^3)$ operation. The approach introduced by Titsias instead suggests to minimize the KL divergence $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}, \mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t} \mid \mathbf{y}_\text{t}))$ between the approximate posterior and the true posterior over the joint inducing and training latents (and marginalise out the inducing points later), which results in a more tractable ELBO because the KL divergence between the approximate posterior and prior joint simplifies as $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) = \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i}))$ which is a much cheaper $\mathcal{O}(P_\text{i}^3)$ operation. The expected log-likelihood term is the same in both approaches, and can be estimated using minibatching. Hence the only difference is the KL divergence used in the ELBO. For completeness, note that, by the data processing inequality, $\mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{t})) \le \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}, \mathbf{f}_\text{t}) \| p(\mathbf{f}_\text{i}, \mathbf{f}_\text{t})) = \mathrm{D}_{\mathrm{KL}}(q(\mathbf{f}_\text{i}) \| p(\mathbf{f}_\text{i}))$, and so the bound introduced in Eq. 26.42 is potentially a looser bound on the model evidence / marginal likelihood than the bound in Eq. 26.41. However, the literature shows this bound works well in practice.
+
+### 2.4 Deep Gaussian processes
+
+Deep Gaussian processes (DGPs) were introduced in detail in [Chapter 25](/blog/deep-gaussian-processes); the essentials are recapped here. The Deep Kernel Machines (DKMs) and Deep Kernel Processes (DKPs) introduced later will be based on these. A DGP maps inputs $\mathbf{X} \in \mathbb{R}^{P \times N_0}$ to outputs $\mathbf{Y} \in \mathbb{R}^{P \times N_{L+1}}$ using $L$ intermediate layers of features $\mathbf{F}^\ell \in \mathbb{R}^{P \times N_\ell}$. Here $P$ is the number of input points, and $N_\ell$ is the number of features at layer $\ell$, so that $N_0$ is the number of input features, and $N_{L+1}$ is the number of output features. Writing $\mathbf{F}^\ell$ and $\mathbf{Y}$ as stacks of vectors,
+
+$$
+\mathbf{F}^\ell = \begin{pmatrix} \mathbf{f}_1^\ell & \mathbf{f}_2^\ell & \cdots & \mathbf{f}_{N_\ell}^\ell \end{pmatrix} \in \mathbb{R}^{P \times N_\ell} \tag{26.53a}
+$$
+
+$$
+\mathbf{Y} = \begin{pmatrix} \mathbf{y}_1 & \mathbf{y}_2 & \cdots & \mathbf{y}_{N_{L+1}} \end{pmatrix} \in \mathbb{R}^{P \times N_{L+1}}, \tag{26.53b}
+$$
+
+where $\mathbf{f}_\lambda^\ell \in \mathbb{R}^P$ gives the values of a particular feature $\lambda$ at layer $\ell$ for all $P$ input points and $\mathbf{y}_\lambda \in \mathbb{R}^P$ gives the value of a particular output $\lambda$ for all $P$ input points. The features $\mathbf{F}^1, \dots, \mathbf{F}^L$ have i.i.d. Gaussian process priors whose covariance depends on the previous layer's features,
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}) = \prod_{\lambda=1}^{N_\ell} \mathcal{N}(\mathbf{f}_\lambda^\ell; \mathbf{0}, \mathbf{K}(\mathbf{F}^{\ell-1})). \tag{26.54}
+$$
+
+For regression the outputs are also sampled from a Gaussian process,
+
+$$
+p(\mathbf{Y} \mid \mathbf{F}^L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\mathbf{y}_\lambda; \mathbf{0}, \mathbf{K}(\mathbf{F}^L) + \sigma^2\mathbf{I}). \tag{26.55}
+$$
+
+Other likelihoods could be used. For example, Milsom et al. uses a categorical likelihood with softmax probabilities, as in Eq. (26.19).
+
+## 3. Deep kernel processes
+
+The DGP defined successively alternates between (a) constructing a kernel using the features from the previous layer, and (b) sampling new features from that kernel. Remarkably, it turns out that for certain kernel functions, $\mathbf{K}(\cdot)$, the DGP can be reframed as a process over *kernel matrices* (a.k.a. gram matrices). This is called a Deep Kernel Process (DKP). In the intermediate layers of a DKP, there are no features: only the covariances between data points matter.
+
+Since DKPs are equivalent to DGPs, you may be wondering why one would worry at all about replacing the features with kernel/Gram matrices. One big motivation is the large number of symmetries involved when modeling a posterior over features. The main culprit is the large number of permutation symmetries: if the order of the features in a NN (or a DGP) is swapped, then the model's output distribution is identical, and thus the posterior over features ought to account for this by assigning equal probability density to both feature permutations. The DKP completely sidesteps this issue by modeling the posterior over Gram matrices, which are invariant to feature permutations. To see why, let $\mathbf{G}$ be the Gram matrix formed from the features $\mathbf{F}$, then
+
+$$
+\mathbf{G} = \mathbf{F}\mathbf{F}^T. \tag{26.56}
+$$
+
+The features can be permuted, or even rotated, and reflected, and the Gram matrix remains unchanged. This is because these operations are equivalent to multiplying the features by an orthogonal matrix $\mathbf{O}$, i.e. $\mathbf{F}' = \mathbf{F}\mathbf{O}$, where $\mathbf{O}^T\mathbf{O} = \mathbf{O}\mathbf{O}^T = \mathbf{I}$,
+
+$$
+\mathbf{F}'(\mathbf{F}')^T = \mathbf{F}\mathbf{O}\mathbf{O}^T\mathbf{F}^T = \mathbf{F}\mathbf{F}^T = \mathbf{G}. \tag{26.57}
+$$
+
+Full Bayesian inference is still intractable for the DKP (just like it is intractable for the DGP), but any chosen approximate posterior will by default account for many symmetries in the model. For context, even considering only the removal of the permutation symmetries, the kernel reframing removes $N!$ symmetries from the approximate posterior, where $N$ is the number of features. Even for modestly sized networks, this is *enormously* large. A more detailed discussion on symmetries in Bayesian machine learning can be found in Chapter 32.
+
+### 3.1 Constructing a deep kernel process
+
+Recall the DGP above, where at every layer $\ell$, feature vectors $\mathbf{f}_\lambda^\ell \in \mathbb{R}^P$ are sampled i.i.d. from the kernel $\mathbf{K}(\mathbf{F}^{\ell-1})$,
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}) = \prod_{\lambda=1}^{N_\ell} \mathcal{N}(\mathbf{f}_\lambda^\ell; \mathbf{0}, \mathbf{K}(\mathbf{F}^{\ell-1})). \tag{26.58}
+$$
+
+The following concretely demonstrates that the DGP can be written as a kernel process. Define the rescaled Gram matrix for each layer $\mathbf{G}^\ell = \nu_\ell^{-1}\mathbf{F}^\ell(\mathbf{F}^\ell)^T$. The rescaling ensures $\mathbb{E}[\mathbf{G}^\ell] = \mathbf{K}(\mathbf{F}^{\ell-1})$. Suppose the kernel is set to be the RBF kernel, i.e. $\mathbf{K}(\mathbf{F})_{ij} = \exp(-(2\sigma^2)^{-1}\|\mathbf{f}_i - \mathbf{f}_j\|_2^2)$. Remarkably, the kernel at each layer in the DGP can be computed using only the Gram matrix $\mathbf{G}^\ell$, since the distance between the datapoints $i$ and $j$ can be written in terms of $\mathbf{G}^\ell$,
+
+$$
+\begin{aligned}
+R_{ij}^\ell := \nu_\ell^{-1}\|\mathbf{f}_i^\ell - \mathbf{f}_j^\ell\|_2^2 &= \nu_\ell^{-1}\sum_{\lambda=1}^{\nu_\ell}\left(F_{i\lambda}^\ell - F_{j\lambda}^\ell\right)^2 = \nu_\ell^{-1}\sum_{\lambda=1}^{\nu_\ell}\left((F_{i\lambda}^\ell)^2 + (F_{j\lambda}^\ell)^2 - 2F_{i\lambda}^\ell F_{j\lambda}^\ell\right) && (26.59) \\
+&= G_{ii}^\ell + G_{jj}^\ell - 2G_{ij}^\ell. && (26.60)
+\end{aligned}
+$$
+
+The DGP is therefore equivalent to,
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{G}^{\ell-1}) = \prod_{\lambda=1}^{\nu_\ell} \mathcal{N}(\mathbf{f}_\lambda^\ell; \mathbf{0}, \mathbf{K}_{\mathbf{G}}(\mathbf{G}^{\ell-1})). \tag{26.61}
+$$
+
+where,
+
+$$
+\mathbf{K}_{\mathbf{G}}(\mathbf{G}^{\ell-1})_{ij} = \exp\left(-\frac{1}{2\sigma^2}\left(G_{ii}^{\ell-1} + G_{jj}^{\ell-1} - 2G_{ij}^{\ell-1}\right)\right). \tag{26.62}
+$$
+
+Note that the property used above was *isotropy* of the RBF kernel, and the same idea can be applied to other isotropic kernels, such as Matern (and even the ReLU kernel when there is a large number of features). Also see the subscript in $\mathbf{K}_{\mathbf{G}}$ used to denote that this is a kernel formed from a Gram matrix rather than features; however it is clear from context whether the kernel is formed using a Gram matrix or with features, so the subscript is omitted henceforth.
+
+The final step is to observe that the Gram matrix $\mathbf{G}^\ell$ can be sampled directly without computing the features $\mathbf{F}^\ell$ by observing that the Gram matrix is Wishart distributed. This is true by definition, since a matrix $\mathbf{S} \sim \mathcal{W}(\mathbf{V}, N)$ is said to be Wishart distributed with positive-definite scale matrix $\mathbf{V}$ and degrees of freedom $N$ if,
+
+$$
+\mathbf{x}_1, \dots, \mathbf{x}_N \sim_{\text{i.i.d.}} \mathcal{N}(\mathbf{0}, \mathbf{V}), \tag{26.63}
+$$
+
+$$
+\sum_{i=1}^N \mathbf{x}_i\mathbf{x}_i^T = \mathbf{S} \sim \mathcal{W}(\mathbf{V}, N). \tag{26.64}
+$$
+
+Care must be taken when writing the Wishart probability density function. In the case that $N < \operatorname{rank}(\mathbf{V})$, the matrix $\mathbf{S}$ is low-rank, and one must consult the *singular* Wishart distribution.
+
+The Gram matrix is given by $\mathbf{G}^\ell = \nu_\ell^{-1}\sum_{i=1}^{\nu_\ell}\mathbf{f}_i^\ell(\mathbf{f}_i^\ell)^T$, where $\mathbf{f}_i^\ell \sim \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))$. Thus, the DGP prior for intermediate layers is equivalent to,
+
+$$
+p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}) \sim \mathcal{W}(\mathbf{G}^\ell; \mathbf{K}(\mathbf{G}^{\ell-1})/\nu_\ell, \nu_\ell). \tag{26.65}
+$$
+
+Since the distribution over the Gram matrices is Wishart, Eq. (26.65) is called a deep Wishart process (DWPs). While the Wishart distribution is very natural, due to the connection with DGPs, one can imagine placing other distributions over the Gram matrices to obtain different kernel processes. For example, using the inverse Wishart distribution, gives a 'deep inverse Wishart process' (DIWP). The constraint is that the distribution must be over positive semi-definite Gram matrices.
+
+For the top-layer, the intermediate Gram matrices need to be mapped back to the data. For example, if data is Gaussian, then the following is a possible prior:
+
+$$
+p(\mathbf{Y} \mid \mathbf{G}^L) = \prod_{\lambda=1}^{\nu_{L+1}} \mathcal{N}(\mathbf{y}_\lambda; \mathbf{0}, \mathbf{K}(\mathbf{G}^L) + \sigma^2\mathbf{I}). \tag{26.66}
+$$
+
+Note that this is analogous to the DGP top-layer prior, Eq. (26.55), but in terms of Gram matrices rather than features.
+
+### 3.2 Bayesian inference in a deep Wishart process
+
+Similarly to how one might use Variational Inference (VI) in a DGP, Ober and Aitchison introduced a variational inference scheme for a deep Wishart process. In the literature, approximate posteriors have been proposed for both DWPs and DIWPs, but this chapter focuses on the DWP, and a generalized Wishart approximate posterior.
+
+**Table 26.1:** (From Ober and Aitchison) ELBOs and log-likelihoods for UCI data sets for a five-layer network. Significantly better results (within ELBO or LL) are bolded.
+
+| Data set | DWP ELBO | DGP ELBO | DWP LL | DGP LL |
+| --- | :-: | :-: | :-: | :-: |
+| boston | **−0.38 ± 0.01** | −0.45 ± 0.01 | −2.39 ± 0.04 | −2.44 ± 0.04 |
+| concrete | **−0.49 ± 0.00** | −0.50 ± 0.00 | −3.13 ± 0.01 | −3.14 ± 0.02 |
+| energy | **1.41 ± 0.00** | 1.39 ± 0.00 | −0.70 ± 0.03 | −0.70 ± 0.03 |
+| kin8nm | −0.14 ± 0.00 | **−0.13 ± 0.00** | **1.40 ± 0.00** | 1.38 ± 0.01 |
+| naval | 3.65 ± 0.07 | **3.91 ± 0.10** | 8.21 ± 0.05 | 8.31 ± 0.07 |
+| power | **0.03 ± 0.00** | 0.02 ± 0.00 | −2.77 ± 0.01 | −2.78 ± 0.01 |
+| protein | −1.01 ± 0.00 | **−1.00 ± 0.00** | −2.73 ± 0.00 | −2.73 ± 0.00 |
+| wine | −1.19 ± 0.00 | −1.19 ± 0.00 | −0.96 ± 0.01 | −0.96 ± 0.01 |
+| yacht | **1.65 ± 0.01** | 1.37 ± 0.03 | **−0.43 ± 0.10** | −0.88 ± 0.08 |
+
+The goal is to perform Bayesian inference over the Gram matrices $\mathbf{G}^\ell$ in a DWP,
+
+$$
+p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}) \sim \mathcal{W}(\mathbf{G}^\ell; \mathbf{K}_{\mathbf{G}}(\mathbf{G}^{\ell-1})/\nu_\ell, \nu_\ell). \tag{26.67}
+$$
+
+Thus, a flexible distribution over positive semi-definite matrices $\mathbf{G}^\ell$ is desired to serve as the approximate posterior. This is highly unusual, and a significant departure from more usual Gaussian approximate posterior distributions seen over features. Multiple possible approximate posteriors have been proposed for the Gram matrices $\mathbf{G}$, though here the *Generalized Singular Wishart* is introduced. The idea is to parameterize $\mathbf{G}$ as,
+
+$$
+\mathbf{G} = \mathbf{L}\mathbf{A}\mathbf{A}^T\mathbf{L}^T. \tag{26.68}
+$$
+
+Here, $\mathbf{L}$ is a Cholesky decomposition of a positive definite scale matrix $\mathbf{V} = \mathbf{L}\mathbf{L}^T$, and $\mathbf{A}$ is a matrix of independent Gamma random variables,
+
+$$
+\mathbf{A} = \begin{pmatrix} A_{11} & \cdots & 0 \\ \vdots & \ddots & \vdots \\ A_{\nu 1} & \cdots & A_{\nu\nu} \\ \vdots & \vdots & \vdots \\ A_{P1} & \cdots & A_{P\nu} \end{pmatrix}, \tag{26.69a}
+$$
+
+$$
+p\left(A_{jj}^2\right) = \operatorname{Gamma}\left(A_{jj}^2; \alpha_{jj}, \beta_{jj}\right), \quad p(A_{i>j}) = \mathcal{N}(A_{ij}; \mu_{ij}, \sigma_{ij}^2). \tag{26.69b}
+$$
+
+When $\mathbf{A}$ is a tall and skinny matrix, $\mathbf{A}\mathbf{A}^T$ is singular, and therefore the distribution supports positive semi-definite, but not positive definite matrices; hence 'Generalized *Singular* Wishart'.
+
+To actually use the Generalized Singular Wishart for VI, it is necessary to be able to (a) sample from it and (b) evaluate its density. Sampling is straightforward; first sample $\mathbf{A}$ using Eqs. (26.69), and then use Eq. (26.68) to calculate $\mathbf{G}$. Calculating the density is very non-obvious, but it has been shown that $\mathbf{G}$ has the following density,
+
+$$
+\mathcal{GSW}(\mathbf{G} \mid \boldsymbol{\alpha}, \boldsymbol{\beta}, \boldsymbol{\mu}, \boldsymbol{\sigma}) = \left(\prod_{j=1}^P \frac{1}{L_{jj}^{\min(j,\nu)}}\right) \prod_{j=1}^{\min(P,\nu)} \frac{\operatorname{Gamma}\left(A_{jj}^2; \alpha_{jj}, \beta_{jj}\right)}{A_{jj}^{P-j}L_{jj}^{P-j+1}} \prod_{i=j+1}^P \mathcal{N}(A_{ij}; \mu_{ij}, \sigma_{ij}^2). \tag{26.70}
+$$
+
+By using an inducing-point version of this approximate posterior, it was possible to demonstrate performance improvements over similar DGP models (see Table 26.1)
+
+## 4. Deep kernel machines
+
+This section introduces deep kernel machines (DKMs), a class of supervised learning models that have multiple layers of learned kernel matrices. To construct a DKM, start with the same Wishart prior that was used for the DKP. Instead of proceeding with VI immediately however, which can become complex due to requiring an approximate posterior over the latent Gram matrices, a particular infinite width limit called the Bayesian Representation Learning Limit (BRLL) is taken first. The BRLL turns out to be desirable because the posterior over Gram matrices becomes a Dirac-delta distribution, which means the optimal Gram matrices can be modeled as constant, and they end up being learned via gradient descent.
+
+Before introducing the BRLL and DKMs, the following first discusses standard infinite-width neural networks, NNGPs.
+
+### 4.1 Infinite-width neural network limits
+
+Neural networks with infinitely many features, under Gaussian priors on the weights, are equivalent to Gaussian processes with particular kernel functions. This section reviews the so-called "Neural Network Gaussian Process" (NNGP) limit of neural networks to aid understanding of the BRLL. The infinite-width / NNGP correspondence is also briefly discussed in Chapter 31.
+
+Consider an $L$-layer neural network with $N_\ell = N \cdot \nu_\ell$ hidden features at layer $\ell$, and weights $\mathbf{W}^\ell \in \mathbb{R}^{N_\ell \times N_{\ell-1}}$. Biases are omitted for brevity. The preactivations and postactivations are given by,
+
+$$
+F_{i\lambda}^\ell = \sum_{\mu=1}^{N_{\ell-1}} W_{\lambda\mu}^\ell H_{i\mu}^{\ell-1}, \qquad H_{i\lambda}^\ell = \phi\left(F_{i\lambda}^\ell\right), \qquad H_{i\lambda}^0 = X_{i\lambda}. \tag{26.71}
+$$
+
+Zero-mean random i.i.d. initialization of the weights is assumed, with variance $\sigma_w^2/N_\ell$. Starting at the first layer, the central limit theorem states that, in the limit of infinitely many features $N_1 \to \infty$, the preactivations $\mathbf{F}^1$ will be Gaussian distributed. Lee et al. formalize this argument using induction to extend it to all layers in the network, while de G. Matthews et al. provides an alternative argument where all layers are taken to the infinite-width limit simultaneously, rather than sequentially. The details are omitted here, but the result is that the preactivations $\mathbf{f}_\lambda^\ell$ have multivariate Gaussian distribution $\mathbf{f}_\lambda^\ell \sim \mathcal{N}(\mathbf{0}, \mathbf{K}^\ell)$, where the covariance matrix $\mathbf{K}^\ell \in \mathbb{R}^{P \times P}$ is given by the recursion,
+
+$$
+K_{ij}^\ell = \sigma_w^2\,\mathbb{E}_{\mathbf{f}_\lambda^{\ell-1} \sim \mathcal{N}(0, K^{\ell-1})}\left[\phi(F_{i\lambda}^{\ell-1})\phi(F_{j\lambda}^{\ell-1})\right]. \tag{26.72}
+$$
+
+which depends on the choice of nonlinearity $\phi$ and the initialization variance of the weights $\sigma_w^2/N^\ell$. When $\phi$ is the ReLU nonlinearity, the recursion has a closed-form expression, the arccos kernel:
+
+$$
+K_{ij}^\ell = \frac{\sigma_w^2}{2\pi}\sqrt{K_{ii}^{\ell-1}K_{jj}^{\ell-1}}\left(\sin\theta_{ij}^{\ell-1} + (\pi - \theta_{ij}^{\ell-1})\cos\theta_{ij}^{\ell-1}\right) \tag{26.73}
+$$
+
+$$
+\theta_{ij}^{\ell-1} = \arccos\left(\frac{K_{ij}^{\ell-1}}{\sqrt{K_{ii}^{\ell-1}K_{jj}^{\ell-1}}}\right). \tag{26.74}
+$$
+
+Regardless of the choice of nonlinearity, the base case is for datapoints $\mathbf{x}_i \in \mathbb{R}^{N_0}$ at the beginning of the network, with weight variance $\sigma_w^2/N_0$, which gives the covariance matrix,
+
+$$
+K_{ij}^0 = \sigma_w^2\left(\frac{\mathbf{x}_i \cdot \mathbf{x}_j}{N_0}\right). \tag{26.75}
+$$
+
+Hence, Bayesian inference with an infinite-width neural network prior can be performed by recursively computing covariances $\mathbf{K}^\ell$, and using a Gaussian process prior with covariance matrix $\mathbf{K}^L$ to perform inference on the datapoints. This is known as the "Neural Network Gaussian Process" (NNGP) limit, with the kernels referred to as NNGP kernels.
+
+NNGPs are useful because they frame neural networks as equivalent to kernel methods, for which many theoretical properties are understood (e.g. convergence properties, generalization bounds, etc.). However, as shown later, the fact that they simplify to fixed kernel functions means that they do not perform representation learning, which is a key strength of deep learning, and so theoretical conclusions based on NNGPs may not transfer to practical networks. Hence, the next section modifies the NNGP limit so that the resulting models (deep kernel machines) can learn representations.
+
+### 4.2 Standard infinite-width limit
+
+Now consider the DGP analog of the standard NNGP infinite-width limit, that is, the intermediate layers are taken to have infinite width / infinitely-many features $\mathbf{F}^\ell \in \mathbb{R}^{P \times N_\ell}$:
+
+$$
+N_\ell = N\nu_\ell \quad \text{for} \quad \ell \in \{1, \dots, L\} \quad \text{with} \quad N \to \infty. \tag{26.76}
+$$
+
+The log-posterior (i.e. the log-joint plus a normalizing constant) for the DGP written in terms of Gram matrices is,
+
+$$
+\log p\left(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \mathbf{Y}\right) = \log p(\mathbf{Y} \mid \mathbf{G}^L) + \sum_{\ell=1}^L \log p\left(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}\right) + \text{const}, \tag{26.77}
+$$
+
+where it is emphasized that $\mathbf{G}^1, \dots, \mathbf{G}^L$ are $P \times P$ matrix arguments chosen to specify where the log-posterior is to be evaluated, and so are not affected by any infinite-width limits taken. That said, the actual value of $\log p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1})$ is affected by the limit. In particular, in the infinite limit specified in Eq. (26.76), the log-prior term $\log p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1})$ (Eq. 26.65) scales with $N_\ell$ and therefore $N$, so it must be divided by $N$ to obtain a finite limit:
+
+$$
+\begin{aligned}
+\lim_{N \to \infty} \tfrac{1}{N}\log p(\mathbf{G}^\ell \mid \mathbf{G}^{\ell-1}) &= \tfrac{\nu_\ell}{2}\log\left|\mathbf{K}(\mathbf{G}^{\ell-1})^{-1}\mathbf{G}^\ell\right| - \tfrac{\nu_\ell}{2}\operatorname{Tr}\left(\mathbf{K}(\mathbf{G}^{\ell-1})^{-1}\mathbf{G}^\ell\right) + \lim_{N \to \infty}\tfrac{\alpha_\ell}{N} \\
+&= -\nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))) + \text{const}.
+\end{aligned} \tag{26.78}
+$$
+
+where $\lim_{N \to \infty}\alpha_\ell/N$ is shown to converge to a constant in Yang et al. Note that this limit has been written as a KL-divergence between two Gaussians. By contrast, the log-likelihood term $\log p(\mathbf{Y} \mid \mathbf{G}^L)$ is constant w.r.t. $N$, so will vanish if divided by $N$ in the limit. Putting this all together, the limiting log-posterior (divided by $N$ to remain finite) is
+
+$$
+\lim_{N \to \infty}\tfrac{1}{N}\log p(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \mathbf{Y}) = -\sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))) + \text{const}. \tag{26.79}
+$$
+
+Now, as the log-posterior scales with $N$, the posterior itself converges to a point distribution at its global maximum $(\mathbf{G}^1)^*, \dots, (\mathbf{G}^L)^*$ (see Yang et al. for a more rigorous discussion of weak convergence),
+
+$$
+\lim_{N \to \infty} p(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \mathbf{Y}) = \prod_{\ell=1}^L \delta(\mathbf{G}^\ell - (\mathbf{G}^\ell)^*). \tag{26.80}
+$$
+
+From Eq. (26.79), it is clear that the unique global maximum is obtained when $(\mathbf{G}^\ell)^* = \mathbf{K}((\mathbf{G}^{\ell-1})^*)$, since this minimizes the KL divergence. In other words, the MAP (maximum a posteriori) Gram matrices can be computed recursively by applying the kernel repeatedly:
+
+$$
+\mathbf{G}^\ell = \mathbf{K}(\mathbf{G}^{\ell-1}) = \underbrace{\mathbf{K}(\mathbf{K}(\cdots\mathbf{K}(\mathbf{G}^0)))}_{\ell \text{ times}}, \qquad \mathbf{G}^0 = \frac{1}{N_0}\mathbf{X}\mathbf{X}^T. \tag{26.81}
+$$
+
+Importantly, this means that the limiting posterior has no dependence on $\mathbf{Y}$, the training targets, and so it is not possible for representation learning to occur. This is a big problem, since the success of modern deep learning hinges on its ability to flexibly learn good representations from data.
+
+### 4.3 The Bayesian representation learning limit and DKMs
+
+Representation learning was lost because the likelihood term in the normalized posterior vanished in the infinite limit, while the prior term did not. The Bayesian representation learning limit retains representation learning by sending the number of output features to infinity, in addition to the intermediate features:
+
+$$
+N_\ell = N\nu_\ell \quad \text{for} \quad \ell \in \{1, \dots, L+1\} \quad \text{with} \quad N \to \infty. \tag{26.82}
+$$
+
+Note that the only difference between this limit and Eq. (26.76) is that layer $L + 1$ (the output layer) is included in the limit. To account for an infinitely wide output layer, the following prior is used (a similar one can be used for classification),
+
+$$
+p(\tilde{\mathbf{Y}} \mid \mathbf{G}^L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{y}}_\lambda; \mathbf{0}, \mathbf{K}(\mathbf{G}^L) + \sigma^2\mathbf{I}). \tag{26.83}
+$$
+
+where, $\tilde{\mathbf{Y}} \in \mathbb{R}^{P \times N_{L+1}}$. Since the limit $N_{L+1} \to \infty$ is being taken, one might wonder where to find data with infinitely many features. To apply the DKM to finite-width data $\mathbf{Y} \in \mathbb{R}^{P \times \nu_{L+1}}$, $\tilde{\mathbf{Y}}$ is formed from $N$ copies of $\mathbf{Y}$ concatenated together, i.e.
+
+$$
+\tilde{\mathbf{Y}} = \begin{pmatrix} \mathbf{Y} & \cdots & \mathbf{Y} \end{pmatrix}. \tag{26.84}
+$$
+
+Note that since each output is assumed to be i.i.d., but copies of the data labels are applied to them, this is a case of Bayesian model mismatch, and so the uncertainty quantification of the deep kernel machine may not be optimal. However, for the purposes of investigating representation learning in deep models, this approximation is good enough. Since the output channels were assumed to be i.i.d. (Eq. 26.83), the log-likelihood now scales with $N$:
+
+$$
+\log p(\tilde{\mathbf{Y}} \mid \mathbf{G}^L) = N\log p(\mathbf{Y} \mid \mathbf{G}^L). \tag{26.85}
+$$
+
+Computing the log-posterior as before therefore shows that the likelihood no longer vanishes in the infinite limit, thus allowing representation learning:
+
+$$
+\begin{aligned}
+\mathcal{L}(\mathbf{G}^1, \dots, \mathbf{G}^L) &= \lim_{N \to \infty}\tfrac{1}{N}\log p(\mathbf{G}^1, \dots, \mathbf{G}^L \mid \mathbf{X}, \tilde{\mathbf{Y}}) + \text{const}, \\
+&= \log p(\mathbf{Y} \mid \mathbf{G}^L) - \sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}^{\ell-1}))).
+\end{aligned} \tag{26.86}
+$$
+
+The limiting normalized log-posterior, $\mathcal{L}(\mathbf{G}^1, \dots, \mathbf{G}^L)$, forms the "DKM objective", so named because it is used to optimize the Gram matrices $\mathbf{G}^\ell$ in a deep kernel machine. The first term encourages good predictions by maximizing the log-likelihood of the training data $\mathbf{Y}$, while the other KL-divergence terms form a regularizer that encourages $\mathbf{G}^\ell$ to be close to $\mathbf{K}(\mathbf{G}^{\ell-1})$. The model reduces to the standard infinite-width limit (Eq. 26.81) when no data is observed (equivalently, when $\nu_\ell = \infty$ for all $\ell$), since the KL-divergence is minimized by setting $\mathbf{G}^\ell = \mathbf{K}(\mathbf{G}^{\ell-1})$. Assuming the global maximum of this expression is unique, then the posterior is a point distribution around that maximum (Eq. 26.80). However, unlike in the NNGP case, the maximum cannot simply be computed by recursively applying the kernel function to the data, since the maximum now also depends on the likelihood term. Instead, the Gram matrices must be optimized using e.g. gradient ascent. Remarkably, given a set of optimal Gram matrices $(\mathbf{G}^1)^*, \dots, (\mathbf{G}^L)^*$, Yang et al. showed that the posterior distribution over features is zero-mean multivariate Gaussian (assuming the global maximum for the Gram matrices is unique),
+
+$$
+p(\mathbf{f}_\lambda^\ell \mid \mathbf{X}, \mathbf{Y}) = \mathcal{N}\left(\mathbf{f}_\lambda^\ell; \mathbf{0}, (\mathbf{G}^\ell)^*\right). \tag{26.87}
+$$
+
+This fact allows *sparse* DKMs with variational inference, since a Gaussian approximate posterior can capture the true posterior. The next section discusses sparse DKMs, which extend the inducing-point framework from the GP literature to DKMs. When applying the BRLL to neural networks instead of DGPs, the posterior is not Gaussian, and Yang et al. needed to use normalizing flows to accurately approximate the posterior, which adds significant complexity, and it is also not obvious how to integrate inducing points. As such, the focus here stays on DKMs derived from DGPs.
+
+Once the Gram matrices have been optimized according to the DKM objective using the training data, one can perform inference on test points using a method similar to that in DGPs. The full prediction procedure for the sparse DKM is detailed in the next section, and the details for the full-rank DKM, which are very similar to the sparse DKM case, are omitted.
+
+### 4.4 Sparse DKMs
+
+As with all naive kernel methods, directly computing the DKM objective for all data is $\mathcal{O}(P_\text{t}^3)$, where $P_\text{t}$ is the number of datapoints, which is typically infeasible. As a DKM is ultimately an infinite-width DGP parameterized by Gram matrices rather than features, Yang et al. developed an inducing point scheme inspired by the doubly stochastic inducing point framework for DGPs to reduce the computational complexity of the DKM objective. A high level overview of the scheme is given first, before the full derivation of the sparse DKM objective is detailed, closely following the original derivation in Yang et al.
+
+In DGPs, each layer is a GP, so one set of inducing points is learned for each layer. When using inducing points, the features at each layer are partitioned into inducing points $\mathbf{F}_\text{i}^\ell$ and training points $\mathbf{F}_\text{t}^\ell$. Likewise, the kernel matrix is partitioned into blocks corresponding to inducing and training points. In a DKM, $\mathbf{G}^\ell$ is partitioned similarly,
+
+$$
+\mathbf{G}^\ell = \begin{pmatrix} \mathbf{G}_\text{ii}^\ell & \mathbf{G}_\text{it}^\ell \\ \mathbf{G}_\text{ti}^\ell & \mathbf{G}_\text{tt}^\ell \end{pmatrix} \qquad \mathbf{K}(\mathbf{G}^\ell) = \begin{pmatrix} \mathbf{K}_\text{ii}(\mathbf{G}_\text{ii}^\ell) & \mathbf{K}_\text{it}(\mathbf{G}^\ell) \\ \mathbf{K}_\text{ti}(\mathbf{G}^\ell) & \mathbf{K}_\text{tt}(\mathbf{G}_\text{tt}^\ell) \end{pmatrix}, \tag{26.88}
+$$
+
+with $\mathbf{G}_\text{ii}^\ell \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$, $\mathbf{G}_\text{ti}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{i}}$, and $\mathbf{G}_\text{tt}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$. At each layer $\ell$, $\mathbf{G}_\text{ii}^\ell$ is learned, while $\mathbf{G}_\text{ti}^\ell$ and $\mathbf{G}_\text{tt}^\ell$ are predicted using $\mathbf{G}_\text{ii}^\ell$, $\mathbf{K}(\mathbf{G}^{\ell-1})$, and properties of the assumed Gaussian approximate posteriors. This results in the sparse DKM objective,
+
+$$
+\mathcal{L}_{\text{ind}}(\mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L) = \text{GP-ELBO}(\mathbf{Y}_\text{t}; \mathbf{G}_\text{ii}^L, \mathbf{G}_\text{ti}^L, \mathbf{G}_\text{tt}^L) - \sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}_\text{ii}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^{\ell-1}))) \tag{26.89}
+$$
+
+where $\text{GP-ELBO}\left(\mathbf{Y}_\text{t}; \mathbf{G}_\text{ii}^L, \mathbf{G}_\text{ti}^L, \mathbf{G}_\text{tt}^L\right)$ is the ELBO for a sparse GP (i.e. Eq. 26.42) with data $\mathbf{Y}_\text{t}$ and kernel $\mathbf{K}(\mathbf{G}^L)$, including a likelihood term which measures the performance of the model on training data. Hence the sparse DKM objective looks very similar in structure to the full-rank DKM objective (Eq. 26.86). This scheme is efficient, with time complexity $\mathcal{O}(L(P_\text{i}^3 + P_\text{i}^2P_\text{t}))$, because the KL terms in the sparse DKM objective depend only on $\mathbf{G}_\text{ii} \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$ (not $\mathbf{G}_\text{tt} \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$). Furthermore, obtaining predictions and computing the expected log-likelihood term in the sparse DKM objective requires only the diagonal of $\mathbf{G}_\text{tt}^\ell$. Since an i.i.d. likelihood is used, all covariances $\mathbf{K}_\text{tt}$ and $\mathbf{G}_\text{tt}$ between train / test points in the batch do not affect the final prediction (covariances between datapoints are instead implicitly encoded via the inducing points $\mathbf{G}_\text{ii}$), and so only the diagonal in the train / test blocks ever needs to be computed.
+
+The full derivation of the sparse DKM objective, which was originally based on the "Doubly Stochastic Variational Inference for Deep Gaussian Processes" scheme from Salimbeni and Deisenroth, is presented now. The majority of this derivation is a modified reproduction of Appendix M (Inducing Point DKMs) in Yang et al., the primary modification of note being that an approximate posterior over the top-layer features $\tilde{\mathbf{F}}_{L+1}$ is explicitly modeled, which were just treated as deterministic variational parameters in Yang et al.
+
+To do inducing-point variational inference, top-layer features $\mathbf{F}^{L+1} \in \mathbb{R}^{P \times \nu_{L+1}}$ are explicitly introduced and the likelihood is computed from those features. Formally, each feature, $\mathbf{f}_1^{L+1}, \dots, \mathbf{f}_{\nu_{L+1}}^{L+1}$ is i.i.d., conditioned on $\mathbf{F}^L$,
+
+$$
+p(\mathbf{F}^{L+1} \mid \mathbf{F}^L) = \prod_{\lambda=1}^{\nu_{L+1}} \mathcal{N}(\mathbf{f}_\lambda^{L+1}; \mathbf{0}, \mathbf{K}(\mathbf{G}(\mathbf{F}^L))), \tag{26.90a}
+$$
+
+$$
+p(\mathbf{Y} \mid \mathbf{F}^{L+1}) = \prod_{\lambda=1}^{\nu_{L+1}} \mathcal{N}(\mathbf{y}_\lambda; \mathbf{f}_\lambda^{L+1}, \sigma^2\mathbf{I}), \tag{26.90b}
+$$
+
+where for simplicity the likelihood for regression is given, but other likelihoods (e.g. for classification) are possible. Since the DKM uses infinite-width outputs, the features replicated $N$ times, $\tilde{\mathbf{F}}^{L+1} \in \mathbb{R}^{P \times N_{L+1}}$, are also used; they look exactly like the features at the previous layers, but with $N_{L+1} = N\nu_{L+1}$ features, where $N$ is the number of copies of the data used to approximate the infinite-width limit:
+
+$$
+p(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}_L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{f}}_\lambda^{L+1}; \mathbf{0}, \mathbf{K}(\mathbf{G}(\mathbf{F}^L))), \tag{26.91a}
+$$
+
+$$
+p(\tilde{\mathbf{Y}} \mid \tilde{\mathbf{F}}^{L+1}) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{y}}_\lambda; \tilde{\mathbf{f}}_\lambda^{L+1}, \sigma^2\mathbf{I}), \tag{26.91b}
+$$
+
+Further, the total number of points, $P$, is taken to be made up of $P_\text{i}$ inducing points and $P_\text{t}$ test/train points, so that $P = P_\text{i} + P_\text{t}$. Thus, all features, $\mathbf{F}^\ell \in \mathbb{R}^{P \times N_\ell}$, can be separated into the inducing features, $\mathbf{F}_\text{i}^\ell \in \mathbb{R}^{P_\text{i} \times N_\ell}$, and the test/train features, $\mathbf{F}_\text{t}^\ell \in \mathbb{R}^{P_\text{t} \times N_\ell}$. Likewise, the inputs, $\mathbf{X}$, and outputs, $\mathbf{Y}$, are separated into (potentially trained) inducing inputs, $\mathbf{X}_\text{i}$, and trained inducing outputs, $\mathbf{Y}_\text{i}$, and the real test/training inputs, $\mathbf{X}_\text{t}$, and outputs, $\mathbf{Y}_\text{t}$,
+
+$$
+\mathbf{F}^\ell = \begin{pmatrix} \mathbf{F}_\text{i}^\ell \\ \mathbf{F}_\text{t}^\ell \end{pmatrix} \qquad \tilde{\mathbf{F}}^{L+1} = \begin{pmatrix} \tilde{\mathbf{F}}_\text{i}^{L+1} \\ \tilde{\mathbf{F}}_\text{t}^{L+1} \end{pmatrix} \qquad \mathbf{X} = \begin{pmatrix} \mathbf{X}_\text{i} \\ \mathbf{X}_\text{t} \end{pmatrix} \qquad \mathbf{Y} = \begin{pmatrix} \mathbf{Y}_\text{i} \\ \mathbf{Y}_\text{t} \end{pmatrix} \qquad \tilde{\mathbf{Y}} = \begin{pmatrix} \tilde{\mathbf{Y}}_\text{i} \\ \tilde{\mathbf{Y}}_\text{t} \end{pmatrix} \tag{26.92}
+$$
+
+The usual doubly stochastic inducing point approach for DGPs is followed. In particular, all the features at intermediate layers, $\mathbf{F}^1, \dots, \mathbf{F}^L$, and the top-layer features, $\tilde{\mathbf{F}}^{L+1}$ are treated as latent variables. The prior and approximate posterior over $\mathbf{F}^1, \dots, \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1}$ are given by,
+
+$$
+q\left(\mathbf{F}^1, \dots, \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X}\right) = q\left(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L\right)\prod_{\ell=1}^L q\left(\mathbf{F}^\ell \mid \mathbf{F}_{\ell-1}\right), \tag{26.93a}
+$$
+
+$$
+p(\mathbf{F}^1, \dots, \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X}) = p(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L)\prod_{\ell=1}^L p(\mathbf{F}^\ell \mid \mathbf{F}_{\ell-1}), \tag{26.93b}
+$$
+
+and $\mathbf{F}^0 = \mathbf{X}$. The prior and approximate posterior at each layer factorizes into a distribution over the inducing points and a distribution over the test/train points,
+
+$$
+q\left(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}\right) = p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})q\left(\mathbf{F}_\text{i}^\ell\right), \tag{26.94a}
+$$
+
+$$
+p(\mathbf{F}^\ell \mid \mathbf{F}^{\ell-1}) = p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1}). \tag{26.94b}
+$$
+
+Similarly, for the top-layer features,
+
+$$
+q\left(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L\right) = p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L)q\left(\tilde{\mathbf{F}}_\text{i}^{L+1}\right), \tag{26.95a}
+$$
+
+$$
+p(\tilde{\mathbf{F}}^{L+1} \mid \mathbf{F}^L) = p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L)p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \mathbf{F}_\text{i}^L) \tag{26.95b}
+$$
+
+Critically, the approximate posterior for the test/train points is the conditional prior $p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})$, which is going to lead to cancellation when the ELBO is computed. Likewise, the approximate posterior over $\tilde{\mathbf{F}}_\text{t}^{L+1}$ is the conditional prior,
+
+$$
+q\left(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L\right) = p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L). \tag{26.96}
+$$
+
+Concretely, the approximate posteriors and priors over inducing points for intermediate layers are given by,
+
+$$
+q\left(\mathbf{F}_\text{i}^\ell\right) = \prod_\lambda^{N_\ell} \mathcal{N}(\mathbf{f}_{\text{i};\lambda}^\ell; \mathbf{0}, \mathbf{G}_\text{ii}^\ell), \tag{26.97a}
+$$
+
+$$
+p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1}) = \prod_\lambda^{N_\ell} \mathcal{N}(\mathbf{f}_{\text{i};\lambda}^\ell; \mathbf{0}, \mathbf{K}(\mathbf{G}(\mathbf{F}_\text{i}^{\ell-1}))) \tag{26.97b}
+$$
+
+and for the top-layer, the approximate posterior over $\mathbf{F}_\text{i}^{L+1} \in \mathbb{R}^{P_\text{i} \times \nu_{L+1}}$ is allowed to learn a separate mean for each channel (the same covariance is usually used for all channels to save memory), and the approximate posterior over the infinite-copies $\tilde{\mathbf{F}}_\text{i}^{L+1} \in \mathbb{R}^{P_\text{i} \times N_{L+1}}$ is defined by "copying" the approximate posterior for each concrete channel $N$ times, while the prior assumes that the infinite copies are i.i.d. (again, this is a slightly strange thing to do, but it allows the DKM to be used to learn representations from finite-width data, as discussed in Section 4.3):
+
+$$
+q\left(\mathbf{F}_\text{i}^{L+1}\right) = \prod_\lambda^{\nu_{L+1}} \mathcal{N}(\mathbf{f}_{\text{i};\lambda}^{L+1}; \boldsymbol{\mu}_\lambda, \mathbf{A}) \tag{26.98a}
+$$
+
+$$
+q\left(\tilde{\mathbf{F}}_\text{i}^{L+1}\right) = q\left(\mathbf{F}_\text{i}^{L+1}\right)^N \tag{26.98b}
+$$
+
+$$
+p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^L) = \prod_{\lambda=1}^{N_{L+1}} \mathcal{N}(\tilde{\mathbf{f}}_{\text{i};\lambda}^{L+1}; \mathbf{0}, \mathbf{K}(\mathbf{G}(\tilde{\mathbf{F}}_\text{i}^L))). \tag{26.98c}
+$$
+
+Now the ELBO (in the form of expected log-likelihood minus the KL between approximate posterior and true prior, as given in Eq. 26.42) is computed with respect to the variational parameters
+
+$$
+\text{ELBO}(\mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L, \boldsymbol{\mu}_1, \dots, \boldsymbol{\mu}_{N_{L+1}}, \mathbf{A}) = \mathbb{E}_q\left[\log p(\tilde{\mathbf{Y}}_\text{t} \mid \tilde{\mathbf{F}}_\text{t}^{L+1}) + \log\frac{p(\mathbf{F}^1, \dots \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X})}{q(\mathbf{F}^1, \dots \mathbf{F}^L, \tilde{\mathbf{F}}^{L+1} \mid \mathbf{X})}\right] \tag{26.99}
+$$
+
+Substituting Eq. (26.93–26.96) and canceling the $p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{F}^{\ell-1})$ and $p(\tilde{\mathbf{F}}_\text{t}^{L+1} \mid \tilde{\mathbf{F}}_\text{i}^{L+1}, \mathbf{F}^L)$ terms in the fraction gives
+
+$$
+\text{ELBO}(\dots) = \mathbb{E}_q\left[\log p(\tilde{\mathbf{Y}}_\text{t} \mid \tilde{\mathbf{F}}_\text{t}^{L+1}) + \log\frac{p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \mathbf{F}_\text{i}^L)}{q(\tilde{\mathbf{F}}_\text{i}^{L+1})} + \sum_{\ell=1}^L \log\frac{p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1})}{q(\mathbf{F}_\text{i}^\ell)}\right]. \tag{26.100}
+$$
+
+In a DGP, $\mathbf{F}_\text{i}^\ell$ only depends on $\mathbf{F}_\text{i}^{\ell-1}$ through $\mathbf{G}_\text{ii}^{\ell-1}$, and the prior and approximate posterior factorize across features $\lambda$ (Eq. 26.97). Thus, in the infinite limit, individual terms in the ELBO can be written,
+
+$$
+\begin{aligned}
+\lim_{N \to \infty}\mathbb{E}_q\left[\log\frac{p(\mathbf{F}_\text{i}^\ell \mid \mathbf{F}_\text{i}^{\ell-1})}{q(\mathbf{F}_\text{i}^\ell)}\right] &= N\nu_\ell\,\mathbb{E}_q\left[\log\frac{p(\mathbf{f}_{\text{i};\lambda}^\ell \mid \mathbf{G}_\text{ii}^{\ell-1})}{q(\mathbf{f}_{\text{i};\lambda}^\ell)}\right] && (26.101) \\
+&= -N\nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}_\text{ii}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^{\ell-1}))), && (26.102)
+\end{aligned}
+$$
+
+where the final equality arises when one notices that the expectation can be written as a negative KL-divergence. Similarly, for the top-layer features, recalling Eq. 26.98, one has
+
+$$
+\begin{aligned}
+\lim_{N \to \infty}\mathbb{E}_q\left[\log\frac{p(\tilde{\mathbf{F}}_\text{i}^{L+1} \mid \mathbf{F}_\text{i}^L)}{q(\tilde{\mathbf{F}}_\text{i}^{L+1})}\right] &= N\sum_{\lambda=1}^{\nu_{L+1}}\mathbb{E}_q\left[\log\frac{p(\mathbf{f}_{\text{i};\lambda}^{L+1} \mid \mathbf{G}_\text{ii}^L)}{q(\mathbf{f}_{\text{i};\lambda}^{L+1})}\right] && (26.103) \\
+&= -N\sum_{\lambda=1}^{\nu_{L+1}}\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\boldsymbol{\mu}_\lambda, \mathbf{A}) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^L))). && (26.104)
+\end{aligned}
+$$
+
+Note that for the top layer there is a sum of $\nu_\ell$ terms rather than just a factor of $\nu_\ell$ as in the intermediate layer terms, since there is a separate $\mu_\lambda$ in the approximate posterior for each feature $\lambda$. Finally, note that since the data labels $\tilde{\mathbf{Y}}_\text{t}$ are replicated $N$ times, and the top-layer features $\tilde{\mathbf{F}}_\text{t}^{L+1}$ are also replicated $N$ times in the same way, the expected log-likelihood term can be written as
+
+$$
+\mathbb{E}_q\left[\log p(\tilde{\mathbf{Y}}_\text{t} \mid \tilde{\mathbf{F}}_\text{t}^{L+1})\right] = N\mathbb{E}_q\left[\log p(\mathbf{Y}_\text{t} \mid \mathbf{F}_\text{t}^{L+1})\right] \tag{26.105}
+$$
+
+The inducing DKM objective, $\mathcal{L}_{\text{ind}}$, which is the ELBO divided by N to ensure that it remains finite in the infinite limit, can therefore be written as
+
+$$
+\begin{aligned}
+&\mathcal{L}_{\text{ind}}(\mathbf{F}_\text{i}^{L+1}, \mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L) \\
+&= \lim_{N \to \infty}\tfrac{1}{N}\text{ELBO}(\mathbf{F}_\text{i}^{L+1}, \mathbf{G}_\text{ii}^1, \dots, \mathbf{G}_\text{ii}^L) \\
+&= \underbrace{\mathbb{E}_q\left[\log p(\mathbf{Y}_\text{t} \mid \mathbf{F}_\text{t}^{L+1})\right] - \sum_{\lambda=1}^{N_{L+1}}\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\boldsymbol{\mu}_\lambda, \mathbf{A}_\lambda) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^L)))}_{\text{Sparse GP ELBO}} \\
+&\quad \underbrace{- \sum_{\ell=1}^L \nu_\ell\mathrm{D}_{\mathrm{KL}}(\mathcal{N}(\mathbf{0}, \mathbf{G}_\text{ii}^\ell) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{K}(\mathbf{G}_\text{ii}^{\ell-1})))}_{\text{DKM Regularisation Terms}}.
+\end{aligned} \tag{26.106}
+$$
+
+Note that this has almost exactly the same form as the standard DKM objective for DGPs (Eq. 26.89). In particular, the first term is a "performance" term that here depends on the quality of the predictions given the inducing points, and the second and third terms are a chain of KL-divergences, with the only difference that these KL-divergences apply only to the inducing points, and the top-layer has to be dealt with separately due to the approximate posterior.
+
+Now that a simple form for the ELBO is available, the expected likelihood, $\mathbb{E}_q\left[\log p(\mathbf{Y}_\text{t} \mid \mathbf{F}_\text{t}^{L+1})\right]$, needs to be computed. Since the top layer is a sparse GP, computing the expected log-likelihood term in the sparse DKM objective is similar to Section 2.3. For Gaussian likelihoods, the expected log-likelihood can be computed without a Monte-Carlo estimate, along with the concrete formula used for the Categorical likelihood. This relies on having the last full Gram matrix $\mathbf{G}^L$, which depends on previous layers, and therefore requires computing the full Gram matrices, including test/train point blocks, conditioned on the optimized inducing Gram matrices $\mathbf{G}_\text{ii}^\ell$ at every layer. Once the last full Gram matrix $\mathbf{G}^L$ is available, the expected log-likelihood can be computed as in a sparse GP.
+
+Start by recapping the definition of the full Gram matrix,
+
+$$
+\mathbf{G}^\ell = \begin{pmatrix} \mathbf{G}_\text{ii}^\ell & \mathbf{G}_\text{it}^\ell \\ \mathbf{G}_\text{ti}^\ell & \mathbf{G}_\text{tt}^\ell \end{pmatrix} \tag{26.107}
+$$
+
+for both inducing points (labeled 'i') and test/training points (labeled 't'). For clarity, $\mathbf{G}^\ell \in \mathbb{R}^{P \times P}$, $\mathbf{G}_\text{ii}^\ell \in \mathbb{R}^{P_\text{i} \times P_\text{i}}$, $\mathbf{G}_\text{ti}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{i}}$, $\mathbf{G}_\text{tt}^\ell \in \mathbb{R}^{P_\text{t} \times P_\text{t}}$, where $P_\text{i}$ is the number of inducing points, $P_\text{t}$ is the number of train/test points and $P = P_\text{i} + P_\text{t}$ is the total number of inducing and train/test points.
+
+The conditional distribution over $\mathbf{F}_\text{t}^\ell$ given $\mathbf{F}_\text{i}^\ell$ is,
+
+$$
+p(\mathbf{F}_\text{t}^\ell \mid \mathbf{F}_\text{i}^\ell, \mathbf{G}_{\ell-1}) = \prod_{\lambda=1}^{\nu_\ell} \mathcal{N}(\mathbf{f}_{\text{t};\lambda}^\ell; \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{f}_{\text{i};\lambda}^\ell, \mathbf{K}_{\text{tt}\cdot\text{i}}) \tag{26.108}
+$$
+
+where $\mathbf{f}_{\text{t};\lambda}^\ell$ is the $\lambda$th feature for all train/test points, $\mathbf{f}_{\text{i};\lambda}^\ell$ is the $\lambda$th feature for all inducing points, and
+
+$$
+\begin{pmatrix} \mathbf{K}_\text{ii} & \mathbf{K}_\text{ti}^T \\ \mathbf{K}_\text{ti} & \mathbf{K}_\text{tt} \end{pmatrix} = \mathbf{K}\left(\tfrac{1}{N_{\ell-1}}\mathbf{F}^{\ell-1}(\mathbf{F}^{\ell-1})^T\right) = \mathbf{K}(\mathbf{G}_{\ell-1}) \tag{26.109}
+$$
+
+$$
+\mathbf{K}_{\text{tt}\cdot\text{i}} = \mathbf{K}_\text{tt} - \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{ti}^T. \tag{26.110}
+$$
+
+**Algorithm 27** DKM prediction
+
+```text
+Inputs : parameters {ν_ℓ}_{ℓ=1}^{L}; optimized Gram matrices {G_ii^ℓ}_{ℓ=1}^{L}; inducing and train/test inputs
+         X_i ∈ R^{P_i × ν_0}, X_t ∈ R^{P_t × ν_0}; inducing output means μ_1, ..., μ_{N_{L+1}} ∈ R^{P_i} and covariance
+         A ∈ R^{P_i × P_i}
+Outputs: predicted outputs F_t^{L+1}
+// Initialize full Gram matrix
+[ G_ii^0   G_ti^{0;T} ]          [ X_i X_i^T   X_i X_t^T ]
+[ G_ti^0   G_tt^0     ] = (1/ν_0) [ X_t X_i^T   X_t X_t^T ]
+// Propagate full Gram matrix
+for ℓ = 1 to L do
+    [ K_ii   K_ti^T ]     ( [ G_ii^{ℓ-1}   (G_ti^{ℓ-1})^T ] )
+    [ K_ti   K_tt   ] = K ( [ G_ti^{ℓ-1}    G_tt^{ℓ-1}     ] )
+    K_tt·i ← K_tt − K_ti K_ii^{-1} K_ti^T
+    G_ti^ℓ ← K_ti K_ii^{-1} G_ii^ℓ
+    G_tt^ℓ ← K_ti K_ii^{-1} G_ii^ℓ K_ii^{-1} K_ti^T + K_tt·i
+// Final prediction using Gaussian process expressions
+[ K_ii   K_ti^T ]     ( [ G_ii^L   (G_ti^L)^T ] )
+[ K_ti   K_tt   ] = K ( [ G_ti^L    G_tt^L    ] )
+f_{t;λ}^{L+1} ~ N(K_ti K_ii^{-1} μ_λ, K_tt − K_ti K_ii^{-1} K_it + K_ti K_ii^{-1} A K_ii^{-1} K_it)
+```
+
+In the infinite limit, the intermediate layer Gram matrices become deterministic via the law of large numbers:
+
+$$
+\lim_{N \to \infty}\mathbf{G}^\ell = \lim_{N \to \infty}\tfrac{1}{N_\ell}\mathbf{F}^\ell(\mathbf{F}^\ell)^T = \lim_{N \to \infty}\tfrac{1}{N_\ell}\sum_{\lambda=1}^{N_\ell}\mathbf{f}_\lambda^\ell(\mathbf{f}_\lambda^\ell)^T = \mathbb{E}_q\left[\mathbf{f}_\lambda^\ell(\mathbf{f}_\lambda^\ell)^T\right] \tag{26.111}
+$$
+
+(where the third equality follows since an infinite number of i.i.d. terms is being averaged, and $q$ is defined as in Eq. 26.93 and Eq. 26.97) and as such $\mathbf{G}_\text{it}$ and $\mathbf{G}_\text{tt}$ become deterministic and equal to their expected values. Using Eq. (26.108), one can write,
+
+$$
+\mathbf{F}_\text{t}^\ell = \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{F}_\text{i}^\ell + \mathbf{K}_{\text{tt}\cdot\text{i}}^{1/2}\mathbf{Z}_\text{i}. \tag{26.112}
+$$
+
+where $\mathbf{Z}_\text{i}$ is a matrix with i.i.d. standard Gaussian elements. Hence, $\mathbf{G}_\text{it}$ and $\mathbf{G}_\text{tt}$ can be written as
+
+$$
+\begin{aligned}
+\mathbf{G}_\text{ti}^\ell &= \tfrac{1}{N_\ell}\mathbb{E}\left[\mathbf{F}_\text{t}^\ell(\mathbf{F}_\text{i}^\ell)^T\right] && (26.113) \\
+&= \tfrac{1}{N_\ell}\mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbb{E}\left[\mathbf{F}_\text{i}^\ell(\mathbf{F}_\text{i}^\ell)^T\right] && (26.114) \\
+&= \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{G}_\text{ii}^\ell && (26.115)
+\end{aligned}
+$$
+
+and
+
+$$
+\begin{aligned}
+\mathbf{G}_\text{tt}^\ell &= \tfrac{1}{N_\ell}\mathbb{E}\left[\mathbf{F}_\text{t}^\ell(\mathbf{F}_\text{t}^\ell)^T\right] && (26.116) \\
+&= \tfrac{1}{N_\ell}\mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbb{E}\left[\mathbf{F}_\text{i}^\ell(\mathbf{F}_\text{i}^\ell)^T\right]\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{ti}^T + \tfrac{1}{N_\ell}\mathbf{K}_{\text{tt}\cdot\text{i}}^{1/2}\mathbb{E}\left[\mathbf{Z}_\text{i}\mathbf{Z}_\text{i}^T\right]\mathbf{K}_{\text{tt}\cdot\text{i}}^{1/2} && (26.117) \\
+&= \mathbf{K}_\text{ti}\mathbf{K}_\text{ii}^{-1}\mathbf{G}_\text{ii}\mathbf{K}_\text{ii}^{-1}\mathbf{K}_\text{ti}^T + \mathbf{K}_{\text{tt}\cdot\text{i}} && (26.118)
+\end{aligned}
+$$
+
+For the full prediction algorithm, see Algorithm 27.

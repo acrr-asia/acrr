@@ -10,11 +10,6 @@ objectives:
   - "Choose a method that scales to a given model and data set, and evaluate predictive uncertainty with calibration, proper scoring rules and selective prediction."
   - "Describe current research directions in Bayesian deep learning and state the open problems each one addresses."
 plannedEntries:
-  - title: "Chapter 23: Introduction to Kernel Methods"
-  - title: "Chapter 24: Deep Kernel Learning"
-  - title: "Chapter 25: Deep Gaussian Processes"
-  - title: "Chapter 26: Deep Kernel Processes and Deep Kernel Machines"
-  - title: "Chapter 27: Meta-Learning Deep Kernel Gaussian Processes"
   - title: "Chapter 28: Introduction to Priors"
   - title: "Chapter 29: Statistical Properties of Priors"
   - title: "Chapter 30: Informative Priors"

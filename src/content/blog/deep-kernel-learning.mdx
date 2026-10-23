@@ -1,0 +1,193 @@
+---
+title: "Deep Kernel Learning"
+description: "Deep kernel learning: Gaussian processes on neural-network features, stochastic variational DKL, kernel estimation strategies and practical tools."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - gaussian processes
+  - deep kernel learning
+  - kernel methods
+series: bayesian-deep-learning
+seriesOrder: 30
+---
+
+import Figure from '../../components/Figure.astro';
+import Bdl24DeepKernelRegression from '../../components/diagrams/Bdl24DeepKernelRegression.astro';
+
+Historically, neural networks and kernel methods have often been treated as competing approaches. Deep kernel learning (DKL) combines a deterministic neural-network feature extractor with a kernel method, most commonly a Gaussian process (GP). At prediction time, standard DKL evaluates the feature extractor once for each test input and then performs GP prediction in the learned feature space. This avoids the repeated stochastic neural-network passes required by some Bayesian neural-network approximations, but GP prediction still requires kernel computations against stored training or inducing-point features.
+
+Deep kernel learning transforms the inputs of a base kernel, such as a radial basis function (RBF) kernel, through a neural network. The resulting *deep kernel* has hyperparameters from both the base kernel and the neural-network feature map. For Gaussian-likelihood regression, the GP predictive distribution and marginal likelihood are available in closed form for any fixed values of these hyperparameters. Learning the hyperparameters still requires numerical optimization, and classification or other non-Gaussian likelihoods require approximate inference. Moreover, standard DKL is an empirical-Bayes (type-II) construction: it integrates over GP function values but point-estimates the neural-network and kernel parameters rather than placing a posterior over them.
+
+The remainder of the chapter reviews Gaussian processes (Section 1), introduces the deep-kernel construction (Section 2), describes stochastic variational deep kernel learning (Section 3), discusses estimation choices (Section 4), and closes with practical resources (Section 5).
+
+Applications and surveys involving DKL or closely related GP–neural-network hybrids span biological sequence design, physics-informed machine learning, materials science, computational chemistry, autonomous vehicles, semi-supervised learning, few-shot learning, healthcare, and astrobiology. Related hybrid methods and DKL extensions also exist. DKL has also been used in Bayesian optimization, where predictive uncertainty informs the exploration–exploitation trade-off; what counts as "far from the data", however, is determined by the learned representation.
+
+## 1. Review of Gaussian processes
+
+Although deep kernels can be used with other kernel methods, this chapter focuses on Gaussian processes because they provide both predictive distributions and a marginal-likelihood objective for hyperparameter estimation.
+
+For a full treatment, see Rasmussen and Williams. A *Gaussian process* is a distribution over functions whose every finite-dimensional marginal is Gaussian. Write $f \sim \mathcal{GP}(m, k)$ when, for every finite input set $X = \{x_1, \ldots, x_n\}$,
+
+$$
+\big(f(x_1), \ldots, f(x_n)\big)^\top \sim \mathcal{N}(m_X, K_{XX}), \tag{24.1}
+$$
+
+where $(m_X)_i = m(x_i)$ and $(K_{XX})_{ij} = k(x_i, x_j)$.
+
+For simplicity, assume $m(x) = 0$ unless stated otherwise. The kernel then plays the central role in determining the covariance and generalization properties of the process. A standard choice is the RBF kernel
+
+$$
+k_{\mathrm{RBF}}(x_i, x_j) = a^2 \exp\left(-\frac{\|x_i - x_j\|^2}{2\ell^2}\right), \tag{24.2}
+$$
+
+where the amplitude $a^2$ controls the signal variance and the length-scale $\ell$ controls how rapidly correlations decay with distance. Larger length-scales produce more slowly varying functions, whereas shorter length-scales permit more rapidly varying functions. In forecasting, for example, $\ell$ can be interpreted as the time range over which past observations remain substantially correlated with a forecast.
+
+For Gaussian-likelihood regression, assume
+
+$$
+y_i = f(x_i) + \epsilon_i, \qquad \epsilon_i \overset{\text{iid}}{\sim} \mathcal{N}(0, \sigma^2),
+$$
+
+with the noise independent of $f$. Given training inputs $X = \{x_i\}_{i=1}^N$ and observations $\boldsymbol{y} = (y_1, \ldots, y_N)^\top$, the latent-function predictive distribution at $x_*$ is
+
+$$
+\begin{aligned}
+p(f_* \mid \boldsymbol{y}, x_*, X) &= \mathcal{N}(f_* \mid \mu_*, v_*), \\
+\mu_* &= k_{*X}\big(K_{XX} + \sigma^2 \mathbf{I}_N\big)^{-1} \boldsymbol{y}, \\
+v_* &= k_{**} - k_{*X}\big(K_{XX} + \sigma^2 \mathbf{I}_N\big)^{-1} k_{X*}.
+\end{aligned} \tag{24.3}
+$$
+
+The predictive distribution for a noisy observation $y_*$ has the same mean and variance $v_* + \sigma^2$.
+
+Writing $\boldsymbol{f} = (f(x_1), \ldots, f(x_N))^\top$, the marginal likelihood is
+
+$$
+p(\boldsymbol{y} \mid \theta, \sigma^2, X) = \int p(\boldsymbol{y} \mid \boldsymbol{f}, \sigma^2)\, p(\boldsymbol{f} \mid \theta, X)\, \mathrm{d}\boldsymbol{f}. \tag{24.4}
+$$
+
+For Gaussian-likelihood regression,
+
+$$
+\log p(\boldsymbol{y} \mid \theta, \sigma^2, X) = -\frac{1}{2}\boldsymbol{y}^\top \big(K_\theta + \sigma^2 \mathbf{I}_N\big)^{-1} \boldsymbol{y} - \frac{1}{2}\log\big|K_\theta + \sigma^2 \mathbf{I}_N\big| + \text{const}. \tag{24.5}
+$$
+
+The first term measures data fit, while the log-determinant term acts as a complexity penalty and connects to minimum description length. The marginal likelihood can therefore be used to estimate kernel hyperparameters and the observation-noise variance.
+
+## 2. Deep kernel learning
+
+Let $k_\theta$ be a base kernel with hyperparameters $\theta$, and let $g_w$ be a neural-network feature map with weights $w$. The resulting deep kernel is
+
+$$
+k_\gamma(x, x') := k_\theta\big(g_w(x), g_w(x')\big), \qquad \gamma = (\theta, w). \tag{24.6}
+$$
+
+Composition with a deterministic feature map preserves positive semidefiniteness, so $k_\gamma$ is a valid kernel whenever $k_\theta$ is. Structurally, this places a GP on the features produced by the neural network.
+
+The base kernel supplies a covariance model, while the neural network learns a task-adapted representation in which that covariance model is applied. For Gaussian-likelihood regression and fixed $\gamma$, prediction requires one forward pass through $g_w$ for each test input, followed by GP prediction using cross-covariances with stored training or inducing-point features. When $\gamma$ is learned by marginal-likelihood maximization, the usual DKL construction is empirical Bayes: $w$ and $\theta$ are point-estimated rather than integrated out.
+
+Once constructed, $k_\gamma$ can be used like any other kernel. The principal estimation strategies are discussed in Section 4.
+
+Dense GP regression requires $\mathcal{O}(N^3)$ time and $\mathcal{O}(N^2)$ memory. Structured kernel interpolation (SKI, also known as KISS-GP) introduces a structured inducing grid and sparse local interpolation. In favorable regimes, this yields fast matrix–vector products and iterative inference whose cost can be close to linear in $N$, with additional dependence on the number and structure of the inducing points. SKI is an approximation rather than exact GP inference, and it is most effective in low-dimensional spaces; a neural feature map can supply such a space.
+
+Other scalable GP approaches can also be combined with DKL. GPU-accelerated conjugate-gradient solves and stochastic log-determinant estimates are effective in practice, but finite solve tolerances and stochastic estimators remain numerical approximations, while inducing-point and variational methods introduce further statistical approximations.
+
+A stationary RBF kernel measures similarity through Euclidean distance in its input space. That distance may be appropriate in low dimensions but can be poorly aligned with the prediction task in high-dimensional inputs. For example, two face images can be far apart in pixel space while having similar orientations. A learned feature map can make Euclidean distance more task-relevant, so DKL learns a task-adapted kernel rather than the "right" kernel in any globally optimal sense. Figure 24.1 gives a stylized one-dimensional illustration of both the benefit and the caveat: feature warping changes the fit and the predictive uncertainty, and distance from the training data is measured in the learned feature space rather than the original input space.
+
+The RBF kernel is a common base kernel, but it is not the only option. A spectral-mixture kernel, for example, can encode quasi-periodic structure, leaving the neural feature map to capture complementary patterns.
+
+<Figure caption="Figure 24.1: Illustrative deep-kernel regression for a target with a sharp transition, f(x) = tanh(20(x − 0.5)), observed with independent Gaussian noise. The dashed line is the target, dots are the same 60 training observations in both panels, the solid line is the predictive mean, and the shaded region is the mean plus or minus two predictive standard deviations for a future noisy observation. Left: a GP with a stationary RBF kernel in the original input space. Right: a GP with the same RBF base kernel applied after a small multilayer-perceptron feature map, with all parameters learned by marginal-likelihood maximization. In this illustrative optimization run, the deep kernel produces much narrower intervals, including outside the training range. The figure illustrates representation-dependent predictive behavior, not superior calibration: narrower intervals are not automatically better calibrated and may reflect overconfidence under extrapolation. (Schematic reproduction: the curves are recomputed from 60 simulated observations, and a fixed saturating two-dimensional feature map stands in for the trained multilayer perceptron; the kernel hyperparameters maximize the log marginal likelihood in both panels.)">
+  <Bdl24DeepKernelRegression />
+</Figure>
+
+## 3. Stochastic variational deep kernel learning
+
+So far, the chapter has considered DKL for Gaussian-likelihood regression, where the GP predictive distribution and marginal likelihood are available in closed form for fixed deep-kernel parameters. For classification and other non-Gaussian likelihoods, exact prediction and evaluation of the marginal likelihood are analytically intractable. Multi-class problems also require a construction for correlated outputs.
+
+Wilson et al. address these challenges with *stochastic variational deep kernel learning* (SVDKL), building on sparse variational GP methods. SVDKL optimizes a variational lower bound rather than the exact log marginal likelihood, supports mini-batch stochastic gradients, and accommodates non-Gaussian likelihoods and multiple outputs. For these reasons, it is also used for large-scale regression. Alternative formulations include Bradshaw et al.
+
+### 3.1 Details of SVDKL
+
+This section describes the construction of Wilson et al.; Section 5 discusses implementations that need not follow every detail of this formulation. Let
+
+$$
+\mathcal{D} = \{(\boldsymbol{x}_i, \boldsymbol{y}_i)\}_{i=1}^N, \qquad \boldsymbol{y}_i \in \{0, 1\}^C,
+$$
+
+where $C$ is the number of classes and $\boldsymbol{y}_i$ is a one-hot label. The neural feature extractor produces $\boldsymbol{z}_i = g_w(\boldsymbol{x}_i) \in \mathbb{R}^Q$. For each $j = 1, \ldots, J$, let $\boldsymbol{z}_i^{(j)}$ denote the subset or projection of $\boldsymbol{z}_i$ supplied to latent GP $f_j$, and define
+
+$$
+\boldsymbol{f}_i := \big(f_1(\boldsymbol{z}_i^{(1)}), \ldots, f_J(\boldsymbol{z}_i^{(J)})\big)^\top \in \mathbb{R}^J. \tag{24.7}
+$$
+
+The collection of latent GPs forms an additive GP layer over subsets of the learned features. Their outputs are mixed through $A \in \mathbb{R}^{C \times J}$, so the class logits are $A\boldsymbol{f}_i$. This mixing induces correlations between the outputs even when the latent GPs are independent. For a softmax observation model,
+
+$$
+p(\boldsymbol{y}_i \mid \boldsymbol{f}_i, A) = \prod_{c=1}^{C} \left[\frac{\exp((A\boldsymbol{f}_i)_c)}{\sum_{c'=1}^{C} \exp((A\boldsymbol{f}_i)_{c'})}\right]^{y_{ic}}. \tag{24.8}
+$$
+
+For GP $j$, let $H_j = \{\boldsymbol{z}_i^{(j)}\}_{i=1}^N$ denote its transformed training inputs, let $Z_j$ contain $m$ inducing inputs, let $\boldsymbol{f}_j$ collect its latent values on $H_j$, and let $\boldsymbol{u}_j$ collect its latent values on $Z_j$. The standard sparse-GP conditional is
+
+$$
+\begin{aligned}
+p(\boldsymbol{f}_j \mid \boldsymbol{u}_j) &= \mathcal{N}\Big(\boldsymbol{f}_j \mid K^{(j)}_{H_j Z_j}\big(K^{(j)}_{Z_j Z_j}\big)^{-1} \boldsymbol{u}_j, \widetilde{K}_j\Big), \\
+\widetilde{K}_j &= K^{(j)}_{H_j H_j} - K^{(j)}_{H_j Z_j}\big(K^{(j)}_{Z_j Z_j}\big)^{-1} K^{(j)}_{Z_j H_j}.
+\end{aligned} \tag{24.9}
+$$
+
+Under the local kernel-interpolation approximation of Wilson and Nickisch,
+
+$$
+K^{(j)}_{H_j Z_j} \approx M_j K^{(j)}_{Z_j Z_j}, \qquad K^{(j)}_{H_j H_j} \approx M_j K^{(j)}_{Z_j Z_j} M_j^\top, \tag{24.10}
+$$
+
+where $M_j \in \mathbb{R}^{N \times m}$ is a sparse local-interpolation matrix. Substituting these approximations into Equation (24.9) sets the residual covariance to zero in the interpolated model and gives $\boldsymbol{f}_j \approx M_j \boldsymbol{u}_j$. This deterministic relation is an approximation introduced by interpolation, not an exact consequence of the original GP conditional.
+
+Let $\boldsymbol{u} = (\boldsymbol{u}_1^\top, \ldots, \boldsymbol{u}_J^\top)^\top$ and let $\boldsymbol{f}$ collect all latent GP values. SVDKL uses a factorized Gaussian variational distribution
+
+$$
+q(\boldsymbol{u}) = \prod_{j=1}^{J} \mathcal{N}(\boldsymbol{u}_j \mid \boldsymbol{\mu}_j, \boldsymbol{S}_j). \tag{24.11}
+$$
+
+Writing $\boldsymbol{y} = (\boldsymbol{y}_1^\top, \ldots, \boldsymbol{y}_N^\top)^\top$, Jensen's inequality gives the evidence lower bound
+
+$$
+\mathcal{L}(q; \gamma, A) := \mathbb{E}_{q(\boldsymbol{u})p(\boldsymbol{f} \mid \boldsymbol{u})}\big[\log p(\boldsymbol{y} \mid \boldsymbol{f}, A)\big] - \mathrm{D}_{\mathrm{KL}}\big(q(\boldsymbol{u}) \,\|\, p(\boldsymbol{u})\big) \le \log p(\boldsymbol{y} \mid \gamma, A). \tag{24.12}
+$$
+
+For fixed $(\gamma, A)$, maximizing Equation (24.12) over $q$ within the chosen variational family is equivalent to minimizing the KL divergence from $q(\boldsymbol{u})$ to the exact posterior over the inducing variables. When $(\gamma, A)$ are optimized jointly with the variational parameters, the same bound is used both for posterior approximation and for point estimation of the model parameters.
+
+Because the likelihood factorizes over observations, a uniformly sampled mini-batch $\mathcal{B} \subseteq \{1, \ldots, N\}$ of size $b$ gives the unbiased ELBO estimator
+
+$$
+\widehat{\mathcal{L}}_{\mathcal{B}} = \frac{N}{b} \sum_{i \in \mathcal{B}} \mathbb{E}_{q(\boldsymbol{f}_i)}\big[\log p(\boldsymbol{y}_i \mid \boldsymbol{f}_i, A)\big] - \mathrm{D}_{\mathrm{KL}}\big(q(\boldsymbol{u}) \,\|\, p(\boldsymbol{u})\big). \tag{24.13}
+$$
+
+Here $q(\boldsymbol{f}_i)$ is the marginal induced by $q(\boldsymbol{u})p(\boldsymbol{f} \mid \boldsymbol{u})$. Stochastic gradients of this estimator update the variational parameters $\{(\boldsymbol{\mu}_j, \boldsymbol{S}_j)\}_{j=1}^J$ together with $w$, the base-kernel hyperparameters, and $A$. The expected log-likelihood is generally estimated by Monte Carlo for non-Gaussian observation models. Thus, SVDKL performs variational lower-bound optimization, not exact marginal-likelihood training.
+
+## 4. Kernel estimation
+
+Compared with more deeply nested probabilistic constructions such as deep Gaussian processes, standard DKL usually presents a simpler estimation problem. Nevertheless, practical performance depends strongly on how its many point-estimated parameters are trained.
+
+Three strategies are common:
+
+1. pre-train the neural network to learn $w$, freeze it, and fit only the base-kernel hyperparameters $\theta$;
+2. use pre-training as a warm start and then fine-tune $w$ and $\theta$ jointly;
+3. learn $\gamma = (\theta, w)$ end-to-end from scratch.
+
+The strategies differ in computational cost, susceptibility to overfitting, and reliance on a pre-training pipeline; none is uniformly best. In all three cases, standard DKL point-estimates $w$ and $\theta$, so its tractability should not be confused with a fully Bayesian treatment of uncertainty in the feature extractor.
+
+A second choice is the training objective. For Gaussian-likelihood regression one can optimize the exact GP log marginal likelihood when dense computation is feasible, or an approximation to it when using scalable numerical methods. For non-Gaussian likelihoods and mini-batch training, SVDKL instead optimizes the ELBO in Equation (24.12). The latter enables stochastic optimization but introduces a variational approximation. Lotfi et al. propose the *conditional marginal likelihood*, which forms a posterior using one subset of the data and evaluates the marginal likelihood of the remainder; they report that this can mitigate marginal-likelihood underfitting in model selection.
+
+Overfitting remains a legitimate concern. Ober et al. identify overfitting pathologies in marginal-likelihood-trained DKL and attribute them to excessive flexibility in the learned kernel. Wilson et al. dispute part of the accompanying explanation of the marginal-likelihood complexity term, arguing that it omits an additional data-fit dependence. These positions do not eliminate the practical need to check predictive performance and uncertainty on held-out data. A fully Bayesian treatment of the neural-network parameters can represent additional uncertainty but is substantially more expensive; standard regularization such as weight decay is a more common practical safeguard.
+
+When specialized base kernels such as the spectral-mixture kernel are used, tailored initialization may be important. A sensible workflow is therefore to begin with a pre-trained and frozen feature extractor, fit the base kernel, and adopt joint fine-tuning, conditional marginal likelihood, or end-to-end training only when validation results justify the additional complexity.
+
+## 5. DKL in practice, implementations, and resources
+
+Several mature frameworks support DKL. *GPyTorch* integrates PyTorch neural-network modules with exact and approximate GP inference, GPU-accelerated linear algebra, and scalable variational methods. It is therefore well suited to prototyping DKL architectures and SVDKL variants, but the approximation and numerical assumptions of the selected GP method still apply.
+
+A convenient starting point is the GPyTorch neural-network integration tutorial at [`https://docs.gpytorch.ai/en/stable/examples/06_PyTorch_NN_Integration_DKL/index.html`](https://docs.gpytorch.ai/en/stable/examples/06_PyTorch_NN_Integration_DKL/index.html). Before adding SKI or a variational approximation, it is often useful to test whether the default exact or iterative solvers are adequate for the data set at hand. SVDKL provides a separate route to scale through inducing variables and mini-batch stochastic optimization.
+
+GPJax provides another deep-kernel tutorial at [`https://docs.jaxgaussianprocesses.com/_examples/deep_kernels/`](https://docs.jaxgaussianprocesses.com/_examples/deep_kernels/). For Bayesian optimization, BoTorch integrates with GPyTorch and supports DKL-based optimization pipelines.
