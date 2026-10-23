@@ -515,6 +515,44 @@ from the measurement sense *độ chụm*. In prose, "et al." is written *và c�
 | alternating minimization, (strongly) quasi-convex | cực tiểu hóa luân phiên (alternating minimization), tựa lồi (mạnh) |
 | bagging, out-of-bag samples | bagging, mẫu ngoài túi (out-of-bag) |
 | moment (of a distribution), moment matching | mô-men (not *mômen*), khớp mô-men |
+| prior elicitation, domain knowledge | khơi gợi tiên nghiệm (prior elicitation; not *thu thập*), tri thức về lĩnh vực |
+| informative / uninformative / weakly informative prior | tiên nghiệm có thông tin (informative prior; not *giàu thông tin*) / không thông tin (not *không mang thông tin*) / ít thông tin |
+| objective / subjective prior, reference prior, Jeffreys prior | tiên nghiệm khách quan / chủ quan, tiên nghiệm tham chiếu (reference prior), tiên nghiệm Jeffreys |
+| conjugate prior, base prior | tiên nghiệm liên hợp (conjugate prior), tiên nghiệm cơ sở (base prior) |
+| improper / proper (prior, posterior) | không chính thường (improper) / chính thường |
+| prior predictive check, prior misspecification | phép kiểm tra dự đoán tiên nghiệm (prior predictive check), đặc tả sai tiên nghiệm |
+| regularization prior, convenience prior | tiên nghiệm chính quy hóa, tiên nghiệm tiện lợi (convenience prior) |
+| sparsity-inducing prior, soft / hard sparsity, (continuous) shrinkage prior | tiên nghiệm tạo tính thưa (not *thúc đẩy tính thưa*), tính thưa mềm / cứng, tiên nghiệm co (liên tục) |
+| spike-and-slab prior, horseshoe prior, half-Cauchy | tiên nghiệm spike-and-slab, tiên nghiệm horseshoe (names kept in English, not italicized), nửa Cauchy (half-Cauchy) |
+| scale mixture (of Gaussians), scale parameter | hỗn hợp co giãn (của phân phối Gauss) (scale mixture), tham số co giãn (scale parameter); not *thang đo*, which stays for a measurement scale |
+| heavy-tailed / light-tailed, tail parameter / index | đuôi nặng (heavy tail; not *đuôi dày*) / đuôi nhẹ, tham số đuôi / chỉ số đuôi |
+| inclusion probability, variable selection, median probability model | xác suất đưa vào (inclusion probability), chọn biến (variable selection), mô hình xác suất trung vị |
+| point mass, Dirac delta | khối lượng điểm (point mass), delta Dirac |
+| induce, induced (prior, distribution) | cảm sinh (not *tạo ra* in this sense), tiên nghiệm / phân phối được cảm sinh |
+| over-parameterized, over-parameterization | quá tham số hóa |
+| kernel density estimate (plot) | (đồ thị) ước lượng mật độ hàm nhân (kernel density estimate) |
+| pre-activation, post-activation | tiền kích hoạt (pre-activation), hậu kích hoạt (post-activation; not *sau kích hoạt*) |
+| sub-Gaussian, sub-exponential, sub-Weibull, Weibull tail | dưới Gauss, dưới mũ, dưới Weibull (as for sub-Gamma), đuôi Weibull |
+| Meijer G-function | hàm G Meijer (Meijer G-function) |
+| infinite-width / infinite-depth limit, finite-width regime | giới hạn độ rộng vô hạn / độ sâu vô hạn, chế độ độ rộng hữu hạn |
+| α-stable prior, stable process, spectral measure | tiên nghiệm α-ổn định, quá trình ổn định, độ đo phổ (spectral measure) |
+| trace-class prior, extended envelope property | tiên nghiệm lớp vết, tính chất bao mở rộng (extended envelope property) |
+| Student-t process, Gaussian-Inverse-Gamma prior | quá trình Student-t, tiên nghiệm Gauss–Gamma nghịch đảo |
+| Bayesian asymptotics, posterior consistency, (statistical) adaptation | tiệm cận Bayes, tính vững của hậu nghiệm (posterior consistency), sự thích nghi (thống kê) |
+| posterior contraction rate, near-minimax rate | tốc độ co của hậu nghiệm (contraction rate), tốc độ gần minimax |
+| Bernstein–von Mises (BvM) theorem | định lý Bernstein–von Mises (BvM) |
+| kurtosis, excess kurtosis | độ nhọn (kurtosis), độ nhọn dư |
+| function-space prior, weight-space / parameter-space prior | tiên nghiệm trong không gian hàm (function-space prior), tiên nghiệm trong không gian trọng số / tham số |
+| neural process, finite-dimensional marginals, Kolmogorov extension theorem | quá trình nơ-ron (neural process), các phân phối biên hữu hạn chiều, định lý mở rộng Kolmogorov |
+| exchangeable / exchangeability, consistency (of a process) | khả hoán / tính khả hoán (exchangeability), tính nhất quán (consistency; an estimator's *consistent* stays *vững*) |
+| change of variables | phép đổi biến (change of variables) |
+| integral probability metric, Wasserstein distance, Earth-Mover distance | metric xác suất tích phân (integral probability metric), khoảng cách Wasserstein, khoảng cách Earth-Mover |
+| Lipschitz function, gradient penalty, measurement points | hàm 1-Lipschitz, số hạng phạt gradient (gradient penalty), điểm đo (measurement points) |
+| fan-in scaling | co giãn theo số đầu vào (fan-in); not *chia tỉ lệ* |
+| context data / inputs, context inference problem, context observation model | dữ liệu / đầu vào ngữ cảnh, bài toán suy luận ngữ cảnh, mô hình quan sát ngữ cảnh |
+| cost function, uncertainty-aware / group-aware prior, group robustness | hàm chi phí (cost function), tiên nghiệm nhận biết độ bất định / nhận biết nhóm, tính vững theo nhóm (group robustness) |
+| sharpness-aware minimization (SAM), stop-gradient, surrogate gradient | cực tiểu hóa nhận biết độ nhọn (SAM), toán tử dừng gradient (stop-gradient), gradient thay thế |
+| residual connection, receptive field, neural ODE | kết nối phần dư (residual connection), trường tiếp nhận (receptive field), ODE nơ-ron (neural ODE) |
 | Lemma | Bổ đề |
 | Takeaways (box label) | Điểm cần ghi nhớ |
 | Equation N, Proposition, Definition, Theorem, Proof, Figure, Table, Algorithm | Phương trình N, Mệnh đề, Định nghĩa, Định lý, Chứng minh, Hình, Bảng, Thuật toán |

@@ -5457,3 +5457,832 @@ def bdl27_bo():
 bdl27_training_diagram()
 bdl27_fsmol()
 bdl27_bo()
+
+
+# ---------- Chapter 28: Introduction to priors ----------
+import numpy as _bdl28_np
+
+bdl28_styles = [('acc', ''), ('ln', ' stroke-dasharray="7 4"'), ('mut', ' stroke-dasharray="2 3"')]
+
+def bdl28_npdf(x, m, v):
+    return math.exp(-(x - m) ** 2 / (2 * v)) / math.sqrt(2 * math.pi * v)
+
+def bdl28_legend(x, y, labels, title=None):
+    o = ''
+    if title:
+        o += text(x, y, title, 'start', 'small')
+        y += 17
+    for k, lab in enumerate(labels):
+        cls, dash = bdl28_styles[k]
+        o += line([(x, y + k * 17 - 4), (x + 24, y + k * 17 - 4)], cls, dash)
+        o += text(x + 30, y + k * 17, lab, 'start', 'small')
+    return o
+
+def bdl28_curve_clipped(P, f, cls, dash, n=240):
+    # evaluate on the grid and clamp to the top of the plot (densities that exceed the range)
+    pts = []
+    for i in range(n + 1):
+        xv = P.xr[0] + i * (P.xr[1] - P.xr[0]) / n
+        yv = min(max(f(xv), P.yr[0]), P.yr[1])
+        pts.append((P.X(xv), P.Y(yv)))
+    return line(pts, cls, dash)
+
+def bdl28_density_panel(x0, y0, w, h, xr, yr, xticks, yticks, title, xlabel, curves, labels, legend_at, legend_title=None):
+    P = Plot(x0, y0, w, h, xr, yr)
+    o = text(x0 + w / 2, y0 - 26, title, 'middle')
+    o += P.axes(xticks, yticks, xlabel, 'Density')
+    for k, f in enumerate(curves):
+        cls, dash = bdl28_styles[k]
+        o += bdl28_curve_clipped(P, f, cls, dash)
+    o += bdl28_legend(legend_at[0], legend_at[1], labels, legend_title)
+    return o
+
+# ----- tiny network: 1 input, two hidden layers of 2 units, linear output -----
+def bdl28_act(name, z):
+    if name == 'logistic':
+        return 1.0 / (1.0 + _bdl28_np.exp(-_bdl28_np.clip(z, -60, 60)))
+    if name == 'tanh':
+        return _bdl28_np.tanh(z)
+    return _bdl28_np.maximum(z, 0.0)
+
+def bdl28_prior_functions(sampler, act, xs, n_draws, rng):
+    out = []
+    for _ in range(n_draws):
+        th = sampler(rng, 15)  # 2+2 (layer 1) + 4+2 (layer 2) + 2+1 (output) = 13, two spare
+        W1, b1 = th[0:2], th[2:4]
+        W2, b2 = th[4:8].reshape(2, 2), th[8:10]
+        w3, b3 = th[10:12], th[12]
+        h1 = bdl28_act(act, _bdl28_np.outer(xs, W1) + b1)
+        h2 = bdl28_act(act, h1 @ W2.T + b2)
+        out.append(h2 @ w3 + b3)
+    return out
+
+bdl28_clip_count = [0]
+def bdl28_pp_panels(x0, y0, title, labels, samplers, act, rng, n_draws=30, pw=98, ph=118, gap=18):
+    xs = _bdl28_np.linspace(-5, 5, 26)
+    o = text(x0 + (3 * pw + 2 * gap) / 2, y0 - 26, title, 'middle')
+    o += text(x0 - 40, y0 + ph / 2 + 4, var('μ') + '(' + var('x') + ')', 'middle', 'small')
+    for j in range(3):
+        px = x0 + j * (pw + gap)
+        P = Plot(px, y0, pw, ph, (-5, 5), (-50, 50))
+        for v in (-50, -25, 0, 25, 50):
+            o += line([(px, P.Y(v)), (px + pw, P.Y(v))], 'grid')
+            if j == 0:
+                o += text(px - 5, P.Y(v) + 4, f'{v:g}', 'end', 'small')
+        for v in (-5, 0, 5):
+            o += line([(P.X(v), y0), (P.X(v), y0 + ph)], 'grid')
+            o += text(P.X(v), y0 + ph + 15, f'{v:g}', 'middle', 'small')
+        o += text(px + pw / 2, y0 - 7, labels[j], 'middle', 'small')
+        bdl28_clip_count[0] += 1
+        cid = f'bdl28clip{bdl28_clip_count[0]}'
+        o += f'  <clipPath id="{cid}"><rect x="{px}" y="{y0}" width="{pw}" height="{ph}" /></clipPath>\n'
+        o += f'  <g clip-path="url(#{cid})">\n'
+        for mu in bdl28_prior_functions(samplers[j], act, xs, n_draws, rng):
+            pts = [(P.X(xv), P.Y(max(min(yv, 400.0), -400.0))) for xv, yv in zip(xs, mu)]
+            d = ' '.join(('M' if i == 0 else 'L') + f'{a:.1f},{b:.1f}' for i, (a, b) in enumerate(pts))
+            o += f'  <path class="ln" style="stroke-width:0.7;stroke-opacity:0.4" d="{d}" />\n'
+        o += '  </g>\n'
+        o += line([(px, y0), (px, y0 + ph), (px + pw, y0 + ph)])
+    o += text(x0 + (3 * pw + 2 * gap) / 2, y0 + ph + 33, var('x'), 'middle', 'small')
+    return o
+
+def bdl28_uniform(a):
+    return lambda rng, n: rng.uniform(-a, a, n)
+def bdl28_gauss(v):
+    return lambda rng, n: rng.normal(0.0, math.sqrt(v), n)
+def bdl28_laplace(b):
+    return lambda rng, n: rng.laplace(0.0, b, n)
+bdl28_s1, bdl28_s2 = 10.0, 0.02   # assumed mixture variances (not stated in the book)
+def bdl28_mixture(p):
+    return lambda rng, n: _bdl28_np.where(rng.uniform(size=n) < p, rng.normal(0, math.sqrt(bdl28_s1), n), rng.normal(0, math.sqrt(bdl28_s2), n))
+def bdl28_horseshoe(v):
+    return lambda rng, n: rng.normal(0.0, 1.0, n) * math.sqrt(v) * _bdl28_np.abs(rng.standard_cauchy(n))
+
+def bdl28_horseshoe_pdf(v):
+    t = _bdl28_np.exp(_bdl28_np.linspace(-9, 9, 4000))
+    w = 2 / (math.pi * (1 + t ** 2)) * t   # density of tau times dtau/dlog(tau)
+    dl = 18 / 3999
+    def f(x):
+        s2 = v * t ** 2
+        return float(_bdl28_np.sum(_bdl28_np.exp(-x * x / (2 * s2)) / _bdl28_np.sqrt(2 * math.pi * s2) * w) * dl)
+    return f
+
+# ----- Figure 28.1: student heights -----
+def bdl28_heights():
+    o = ''
+    pri = [(1.2, 0.003), (1.4, 0.002)]
+    post = [(1.212581, 0.00009677), (1.389091, 0.0001818)]
+    o += bdl28_density_panel(56, 50, 240, 150, (0.5, 2.0), (0, 9), [0.5, 1.0, 1.5, 2.0], [0, 2.5, 5, 7.5],
+                             'Prior distributions', 'Height (m)',
+                             [lambda x: bdl28_npdf(x, *pri[0]), lambda x: bdl28_npdf(x, *pri[1])],
+                             ['First grade', 'Third grade'], (66, 60))
+    o += bdl28_density_panel(380, 50, 240, 150, (0.5, 2.0), (0, 42), [0.5, 1.0, 1.5, 2.0], [0, 10, 20, 30, 40],
+                             'Posterior distributions', 'Mean height (' + var('μ') + ')',
+                             [lambda x: bdl28_npdf(x, *post[0]), lambda x: bdl28_npdf(x, *post[1])],
+                             ['First grade', 'Third grade'], (520, 60))
+    svg('Bdl28StudentHeights', 640, 250, 'Prior and posterior densities for the mean height of first- and third-grade students',
+        'Left panel, prior distributions: a solid normal curve centered at 1.2 metres with variance 0.003 (first grade) and a dashed one centered at 1.4 metres with variance 0.002 (third grade), both with peaks between 7 and 9. Right panel, posterior distributions: much narrower curves at about 1.213 (peak near 40) and 1.389 (peak near 30), showing the reduced uncertainty after observing the data.',
+        o)
+
+# ----- Figure 28.2: spike-and-slab prior -----
+def bdl28_spike_slab():
+    P = Plot(70, 40, 470, 170, (-0.4, 3.0), (0, 1.5))
+    o = text(70 + 235, 22, 'Priors for heart disease risk', 'middle')
+    o += P.axes([0, 1, 2, 3], [0, 0.5, 1.0, 1.5], 'Weight value (' + var('θ') + ')', 'Density')
+    # cholesterol: rho = 0.9 slab N(0.5, 0.25^2), spike of mass 0.1 at 0 (drawn as a bar of height equal to its mass)
+    o += P.curve(lambda x: 0.9 * bdl28_npdf(x, 0.5, 0.0625), n=300, cls='ln', extra=' stroke-dasharray="7 4"')
+    o += line([(P.X(0), P.Y(0)), (P.X(0), P.Y(0.1))], 'ln', ' stroke-dasharray="7 4"')
+    # eye colour: rho = 0.1 slab N(0, 0.1^2), spike of mass 0.9 at 0
+    o += P.curve(lambda x: 0.1 * bdl28_npdf(x, 0.0, 0.01), n=600, cls='acc')
+    o += line([(P.X(0), P.Y(0)), (P.X(0), P.Y(0.9))], 'acc')
+    o += text(P.X(1.15), P.Y(1.3), 'Covariate', 'start', 'small')
+    o += line([(P.X(1.15), P.Y(1.12)), (P.X(1.15) + 24, P.Y(1.12))], 'ln', ' stroke-dasharray="7 4"')
+    o += text(P.X(1.15) + 30, P.Y(1.12) + 4, 'Cholesterol (' + var('ρ') + ' = 0.9)', 'start', 'small')
+    o += line([(P.X(1.15), P.Y(0.96)), (P.X(1.15) + 24, P.Y(0.96))], 'acc')
+    o += text(P.X(1.15) + 30, P.Y(0.96) + 4, 'Eye color (' + var('ρ') + ' = 0.1)', 'start', 'small')
+    svg('Bdl28SpikeSlab', 600, 260, 'Spike-and-slab priors for two covariates of a heart disease model',
+        'Density of a first-layer weight. Cholesterol, inclusion probability 0.9, dashed: a broad slab peaking at about 1.45 near a weight value of 0.5, with a small spike of mass 0.1 at zero. Eye color, inclusion probability 0.1, solid: a tall spike of mass 0.9 at zero and a small narrow slab around zero.',
+        o)
+
+# ----- Figure 28.3: uniform priors -----
+def bdl28_uniform_fig():
+    rng = _bdl28_np.random.default_rng(283)
+    ab = [1, 10, 50]
+    o = bdl28_density_panel(56, 50, 250, 160, (-5, 5), (0, 0.55), [-5, -2.5, 0, 2.5, 5], [0, 0.1, 0.2, 0.3, 0.4, 0.5],
+                            'Uniform priors', 'Parameter (' + var('θ') + ')',
+                            [lambda x, a=a: (1 / (2 * a) if -a <= x <= a else 0.0) for a in ab],
+                            ['[−1, 1]', '[−10, 10]', '[−50, 50]'], (226, 60))
+    o += bdl28_pp_panels(370, 50, 'Prior predictive', ['[a, b] = [−1, 1]', '[a, b] = [−10, 10]', '[a, b] = [−50, 50]'],
+                         [bdl28_uniform(a) for a in ab], 'logistic', rng)
+    svg('Bdl28UniformPriors', 720, 260, 'Uniform priors and the prior predictive functions they induce',
+        'Left: uniform densities on [−1, 1] (height 0.5), [−10, 10] (height 0.05) and [−50, 50] (height 0.01). Right: three panels of 30 sampled functions mu of x for x from −5 to 5 from a network with two hidden layers of two logistic units. With [−1, 1] all functions are nearly flat at zero; with [−10, 10] they spread over roughly ±15; with [−50, 50] they spread over the whole range ±50 and show sharp steps.',
+        o)
+
+# ----- Figure 28.4: Gaussian priors -----
+bdl28_vars = [0.02, 1, 50]
+bdl28_vlabels = ['σ² = 0.02', 'σ² = 1', 'σ² = 50']
+def bdl28_gauss_fig():
+    rng = _bdl28_np.random.default_rng(284)
+    o = bdl28_density_panel(56, 50, 250, 160, (-5, 5), (0, 3), [-5, -2.5, 0, 2.5, 5], [0, 1, 2, 3],
+                            'Gaussian priors', 'Parameter (' + var('θ') + ')',
+                            [lambda x, v=v: bdl28_npdf(x, 0, v) for v in bdl28_vars],
+                            bdl28_vlabels, (226, 60))
+    o += bdl28_pp_panels(370, 50, 'Prior predictive', bdl28_vlabels, [bdl28_gauss(v) for v in bdl28_vars], 'logistic', rng)
+    svg('Bdl28GaussianPriors', 720, 260, 'Gaussian priors with three variances and their prior predictive functions',
+        'Left: zero-mean normal densities with variance 0.02 (tall, narrow peak near 2.8), 1 (peak near 0.4) and 50 (almost flat). Right: 30 sampled functions per panel from the two-hidden-layer logistic network: constant near zero for variance 0.02, a narrow band of near-linear functions for variance 1, and a wide spread of nonlinear functions for variance 50.',
+        o)
+
+# ----- Figure 28.5: tanh and ReLU -----
+def bdl28_act_fig():
+    rng = _bdl28_np.random.default_rng(285)
+    o = bdl28_pp_panels(60, 50, 'Prior predictive (tanh)', bdl28_vlabels, [bdl28_gauss(v) for v in bdl28_vars], 'tanh', rng, pw=84)
+    o += bdl28_pp_panels(420, 50, 'Prior predictive (ReLU)', bdl28_vlabels, [bdl28_gauss(v) for v in bdl28_vars], 'relu', rng, pw=84)
+    svg('Bdl28ActivationPriorPredictive', 740, 220, 'Prior predictive functions for tanh and ReLU activations',
+        'Two groups of three panels with Gaussian priors of variance 0.02, 1 and 50. Left, tanh activations: flat functions at zero for 0.02, a narrow band for 1, and bounded but widely spread functions for 50. Right, ReLU activations: flat for 0.02, a narrow band for 1, and for 50 piecewise-linear functions that fan out steeply and leave the plotted range of ±50.',
+        o)
+
+# ----- Figure 28.6: decision boundaries -----
+def bdl28_boundary_fig():
+    rng = _bdl28_np.random.default_rng(286)
+    n1, n0 = 110, 70
+    c1 = rng.multivariate_normal([1.5, 0.5], [[3.0, 1.2], [1.2, 1.2]], n1)
+    c0 = rng.multivariate_normal([4.5, -3.0], [[2.0, -1.0], [-1.0, 2.5]], n0)
+    bounds = [None, lambda x: 0.25 * x + 0.5, lambda x: 0.012 * (x + 10) ** 2 + 0.05 * x - 1.6]
+    titles = ['σ²: 0.02', 'σ²: 1', 'σ²: 50']
+    o = ''
+    for k in range(3):
+        x0 = 62 + k * 205
+        P = Plot(x0, 40, 170, 170, (-10, 10), (-10, 10))
+        o += text(x0 + 85, 28, titles[k], 'middle', 'small')
+        if bounds[k] is None:
+            o += f'  <rect class="band" x="{x0}" y="40" width="170" height="170" />\n'
+        else:
+            f = bounds[k]
+            xs = [-10 + i * 0.5 for i in range(41)]
+            top = [(P.X(-10), P.Y(10))] + [(P.X(x), P.Y(min(f(x), 10))) for x in xs] + [(P.X(10), P.Y(10))]
+            o += '  <path class="band" d="' + ' '.join(('M' if i == 0 else 'L') + f'{a:.1f},{b:.1f}' for i, (a, b) in enumerate(top)) + ' Z" />\n'
+            # the lower class region is left unshaded so the two predicted classes contrast in both themes
+            o += line([(P.X(x), P.Y(min(f(x), 10))) for x in xs], 'mut')
+        for (a, b) in c0:
+            o += f'  <circle class="ln" style="stroke-width:0.8" cx="{P.X(a):.1f}" cy="{P.Y(b):.1f}" r="2.2" />\n'
+        for (a, b) in c1:
+            o += f'  <circle class="dot" cx="{P.X(a):.1f}" cy="{P.Y(b):.1f}" r="2.2" />\n'
+        o += f'  <rect class="ln" x="{x0}" y="40" width="170" height="170" />\n'
+        for v in (-10, -5, 0, 5, 10):
+            o += text(P.X(v), 226, f'{v:g}', 'middle', 'small')
+            if k == 0:
+                o += text(x0 - 5, P.Y(v) + 4, f'{v:g}', 'end', 'small')
+        o += text(x0 + 85, 244, 'PC1', 'middle', 'small')
+    o += text(4, 129, 'PC2', 'start', 'small')
+    svg('Bdl28DecisionBoundaries', 680, 256, 'Posterior predictive decision boundaries for three prior variances',
+        'Three square panels with axes PC1 and PC2 from −10 to 10 showing the same two classes of points: filled points in an elongated cloud around the origin and open points to the lower right. The region assigned to the class of the filled points is shaded. For variance 0.02 the whole plane is shaded, so every point is assigned to that one class. For variance 1 a nearly straight boundary rises gently from left to right between the two clouds. For variance 50 the boundary curves upward, giving a nonlinear separation.',
+        o)
+
+# ----- Figure 28.7: continuous sparsity-inducing priors -----
+def bdl28_sparsity_fig():
+    rng = _bdl28_np.random.default_rng(287)
+    o = ''
+    rows = [
+        ('Laplace priors', (0, 5.2), [0, 1, 2, 3, 4, 5], [lambda x, b=b: math.exp(-abs(x) / b) / (2 * b) for b in (0.1, 1, 10)],
+         ['b = 0.1', 'b = 1', 'b = 10'], [bdl28_laplace(b) for b in (0.1, 1, 10)]),
+        ('Scale mixture priors', (0, 2.8), [0, 0.5, 1.0, 1.5, 2.0, 2.5],
+         [lambda x, p=p: p * bdl28_npdf(x, 0, bdl28_s1) + (1 - p) * bdl28_npdf(x, 0, bdl28_s2) for p in (0.1, 0.5, 0.9)],
+         ['π = 0.1', 'π = 0.5', 'π = 0.9'], [bdl28_mixture(p) for p in (0.1, 0.5, 0.9)]),
+        ('Horseshoe priors', (0, 2.5), [0, 0.5, 1.0, 1.5, 2.0, 2.5], [bdl28_horseshoe_pdf(v) for v in bdl28_vars],
+         bdl28_vlabels, [bdl28_horseshoe(v) for v in bdl28_vars]),
+    ]
+    for r, (title, yr, yt, dens, labs, samp) in enumerate(rows):
+        y0 = 50 + r * 235
+        o += bdl28_density_panel(56, y0, 250, 150, (-5, 5), yr, [-5, -2.5, 0, 2.5, 5], yt,
+                                 title, 'Parameter (' + var('θ') + ')', dens, labs, (226, y0 + 10))
+        o += bdl28_pp_panels(370, y0, 'Prior predictive', labs, samp, 'logistic', rng, n_draws=25, ph=110)
+    svg('Bdl28SparsityPriors', 720, 740, 'Laplace, scale mixture and horseshoe priors and their prior predictive functions',
+        'Three rows. Top: Laplace densities with scale 0.1 (peak 5), 1 and 10, and prior predictive functions that are flat at zero for 0.1, a narrow band for 1 and a wide spread for 10. Middle: scale mixtures of a wide and a narrow zero-mean Gaussian with weight pi on the wide one equal to 0.1, 0.5 and 0.9; the peak at zero drops as pi grows, and the prior predictive functions spread more for larger pi. Bottom: horseshoe densities with sigma squared 0.02, 1 and 50, all with a pole at zero and heavy tails; the prior predictive functions are flat for 0.02 and 1 and form a band around zero for 50, with occasional large excursions.',
+        o)
+
+bdl28_heights()
+bdl28_spike_slab()
+bdl28_uniform_fig()
+bdl28_gauss_fig()
+bdl28_act_fig()
+bdl28_boundary_fig()
+bdl28_sparsity_fig()
+
+
+# ---------- Chapter 29: Statistical properties of priors ----------
+# Figure 29.1 is a schematic drawing. Figures 29.2 and 29.3 are schematic reproductions computed here
+# (pure Python, fixed seeds) from ReLU networks with Gaussian weight priors, as described in the captions.
+import random as bdl29_random
+
+def bdl29_gi(base, l):
+    # g_i^(l) style label: italic base, subscript i, superscript (l)
+    return (f'<tspan class="var">{base}</tspan><tspan class="sub var" dy="4">i</tspan>'
+            f'<tspan class="sub" dx="-3" dy="-11">({l})</tspan><tspan dy="7"> </tspan>')
+def bdl29_brace(x0, x1, y, up=True, h=8):
+    # curly brace from x0 to x1; tip points up (toward the label above) when up is True
+    s = -1 if up else 1
+    xm = (x0 + x1) / 2
+    d = (f'M{x0:.1f},{y:.1f} Q{x0:.1f},{y+s*h/2:.1f} {x0+6:.1f},{y+s*h/2:.1f} L{xm-6:.1f},{y+s*h/2:.1f} '
+         f'Q{xm:.1f},{y+s*h/2:.1f} {xm:.1f},{y+s*h:.1f} Q{xm:.1f},{y+s*h/2:.1f} {xm+6:.1f},{y+s*h/2:.1f} '
+         f'L{x1-6:.1f},{y+s*h/2:.1f} Q{x1:.1f},{y+s*h/2:.1f} {x1:.1f},{y:.1f}')
+    return f'  <path class="ln" d="{d}" stroke-width="1" />\n'
+def bdl29_node(cx, cy, hidden, r=8):
+    o = f'  <circle class="box" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" />\n'
+    if hidden:
+        o += f'  <circle class="band" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" />\n'
+    return o
+def bdl29_edge(p, q, r=8):
+    dx, dy = q[0]-p[0], q[1]-p[1]; d = math.hypot(dx, dy)
+    return arrow([(p[0]+dx/d*r, p[1]+dy/d*r), (q[0]-dx/d*(r+1), q[1]-dy/d*(r+1))], 'mut')
+def bdl29_vdots(x, y):
+    return ''.join(f'  <circle cx="{x:.1f}" cy="{y+k:.1f}" r="1.3" fill="currentColor" />\n' for k in (-6, 0, 6))
+def bdl29_hdots(x, y):
+    return text(x, y+4, '···', 'middle', 'small')
+
+b = ''
+rows = [70, 100, 130, 190]       # node rows; vertical dots at 160
+hrows = [70, 100, 190]           # hidden columns: two nodes, dots, one node
+# --- left: single-hidden-layer network ---
+xin, xh, xo = 40, 125, 205
+b += text(xin, 52, '<tspan class="var" font-weight="bold">x</tspan>', 'middle')
+for yi in rows:
+    for yh in hrows:
+        b += bdl29_edge((xin, yi), (xh, yh))
+for yh in hrows:
+    for yo in hrows:
+        b += bdl29_edge((xh, yh), (xo, yo))
+for yo in hrows:
+    b += arrow([(xo+9, yo), (xo+36, yo)])
+for yi in rows:
+    b += bdl29_node(xin, yi, False)
+for yh in hrows:
+    b += bdl29_node(xh, yh, True)
+    b += bdl29_node(xo, yh, True)
+b += bdl29_vdots(xin, 160) + bdl29_vdots(xh, 145) + bdl29_vdots(xo, 145)
+b += text(xh, 18, 'Sec. 29.2.1', 'middle', 'small')
+b += bdl29_brace(xh-26, xh+26, 34, up=True)
+b += text(xh, 52, bdl29_gi('g', 1) + ', ' + bdl29_gi('h', 1), 'middle')
+b += text(xo+4, 18, 'Sec. 29.2.2', 'middle', 'small')
+b += bdl29_brace(xo-20, xo+28, 34, up=True)
+b += text(xo+2, 52, bdl29_gi('g', 2), 'middle')
+b += text(xh, 222, '<tspan class="var">H</tspan><tspan class="sub" dy="4">1</tspan><tspan dy="-4"> → ∞</tspan>', 'middle')
+b += bdl29_brace(xh-30, xh+30, 230, up=False)
+b += text(xh, 256, 'Sec. 29.2.3', 'middle', 'small')
+# --- right: deep network ---
+xin2, xd1, xl, xd2, xL = 300, 360, 430, 505, 585
+b += text(xin2, 52, '<tspan class="var" font-weight="bold">x</tspan>', 'middle')
+for yi in rows:
+    for yd in rows:
+        b += line([(xin2+8, yi), (xd1-14, yd)], 'mut')
+for yd in rows:
+    for yh in hrows:
+        b += arrow([(xd1+14, yd), (xl-9, yh)], 'mut')
+for yh in hrows:
+    for yd in rows:
+        b += line([(xl+8, yh), (xd2-14, yd)], 'mut')
+for yd in rows:
+    for yo in hrows:
+        b += arrow([(xd2+14, yd), (xL-9, yo)], 'mut')
+for yo in hrows:
+    b += arrow([(xL+9, yo), (xL+36, yo)])
+for yi in rows:
+    b += bdl29_node(xin2, yi, False)
+    b += bdl29_hdots(xd1, yi) + bdl29_hdots(xd2, yi)
+for yh in hrows:
+    b += bdl29_node(xl, yh, True)
+    b += bdl29_node(xL, yh, True)
+b += bdl29_vdots(xin2, 160) + bdl29_vdots(xl, 145) + bdl29_vdots(xL, 145)
+b += text(xl, 18, 'Sec. 29.3.1, 29.3.2', 'middle', 'small')
+b += bdl29_brace(xl-26, xl+26, 34, up=True)
+b += text(xl, 52, bdl29_gi('g', 'l') + ', ' + bdl29_gi('h', 'l'), 'middle')
+b += text(xL, 52, bdl29_gi('g', 'L'), 'middle')
+b += text(xl, 222, '<tspan class="var">H</tspan><tspan class="sub var" dy="4">l</tspan><tspan dy="-4"> → ∞</tspan>', 'middle')
+b += bdl29_brace(xl-30, xl+30, 230, up=False)
+b += text(xl, 256, 'Sec. 29.3.3', 'middle', 'small')
+svg('Bdl29MaterialMap', 640, 266, 'Schematic map of Sections 29.2 and 29.3 on two networks',
+    'Left: a network with input x, one hidden layer and an output layer, all fully connected. Braces mark the first-layer units g and h (Section 29.2.1), the second-layer pre-activations g of layer 2 (Section 29.2.2), and the width limit H1 to infinity of the hidden layer (Section 29.2.3). Right: a deep network with input x, several hidden layers drawn as dots, a highlighted hidden layer l and the output g of layer L. Braces mark the units g and h of layer l (Sections 29.3.1 and 29.3.2) and the width limit Hl to infinity (Section 29.3.3).',
+    b)
+
+# ---------- Figure 29.2: Gaussian process limit, joint prior at two inputs ----------
+BDL29_SW, BDL29_SB = 1.4, 1.0          # weight and bias variance (weights of a layer of width H: SW/H)
+BDL29_X = [(1.0, 0.0), (0.3, math.sqrt(1 - 0.09))]   # two unit-norm inputs, cosine 0.3
+def bdl29_relu(v): return v if v > 0 else 0.0
+def bdl29_net_draw(rng, depth, H):
+    # one prior draw of a ReLU network evaluated at both inputs; returns (Y1, Y2)
+    sw, sb = BDL29_SW, BDL29_SB
+    W = [[rng.gauss(0, math.sqrt(sw)) for _ in range(2)] for _ in range(H)]
+    B = [rng.gauss(0, math.sqrt(sb)) for _ in range(H)]
+    hs = [[bdl29_relu(sum(W[i][d]*x[d] for d in range(2)) + B[i]) for i in range(H)] for x in BDL29_X]
+    for _ in range(depth - 1):
+        W = [[rng.gauss(0, math.sqrt(sw/H)) for _ in range(H)] for _ in range(H)]
+        B = [rng.gauss(0, math.sqrt(sb)) for _ in range(H)]
+        hs = [[bdl29_relu(sum(W[i][j]*h[j] for j in range(H)) + B[i]) for i in range(H)] for h in hs]
+    w = [rng.gauss(0, math.sqrt(sw/H)) for _ in range(H)]; b0 = rng.gauss(0, math.sqrt(sb))
+    return tuple(sum(w[j]*h[j] for j in range(H)) + b0 for h in hs)
+def bdl29_relu_E(k11, k22, k12):
+    c = max(-1.0, min(1.0, k12/math.sqrt(k11*k22))); th = math.acos(c)
+    return math.sqrt(k11*k22)/(2*math.pi)*(math.sin(th) + (math.pi - th)*c)
+def bdl29_nngp(depth):
+    # covariance of (Y1, Y2) in the infinite-width limit (arc-cosine recursion for ReLU)
+    sw, sb = BDL29_SW, BDL29_SB
+    x1, x2 = BDL29_X
+    k11 = sb + sw*sum(a*a for a in x1); k22 = sb + sw*sum(a*a for a in x2); k12 = sb + sw*sum(a*c for a, c in zip(x1, x2))
+    for _ in range(depth):
+        k12 = sb + sw*bdl29_relu_E(k11, k22, k12); k11 = sb + sw*k11/2; k22 = sb + sw*k22/2
+    return k11, k22, k12
+def bdl29_gp_draw(rng, cov):
+    k11, k22, k12 = cov
+    a = math.sqrt(k11); c = k12/a; d = math.sqrt(max(k22 - c*c, 1e-12))
+    z1, z2 = rng.gauss(0, 1), rng.gauss(0, 1)
+    return (a*z1, c*z1 + d*z2)
+def bdl29_minus(v):
+    return f'{v:g}'.replace('-', '−')
+def bdl29_frame(P, xticks, yticks, fmt=bdl29_minus):
+    o = f'  <rect class="ln" x="{P.x0:.1f}" y="{P.y0:.1f}" width="{P.w:.1f}" height="{P.h:.1f}" fill="none" stroke-width="1" />\n'
+    for v in yticks:
+        o += line([(P.x0-4, P.Y(v)), (P.x0, P.Y(v))], 'ln', ' stroke-width="1"')
+        o += text(P.x0-6, P.Y(v)+4, fmt(v), 'end', 'small')
+    for v in xticks:
+        o += line([(P.X(v), P.y0+P.h), (P.X(v), P.y0+P.h+4)], 'ln', ' stroke-width="1"')
+        o += text(P.X(v), P.y0+P.h+16, fmt(v), 'middle', 'small')
+    return o
+b = ''
+NS = 600
+widths = [2, 5, 1000]
+for row, depth in enumerate((1, 3)):
+    rng = bdl29_random.Random(2900 + row)
+    for col, H in enumerate(widths):
+        if row == 0:
+            P = Plot(62 + col*196, 30, 160, 150, (-3.2, 3.2), (-4.2, 4.2))
+            xt = [-2, 0, 2]
+        else:
+            P = Plot(62 + col*196, 248, 160, 150, (-5, 5), (-5, 5))
+            xt = [-5.0, -2.5, 0.0, 2.5, 5.0]
+        if H == 1000:
+            cov = bdl29_nngp(depth)
+            pts = [bdl29_gp_draw(rng, cov) for _ in range(NS)]
+        else:
+            pts = [bdl29_net_draw(rng, depth, H) for _ in range(NS)]
+        # each sample is a zero-length round-capped segment, so a panel is a single path
+        d = ''.join(f'M{P.X(u):.1f},{P.Y(v):.1f}h0' for (u, v) in pts
+                    if P.xr[0] < u < P.xr[1] and P.yr[0] < v < P.yr[1])
+        b += f'  <path class="acc" d="{d}" stroke-width="2.2" stroke-linecap="round" />\n'
+        b += bdl29_frame(P, xt, [-4, -2, 0, 2, 4])
+        if row == 0:
+            b += text(P.x0 + P.w/2, 20, f'{depth} layer, {H:,} units', 'middle', 'small')
+        else:
+            b += text(P.x0 + P.w/2, 238, f'{depth} layers, {H:,} units each', 'middle', 'small')
+            b += text(P.x0 + P.w/2, 438, '<tspan class="var">Y</tspan><tspan class="sub" dy="4">1</tspan>', 'middle')
+        if col == 0:
+            b += text(22, P.y0 + P.h/2 + 4, '<tspan class="var">Y</tspan><tspan class="sub" dy="4">2</tspan>', 'middle')
+svg('Bdl29GpLimit', 640, 448, 'Joint prior of a network output at two inputs for growing width',
+    'A grid of six scatter plots of prior draws of the outputs Y1 and Y2 at two inputs. Top row: networks with one hidden layer of 2, 5 and 1,000 units. Bottom row: networks with three hidden layers of 2, 5 and 1,000 units per layer. With 2 units the clouds are irregular and heavy-tailed, with 5 units they are smoother, and with 1,000 units they are elliptical, as for a bivariate Gaussian. The deeper networks show a stronger correlation between Y1 and Y2.',
+    b)
+
+# ---------- Figure 29.3: tail of a unit after 1, 3 and 10 layers ----------
+# Unit: a pre-activation that follows l hidden ReLU layers of width 4 with standard Gaussian weights,
+# input of norm 1. Given the post-activations h of the last hidden layer, the unit is exactly
+# N(0, |h|^2), so its survival function is the average of erfc(t / (sqrt(2) c |h|)) over draws of h
+# (smooth far into the tail). The scale c is set so that each curve ends at the value shown in the book.
+def bdl29_hnorm(rng, depth, H=4):
+    g = [rng.gauss(0, 1) for _ in range(H)]
+    for d in range(depth):
+        h = [v if v > 0 else 0.0 for v in g]
+        if d == depth - 1:
+            return math.sqrt(sum(v*v for v in h))
+        g = [sum(rng.gauss(0, 1)*hj for hj in h if hj) for _ in range(H)]
+def bdl29_surv(norms, t):
+    return sum(math.erfc(t/(math.sqrt(2)*r)) for r in norms if r > 0)/len(norms)
+def bdl29_logtick(e):
+    return f'10<tspan class="sub" dy="-6">{bdl29_minus(e)}</tspan>'
+b = ''
+# (layers, survival at t=10, dotted line: value at t=0, (t_end, value at t_end)), read off the book's plots
+panels = [(1, 1e-5, 1e-2, (9.1, 1e-6)), (3, 8e-5, 1e-2, (10, 7e-5)), (10, 3e-5, 1e-4, (10, 1.6e-5))]
+for k, (depth, s10, c0, dend) in enumerate(panels):
+    P = Plot(78 + k*196, 20, 150, 330, (0, 10), (-6, 0))
+    rng = bdl29_random.Random(2930 + depth)
+    raw = sorted(bdl29_hnorm(rng, depth) for _ in range(12000))
+    lo, hi = -8.0, 8.0                      # bisection on log10 of the scale c
+    for _ in range(40):
+        mid = (lo + hi)/2
+        c = 10**mid
+        if bdl29_surv([r/c for r in raw[-3000:]], 10)*3000/len(raw) > s10:
+            lo = mid
+        else:
+            hi = mid
+    c = 10**((lo + hi)/2)
+    norms = [r/c for r in raw]
+    pts = [(t, bdl29_surv(norms, t)) for t in [i*0.1 for i in range(101)]]
+    pts = [(t, p) for t, p in pts if p > 0]
+    # dotted Weibull tail: a straight line on the logarithmic axis, as in the book's plots
+    dl = [(0, c0), dend]
+    b += line([(P.X(s), P.Y(math.log10(p))) for s, p in dl], 'ln', ' stroke-dasharray="2 3"')
+    b += line([(P.X(s), P.Y(max(math.log10(p), -6))) for s, p in pts], 'thick')
+    o = f'  <rect class="ln" x="{P.x0:.1f}" y="{P.y0:.1f}" width="{P.w:.1f}" height="{P.h:.1f}" fill="none" stroke-width="1" />\n'
+    for e in range(-6, 1):
+        o += line([(P.x0-5, P.Y(e)), (P.x0, P.Y(e))], 'ln', ' stroke-width="1"')
+        o += text(P.x0-8, P.Y(e)+4, bdl29_logtick(e), 'end', 'small')
+        for m in range(2, 10):
+            if e < 0:
+                o += line([(P.x0-2.5, P.Y(e + math.log10(m))), (P.x0, P.Y(e + math.log10(m)))], 'ln', ' stroke-width="0.6"')
+    for v in (0, 5, 10):
+        o += line([(P.X(v), P.y0+P.h), (P.X(v), P.y0+P.h+4)], 'ln', ' stroke-width="1"')
+        o += text(P.X(v), P.y0+P.h+17, f'{v}', 'middle', 'small')
+    o += f'  <text class="small" x="0" y="0" text-anchor="middle" transform="translate({P.x0-50:.1f},{P.y0+P.h/2:.1f}) rotate(-90)">Proportion</text>\n'
+    o += text(P.x0 + P.w/2, P.y0+P.h+36, f'{depth} layer' + ('' if depth == 1 else 's'), 'middle', 'small')
+    b += o
+svg('Bdl29TailBehavior', 640, 400, 'Survival function of a unit after 1, 3 and 10 layers on a log scale',
+    'Three panels with a logarithmic vertical axis labelled Proportion, from 10 to the minus 6 up to 1, and a horizontal axis from 0 to 10. Solid line: empirical survival function of a unit. Dotted line: the theoretical Weibull tail, a straight line on this axis. After 1 layer the survival function is itself a straight line, above the dotted line. After 3 layers it falls quickly at first and then bends into a straight tail close to the Weibull line. After 10 layers it drops steeply near zero and then decays slowly, staying above the Weibull line.',
+    b)
+
+
+# ---------- Chapter 31: Function-space priors ----------
+# All plots are schematic reproductions computed here (pure Python, fixed seeds).
+import random as bdl31_random
+
+def bdl31_num(v):
+    return f'{v:g}'.replace('-', '−')
+def bdl31_frame(P, xticks, yticks, fmt=None):
+    o = ''
+    for v in yticks:
+        o += line([(P.x0, P.Y(v)), (P.x0+P.w, P.Y(v))], 'grid')
+        o += text(P.x0-5, P.Y(v)+4, (fmt(v) if fmt else bdl31_num(v)), 'end', 'small')
+    for v in xticks:
+        o += text(P.X(v), P.y0+P.h+14, bdl31_num(v), 'middle', 'small')
+    o += f'  <rect class="region2" x="{P.x0:.1f}" y="{P.y0:.1f}" width="{P.w:.1f}" height="{P.h:.1f}" style="stroke-dasharray: none; stroke-width: 1" />\n'
+    return o
+def bdl31_poly(P, xs, ys, cls='mut', extra=''):
+    return line([(P.X(a), P.Y(max(P.yr[0], min(P.yr[1], b)))) for a, b in zip(xs, ys)], cls, extra)
+def bdl31_band(P, xs, lo, hi):
+    pts = [(P.X(a), P.Y(max(P.yr[0], min(P.yr[1], b)))) for a, b in zip(xs, hi)]
+    pts += [(P.X(a), P.Y(max(P.yr[0], min(P.yr[1], b)))) for a, b in reversed(list(zip(xs, lo)))]
+    d = ' '.join(('M' if i == 0 else 'L') + f'{x:.1f},{y:.1f}' for i, (x, y) in enumerate(pts)) + ' Z'
+    return f'  <path class="band" d="{d}" />\n'
+def bdl31_sub(base, s):
+    return f'<tspan class="var">{base}</tspan><tspan class="sub" dy="4">{s}</tspan><tspan dy="-4"> </tspan>'
+
+# Linear algebra for Gaussian process draws.
+def bdl31_chol(A):
+    n = len(A); L = [[0.0]*n for _ in range(n)]
+    for i in range(n):
+        Li = L[i]
+        for j in range(i+1):
+            Lj = L[j]
+            s = A[i][j] - sum(Li[k]*Lj[k] for k in range(j))
+            if i == j:
+                Li[i] = math.sqrt(max(s, 1e-12))
+            else:
+                Li[j] = s / Lj[j]
+    return L
+def bdl31_fwd(L, b):
+    n = len(L); x = [0.0]*n
+    for i in range(n):
+        x[i] = (b[i] - sum(L[i][k]*x[k] for k in range(i))) / L[i][i]
+    return x
+def bdl31_bwd(L, b):
+    n = len(L); x = [0.0]*n
+    for i in reversed(range(n)):
+        x[i] = (b[i] - sum(L[k][i]*x[k] for k in range(i+1, n))) / L[i][i]
+    return x
+def bdl31_rbf(a2, ell):
+    return lambda u, v: a2*math.exp(-(u-v)**2/(2*ell*ell))
+def bdl31_m32(a2, ell):
+    def k(u, v):
+        r = math.sqrt(3)*abs(u-v)/ell
+        return a2*(1+r)*math.exp(-r)
+    return k
+def bdl31_gp_draws(xs, k, m, rng, jitter=1e-6):
+    n = len(xs)
+    K = [[k(xs[i], xs[j]) + (jitter if i == j else 0.0) for j in range(n)] for i in range(n)]
+    L = bdl31_chol(K)
+    out = []
+    for _ in range(m):
+        z = [rng.gauss(0, 1) for _ in range(n)]
+        out.append([sum(L[i][q]*z[q] for q in range(i+1)) for i in range(n)])
+    return out
+def bdl31_gp_post(xd, yd, grid, k, s2):
+    n = len(xd)
+    K = [[k(xd[i], xd[j]) + (s2 if i == j else 0.0) for j in range(n)] for i in range(n)]
+    L = bdl31_chol(K)
+    alpha = bdl31_bwd(L, bdl31_fwd(L, yd))
+    Ks = [[k(g, x) for x in xd] for g in grid]
+    mu = [sum(a*b for a, b in zip(row, alpha)) for row in Ks]
+    V = [bdl31_fwd(L, row) for row in Ks]
+    m = len(grid)
+    C = [[k(grid[i], grid[j]) - sum(p*q for p, q in zip(V[i], V[j])) + (1e-6 if i == j else 0.0) for j in range(m)] for i in range(m)]
+    return mu, C
+
+# Fully connected tanh network with fan-in-scaled Gaussian weights (unit base variance).
+def bdl31_mlp_draw(xs, depth, width, rng, sw=1.0, sb=1.0):
+    sizes = [1] + [width]*(depth-1) + [1]
+    Ws, bs = [], []
+    for a, b2 in zip(sizes[:-1], sizes[1:]):
+        Ws.append([[rng.gauss(0, math.sqrt(sw/a)) for _ in range(a)] for _ in range(b2)])
+        bs.append([rng.gauss(0, math.sqrt(sb)) for _ in range(b2)])
+    out = []
+    for x in xs:
+        h = [x]
+        for li, (W, bb) in enumerate(zip(Ws, bs)):
+            z = [sum(w*v for w, v in zip(row, h)) + c for row, c in zip(W, bb)]
+            h = z if li == len(Ws)-1 else [math.tanh(t) for t in z]
+        out.append(h[0])
+    return out
+
+# ---------- Figure 31.1: samples and exact density on the manifold ----------
+def bdl31_fig1():
+    rng = bdl31_random.Random(31)
+    b = ''
+    PL = Plot(64, 40, 250, 200, (-1.1, 1.1), (-1.1, 1.1))
+    PR = Plot(344, 40, 250, 200, (-1.1, 1.1), (-1.1, 1.1))
+    ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    f1 = lambda v: f'{v:.1f}'.replace('-', '−')
+    b += bdl31_frame(PL, [], ticks, f1)
+    for v in ticks:
+        b += text(PL.X(v), PL.y0+PL.h+14, f1(v), 'middle', 'small')
+        b += text(PR.X(v), PR.y0+PR.h+14, f1(v), 'middle', 'small')
+    b += f'  <rect class="region2" x="{PR.x0:.1f}" y="{PR.y0:.1f}" width="{PR.w:.1f}" height="{PR.h:.1f}" style="stroke-dasharray: none; stroke-width: 1" />\n'
+    b += text(PL.x0+PL.w/2, 26, 'Samples from ' + var('p') + '(' + bdl31_sub('F', '1:2') + ')', 'middle')
+    b += text(PR.x0+PR.w/2, 26, 'Exact density induced on the manifold', 'middle')
+    b += text(PL.x0+PL.w/2, PL.y0+PL.h+34, bdl31_sub('F', '1'), 'middle')
+    b += text(PR.x0+PR.w/2, PR.y0+PR.h+34, bdl31_sub('F', '1'), 'middle')
+    b += text(PL.x0-40, PL.y0+PL.h/2+4, bdl31_sub('F', '2'), 'middle')
+    # Left: Monte Carlo samples of (sin(theta), sin(2 theta)), theta ~ N(0, 1).
+    for _ in range(400):
+        t = rng.gauss(0, 1)
+        b += f'  <circle class="dot" cx="{PL.X(math.sin(t)):.1f}" cy="{PL.Y(math.sin(2*t)):.1f}" r="2.6" style="fill-opacity: 0.45" />\n'
+    # Right: density p(theta)/||g'(theta)|| along the curve, encoded as opacity of the accent stroke.
+    vmax = 0.4
+    N = 600
+    for i in range(N):
+        t0 = -3.6 + 7.2*i/N; t1 = -3.6 + 7.2*(i+1)/N; tm = (t0+t1)/2
+        dens = math.exp(-tm*tm/2)/math.sqrt(2*math.pi) / math.hypot(math.cos(tm), 2*math.cos(2*tm))
+        op = max(0.0, min(1.0, dens/vmax))
+        if op < 0.02:
+            continue
+        b += line([(PR.X(math.sin(t0)), PR.Y(math.sin(2*t0))), (PR.X(math.sin(t1)), PR.Y(math.sin(2*t1)))], 'acc', f' style="stroke-width: 5; stroke-opacity: {op:.2f}; stroke-linecap: butt"')
+    # Colorbar.
+    cx, cy0, ch = 612, 40, 200
+    for j in range(50):
+        v = vmax*(j+0.5)/50
+        y = cy0 + ch - (j+1)*ch/50
+        b += f'  <rect class="dot" x="{cx}" y="{y:.1f}" width="12" height="{ch/50+0.4:.1f}" style="fill-opacity: {v/vmax:.2f}" />\n'
+    b += f'  <rect class="region2" x="{cx}" y="{cy0}" width="12" height="{ch}" style="stroke-dasharray: none; stroke-width: 1" />\n'
+    for v in [0.1, 0.2, 0.3, 0.4]:
+        y = cy0 + ch - v/vmax*ch
+        b += line([(cx+12, y), (cx+16, y)])
+        b += text(cx+19, y+4, f'{v:.1f}', 'start', 'small')
+    b += text(cx+6, cy0-10, var('p') + '(' + bdl31_sub('F', '1:2') + ')', 'middle', 'small')
+    svg('Bdl31SineManifold', 680, 300,
+        'Samples and exact density of the function-space prior of a one-parameter sine network',
+        'Left: four hundred Monte Carlo samples of (F1, F2) = (sin theta, sin 2 theta) with theta drawn from a standard normal distribution; all points lie on a closed one-dimensional curve in the square from minus one to one, running from the lower left through the origin to the upper right, with outer arcs near F1 equal to plus or minus one. Right: the same curve shaded by the induced density p(theta) divided by the norm of the derivative of the map, on a scale from 0 to 0.4; the density is highest near the minimum at the lower left and the maximum at the upper right and fades to almost zero along the outer arcs.',
+        b)
+
+# ---------- Figure 31.2: BNN priors of increasing depth and GP priors ----------
+def bdl31_fig2():
+    rng = bdl31_random.Random(312)
+    xs = [-15 + 30*i/120 for i in range(121)]
+    b = ''
+    W, H = 190, 120
+    tops = [(52, 30), (272, 30), (492, 30)]
+    for (x0, y0), depth in zip(tops, [2, 4, 8]):
+        P = Plot(x0, y0, W, H, (-15, 15), (-4.6, 4.6))
+        draws = [bdl31_mlp_draw(xs, depth, 24, rng) for _ in range(14)]
+        b += bdl31_frame(P, [-15, -10, -5, 0, 5, 10, 15], [-4, -2, 0, 2, 4])
+        mean = [sum(d[i] for d in draws)/len(draws) for i in range(len(xs))]
+        sd = math.sqrt(sum((d[i]-mean[i])**2 for d in draws for i in range(len(xs)))/(len(draws)*len(xs)))
+        b += bdl31_band(P, xs, [-2*sd]*len(xs), [2*sd]*len(xs))
+        for d in draws:
+            b += bdl31_poly(P, xs, d, 'mut', ' style="stroke-opacity: 0.8"')
+        b += line([(P.X(-15), P.Y(0)), (P.X(15), P.Y(0))], 'thick', ' stroke-dasharray="6 4"')
+        b += text(P.x0+P.w/2, y0-10, f'BNN prior with {depth} layers', 'middle', 'small')
+    b += line([(20, 182), (700, 182)])
+    for (x0, y0), (k, lab) in zip([(150, 212), (400, 212)], [(bdl31_rbf(1.0, 1.6), 'GP prior with RBF kernel'), (bdl31_m32(1.0, 1.6), 'GP prior with Matern32 kernel')]):
+        P = Plot(x0, y0, W, H, (-15, 15), (-3.4, 3.4))
+        draws = bdl31_gp_draws(xs, k, 14, rng)
+        b += bdl31_frame(P, [-15, -10, -5, 0, 5, 10, 15], [-2, 0, 2])
+        b += bdl31_band(P, xs, [-2]*len(xs), [2]*len(xs))
+        for d in draws:
+            b += bdl31_poly(P, xs, d, 'mut', ' style="stroke-opacity: 0.8"')
+        b += line([(P.X(-15), P.Y(0)), (P.X(15), P.Y(0))], 'thick', ' stroke-dasharray="6 4"')
+        b += text(P.x0+P.w/2, y0-10, lab, 'middle', 'small')
+    svg('Bdl31DepthPathology', 720, 360,
+        'Prior function samples of tanh networks of depth 2, 4 and 8 compared with Gaussian process prior samples',
+        'Top row: fourteen sample functions each from fully connected tanh networks with 2, 4 and 8 layers and fan-in-scaled unit-variance Gaussian weights, on inputs from minus 15 to 15, with a dashed zero mean and a shaded band of two standard deviations. With 2 layers the functions are flat away from the origin and change sharply near it; with 4 layers they change less; with 8 layers they are nearly constant lines. Bottom row: fourteen samples from Gaussian process priors with an RBF kernel (smooth wiggles) and a Matern 3/2 kernel (rougher wiggles), both with unit marginal variance, a dashed zero mean and a shaded band from minus 2 to 2.',
+        b)
+
+# ---------- Figure 31.3: schematic of the prior-matching procedure ----------
+def bdl31_net(x0, y0, w, h, layers=(3, 4, 4, 1), r=5):
+    o = ''
+    cols = []
+    n = len(layers)
+    for li, m in enumerate(layers):
+        cx = x0 + w*li/(n-1)
+        ys = [y0 + h*(j+0.5)/m for j in range(m)]
+        cols.append([(cx, y) for y in ys])
+    for a, c in zip(cols[:-1], cols[1:]):
+        for p in a:
+            for q in c:
+                o += line([p, q], 'mut', ' style="stroke-width: 0.8"')
+    for col in cols:
+        for (cx, cy) in col:
+            o += f'  <circle class="box" cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" style="stroke-width: 1" />\n'
+    return o
+def bdl31_fig3():
+    b = ''
+    bf = lambda s: f'<tspan style="font-weight: 600">{s}</tspan>'
+    # Gaussian process panel.
+    b += text(80, 22, 'Gaussian process', 'middle', 'small')
+    b += f'  <rect class="region" x="10" y="30" width="140" height="74" rx="6" />\n'
+    b += text(26, 54, var('x'), 'middle')
+    b += f'  <rect class="band" x="40" y="45" width="50" height="7" style="fill-opacity: 1" />\n'
+    b += f'  <rect class="band" x="98" y="56" width="7" height="40" style="fill-opacity: 1" />\n'
+    b += text(78, 86, var('x′'), 'middle')
+    b += text(132, 86, var('k') + '(' + var('x') + ', ' + var('x′') + ')', 'middle', 'small')
+    # Bayesian neural network panel.
+    b += text(80, 132, '(Bayesian) neural network', 'middle', 'small')
+    b += f'  <rect class="region" x="10" y="140" width="140" height="96" rx="6" />\n'
+    b += text(24, 178, var('x'), 'middle')
+    b += bdl31_net(42, 150, 92, 52)
+    b += text(80, 226, var('θ') + ' ∼ ' + var('p') + '(' + var('θ') + ' | ' + var('ψ') + ')', 'middle', 'small')
+    # Arrows into the central box.
+    b += arrow([(150, 66), (330, 66)])
+    b += text(160, 58, bf('f') + '<tspan class="sub" dy="4">gp</tspan><tspan dy="-4"> ∼ GP(0, </tspan>' + var('K') + ')', 'start', 'small')
+    b += text(162, 168, var('θ') + ' ∼ ' + var('p') + '(' + var('θ') + ' | ' + var('ψ') + ')', 'start', 'small')
+    b += text(162, 186, bf('f') + '<tspan class="sub" dy="4">nn</tspan><tspan dy="-4"> ∼ ∫ </tspan>' + var('p') + '(' + bf('f') + ' | ' + var('θ') + ') d' + var('p') + '(' + var('θ') + ')', 'start', 'small')
+    b += arrow([(150, 196), (318, 196), (318, 82), (330, 82)])
+    b += arrow([(318, 196), (318, 246), (348, 246)])
+    b += arrow([(306, 66), (306, 238), (348, 238)])
+    # Central optimization box.
+    b += f'  <rect class="region" x="326" y="30" width="248" height="250" rx="8" />\n'
+    b += f'  <rect class="box" x="338" y="42" width="224" height="104" rx="5" />\n'
+    b += bdl31_net(400, 50, 90, 46, (3, 4, 4, 1), 4.5)
+    b += text(450, 124, 'sup' + '<tspan class="sub" dy="4">g</tspan><tspan dy="-4"> </tspan>E' + '<tspan class="sub" dy="4">pnn</tspan><tspan dy="-4"> </tspan>' + var('g') + '(' + bf('f') + '<tspan class="sub" dy="4">nn</tspan><tspan dy="-4">) − E</tspan>' + '<tspan class="sub" dy="4">pgp</tspan><tspan dy="-4"> </tspan>' + var('g') + '(' + bf('f') + '<tspan class="sub" dy="4">gp</tspan><tspan dy="-4">)</tspan>', 'middle', 'small')
+    b += text(546, 64, '↻', 'middle')
+    b += arrow([(450, 146), (450, 214)], 'thick')
+    b += text(458, 186, var('g') + '*', 'start', 'small')
+    b += f'  <rect class="box" x="348" y="216" width="214" height="54" rx="5" />\n'
+    b += text(455, 238, var('W') + '<tspan class="sub" dy="4">1</tspan><tspan dy="-4"> = E</tspan>' + '<tspan class="sub" dy="4">pnn</tspan><tspan dy="-4"> </tspan>' + var('g') + '*(' + bf('f') + '<tspan class="sub" dy="4">nn</tspan><tspan dy="-4">) − E</tspan>' + '<tspan class="sub" dy="4">pgp</tspan><tspan dy="-4"> </tspan>' + var('g') + '*(' + bf('f') + '<tspan class="sub" dy="4">gp</tspan><tspan dy="-4">)</tspan>', 'middle', 'small')
+    b += text(455, 260, 'inf' + '<tspan class="sub" dy="4">ψ</tspan><tspan dy="-4"> </tspan>' + var('W') + '<tspan class="sub" dy="4">1</tspan><tspan dy="-4">(</tspan>' + var('p') + '<tspan class="sub" dy="4">nn</tspan><tspan dy="-4">(</tspan>' + bf('f') + '<tspan class="sub" dy="4">nn</tspan><tspan dy="-4">; </tspan>' + var('ψ') + '), ' + var('p') + '<tspan class="sub" dy="4">gp</tspan><tspan dy="-4">(</tspan>' + bf('f') + '<tspan class="sub" dy="4">gp</tspan><tspan dy="-4">))</tspan>', 'middle', 'small')
+    b += text(552, 284, '↻', 'middle', 'small')
+    # Output: network with optimized priors.
+    b += arrow([(562, 243), (604, 243)], 'thick')
+    b += text(583, 234, var('ψ') + '*', 'middle', 'small')
+    b += text(658, 116, '(Bayesian) neural network', 'middle', 'small')
+    b += text(658, 132, 'with optimized priors', 'middle', 'small')
+    b += f'  <rect class="region" x="590" y="140" width="136" height="130" rx="6" />\n'
+    b += text(602, 178, var('x'), 'middle')
+    b += bdl31_net(620, 152, 90, 52)
+    b += text(660, 248, var('p') + '(' + var('θ') + ' | ' + var('ψ') + '*)', 'middle', 'small')
+    svg('Bdl31PriorMatching', 740, 296,
+        'Schematic of imposing Gaussian process priors on Bayesian neural networks by Wasserstein distance minimization',
+        'Left: a Gaussian process with kernel k(x, x′) supplies samples f_gp drawn from GP(0, K); a (Bayesian) neural network with parameters theta drawn from p(theta | psi) supplies samples f_nn obtained by integrating p(f | theta) over p(theta). Both sample streams enter a central loop. Its upper box is a Lipschitz network g that computes the supremum over g of the expectation of g(f_nn) under p_nn minus the expectation of g(f_gp) under p_gp, repeated in an inner loop; it passes the optimum g* down to a lower box that evaluates W1 as the difference of the expectations of g* and takes the infimum over psi of W1(p_nn(f_nn; psi), p_gp(f_gp)), repeated in an outer loop. The resulting psi* is passed to the right, to a (Bayesian) neural network with optimized priors p(theta | psi*).',
+        b)
+
+# ---------- Figure 31.4: one-dimensional regression example ----------
+def bdl31_fig4():
+    rng = bdl31_random.Random(3104)
+    grid = [-14 + 28*i/48 for i in range(49)]
+    kgp = bdl31_rbf(2.0, 1.4)
+    # Synthetic data: 64 inputs on [-10, 10] rearranged to leave a gap, values from a GP draw plus noise.
+    xd = sorted([-9.2 + 0.25*rng.random() for _ in range(4)] + [-1.4 + 11.4*i/59 for i in range(60)])
+    fd = bdl31_gp_draws(xd, kgp, 1, rng)[0]
+    yd = [f + rng.gauss(0, math.sqrt(0.1)) for f in fd]
+    W, H = 128, 62
+    colx = [56, 226, 396, 566]
+    rows = [34, 140, 268, 402, 520]
+    xt = [-10, 0, 10]
+    def panel(c, r, title, yr=(-4.4, 4.4)):
+        P = Plot(colx[c], rows[r], W, H, (-14, 14), yr)
+        return P
+    b = ''
+    def frame(P, yt=(-2.5, 0.0, 2.5)):
+        return bdl31_frame(P, xt, list(yt), lambda v: f'{v:.1f}'.replace('-', '−'))
+    def prior_panel(P, draws, title, band=2.0):
+        o = frame(P)
+        o += bdl31_band(P, grid, [-band]*len(grid), [band]*len(grid))
+        for d in draws:
+            o += bdl31_poly(P, grid, d, 'mut', ' style="stroke-opacity: 0.85"')
+        o += line([(P.X(-14), P.Y(0)), (P.X(14), P.Y(0))], 'ln', ' stroke-dasharray="4 3"')
+        o += text(P.x0+P.w/2, P.y0-8, title, 'middle', 'small')
+        return o
+    # Row 1: GP prior and fixed BNN priors.
+    b += prior_panel(panel(0, 0, ''), bdl31_gp_draws(grid, kgp, 4, rng), 'GP prior')
+    fixed = [('Fixed-Gauss.', 1.0, 0.05), ('Fixed-hierar.', 1.0, 0.3), ('Fixed-NFlow', 1.0, 0.03)]
+    for c, (lab, sb, sw0) in enumerate(fixed, start=1):
+        draws = []
+        for _ in range(4):
+            d = bdl31_mlp_draw([g*math.sqrt(sw0) for g in grid], 3, 16, rng, 1.0, sb)
+            draws.append(d)
+        b += prior_panel(panel(c, 0, ''), draws, f'BNN - {lab} prior', 2.6)
+    # Row 2: GP-induced priors (schematic: random-feature networks whose weight prior matches the GP kernel).
+    def rff(rng, ell, nf=40):
+        ws = [rng.gauss(0, 1/ell) for _ in range(nf)]
+        bs = [rng.uniform(0, 2*math.pi) for _ in range(nf)]
+        a = [rng.gauss(0, 1) for _ in range(nf)]
+        return [math.sqrt(2/nf)*sum(ai*math.cos(wi*g+bi) for ai, wi, bi in zip(a, ws, bs)) for g in grid]
+    gpi = [('GPi-Gauss.', 30), ('GPi-hierar.', 60), ('GPi-NFlow', 400)]
+    for c, (lab, nf) in enumerate(gpi, start=1):
+        draws = [rff(rng, 1.4, nf) for _ in range(4)]
+        b += prior_panel(panel(c, 1, ''), draws, f'BNN - {lab} prior', 2.0)
+    # Row 3: W1 optimization traces (schematic).
+    traces = [((30, 5.0, 0.45, 0), (5, 31), [10, 20, 30]), ((40, 12.0, 2.2, 1), (6, 56), [20, 40]), ((20, 0.6, 0.6, 0), (-1.5, 22), [0, 10, 20])]
+    labs = ['(Fixed-Gauss. prior)', '(Fixed-Hierar. prior)', '(Fixed-NFlow. prior)']
+    for c, (((a0, af, nz, spikes), yr, yt), lab) in enumerate(zip(traces, labs), start=1):
+        P = Plot(colx[c], rows[2], W, H, (-20, 820), yr)
+        o = ''
+        for v in yt:
+            o += text(P.x0-5, P.Y(v)+4, str(v), 'end', 'small')
+        for v in [0, 250, 500, 750]:
+            o += text(P.X(v), P.y0+P.h+14, str(v), 'middle', 'small')
+        o += f'  <rect class="region2" x="{P.x0:.1f}" y="{P.y0:.1f}" width="{P.w:.1f}" height="{P.h:.1f}" style="stroke-dasharray: none; stroke-width: 1" />\n'
+        its = list(range(0, 801, 8))
+        ys = []
+        for t in its:
+            v = af + (a0-af)*math.exp(-t/(110 if c != 3 else 150)) + rng.gauss(0, nz)
+            if spikes and t in (40, 96):
+                v += 22 if t == 96 else 12
+            ys.append(v)
+        o += bdl31_poly(P, its, ys, 'ln', ' style="stroke-width: 1.2"')
+        for t, v in zip(its, ys):
+            o += f'  <circle cx="{P.X(t):.1f}" cy="{P.Y(max(yr[0], min(yr[1], v))):.1f}" r="1.3" style="fill: currentColor" />\n'
+        o += text(P.x0+P.w/2, P.y0-22, var('W') + '<tspan class="sub" dy="4">1</tspan><tspan dy="-4"> optimization</tspan>', 'middle', 'small')
+        o += text(P.x0+P.w/2, P.y0-8, lab, 'middle', 'small')
+        o += text(P.x0+P.w/2, P.y0+P.h+28, 'Iteration', 'middle', 'small')
+        b += o
+    b += line([(16, rows[2]-40), (724, rows[2]-40)])
+    b += line([(16, rows[3]-36), (724, rows[3]-36)])
+    # Rows 4 and 5: posteriors. GP posterior exact; BNN posteriors schematic (GP posterior mean,
+    # spread scaled down for the fixed priors to show their overconfidence away from the data).
+    mu, C = bdl31_gp_post(xd, yd, grid, kgp, 0.1)
+    L = bdl31_chol(C)
+    sd = [math.sqrt(max(C[i][i], 0)) for i in range(len(grid))]
+    def post_panel(P, scale, smooth, title1, title2=None):
+        o = frame(P)
+        o += bdl31_band(P, grid, [m - 1.96*scale*s for m, s in zip(mu, sd)], [m + 1.96*scale*s for m, s in zip(mu, sd)])
+        for _ in range(5):
+            z = [rng.gauss(0, 1) for _ in grid]
+            d = [mu[i] + scale*sum(L[i][q]*z[q] for q in range(i+1)) for i in range(len(grid))]
+            o += bdl31_poly(P, grid, d, 'mut', ' style="stroke-opacity: 0.7; stroke-width: 1"')
+        o += bdl31_poly(P, grid, mu, 'ln', ' stroke-dasharray="4 3"')
+        for x, y in zip(xd, yd):
+            o += f'  <circle cx="{P.X(x):.1f}" cy="{P.Y(y):.1f}" r="2.4" style="fill: currentColor" />\n'
+        if title2:
+            o += text(P.x0+P.w/2, P.y0-22, title1, 'middle', 'small')
+            o += text(P.x0+P.w/2, P.y0-8, title2, 'middle', 'small')
+        else:
+            o += text(P.x0+P.w/2, P.y0-8, title1, 'middle', 'small')
+        return o
+    b += post_panel(panel(0, 3, ''), 1.0, 0, 'GP posterior')
+    for c, (lab, sc) in enumerate([('(Fixed-Gauss. prior)', 0.25), ('(Fixed-Hierar. prior)', 0.45), ('(Fixed-NFlow. prior)', 0.3)], start=1):
+        b += post_panel(panel(c, 3, ''), sc, 0, 'BNN posterior', lab)
+    for c, (lab, sc) in enumerate([('(GPi-Gauss. prior)', 0.8), ('(GPi-Hierar. prior)', 0.85), ('(GPi-NFlow. prior)', 0.95)], start=1):
+        b += post_panel(panel(c, 4, ''), sc, 0, 'BNN posterior', lab)
+    svg('Bdl31RegressionExample', 740, 606,
+        'Gaussian process and Bayesian neural network priors, prior matching and posteriors on a one-dimensional regression problem',
+        'A grid of panels with inputs from minus 14 to 14 on the horizontal axis and function values from about minus 4 to 4 on the vertical axis. Row 1: four sample functions from the reference GP prior, which wiggle with a moderate length-scale, and from three BNN priors with fixed hyper-parameters (Gaussian, hierarchical and normalizing flow), whose samples are nearly constant or change once. Row 2: samples from the three GP-induced (GPi) BNN priors, which wiggle like the GP samples. Row 3 (illustrative decays, not optimization results): the 1-Wasserstein distance against iteration from 0 to 800 for the three priors; it falls from about 30 to about 5, from about 45 with early spikes to about 12, and from about 20 to about 1. Rows 4 and 5 are illustrative depictions, not computed BNN posteriors; only the GP posterior is computed. Row 4: posteriors given 64 noisy data points, four near x = minus 9 and the rest between minus 1.4 and 10 tracing an oscillating curve: the GP posterior has wide credible bands in the gap and outside the data, while the posteriors under the fixed priors have narrow bands there. Row 5: the posteriors under the GPi priors have wide bands in the gap and outside the data, like the GP posterior. Dashed lines are means and shaded areas are 95 percent credible intervals.',
+        b)
+
+bdl31_fig1()
+bdl31_fig2()
+bdl31_fig3()
+bdl31_fig4()
