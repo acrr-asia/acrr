@@ -1,0 +1,371 @@
+---
+title: "Các tính chất thống kê của tiên nghiệm"
+description: "Tiên nghiệm trọng số của mạng nơ-ron Bayes cảm sinh phân phối đơn vị có đuôi nặng dần theo độ sâu, các giới hạn độ rộng Gauss và ổn định, và sự co của hậu nghiệm."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - bayesian neural networks
+  - gaussian processes
+series: bayesian-deep-learning
+seriesOrder: 36
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl29MaterialMap from '../../../components/diagrams/Bdl29MaterialMap.astro';
+import Bdl29GpLimit from '../../../components/diagrams/Bdl29GpLimit.astro';
+import Bdl29TailBehavior from '../../../components/diagrams/Bdl29TailBehavior.astro';
+
+[Chương 28](/vi/blog/introduction-to-priors), chương mở đầu trước đó, đã giới thiệu cách các tiên nghiệm (prior) trong học sâu Bayes (Bayesian Deep Learning, BDL) định hình hành vi của mô hình thông qua ảnh hưởng của chúng lên phân phối tiên nghiệm và phân phối hậu nghiệm (posterior) trên tham số và trên hàm. Tuy các tiên nghiệm có thông tin (informative prior; xem [Chương 30](/vi/blog/informative-priors)) có thể mã hóa tri thức về lĩnh vực, việc dùng chúng trong BDL bị hạn chế do độ phức tạp của mô hình. Thay vào đó, tiên nghiệm thường đóng những vai trò thực dụng như chính quy hóa, thúc đẩy tính thưa hoặc giúp suy luận hiệu quả. [Chương 28](/vi/blog/introduction-to-priors) nhấn mạnh tầm quan trọng của việc hiểu các phân phối dự đoán tiên nghiệm (prior predictive distribution) và minh họa cách các lựa chọn kiến trúc tương tác với các loại tiên nghiệm khác nhau. Chương này nghiên cứu sâu hơn cách các tiên nghiệm trên tham số của mạng nơ-ron cảm sinh (induce) các tiên nghiệm trên các đơn vị của lớp ẩn. Trọng tâm chính là suy ra các tính chất phân phối và những tác động có thể có của chúng lên việc huấn luyện mạng nơ-ron. Ngoài ra, [Chương 31](/vi/blog/function-space-priors) khảo sát các tiên nghiệm trong không gian hàm, một cách khác để nghiên cứu ảnh hưởng của tiên nghiệm lên mô hình. Tiên nghiệm trong không gian hàm thường diễn giải được nhưng không xử lý được bằng giải tích. [Chương 31](/vi/blog/function-space-priors) chỉ ra những bệnh lý phát sinh từ các tiên nghiệm tham số thông dụng và đề xuất khớp các tiên nghiệm hàm do mạng nơ-ron cảm sinh với các phân phối mục tiêu trong không gian hàm, chẳng hạn quá trình Gauss, bằng các hàm mục tiêu dựa trên mẫu như khoảng cách Wasserstein (Wasserstein distance) hay độ sai khác trung bình cực đại (Maximum Mean Discrepancy, MMD).
+
+## 1. Giới thiệu
+
+Tiên nghiệm, tức các phân phối xác suất chứa đựng niềm tin ban đầu về tham số của mô hình, nằm ở trung tâm của mạng nơ-ron Bayes (Bayesian neural network, BNN). Việc chọn tiên nghiệm không chỉ là một cân nhắc lý thuyết mà còn có hệ quả sâu sắc đối với các tính chất thống kê của mô hình thu được. Nghiên cứu lý thuyết về tiên nghiệm trong BNN bắt nguồn từ công trình nền tảng của Neal, người đã chỉ ra rằng mạng nơ-ron một lớp ẩn với trọng số Gauss *i.i.d.* hội tụ đến một quá trình Gauss khi số nơ-ron của lớp ẩn tiến tới vô cùng (cái gọi là giới hạn độ rộng vô hạn (infinite-width limit)), xem Định lý 29.2. Sau phần tổng quan về các tính chất thống kê của tiên nghiệm trong suy luận Bayes và cụ thể hơn là trong BNN, chương này được tổ chức như sau. Mục 2 và Mục 3 lần lượt xem xét mạng nơ-ron một lớp ẩn và mạng nơ-ron sâu. Mục 4 và Mục 5 xét vai trò của các tiên nghiệm và kiến trúc khác nhau. Cuối cùng, tác động của tiên nghiệm lên hậu nghiệm được thảo luận ở Mục 6.
+
+### 1.1 Các tính chất thống kê đơn giản của tiên nghiệm
+
+Nguyên lý cốt lõi của khuôn khổ Bayes là biểu diễn độ bất định về tham số và dự đoán của mô hình bằng các phân phối xác suất. Khác với các phương pháp không Bayes hay theo trường phái tần suất (frequentist), vốn coi tham số là những đại lượng cố định nhưng chưa biết, quan điểm Bayes coi tham số là các biến ngẫu nhiên. Suy luận Bayes là quá trình quy nạp cập nhật niềm tin dựa trên dữ liệu quan sát thông qua quy tắc Bayes. Lựa chọn này không tùy tiện: nó dựa trên những nền tảng toán học chặt chẽ, đáng chú ý là từ các công trình của Cox và Savage.
+
+Ký hiệu sau được sử dụng: gọi $\mathcal{D} = (X, Y)$ là một tập dữ liệu huấn luyện kích thước $N$, giả định được sinh ra bởi một *mô hình lấy mẫu* (sampling model) hay *hàm hợp lý* (likelihood) $p(\mathcal{D} \mid \theta)$ nền tảng. Các tham số $\theta$ nằm trong một không gian tham số $\Theta$, thường là một tập con của không gian Euclid $\mathbb{R}^P$. *Phân phối tiên nghiệm* $p(\theta)$ mã hóa niềm tin về các tham số $\theta$ trước khi quan sát bất kỳ dữ liệu nào, và là chủ đề trung tâm của chương này.
+
+Việc xác định cả tiên nghiệm $p(\theta)$ lẫn hàm hợp lý $p(\mathcal{D} \mid \theta)$ xác định *phân phối đồng thời* (joint distribution) của tham số và dữ liệu qua quy tắc nhân: $p(\theta, \mathcal{D}) = p(\theta)p(\mathcal{D} \mid \theta)$. Quy tắc Bayes kết hợp tiên nghiệm và hàm hợp lý để tạo ra *phân phối hậu nghiệm* $p(\theta \mid \mathcal{D})$:
+
+$$
+p(\theta \mid \mathcal{D}) = \frac{p(\theta)p(\mathcal{D} \mid \theta)}{p(\mathcal{D})}.
+\tag{29.1}
+$$
+
+Ở đây, mẫu số $p(\mathcal{D})$, được gọi là *bằng chứng* (evidence) của mô hình hay *hàm hợp lý biên* (marginal likelihood), đóng vai trò hằng số chuẩn hóa.
+
+Quy tắc Bayes (29.1) cung cấp một cơ chế có nguyên tắc để cập nhật niềm tin khi có dữ liệu mới, nhưng không chỉ dẫn gì về cách xác định ban đầu những niềm tin đó, vốn được mã hóa trong tiên nghiệm. Trong thực tế, việc chọn tiên nghiệm thường chịu ảnh hưởng của sự thuận tiện tính toán. Một ví dụ đáng chú ý là việc dùng tiên nghiệm liên hợp (conjugate prior): một tiên nghiệm được gọi là liên hợp với một hàm hợp lý nếu phân phối hậu nghiệm thu được thuộc cùng họ tham số với nó. Các cặp tiên nghiệm – mô hình liên hợp kinh điển gồm Gauss-Gauss, Beta-Nhị thức và Gamma-Poisson.
+
+Vấn đề chọn tiên nghiệm thường dẫn đến câu hỏi: tiên nghiệm mang bao nhiêu thông tin? Câu hỏi này đưa đến sự phân biệt giữa tiên nghiệm khách quan và tiên nghiệm chủ quan. Chẳng hạn, tiên nghiệm Jeffreys (Jeffreys' prior), được định nghĩa là tỉ lệ với căn bậc hai của định thức ma trận thông tin Fisher, được coi là khách quan vì nó bất biến dưới phép tái tham số hóa. Xem Lee và Nalisnick và Smyth về các nghiên cứu tiên nghiệm Jeffreys trong BNN. Các tiên nghiệm khách quan hay không thông tin (uninformative) thường là không chính thường (improper), nghĩa là tích phân của chúng không cho một xác suất toàn phần hữu hạn (ví dụ, một tiên nghiệm đều trên một không gian không bị chặn). Điều đáng ngạc nhiên là các tiên nghiệm như vậy được dùng rộng rãi trong phân tích Bayes, miễn là phân phối hậu nghiệm thu được là chính thường và do đó phù hợp cho suy luận. Tuy nhiên, không thể dùng tiên nghiệm không chính thường để tính phân phối dự đoán tiên nghiệm hay nhân tử Bayes (Bayes factor), vì những đại lượng này cũng sẽ không chính thường.
+
+Ngược lại, tiên nghiệm chủ quan nằm ở cốt lõi của triết lý Bayes, mã hóa niềm tin của chuyên gia hoặc tri thức có trước. Quá trình khơi gợi tiên nghiệm (prior elicitation) đối với những tiên nghiệm như vậy tinh tế và đầy thách thức; xem, ví dụ, Mikkola và cộng sự để có một bài tổng quan.
+
+Thách thức của việc xác định tiên nghiệm càng rõ rệt hơn khi mô hình trở nên phức tạp, khi các tham số thiếu một diễn giải rõ ràng, hoặc khi không gian tham số có số chiều cao. Trong những bối cảnh đó, việc thiết kế một tiên nghiệm phủ không gian một cách thích hợp trở nên không tầm thường, và việc tính chính xác phân phối hậu nghiệm có thể bất khả thi. Khi đó, chất lượng của suy luận Bayes phụ thuộc nhiều vào cả các phép xấp xỉ được thực hiện để tính toán khả thi lẫn dạng của chính phân phối tiên nghiệm.
+
+### 1.2 Các tính chất thống kê của tiên nghiệm trong BNN
+
+Phân phối Gauss là lựa chọn tiên nghiệm phổ biến và mặc định trong mạng nơ-ron Bayes. Tìm một ước lượng hậu nghiệm cực đại (Maximum a Posteriori, MAP) của một mô hình Bayes như vậy tương đương với huấn luyện một mạng nơ-ron tiêu chuẩn với chính quy hóa $L_2$ có trọng số. Hiện chưa có bằng chứng lý thuyết hay thực nghiệm nào cho thấy tiên nghiệm Gauss tốt hơn các lựa chọn khác. Tuy vậy, các tính chất toán học đã được nghiên cứu kỹ khiến phân phối Gauss trở thành lựa chọn tiên nghiệm mặc định trong BNN.
+
+Có thể nói, tiên nghiệm quan trọng nhất từ góc nhìn của người thực hành là tiên nghiệm được cảm sinh trong không gian hàm, chứ không phải trong không gian tham số hay không gian trọng số, vì tiên nghiệm cảm sinh nhìn ở cấp độ hàm có thể cho thấy hành vi điển hình của các hàm đầu ra. Về các bài tổng quan về tiên nghiệm trong các mô hình học sâu Bayes, xem Arbel và cộng sự, Fortuin, Nalisnick, cũng như [Chương 28](/vi/blog/introduction-to-priors).
+
+### 1.3 Giới hạn độ rộng và độ sâu của BNN và các hệ quả
+
+Mặc dù về mặt tính toán, suy luận trong mạng nơ-ron Bayes chỉ thực hiện được với các mạng hữu hạn, các tính chất thống kê của mạng nơ-ron Bayes thay đổi tùy theo việc xét mạng hữu hạn hay các giới hạn độ rộng vô hạn hoặc độ sâu vô hạn của chúng.
+
+Trong chế độ độ rộng hữu hạn, BNN có một số hữu hạn tham số. Việc tích hợp các nguyên lý suy luận Bayes cho phép chúng biểu diễn độ bất định về hàm đầu ra cần quan tâm bằng cách xét một phân phối trên các tham số của mạng. Cách tiếp cận này rất quan trọng trong những tình huống mà sự quá tự tin (overconfidence) có thể dẫn đến hậu quả nghiêm trọng, chẳng hạn khi nhận diện các bệnh hiếm từ ảnh y khoa hay dự đoán xu hướng thị trường tài chính.
+
+Trong giới hạn độ rộng vô hạn, nhiều BNN thể hiện sự hội tụ về mặt lý thuyết đến quá trình Gauss (Gaussian process, GP), theo nghĩa khi độ rộng của mạng tiến tới vô cùng, phân phối tiên nghiệm trên hàm do một BNN cảm sinh tiến tới phân phối tiên nghiệm của một GP. Góc nhìn độ rộng vô hạn làm sáng tỏ hành vi của mạng nơ-ron ở quy mô lớn, giúp hiểu vì sao các mạng rộng hoạt động tốt trong thực tế, và hỗ trợ việc hiểu và phát triển các kiến trúc mạng và tiên nghiệm có thể tận dụng sự hội tụ này để cải thiện khả năng tổng quát hóa và tính bền vững.
+
+Trong bối cảnh giới hạn độ sâu vô hạn, BNN có thể nắm bắt những hàm ngày càng phức tạp thông qua các kiến trúc sâu hơn. Khi mạng sâu hơn, chúng có tiềm năng mô hình hóa những cấu trúc phân cấp phức tạp trong dữ liệu. Trong chế độ độ sâu vô hạn, các mạng này có thể thể hiện những phép biến đổi đặc trưng đệ quy giống với GP sâu, xem [Chương 25](/vi/blog/deep-gaussian-processes). Điều này mang lại năng lực biểu diễn lớn hơn và khả năng mô hình hóa dữ liệu với những khuôn mẫu phong phú, nhiều tầng. Phân tích lý thuyết trong chế độ này cho thấy những hiện tượng như sự tương tác giữa độ sâu và tính phi tuyến, dẫn đến các hàm trơn hơn và khả năng tổng quát hóa tốt hơn. Tuy nhiên, việc duy trì tính khả thi tính toán và tránh những vấn đề như gradient biến mất trở thành những thách thức thiết yếu. Khảo sát các mạng độ sâu vô hạn giúp hiểu sâu hơn cách mạng nơ-ron có thể nắm bắt và tận dụng hiệu quả những phụ thuộc phức tạp trong dữ liệu.
+
+Hơn nữa, mối quan hệ giữa BNN hữu hạn và các giới hạn vô hạn của chúng cũng đơn giản hóa các phân tích lý thuyết và cung cấp một khuôn khổ để nghiên cứu tác động của các lựa chọn kiến trúc, như độ sâu và hàm kích hoạt, qua lăng kính xác suất. Góc nhìn kép này khiến tiên nghiệm của BNN trở thành một lĩnh vực nghiên cứu phong phú, được khảo sát trong các trang tiếp theo.
+
+### 1.4 Dàn ý
+
+Phần còn lại của chương được tổ chức như sau. Mục 2 nghiên cứu cách tiên nghiệm lan truyền qua mạng nơ-ron nông (với một lớp ẩn duy nhất), cho thấy sự chuyển từ các tiền kích hoạt (pre-activation) dưới Gauss (sub-Gaussian) ở lớp thứ nhất sang các tiền kích hoạt dưới mũ (sub-exponential) ở lớp thứ hai, hiện tượng "không tương quan nhưng phụ thuộc" giữa các đơn vị, và giới hạn quá trình Gauss của mạng nông. Mục 3 phát triển trường hợp mạng sâu, chứng minh các đuôi dưới Weibull (sub-Weibull) với chỉ số tăng theo độ sâu, đưa ra các đặc trưng hóa chính xác bằng hàm G Meijer (Meijer G-function) cho BNN tuyến tính và BNN ReLU, và mở rộng các giới hạn GP (bao gồm các biến thể cho ra quá trình Student-t khi có siêu tiên nghiệm (hyperprior)). Hình 29.1 minh họa dạng sơ đồ nội dung của Mục 2 và Mục 3. Mục 4 so sánh các họ tiên nghiệm rồi trình bày chi tiết hai ví dụ: tiên nghiệm $\alpha$-ổn định (α-stable), vốn giữ được đuôi nặng (heavy tail) ở độ rộng vô hạn qua các giới hạn quá trình ổn định, và tiên nghiệm lớp vết (trace-class), vốn duy trì các đơn vị ẩn khả định danh trong giới hạn độ rộng vô hạn. Mục 5 xem xét cách các giả thiết về hàm kích hoạt (bao mở rộng) và các mô-típ kiến trúc (kết nối phần dư, tích chập và ODE nơ-ron) định hình lại tiên nghiệm trên đơn vị và trên không gian hàm, thường là điều biến hành vi đuôi và các tương quan. Cuối cùng, Mục 6 phân tích cách các tiên nghiệm này tác động lên hậu nghiệm, bao gồm tốc độ co (bao gồm spike-and-slab và các lựa chọn thay thế mở rộng được), sự thích nghi thống kê, giới hạn của các hiện tượng Bernstein–von Mises trong các bối cảnh quá tham số hóa (overparameterized), và mối liên hệ với tiệm cận của GP sâu và các chế độ số chiều cao.
+
+<Figure caption="Hình 29.1: Minh họa dạng sơ đồ nội dung của Mục 2 và Mục 3. Vẽ lại cho trang này.">
+  <Bdl29MaterialMap />
+</Figure>
+
+## 2. Mạng một lớp ẩn
+
+Hiểu phân phối của các đơn vị (tiền kích hoạt và hậu kích hoạt (post-activation) ở mỗi lớp) dưới tiên nghiệm có thể làm sáng tỏ cách thông tin lan truyền trong một mạng chưa được huấn luyện. Đây là trọng tâm của một loạt công trình của Vladimirova và cộng sự. Phát hiện then chốt là phân phối của các đơn vị có đuôi ngày càng nặng ở các lớp sâu hơn khi trọng số có phân phối tiên nghiệm đuôi nhẹ (light-tailed), chẳng hạn tiên nghiệm Gauss.
+
+### 2.1 Đầu ra của lớp ẩn thứ nhất
+
+Gọi $x \in \mathbb{R}^D$ là một vector đầu vào và giả sử các trọng số $\theta$ của mạng nơ-ron tuân theo các phân phối Gauss *i.i.d.* $\mathcal{N}(0, \sigma^2)$, đồng thời tạm giả sử không có tham số độ chệch (bias). Khi đó, tiền kích hoạt của đơn vị ẩn thứ $i$ ở lớp thứ nhất là một tổng có trọng số của các đầu vào:
+
+$$
+g_i^{(1)} = \sum_{j=1}^{D} \theta_{i,j}^{(1)} x_j \sim \mathcal{N}(0, \sigma^2 \|x\|^2),
+\tag{29.2}
+$$
+
+do tính tuyến tính của kỳ vọng và tính độc lập của các trọng số. Kết quả này minh họa một nhận xét then chốt: dưới tiên nghiệm Gauss, đầu vào của hàm phi tuyến ở lớp thứ nhất bản thân nó có phân phối Gauss.
+
+Tuy nhiên, khi một hàm phi tuyến $\phi$ (ví dụ ReLU) được áp dụng để có hậu kích hoạt $h_i^{(1)} = \phi(g_i^{(1)})$, phân phối đầu ra trở nên không Gauss. Chẳng hạn, với ReLU, $h_i^{(1)}$ là một phân phối nửa Gauss (tức một phân phối Gauss bị cắt bên dưới tại không). Phân phối thu được là dưới Gauss, nghĩa là đuôi của nó giảm ít nhất nhanh như đuôi Gauss:
+
+$$
+\mathbb{P}\left(|h_i^{(1)}| > t\right) \leq C \exp(-t^2/K), \quad \text{for any } t \geq 0,
+\tag{29.3}
+$$
+
+với các hằng số $C, K > 0$ nào đó. Tính dưới Gauss này hàm ý rằng ở lớp thứ nhất, tiên nghiệm vẫn giữ đuôi tương đối nhẹ, một tính chất quan trọng định hình tiên nghiệm cảm sinh trên hàm.
+
+Các công trình trước đó cung cấp biểu thức dạng đóng cho hai mô-men (moment) đầu tiên của các đơn vị hậu kích hoạt trong mạng một lớp ẩn với trọng số Gauss. Những đặc trưng hóa mô-men này là cơ sở để chặn hành vi đuôi và sự tăng của phương sai. Tuy nhiên, việc giới hạn ở một lớp ẩn duy nhất hạn chế phân tích của chúng và không nắm bắt được các phép biến đổi phi tuyến tích lũy thấy trong các kiến trúc sâu hơn.
+
+### 2.2 Kết hợp các đầu ra của một mạng nơ-ron một lớp ẩn
+
+Vì đầu ra của lớp ẩn thứ nhất là các phép biến đổi phi tuyến của biến Gauss, chúng không còn là Gauss. Khi chúng được nhân với một tập trọng số Gauss độc lập mới ở lớp thứ hai (xem Hình 29.1), các tiền kích hoạt thu được trở thành tích của các biến dưới Gauss và biến Gauss, tức $g_i^{(2)} = \sum_{j=1}^{H_1} \theta_{i,j}^{(2)} h_j^{(1)}$. Vladimirova và cộng sự chỉ ra rằng các tích như vậy là dưới mũ, với cận đuôi có dạng:
+
+$$
+\mathbb{P}(|g_i^{(2)}| > t) \leq C \exp(-t/K), \quad \text{for any } t \geq 0,
+\tag{29.4}
+$$
+
+với các hằng số $C, K > 0$ nào đó. Hành vi đuôi nặng hơn này đánh dấu sự chuyển từ phân phối dưới Gauss sang phân phối dưới mũ và là một trong những dấu hiệu sớm nhất cho thấy mạng sâu mã hóa những niềm tin có đuôi ngày càng nặng dưới các tiên nghiệm trọng số Gauss tiêu chuẩn.
+
+Các kết quả trên cho các tính chất biên của phân phối tiên nghiệm của các đơn vị ẩn, nhưng phân phối đồng thời của chúng khó đặc trưng hóa hơn vì một mức phụ thuộc nhất định xuất hiện từ lớp ẩn thứ hai, mặc dù các đơn vị trong cùng một lớp không tương quan. Định lý 29.1 hình thức hóa tính chất này, chỉ ra rằng dưới phân phối tiên nghiệm, hai đơn vị bất kỳ của một lớp bất kỳ là không tương quan nếu các tiên nghiệm trọng số độc lập và có tâm tại 0:
+
+**Định lý 29.1** (Sự phụ thuộc giữa các đơn vị ẩn, Vladimirova và cộng sự). *Nếu tiên nghiệm* $p$ *trên các trọng số* $\theta$ *của mạng nơ-ron có tâm, theo nghĩa* $\mathbb{E}_p(\theta) = 0$, *và độc lập (đẳng hướng), thì hai đơn vị bất kỳ của một lớp bất kỳ là không tương quan một cách tiên nghiệm. Ngoài ra, tau Kendall và rho Spearman của chúng bằng không.*
+
+Phần chứng minh được để lại cho người đọc như một bài tập.
+
+Với các mạng có độ rộng hữu hạn, những phân phối phụ thuộc và không Gauss này làm phức tạp việc xử lý bằng giải tích. Riêng các tính chất biên là không đủ để mô tả chính xác, vì không thể đặc trưng hóa tiên nghiệm trong không gian hàm bằng các mô-men đơn giản. Các biểu diễn xấp xỉ, chẳng hạn dùng các tiên nghiệm dưới Weibull, Weibull tổng quát hay dựa trên hàm $G$ Meijer (xem Mục 3), nhằm nắm bắt những tính chất phong phú hơn này ở các dạng xử lý được bằng giải tích.
+
+### 2.3 Giới hạn quá trình Gauss của mạng nơ-ron nông
+
+Như Neal đã chỉ ra, khi số đơn vị ẩn $H_1$ tiến tới vô cùng, tổng của các biến dưới mũ độc lập (hoặc phụ thuộc yếu) với phương sai được co giãn thích hợp hội tụ đến một phân phối Gauss theo định lý giới hạn trung tâm (Central Limit Theorem). Hình 29.2 minh họa giới hạn độ rộng cho cả trường hợp một lớp ẩn (hàng trên) và sự tổng quát hóa của nó cho mạng sâu hơn, Định lý 29.4, của Matthews và cộng sự. Khi đó, tiên nghiệm cảm sinh trên không gian hàm trở thành một quá trình Gauss, với hàm nhân hiệp phương sai được xác định bởi hàm kích hoạt và phương sai của trọng số.
+
+**Định lý 29.2** (Neal). *Xét một mạng nơ-ron Bayes với một lớp ẩn gồm* $H_1$ *nút, và cho mỗi trọng số tuân theo phân phối* $\mathcal{N}(0, 1/H_1)$. *Nếu các hậu kích hoạt có phương sai bị chặn, thì đầu ra của BNN hội tụ đến một quá trình Gauss có trung bình bằng không khi* $H_1$ *tiến tới* $\infty$.
+
+Phần chứng minh được để lại cho người đọc như một bài tập.
+
+<Figure caption="Hình 29.2: Kiểm chứng giới hạn quá trình Gauss của BNN một lớp ẩn (Định lý 29.2) và sự tổng quát hóa của nó cho mạng nơ-ron sâu hơn (Định lý 29.4). Phân phối đồng thời tại hai vị trí cho các BNN có kích thước khác nhau: một lớp ẩn (hàng trên) và ba lớp ẩn (hàng dưới) với 2 (cột trái), 5 (cột giữa) và 1000 (cột phải) nút ẩn mỗi lớp. Đồ thị ước lượng mật độ hàm nhân (kernel density estimate) được vẽ cho các phân phối tương ứng dựa trên 10 000 mẫu. Bản tái hiện dạng sơ đồ: mỗi khung cho thấy 600 mẫu rút từ tiên nghiệm của một mạng ReLU (phương sai trọng số 1.4 chia cho độ rộng của lớp đi vào, phương sai độ chệch 1) tại hai đầu vào có chuẩn đơn vị với cosin 0.3; các khung 1000 đơn vị được rút từ giới hạn quá trình Gauss, và các đường đồng mức của ước lượng mật độ hàm nhân không được vẽ.">
+  <Bdl29GpLimit />
+</Figure>
+
+## 3. Mạng nơ-ron sâu
+
+Như Mục 2 đã chỉ ra, một mức phụ thuộc nhất định giữa các đơn vị ẩn xuất hiện từ lớp ẩn thứ hai, mặc dù các đơn vị trong cùng một lớp không tương quan. Vì vậy, như mục trước cũng đã cho thấy với hai lớp ẩn, phân phối biên của các đơn vị ẩn ở lớp thứ $l$ khó đặc trưng hóa. Vladimirova và cộng sự mô tả tiên nghiệm của các đơn vị qua các phân phối dưới Weibull và phân phối có đuôi Weibull trên các đơn vị, dựa trên đặc trưng hóa sự phụ thuộc giữa các đơn vị ẩn. Noci và cộng sự, Zavatone-Veth và cộng sự đưa ra một mô tả chính xác về phân phối tiên nghiệm của các đơn vị ẩn cho cả BNN tuyến tính lẫn BNN ReLU. Một hệ quả của các công trình này là tiên nghiệm của tiền kích hoạt có tính xuyên tâm (radial). Cụ thể hơn, nếu $\boldsymbol{g}$ ký hiệu các tiền kích hoạt của một lớp nào đó, thì tiên nghiệm $p(\boldsymbol{g})$ có thể viết dưới dạng $p(\|\boldsymbol{g}\|)$. Tính chất này cho phép thu được các biểu thức chính xác cho tiên nghiệm của các đơn vị ẩn theo cái gọi là các hàm $G$ Meijer, bằng cách khai thác mối quan hệ giữa biến đổi Fourier của các hàm xuyên tâm và biến đổi Hankel.
+
+### 3.1 Đặc trưng hóa dưới Weibull
+
+Phân phối của các đơn vị ẩn có thể được đặc trưng hóa là các phân phối dưới Weibull, một sự tổng quát hóa của các đặc trưng hóa dưới Gauss và dưới mũ. Để mô tả kết quả này, trước hết hãy bắt đầu với định nghĩa hình thức của một biến ngẫu nhiên dưới Weibull:
+
+**Định nghĩa 29.1** (Biến ngẫu nhiên dưới Weibull, Vladimirova và cộng sự). *Một biến ngẫu nhiên* $X$ *thỏa mãn, với mọi* $t > 0$ *và với các* $C, \eta > 0$ *nào đó,*
+
+$$
+\mathbb{P}(|X| \geq t) \leq C \exp\left(-t^{1/\eta}\right),
+\tag{29.5}
+$$
+
+*được gọi là một biến ngẫu nhiên dưới Weibull với tham số đuôi* $\eta$, *ký hiệu là* $X \sim \mathrm{subW}(\eta)$.
+
+Các phân phối dưới Weibull được đặc trưng bởi đuôi nhẹ hơn (hoặc nhẹ bằng) đuôi của phân phối Weibull; tương tự như cách các phân phối dưới Gauss hay dưới mũ lần lượt ứng với các phân phối có đuôi nhẹ hơn phân phối Gauss và phân phối mũ. Các phân phối dưới Weibull được tham số hóa bởi một chỉ số đuôi dương $\eta$, và tương đương với dưới Gauss khi $\eta = 1/2$ và dưới mũ khi $\eta = 1$.
+
+Với một giả thiết nhẹ về hàm kích hoạt, cụ thể là hàm này tăng xấp xỉ tuyến tính khi $x$ tiến ra vô cùng, một khái niệm được làm chính xác trong Định nghĩa 29.2 ở Mục 5.1, định lý sau đây đúng.
+
+**Định lý 29.3** (Định lý 3.1, Vladimirova và cộng sự). *Xét một mạng nơ-ron Bayes với* $L - 1$ *lớp ẩn, tiên nghiệm Gauss có tâm và hàm kích hoạt thỏa mãn tính chất bao mở rộng của Định nghĩa 29.2. Khi đó, với điều kiện là đầu vào* $x$, *phân phối tiên nghiệm biên trên một đơn vị bất kỳ (tiền kích hoạt hoặc hậu kích hoạt) của lớp ẩn thứ* $l$ *là dưới Weibull với tham số đuôi* $\eta = l/2$. *Nghĩa là với mọi* $1 \leq l \leq L$ *và với mọi* $1 \leq m \leq H_l$,
+
+$$
+u_m^{(l)} \sim \mathrm{subW}(l/2),
+$$
+
+*trong đó* $u_m^{(l)}$ *là một tiền kích hoạt* $g_m^{(l)}$ *hoặc một hậu kích hoạt* $h_m^{(l)}$.
+
+Như vậy, dưới những điều kiện nhất định về hàm kích hoạt (về cơ bản là hàm này giống ReLU và không bị chặn trên), một tiên nghiệm Gauss trên trọng số cảm sinh một phân phối $\text{dưới Weibull}(l/2)$ trên các đơn vị của lớp thứ $l$, trong đó tham số đuôi $l/2$ tăng theo $l$ (tham số đuôi lớn hơn nghĩa là đuôi nặng hơn). Chẳng hạn, lớp thứ nhất là Gauss, lớp thứ hai là dưới mũ. Trực giác đằng sau là như sau: nhân nhiều ma trận ngẫu nhiên (kể cả khi mỗi ma trận có những tính chất tốt) có xu hướng tạo ra các đầu ra bị chi phối bởi một vài số hạng ngẫu nhiên lớn (do ReLU cho các tổng dương lớn đi qua), từ đó sinh ra đuôi nặng hơn. Một hệ quả thực tế là phân phối dự đoán tiên nghiệm của một BNN sâu có thể có độ nhọn (kurtosis) cao: phần lớn thời gian các đầu ra trông vừa phải, nhưng thỉnh thoảng chúng có thể có độ lớn rất lớn do một tổ hợp hiếm gặp của các trọng số lớn và các hàm phi tuyến củng cố lẫn nhau. Đây là một dạng niềm tin tiên nghiệm: cụ thể, một tiên nghiệm mạng ngẫu nhiên sâu tin rằng các giá trị kích hoạt cực đoan, tuy hiếm, vẫn có khả năng xảy ra cao hơn so với một niềm tin Gauss. Đó là một sự khác biệt so với GP độ rộng vô hạn, vốn dự đoán phân phối đầu ra là Gauss (không có độ nhọn dư).
+
+<Figure caption="Hình 29.3: Kiểm chứng phân phối của nút. Các đồ thị cho thấy hành vi đuôi của một nút sau 1 lớp (trái), 3 lớp (giữa) và 10 lớp (phải); cả hàm sống sót (survival function) thực nghiệm (đường liền) lẫn đuôi Weibull lý thuyết (đường đứt nét) đều được vẽ. Bản tái hiện dạng sơ đồ: các đường cong liền là hàm sống sót của một đơn vị đi sau 1, 3 và 10 lớp ReLU độ rộng 4 với trọng số Gauss chuẩn, được tính từ 12 000 mẫu rút từ tiên nghiệm và co giãn lại theo phạm vi của các đồ thị gốc; các đuôi Weibull chấm chấm được vẽ thành các đường thẳng trên trục logarit giữa các điểm đầu mút đọc từ các đồ thị gốc.">
+  <Bdl29TailBehavior />
+</Figure>
+
+### 3.2 Đặc trưng hóa bằng hàm G Meijer
+
+Mục này giới thiệu một đặc trưng hóa chính xác cho tiên nghiệm của các đơn vị ẩn do Noci và cộng sự, Zavatone-Veth và Pehlevan đề xuất thông qua cái gọi là các hàm $G$ Meijer. Đây là những hàm đặc biệt rất tổng quát, bao gồm nhiều hàm kinh điển (kể cả hàm siêu bội và hàm Bessel) như những trường hợp đặc biệt. Chúng đặc biệt hữu ích vì tích của các biến ngẫu nhiên độc lập thường có mật độ dạng đóng biểu diễn qua các hàm $G$ Meijer, Springer và Thompson. Mặc dù những hàm đặc biệt này không thường gặp trong học máy, chúng cho một cách biểu diễn gọn những mật độ vốn không tính được, và cho phép suy ra các tính chất giải tích như mô-men, hành vi đuôi và các khai triển tiệm cận.
+
+Với tính chất này, Zavatone-Veth và Pehlevan và Noci và cộng sự đã độc lập suy ra mật độ của tiên nghiệm đồng thời của lớp thứ $L$, $\mathbf{h}_L$, của một mạng nơ-ron Bayes tuyến tính với tiên nghiệm Gauss, với các độ rộng $H_1, \dots, H_L$, như sau
+
+$$
+p_L^{\mathrm{lin}}(\mathbf{h}_L \mid x) = \frac{\gamma_L}{(2^L \pi \kappa_L^2)^{H_L/2}} \, G_{0,L}^{L,0}\left( \frac{\|\mathbf{h}_L\|^2}{2^L \kappa_L^2} \,\middle|\, \begin{matrix} - \\ 0, (H_1 - H_L)/2, \dots, (H_{L-1} - H_L)/2 \end{matrix} \right),
+\tag{29.6}
+$$
+
+trong đó
+
+$$
+\kappa_L \equiv \sigma_1 \cdots \sigma_L \|x\| \quad \text{and} \quad \gamma_L \equiv \prod_{l=1}^{L-1} \frac{1}{\Gamma(H_l/2)}.
+\tag{29.7}
+$$
+
+Ở đây, $z \mapsto G_{0,L}^{L,0}\left( z \,\middle|\, \begin{smallmatrix} - \\ 0, (H_1 - H_L)/2, \dots, (H_{L-1} - H_L)/2 \end{smallmatrix} \right)$ ký hiệu một hàm $G$ Meijer với các tham số do Zavatone-Veth và Pehlevan xác định. Tương tự, các tác giả chỉ ra rằng mật độ của một mạng nơ-ron Bayes ReLU có dạng hỗn hợp sau
+
+$$
+\begin{aligned}
+p_L^{\mathrm{ReLU}}(\mathbf{h}_L \mid x) = {} & \left(1 - \frac{(2^{H_1} - 1)(2^{H_2} - 1) \cdots (2^{H_{L-1}} - 1)}{2^{H_1 + \cdots + H_{L-1}}}\right) \delta(\mathbf{h}_L) \\
+& + \frac{1}{2^{H_1 + \cdots + H_{L-1}}} \sum_{k_1 = 1}^{H_1} \cdots \sum_{k_{L-1} = 1}^{H_{L-1}} \binom{H_1}{k_1} \cdots \binom{H_{L-1}}{k_{L-1}} p_L^{\mathrm{lin}}(\mathbf{h}_L \mid x; k_1, \dots, k_{L-1}, H_L),
+\end{aligned}
+\tag{29.8}
+$$
+
+trong đó $\delta(\mathbf{h}_L)$ là phân phối Dirac $H_L$ chiều, và $p_L^{\mathrm{lin}}(\mathbf{h}_L \mid x; k_1, \dots, k_{L-1}, H_L)$ ký hiệu phân phối của BNN tuyến tính ở Phương trình (29.6) với các độ rộng lớp ẩn được chỉ định là $(k_1, \dots, k_{L-1}, H_L)$. Dùng những biểu diễn chính xác này, Zavatone-Veth và Pehlevan suy ra các biểu thức dạng đóng cho mô-men, thiết lập các cận đuôi và đặc trưng hóa hành vi tiệm cận của tiên nghiệm ở các lớp sâu. Những kết quả này cho thấy về mặt lý thuyết cách độ sâu và độ rộng định hình các phân phối do tiên nghiệm của mạng nơ-ron Bayes cảm sinh.
+
+### 3.3 Giới hạn quá trình Gauss của mạng nơ-ron sâu
+
+Kết quả nền tảng 29.2 đã được de G. Matthews và cộng sự tổng quát hóa cho nhiều hơn một lớp; kết quả này được nhắc lại ở đây.
+
+**Định lý 29.4** (Định lý 4, de G. Matthews và cộng sự). *Xét một mạng nơ-ron Bayes với hàm kích hoạt liên tục thỏa mãn tính chất bao mở rộng của Định nghĩa 29.2. Cho mỗi trọng số của lớp thứ* $l$ *tuân theo một cách độc lập phân phối* $\mathcal{N}(0, \sigma^2/H_l)$. *Khi đó, đầu ra của mạng hội tụ theo phân phối đến một quá trình Gauss có trung bình bằng không khi tất cả các độ rộng lớp* $H_1, \dots, H_L$ *đồng thời tiến tới* $\infty$.
+
+Định lý này là động lực để dùng BNN trong những bối cảnh mà tiên nghiệm trong không gian hàm được giả định là một quá trình Gauss. Cách tiếp cận này mang lại lợi thế tính toán trong những bối cảnh mà số lượng lớn các điểm định giá khiến việc thao tác trực tiếp với ma trận hàm nhân của GP trở nên bất khả thi, xem thêm [Chương 26](/vi/blog/deep-kernel-processes-and-machines).
+
+Định lý trên hấp dẫn ở tính tổng quát, nhưng không cho biểu thức tường minh của hàm trung bình và hàm nhân hiệp phương sai của GP thu được. Với những lựa chọn cụ thể của hàm kích hoạt và kiến trúc mạng, có thể thu được tường minh hàm trung bình và hàm nhân hiệp phương sai của GP thu được, xem ví dụ Dutordoir và cộng sự, Yang và Salman. Người thực hành cũng có thể quan tâm đến tình huống ngược lại, trong đó mục tiêu là xây dựng một tiên nghiệm BNN dựa trên một GP mục tiêu trên không gian hàm đầu ra; một cách xây dựng như vậy là tiên nghiệm Ridgelet (Ridgelet prior) của Matsubara và cộng sự, cho ra một tiên nghiệm được chứng minh là hội tụ đến GP mong muốn khi độ rộng lớp tiến tới vô cùng.
+
+Đáng chú ý là Định lý 29.4 đòi hỏi phương sai của tiên nghiệm được co giãn đúng tỉ lệ với $\sigma^2/H_l$ với một hằng số $\sigma^2$ *cố định*. Thay vào đó, có thể đặt một siêu tiên nghiệm lên $\sigma^2$; bối cảnh này đã được Caporali và cộng sự nghiên cứu, cho thấy phân phối hậu nghiệm thu được hội tụ đến một quá trình Student-t (Student-t process), như được phát biểu chính xác trong định lý sau.
+
+**Định lý 29.5** (Hệ quả 3.8, Caporali và cộng sự). *Phân phối hậu nghiệm của một BNN có đầu ra một chiều* ($H_L = 1$) *với tiên nghiệm Gauss–Gamma nghịch đảo (Gaussian-Inverse-Gamma) và hàm hợp lý Gauss, được tính tại đầu vào* $x$, *hội tụ theo phân phối đến một biến Student-t nhiều chiều khi tất cả các độ rộng lớp* $H_1, \dots, H_{L-1}$ *đồng thời tiến tới* $\infty$.
+
+## 4. Các tiên nghiệm khác nhau
+
+Một số tiên nghiệm đã được giới thiệu ở [Chương 28](/vi/blog/introduction-to-priors): các tiên nghiệm có thông tin như tiên nghiệm spike-and-slab, vốn nhúng tri thức chuyên gia; các tiên nghiệm không thông tin và tiên nghiệm tham chiếu (reference prior), nhằm giảm thiểu ảnh hưởng chủ quan; các tiên nghiệm Gauss cho chính quy hóa $L_2$, kiểm soát độ phức tạp của mô hình qua phương sai; các tiên nghiệm tạo tính thưa (sparsity-inducing prior) như phân phối Laplace, hỗn hợp co giãn (scale mixture) và horseshoe, khuyến khích các mô hình đơn giản hơn; và các tiên nghiệm mô hình, cho phép lựa chọn và lấy trung bình mô hình Bayes thông qua các cơ chế đưa trọng số vào một cách có cấu trúc. Các tính chất của tiên nghiệm spike-and-slab và vai trò của nó đối với tốc độ co của hậu nghiệm được trình bày chi tiết ở Mục 6.2, theo công trình của Jantre và cộng sự, Polson và Ročková. Hai lớp tiên nghiệm được trình bày chi tiết hơn trong phần còn lại của mục: tiên nghiệm $\alpha$-ổn định và tiên nghiệm lớp vết.
+
+### 4.1 Tiên nghiệm α-ổn định
+
+Họ tiên nghiệm $\alpha$-ổn định đã được Neal nhắc đến như những ứng viên để tránh giới hạn quá trình Gauss gắn với các mạng nơ-ron rộng. Phân phối $\alpha$-ổn định được đặc trưng bởi một tham số ổn định $\alpha \in (0, 2]$, tham số này kiểm soát hành vi đuôi và sự tồn tại của các mô-men. Các phân phối này được định nghĩa qua hàm đặc trưng của chúng, vì chúng thường không có mật độ dạng đóng (trừ các trường hợp đặc biệt như phân phối Gauss, Cauchy và Lévy). Với một biến ngẫu nhiên $\alpha$-ổn định đối xứng, có tâm $X$, hàm đặc trưng là:
+
+$$
+t \mapsto \mathbb{E}[e^{itX}] = \exp(-\sigma^\alpha |t|^\alpha),
+\tag{29.9}
+$$
+
+trong đó $\sigma > 0$ là tham số co giãn (scale parameter). Khi $\alpha = 2$, phân phối này trở thành phân phối Gauss. Khi $\alpha < 2$, phân phối có đuôi nặng và phương sai vô hạn.
+
+Một công trình liên quan mở rộng giới hạn quá trình Gauss kinh điển của mạng nơ-ron sâu bằng cách thay trọng số Gauss bằng các phân phối ổn định đối xứng. Các tác giả chỉ ra rằng, với cách co giãn thích hợp, đầu ra của các DNN kết nối đầy đủ hội tụ theo phân phối đến một quá trình ngẫu nhiên có các phân phối biên hữu hạn chiều là các phân phối ổn định nhiều chiều. Quá trình ổn định này tổng quát hóa giới hạn GP được phát biểu ở Định lý 29.2 và Định lý 29.4, đồng thời bảo toàn hành vi đuôi nặng trong giới hạn độ rộng vô hạn. Các tham số của phân phối giới hạn được xác định đệ quy qua các lớp, và sự hội tụ được thiết lập đồng thời theo đầu vào và theo lớp. Favaro và cộng sự mở rộng các kết quả này bằng cách thiết lập tốc độ hội tụ theo chuẩn sup dưới cả hai kiểu tăng độ rộng lớp đồng thời và tuần tự, và hình thức hóa đặc trưng hóa đệ quy của độ đo phổ (spectral measure) xác định quá trình giới hạn.
+
+### 4.2 Tiên nghiệm lớp vết
+
+Mặc dù thoạt nhìn giới hạn độ rộng vô hạn của một BNN tiêu chuẩn có vẻ hấp dẫn, nó dẫn đến những tác dụng phụ đáng tiếc mà Neal đã ghi nhận khi thảo luận công trình của mình: *“Các mạng vô hạn được rút từ những tiên nghiệm này không có các đơn vị ẩn biểu diễn ‘đặc trưng ẩn’ của đầu vào. Khả năng tìm ra những đặc trưng ẩn như vậy thường được coi là một khía cạnh thú vị của việc học trong mạng nơ-ron.”* Một lựa chọn thay thế cho việc co giãn đồng đều các phương sai tiên nghiệm là tiên nghiệm BNN lớp vết, vốn giữ lại các đơn vị ẩn trong giới hạn độ rộng vô hạn, và hỗ trợ tính khả định danh (identifiability) vì mỗi trọng số có một phương sai riêng. Tiên nghiệm BNN lớp vết trên các tham số $\theta$ gồm các trọng số $w_{i,j}^{(l)}$ và các độ chệch $b_i^{(l)}$ được cho bởi các phân phối Gauss độc lập sau
+
+$$
+w_{i,j}^{(1)} \sim \mathcal{N}\left(0, \frac{\sigma_{w^{(1)}}^2}{i^\alpha}\right), \quad w_{i,j}^{(l)} \sim \mathcal{N}\left(0, \frac{\sigma_{w^{(l)}}^2}{(ij)^\alpha}\right) \text{ for } l \geq 2, \quad b_i^{(l)} \sim \mathcal{N}\left(0, \frac{\sigma_{b^{(l)}}^2}{i^\alpha}\right),
+\tag{29.10}
+$$
+
+trong đó $\alpha > 0$, $\sigma_{w^{(l)}}^2 > 0$ và $\sigma_{b^{(l)}}^2 > 0$ là các tham số liên quan đến phương sai cần được chỉ định.
+
+Theo Sell và Singh, giới hạn độ rộng vô hạn của mạng được định nghĩa như sau. Cho trước một dãy vô hạn các trọng số và độ chệch của lớp thứ nhất, phân phối theo tiên nghiệm của Phương trình (29.10), tức $\left\{ \left(b_i^{(1)}, w_{i,1}^{(1)}, \dots, w_{i,D}^{(1)}\right) : i \in \mathbb{N} \right\}$, tất cả các hàm của lớp thứ nhất, $\{g_i^{(1)} : i \in \mathbb{N}\}$, hiển nhiên được xác định tốt. Định nghĩa tất cả các hàm của lớp thứ hai ứng với một lớp thứ nhất có độ rộng vô hạn là các giới hạn hầu chắc chắn sau, với giả định rằng chúng tồn tại:
+
+$$
+G_i^{(2)}(x) = \lim_{H_1 \to \infty} b_i^{(2)} + \sum_{j=1}^{H_1} w_{i,j}^{(2)} \phi(g_j^{(1)}(x)).
+\tag{29.11}
+$$
+
+Giả sử các hàm ngẫu nhiên $\{G_i^{(2)} : i \in \mathbb{N}\}$ được xác định tốt, điều sẽ đúng nếu $\alpha > 1/2$ như được chỉ ra ở Định lý 29.6, thì tiến hành lặp lại, tất cả các hàm $\{G_i^{(l)} : i \in \mathbb{N}\}$ của các lớp tiếp theo, $l = 3, \dots, L$, cũng được xác định tốt. Các hàm ở mỗi lớp của một mạng độ rộng hữu hạn được ký hiệu bằng chữ thường để phân biệt rõ với các phiên bản độ rộng vô hạn của chúng. Với lớp đầu ra, mạng hữu hạn cho $g^{(L)}(x)$, còn mạng vô hạn cho $G^{(L)}(x)$.
+
+Có thể định nghĩa một tiên nghiệm lớp vết không có tâm, nhưng điều này đòi hỏi các tham số trung bình khả tổng một cách thích hợp. Các tham số $\sigma$ là tham số co giãn tổng thể cho phương sai của tiên nghiệm, còn $\alpha$ kiểm soát sự suy giảm của trọng số theo độ rộng: giá trị lớn cho các trọng số suy giảm nhanh trong mỗi lớp, còn giá trị nhỏ cho sự suy giảm chậm hơn. Ràng buộc $\alpha > 1/2$ bảo đảm tiên nghiệm được xác định tốt trong giới hạn độ rộng vô hạn, như được chỉ ra trong định lý dưới đây.
+
+**Định lý 29.6** (Sell và Singh). *Giả sử hàm kích hoạt* $\phi$ *là 1-Lipschitz và thỏa mãn* $\phi(0) = 0$. *Cho* $L \in \mathbb{N}$ *và* $\alpha > 0$. *Cố định thêm* $\sigma_{w^{(l)}}^2 > 0$ *và* $\sigma_{b^{(l)}}^2 > 0$ *cho mỗi* $l \in [L]$. *Khi đó, các hàm của các lớp của mạng nơ-ron* độ rộng hữu hạn *thỏa mãn*
+
+1. *Với mọi* $x \in [0, 1]^D$ *thì* $|g_i^{(l)}(x)| < \infty$ *hầu chắc chắn, và* $\mathbb{E}\left[g_i^{(l)}(x)\right] = 0$. *Hơn nữa, tồn tại* $\sigma_l^2$ *sao cho* $\mathbb{E}\left[(g_i^{(l)}(x))^2\right] < \sigma_l^2/i^\alpha$ *với mọi* $x \in [0, 1]^D$. *Ở đây, cả hai kỳ vọng đều được lấy theo tiên nghiệm trên các tham số* $\theta$ *của mạng nơ-ron. Đặc biệt, tính chất này đúng với* $g_1^{(L)}(x)$.
+2. *Tồn tại* $c_l \geq 0$ *sao cho với mọi* $x_1, x_2 \in [0, 1]^D$, $\mathbb{E}\left[\left(g_i^{(l)}(x_1) - g_i^{(l)}(x_2)\right)^2\right] \leq c_l \|x_1 - x_2\|^2/i^\alpha$, *trong đó kỳ vọng cũng được lấy theo tiên nghiệm. Đặc biệt, điều này cho* $\mathbb{E}\left[\left(g_1^{(L)}(x_1) - g_1^{(L)}(x_2)\right)^2\right] \leq c_L \|x_1 - x_2\|^2$.
+
+*Ngoài ra, nếu* $\alpha > 1/2$, *các hàm trên mọi lớp của mạng nơ-ron độ rộng vô hạn, xem Phương trình (29.11), tồn tại hầu chắc chắn và thỏa mãn Tính chất 1 và 2 ở trên, khi các hàm* $g_i^{(l)}(x)$ *trong đó được thay bằng* $G_i^{(l)}(x)$ *như được định nghĩa ở Phương trình (29.11).*
+
+Tiên nghiệm lớp vết hấp dẫn nhờ khả năng diễn giải các hàm trên các lớp ẩn cuối, vốn không hội tụ về 0 khi xét giới hạn độ rộng vô hạn. Nó còn cải thiện tính khả định danh của mô hình, vì hoán đổi các nút làm thay đổi xác suất tiên nghiệm của mạng thu được. Thứ tự tự nhiên của các trọng số tương ứng khiến tiên nghiệm lớp vết trở thành một lựa chọn hiển nhiên cho suy luận một phần hay suy luận trên mạng con, cũng như một tiên nghiệm giá trị cho Monte Carlo đa mức (multilevel Monte Carlo), xem [Chương 4](/vi/blog/sequential-monte-carlo-samplers). Các siêu tham số có thể do người dùng chọn, hoặc được suy luận bằng cách đặt một siêu tiên nghiệm lên mỗi siêu tham số.
+
+## 5. Các kiến trúc khác nhau
+
+### 5.1 Các hàm kích hoạt khác nhau
+
+Như đã mô tả ở các mục trước, sự lan truyền xuôi của tiên nghiệm trên trọng số cảm sinh các phân phối có đuôi ngày càng nặng trên các đơn vị. Mục này xem xét cách những tính chất này tương tác với các hàm kích hoạt khác nhau. Với mục đích đó, hàm kích hoạt $\phi$ được yêu cầu trải trên ít nhất một nửa trục số thực như sau. Một phiên bản mở rộng của giả thiết về hàm kích hoạt của Matthews và cộng sự được đưa ra:
+
+**Định nghĩa 29.2** (Tính chất bao mở rộng, Vladimirova và cộng sự). *Một hàm kích hoạt* $\phi : \mathbb{R} \to \mathbb{R}$ *được gọi là thỏa mãn* tính chất bao mở rộng (extended envelope property) *nếu tồn tại* $c_1, c_2 \geq 0$, $d_1, d_2 > 0$ *sao cho các bất đẳng thức sau đúng*
+
+$$
+|\phi(u)| \geq c_1 + d_1 |u| \quad \text{for all } u \in \mathbb{R}_+ \text{ or } u \in \mathbb{R}_-,
+\tag{29.12}
+$$
+
+$$
+|\phi(u)| \leq c_2 + d_2 |u| \quad \text{for all } u \in \mathbb{R}.
+\tag{29.13}
+$$
+
+Ý nghĩa của tính chất này là $\phi$ phải tiến ra vô cùng ít nhất theo một hướng ($\mathbb{R}_+$ hoặc $\mathbb{R}_-$), ít nhất là tuyến tính (29.12), đồng thời nhiều nhất là tuyến tính (29.13). Dĩ nhiên, các hàm kích hoạt có giá compact như sigmoid và tanh không thỏa mãn tính chất bao mở rộng, nhưng phần lớn các hàm kích hoạt khác thì thỏa mãn, bao gồm ReLU, ELU, PReLU và SeLU.
+
+### 5.2 Các loại lớp khác nhau
+
+Mặc dù các mạng kết nối đầy đủ là trọng tâm của phần lớn phân tích ở trên, các kiến trúc hiện đại thường kết hợp những đổi mới về cấu trúc như kết nối phần dư (residual connection), lớp tích chập và mô hình độ sâu liên tục. Những thay đổi này ảnh hưởng đáng kể đến tiên nghiệm và hành vi trong không gian hàm mà nó cảm sinh.
+
+**Lớp phần dư.** Kết nối phần dư, như được giới thiệu trong ResNet, có thể được xem là đưa vào một ánh xạ đồng nhất bên cạnh phép biến đổi được học. Một cách hình thức, tiền kích hoạt ở lớp $l$, $g^{(l)}$, có thể viết là:
+
+$$
+g^{(l)} = g^{(l-1)} + r^{(l)}(g^{(l-1)}; \theta^{(l)}),
+\tag{29.14}
+$$
+
+với một ánh xạ $r^{(l)}$ nào đó. Dưới cách xử lý Bayes, mỗi khối phần dư đóng góp một nhiễu loạn ngẫu nhiên vào đầu vào của lớp tiếp theo. Điều này thay đổi tiên nghiệm bằng cách cảm sinh một cấu trúc bước ngẫu nhiên (random walk) trên các hàm, dẫn đến sự chuyển tiếp trơn hơn giữa các lớp. Kiến trúc phần dư làm phương sai tăng theo độ sâu chậm hơn so với các kiến trúc truyền thẳng tiêu chuẩn, và có thể kìm hãm hành vi đuôi nặng.
+
+**Lớp tích chập.** Mạng tích chập áp dụng các bộ lọc dùng chung trên các vị trí không gian. Gọi $\theta^{(l)}$ là một nhân tích chập (convolutional kernel) và $*$ ký hiệu toán tử tích chập. Khi đó, tiền kích hoạt ở lớp $l$, $g^{(l)}$, được cho bởi:
+
+$$
+g^{(l)} = \theta^{(l)} * h^{(l-1)} + b^{(l)},
+\tag{29.15}
+$$
+
+trong đó $h^{(l-1)}$ ký hiệu hậu kích hoạt ở lớp $l - 1$. Do việc dùng chung trọng số và các trường tiếp nhận (receptive field) cục bộ, tiên nghiệm cảm sinh trong không gian hàm có các tương quan không gian và các tính bất biến mạnh. Cấu trúc này làm giảm đáng kể số tham số tự do và thường cảm sinh các tiên nghiệm trơn hơn và thích nghi với dữ liệu tốt hơn, có thể vượt trội so với các GP độ rộng vô hạn tương ứng hay hàm nhân tiếp tuyến nơ-ron (neural tangent kernel, NTK) trong các bối cảnh thực tế.
+
+**ODE nơ-ron.** ODE nơ-ron (neural ODE, phương trình vi phân thường nơ-ron) tổng quát hóa các mạng có độ sâu rời rạc bằng cách xét một sự tiến triển liên tục của các trạng thái ẩn. Với một trạng thái ẩn $h(t)$ và một trường vector được tham số hóa $v(h, t; \theta)$, động lực học được chi phối bởi:
+
+$$
+\frac{dh(t)}{dt} = v(h(t), t; \theta), \quad h(0) = x.
+\tag{29.16}
+$$
+
+Đầu ra của mạng khi đó thu được bằng cách giải bài toán giá trị ban đầu trên một khoảng $[0, T]$ nào đó. Tiên nghiệm cảm sinh trên hàm phát sinh từ phân phối trên $\theta$:
+
+$$
+h(T) = x + \int_0^T v(h(t), t; \theta) \, dt.
+\tag{29.17}
+$$
+
+Nếu $v$ tuyến tính theo $h$ và $\theta \sim \mathcal{N}(0, I)$, thì $h(t)$ hành xử tương tự một quá trình Gauss theo thời gian. Tổng quát hơn, tiên nghiệm là ngầm định và có thể xem như một quá trình ngẫu nhiên trong không gian hàm, chịu ảnh hưởng của bộ giải ODE và phương pháp tích phân. Cách phát biểu thời gian liên tục cho phép tính toán thích nghi và chuyển tiếp trơn hơn, nhưng làm phức tạp việc phân tích phân phối dự đoán tiên nghiệm, vì các biểu thức mật độ dạng đóng nói chung không có.
+
+Trong thực tế, các kiến trúc hiện đại thường kết hợp nhiều mô-típ cấu trúc, ví dụ các kết nối phần dư được nhúng trong các lớp tích chập hoặc các khối ODE được dùng trong các mô hình chuỗi. Điều này dẫn đến những tiên nghiệm phân cấp phức tạp, khó đặc trưng hóa bằng giải tích đơn giản. Những thiết kế lai này càng nhấn mạnh vai trò của các lựa chọn kiến trúc trong việc định hình tiên nghiệm trên các đơn vị.
+
+## 6. Ảnh hưởng của tiên nghiệm lên hậu nghiệm
+
+### 6.1 Tiệm cận Bayes
+
+Lĩnh vực tiệm cận Bayes (Bayesian asymptotics) tập trung vào hành vi của phân phối hậu nghiệm $p(\theta \mid \mathcal{D}^n)$ khi cỡ mẫu $n$ của dữ liệu $\mathcal{D} = \mathcal{D}^n$ tiến tới vô cùng. Trong những bối cảnh mà một quá trình sinh dữ liệu thật, được đặc trưng bởi một tham số thật $\theta_0$, được giả định là tồn tại, lĩnh vực tiệm cận Bayes nhằm thiết lập các bảo đảm sau: *tính vững của hậu nghiệm* (posterior consistency) tại $\theta_0$ nghĩa là $p(U^c \mid \mathcal{D}^n) \to 0$ khi $n \to \infty$ theo xác suất $P_{\theta_0}$ với mọi lân cận $U$ của $\theta_0$, tức $p(\theta \mid \mathcal{D}^n)$ tập trung vào $\theta_0$ thật; *tốc độ co* (contraction rate) mô tả $p(\theta \mid \mathcal{D}^n)$ tập trung quanh $\theta_0$ nhanh đến mức nào, tức các lân cận $U$ có thể co lại theo $n$ nhanh đến mức nào; *các định lý Bernstein–von Mises (BvM)* là những dạng định lý giới hạn trung tâm phát biểu rằng, dưới các điều kiện chính quy, $p(\theta \mid \mathcal{D}^n)$ hội tụ đến một phân phối Gauss có tâm tại ước lượng hợp lý cực đại $\hat{\theta}^{\mathrm{MLE}}$, với hiệp phương sai là nghịch đảo của thông tin Fisher.
+
+Mạng nơ-ron Bayes cho phép đặt các phân phối tiên nghiệm lên trọng số của mạng và thực hiện suy luận qua phân phối hậu nghiệm thu được. Hiểu tác động của tiên nghiệm lên hành vi tiệm cận của hậu nghiệm là điều cốt yếu để thiết lập các bảo đảm lý thuyết và thu hẹp khoảng cách giữa học Bayes và đối tác theo trường phái tần suất của nó. Mục này trình bày tổng quan lý thuyết tiệm cận của BNN, tập trung vào ba khía cạnh chính: tốc độ co, sự thích nghi và các định lý Bernstein–von Mises. Nhiều kết quả dưới đây dựa trên các giả thiết chính quy. Các kết quả tương ứng cho mô hình kỳ dị, vốn thường xuất hiện trong học sâu Bayes, được thảo luận ở Chương 52 về lý thuyết học kỳ dị (Singular Learning Theory).
+
+### 6.2 Tốc độ co của hậu nghiệm
+
+Trước khi phát biểu kết quả chính về sự tập trung của hậu nghiệm cho mạng ReLU thưa với tiên nghiệm spike-and-slab, các ký hiệu cần thiết được giới thiệu. Gọi $f_0$ là hàm hồi quy thật chưa biết xác định trên $[0, 1]^D$, được giả định thuộc một lớp Hölder với độ trơn $\alpha > 0$. Dữ liệu $(Y_i, x_i)$ được quan sát, trong đó
+
+$$
+Y_i = f_0(x_i) + \varepsilon_i, \quad \varepsilon_i \sim \mathcal{N}(0, 1), \quad i = 1, \dots, n,
+$$
+
+việc giới hạn ở nhiễu $\mathcal{N}(0, 1)$ là để đơn giản. Một tiên nghiệm mạng nơ-ron Bayes được định nghĩa bằng các mạng ReLU sâu với độ sâu $L$, độ rộng $N$ và độ thưa $s$, được trang bị một tiên nghiệm spike-and-slab trên các trọng số và độ dời (offset). Các tham số kiến trúc $L$, $N$ và $s$ được chọn tùy theo mức độ trơn $\alpha$, số chiều $D$ và cỡ mẫu $n$, để đạt các tính chất xấp xỉ tối ưu.
+
+Ký hiệu $\|\cdot\|_n$ là chuẩn $L^2$ thực nghiệm trên dữ liệu huấn luyện, và gọi $\epsilon_n = n^{-\alpha/(2\alpha + D)} \log^\delta(n)$ với một $\delta > 1$ nào đó là tốc độ gần minimax cho việc ước lượng một hàm trơn bậc $\alpha$ trong không gian $D$ chiều.
+
+**Định lý 29.7** (Sự tập trung của hậu nghiệm, giản lược từ Định lý 6.1 của Polson và Ročková). *Giả sử* $f_0$ *trơn Hölder bậc* $\alpha$ *với* $\alpha < D$ *và bị chặn đều. Khi đó, với một kiến trúc mạng được chọn thích hợp tùy theo* $\alpha$, $D$ *và* $n$, *phân phối hậu nghiệm tập trung quanh* $f_0$ *với tốc độ* $\epsilon_n$, *tức là*
+
+$$
+\Pi\left(f : \|f - f_0\|_n > M_n \epsilon_n \mid Y^{(n)}\right) \to 0
+$$
+
+*theo xác suất khi* $n \to \infty$, *với mọi dãy* $M_n \to \infty$.
+
+Đã có những tiến bộ đáng kể trong việc thiết lập tốc độ co của hậu nghiệm cho BNN trong các bối cảnh phi tham số. Các mạng nơ-ron sâu kết nối đầy đủ đã được chứng minh là đạt tốc độ (gần) tối ưu trong các bài toán như hồi quy và phân loại nhiều lớp. Những kết quả này gợi ý rằng mạng nơ-ron có một năng lực đáng kể trong việc tự động thích nghi với độ trơn chưa biết của hàm.
+
+Mặc dù các tiên nghiệm spike-and-slab kinh điển, tức hỗn hợp của một khối lượng điểm và một "tấm" (slab) phân tán, đã được dùng rộng rãi để đạt tốc độ tối ưu, độ phức tạp tính toán khiến chúng kém thực tế hơn trong bối cảnh học sâu. Các phát triển gần đây tập trung vào những tiên nghiệm thay thế vẫn giữ được tính tối ưu lý thuyết trong khi cải thiện tính khả thi tính toán.
+
+Tốc độ co cho các xấp xỉ biến phân của hậu nghiệm BNN được Bhattacharya và Maiti, Bhattacharya và cộng sự khảo sát, cho thấy hiệu năng lý thuyết của các phương pháp suy luận mở rộng được. Song song đó, các kết quả liên quan được suy ra cho tiên nghiệm quá trình Gauss sâu, với những tiến bộ gần đây của Bachoc và Lagnoux, Castillo và Randrianarisoa, Finocchio và Schmidt-Hieber, những người đặc trưng hóa hành vi hội tụ của chúng.
+
+Bản chất số chiều cao của các ứng dụng hiện đại đặt ra câu hỏi tốc độ của hậu nghiệm thay đổi thế nào theo cả cỡ mẫu $n$ lẫn số chiều đầu vào $D$. Trong khi phần lớn các kết quả hiện có giả định $D$ cố định, Bhattacharya và cộng sự là một ngoại lệ đáng chú ý, suy ra các tốc độ tối ưu minimax phụ thuộc đồng thời vào $(n, D)$, và do đó giải quyết những kịch bản dữ liệu lớn thực tế hơn.
+
+### 6.3 Sự thích nghi
+
+Ngoài tốc độ co, các công trình gần đây đã chỉ ra rằng mạng quá tham số hóa với tiên nghiệm đuôi nặng có thể đạt được sự thích nghi thống kê tự động, với phân phối hậu nghiệm tập trung ở tốc độ tối ưu minimax mà không cần biết trước độ trơn của hàm. Điều này gắn với các phát hiện trước đó rằng tiên nghiệm Gauss trên trọng số mạng có thể cảm sinh hành vi đuôi ngày càng nặng qua các lớp của một mạng sâu.
+
+### 6.4 Các định lý Bernstein–von Mises
+
+Các định lý Bernstein–von Mises (BvM) mô tả tính chuẩn tiệm cận của phân phối hậu nghiệm, cung cấp một đối tác Bayes cho định lý giới hạn trung tâm kinh điển. Trong bối cảnh BNN, rất khó thu được các kết quả BvM chính xác do tính không khả định danh, các đối xứng và sự quá tham số hóa của mô hình.
+
+Với mạng nơ-ron nông, có độ sâu và độ rộng vừa phải và tiên nghiệm có tính chất tốt, hành vi BvM kinh điển có thể được khôi phục. Tuy nhiên, khi mạng trở nên sâu hơn và giàu năng lực biểu diễn hơn, phân phối hậu nghiệm lệch đáng kể khỏi hành vi Gauss, và các định lý BvM tiêu chuẩn không còn đúng.
+
+Các nghiên cứu hiện nay nhằm mở rộng các kết quả kiểu BvM cho các phiếm hàm của phân phối hậu nghiệm, như dự đoán hay các đại lượng tóm tắt gắn với từng đặc trưng, thay vì toàn bộ không gian tham số. Cách tiếp cận thực tế hơn này phù hợp với cách BNN được dùng trong thực hành, nơi độ bất định trên dự đoán thường là mối quan tâm hàng đầu.
+
+## 7. Thảo luận và các câu hỏi mở
+
+Các mạng có độ rộng hữu hạn cảm sinh tiên nghiệm không Gauss trên các hàm đầu ra, nhưng vẫn giữ được một số tính chất "Bayes" nhất định. Chẳng hạn, theo định lý de Finetti, có thể xem phân phối hàm của mạng hữu hạn như một quá trình ngẫu nhiên khả hoán (exchangeable) được đánh chỉ số bởi các đầu vào, nhưng các dạng phân phối chính xác không xử lý được, ngoại trừ với các mạng rất nhỏ hoặc chỉ dưới những giả thiết rất hạn chế. Tính không Gauss có nghĩa là về nguyên tắc, mạng hữu hạn có thể nắm bắt những niềm tin tiên nghiệm phức tạp hơn (ví dụ các phân phối hàm đa mode), nhưng nó cũng làm phân tích phức tạp hơn. Ngược lại, trong giới hạn độ rộng vô hạn, nhiều tiên nghiệm BNN cho ra một quá trình Gauss trên các hàm đầu ra, đơn giản hóa các phân tích lý thuyết và mở ra những liên hệ thú vị với việc nghiên cứu GP.
+
+Trong một số trường hợp, mạng nơ-ron độ rộng hữu hạn vượt trội so với các đối tác độ rộng vô hạn của chúng. Arora và cộng sự chỉ ra rằng mạng nơ-ron tích chập vượt trội so với hàm nhân tiếp tuyến nơ-ron giới hạn tương ứng của chúng (NTK, xem [Chương 8, Mục 2](/vi/blog/linearized-laplace-approximations), và Jacot và cộng sự). Khoảng cách hiệu năng này có lẽ là do hiệu ứng độ rộng hữu hạn, khi một hàm nhân cố định không thể mô tả đầy đủ động lực học của mạng nơ-ron tích chập. Sự tiến triển của NTK trong quá trình huấn luyện có lợi cho khả năng tổng quát hóa, như các công trình tiếp theo đã chỉ ra. Tuy nhiên, vì hiệu năng của mạng nơ-ron độ rộng hữu hạn và độ rộng vô hạn là khác nhau, vẫn chưa rõ khi nào khuôn khổ GP phù hợp hơn để mô tả hành vi của BNN.

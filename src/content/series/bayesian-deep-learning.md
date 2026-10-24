@@ -10,10 +10,6 @@ objectives:
   - "Choose a method that scales to a given model and data set, and evaluate predictive uncertainty with calibration, proper scoring rules and selective prediction."
   - "Describe current research directions in Bayesian deep learning and state the open problems each one addresses."
 plannedEntries:
-  - title: "Chapter 28: Introduction to Priors"
-  - title: "Chapter 29: Statistical Properties of Priors"
-  - title: "Chapter 30: Informative Priors"
-  - title: "Chapter 31: Function-Space Priors"
   - title: "Chapter 32: Symmetries in Bayesian Neural Networks"
   - title: "Chapter 33: Symmetries and Sampling"
   - title: "Chapter 34: Learning Inductive Bias and Symmetries"

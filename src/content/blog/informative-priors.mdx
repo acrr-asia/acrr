@@ -1,0 +1,129 @@
+---
+title: "Informative Priors"
+description: "A framework for informative, data-driven priors over network parameters, with uncertainty-aware and group-aware instantiations built from context data."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - uncertainty quantification
+  - group robustness
+series: bayesian-deep-learning
+seriesOrder: 37
+---
+
+This chapter introduces a framework for constructing informative, data-driven prior distributions over the parameters of neural networks. Specifying meaningful priors for neural-network models is inherently difficult because it is rarely obvious how to map a particular parameter configuration to a desired functional behavior, such as good calibration, high predictive uncertainty under semantic shift (for example, on inputs from classes absent from the training data), a low predictive negative log-likelihood, or robustness to other distribution shifts.
+
+The framework uses problem-specific information and auxiliary data to assign high prior density to parameter values that induce these desired functional properties. Two specific instantiations are discussed:
+
+1. **Uncertainty-aware priors**, designed to improve uncertainty quantification by favoring models that exhibit high predictive entropy on inputs meaningfully distinct from the training distribution (Section 2);
+2. **Group-aware priors**, designed to improve group robustness by favoring models that generalize well to data subgroups underrepresented in the training data (Section 3).
+
+## 1. A family of informative data-driven priors
+
+This section begins by formalizing the model structure. Let $\theta \in \Theta$ denote a realization of the neural-network parameter vector, and let $p(y \mid x, \theta; f)$ be the observation model induced by the network $f$. For classification, $f$ may output logits that parameterize a categorical distribution; for regression, it may parameterize, for example, the mean of a Gaussian observation model. Partition $\theta = (\theta_h, \theta_L)$ into the final-layer parameters $\theta_L$ and the parameters $\theta_h$ of all preceding layers (the feature extractor). The network mapping is thus $f(\cdot\,; \theta) := h(\cdot\,; \theta_h)\theta_L$, where $h(\cdot\,; \theta_h)$ is the post-activation output of the penultimate layer. Access is assumed to pre-trained feature-extractor parameters $\theta_h^*$ and to context data encoding useful information about the downstream task.
+
+The framework is built on a *context inference problem*. It uses a batch of context inputs $x_\mathrm{c} = \{x_1, \dots, x_M\}$ and corresponding labels $y_\mathrm{c} = \{y_1, \dots, y_M\}$, drawn from a joint distribution $p_{X_\mathrm{c}, Y_\mathrm{c}}$. Capital letters $X_\mathrm{c}$ and $Y_\mathrm{c}$ denote random variables, whereas $x_\mathrm{c}$ and $y_\mathrm{c}$ denote their realizations. A Bernoulli random variable $\check{Z} \in \{0, 1\}$ is then introduced, indicating whether $\theta$ induces a model with a desired property; for example, $\check{Z} = 1$ may indicate high uncertainty on $x_\mathrm{c}$ or high accuracy on evaluation points with a specified group attribute.
+
+This relationship is expressed through the context observation model $\check{p}(\check{z} \mid \theta; f, p_{X_\mathrm{c}, Y_\mathrm{c}})$, the probability mass function of the realization $\check{z}$ conditional on $\theta$. The quantities following the semicolon are fixed ingredients used to construct the model, not additional random conditioning variables. Given a base prior $p(\theta)$, the informative data-driven prior is the posterior distribution over $\theta$ conditional on the desired outcome $\check{z} = 1$. For notational simplicity, fixed arguments such as $f$ are suppressed where no ambiguity arises. By Bayes' theorem,
+
+$$
+p(\theta \mid \check{z} = 1; p_{X_\mathrm{c}, Y_\mathrm{c}}) = \frac{\check{p}(\check{z} = 1 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}})\, p(\theta)}{\check{p}(\check{z} = 1; p_{X_\mathrm{c}, Y_\mathrm{c}})}. \tag{30.1}
+$$
+
+This conditional distribution is then used as the prior in a subsequent inference problem for the neural-network parameters, for example in maximum a posteriori (MAP) estimation or in approximate Bayesian inference such as mean-field variational inference ([Chapter 13](/blog/gaussian-mean-field-variational-inference)).
+
+To specify the context observation model, $\check{Z} = 1$ is interpreted as achieving the desired property (e.g., reliable uncertainty). The probability of this outcome is linked to a non-negative cost function $c$:
+
+$$
+\begin{aligned}
+\check{p}(\check{z} = 1 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}}) &:= \exp\!\left(-\mathbb{E}_{p_{X_\mathrm{c}, Y_\mathrm{c}}}[c(X_\mathrm{c}, Y_\mathrm{c}, \theta)]\right), \\
+\check{p}(\check{z} = 0 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}}) &:= 1 - \check{p}(\check{z} = 1 \mid \theta; p_{X_\mathrm{c}, Y_\mathrm{c}}).
+\end{aligned} \tag{30.2}
+$$
+
+Because $c$ is non-negative, these two quantities define a valid Bernoulli probability mass function. Equations (30.1) and (30.2) show that the usefulness of the resulting prior depends on the cost function, context distribution, and base prior. The principal modeling challenge is therefore to choose $c$ and $p_{X_\mathrm{c}, Y_\mathrm{c}}$ so that the context observation model captures the intended functional property as faithfully as possible.
+
+## 2. Uncertainty-aware data-driven priors
+
+Following Rudner et al., this section now instantiates this framework to construct an uncertainty-aware prior for fine-tuning pre-trained classifiers.
+
+**Base prior.** Layer-specific base priors are specified. For the feature-extractor parameters $\theta_h$, a Gaussian prior centered on the pre-trained parameters is used: $p(\theta_h) = \mathcal{N}(\theta_h \mid \theta_h^*, \tau_h^{-1}\mathbf{I})$. This encourages the solution to remain close to the pre-trained representation. For the final-layer parameters, a standard zero-mean Gaussian prior is used: $p(\theta_L) = \mathcal{N}(\theta_L \mid \mathbf{0}, \tau_L^{-1}\mathbf{I})$.
+
+**Cost function and context distribution.** For this classification construction, $f(x_\mathrm{c}; \theta)$ denotes the logits evaluated on the $M$ context inputs. For each output coordinate $k$, $[f(x_\mathrm{c}; \theta)]_k \in \mathbb{R}^M$ collects the corresponding logits across the context batch. The cost is defined using a squared Mahalanobis distance between these logits and a target mean:
+
+$$
+c(x_\mathrm{c}, y_\mathrm{c}, \theta) := \tau_\mathrm{c} \sum_{k=1}^{K} D_{\mathcal{M}}^2\big([f(x_\mathrm{c}; \theta)]_k, m(x_\mathrm{c}, y_\mathrm{c})_k, C(x_\mathrm{c})\big), \tag{30.3}
+$$
+
+where $\tau_\mathrm{c} > 0$ is a cost-scaling parameter, distinct from the base-prior precisions $\tau_h$ and $\tau_L$, and $K$ is the number of output dimensions. The squared Mahalanobis distance in Equation (30.3) is
+
+$$
+D_{\mathcal{M}}^2(\mathbf{a}, \mathbf{b}, \mathbf{C}) := (\mathbf{a} - \mathbf{b})^\top \mathbf{C}^{-1} (\mathbf{a} - \mathbf{b}). \tag{30.4}
+$$
+
+To encourage high uncertainty on the context inputs, set $m(x_\mathrm{c}, y_\mathrm{c})_k := [y_\mathrm{c}]_k$ and choose the context-label distribution to be a point mass at zero, $p(y_\mathrm{c} \mid x_\mathrm{c}) := \delta_{\mathbf{0}}(y_\mathrm{c})$. This makes the target mean zero almost surely under the context-label distribution.
+
+The covariance function is defined by
+
+$$
+C(\cdot) := s_1 h(\cdot\,; \theta_h^*) h(\cdot\,; \theta_h^*)^\top + s_2 \mathbf{I}, \tag{30.5}
+$$
+
+where $s_1 > 0$ and $s_2 > 0$ are fixed scaling parameters. The form in Equation (30.5) reflects the structure of the pre-trained model's representations.
+
+Finally, $p(x_\mathrm{c})$ is taken to be an empirical distribution over inputs meaningfully distinct from the training set, such as out-of-distribution inputs. By Equations (30.2) and (30.3), a low cost (and hence a high value of $\check{p}(\check{z} = 1 \mid \theta)$) is obtained when the logits are close to the zero target in the Mahalanobis metric of Equation (30.4). For a softmax classifier, logits close to zero produce a near-uniform predictive distribution, so the resulting prior favors high predictive uncertainty on the specified out-of-distribution context inputs.
+
+## 3. Group-aware data-driven priors
+
+Following Rudner et al., a useful group-aware prior is specified by choosing (i) a context distribution $p_{X_\mathrm{c}, Y_\mathrm{c}}$ for which observing $\check{z} = 1$ is informative and (ii) a cost function $c$ that serves as a proxy for group robustness under that distribution.
+
+Both choices are generally challenging. One could, for example, learn a tailored generative model for the context distribution or construct a more elaborate cost function. Here a fixed, pre-specified context distribution and a simple cost function are used to illustrate the framework.
+
+**Context distribution.** Access is assumed to a small validation data set $\mathcal{D}_\mathrm{val}$ containing group information. The context distribution is formed by upweighting rare groups in this data set:
+
+$$
+\begin{aligned}
+p_{X_\mathrm{c}, Y_\mathrm{c}} &= \sum_{g \in \mathcal{G}} \alpha_g p_g, \qquad \alpha_g = \frac{\widetilde{\alpha}_g}{\sum_{g' \in \mathcal{G}} \widetilde{\alpha}_{g'}}, \\
+\widetilde{\alpha}_g &= \left(\frac{|\mathcal{D}_\mathrm{val}|}{|\mathcal{D}_\mathrm{val}^g|}\right)^{\gamma}.
+\end{aligned} \tag{30.6}
+$$
+
+Here $p_g$ is the empirical distribution of validation examples in group $g$, $|\mathcal{D}_\mathrm{val}^g|$ is the number of such examples, and $\gamma \geq 1$ controls the strength of the upweighting. The construction does not require the validation-group frequencies to match the training-group frequencies; it deliberately defines a reweighted context distribution. As Equation (30.6) shows, increasing $\gamma$ increases the relative emphasis on rarer groups.
+
+**Cost function.** A cost is defined that acts as a proxy for group robustness, inspired by sharpness-aware minimization (SAM). The task loss $\ell(\cdot)$ (typically cross-entropy for classification or mean-squared error for regression) is evaluated at a first-order worst-case parameter perturbation:
+
+$$
+c(x_\mathrm{c}, y_\mathrm{c}, \theta) := \ell\big(y_\mathrm{c}, f(x_\mathrm{c}; \theta + \rho\, \epsilon(\theta, x_\mathrm{c}, y_\mathrm{c}))\big), \tag{30.7}
+$$
+
+where $\rho > 0$ is the perturbation magnitude. For a non-zero loss gradient, the perturbation direction is
+
+$$
+\epsilon(\theta, x_\mathrm{c}, y_\mathrm{c}) := \perp\!\left(\frac{\nabla_\theta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \theta))}{\lVert \nabla_\theta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \theta)) \rVert_2}\right), \tag{30.8}
+$$
+
+where $\perp(u)$ denotes the `stop_gradient` operator: it has forward value $u$ but derivative zero. When the loss gradient vanishes, set $\epsilon(\theta, x_\mathrm{c}, y_\mathrm{c}) = \mathbf{0}$. The normalized gradient is the unit-$\ell_2$ direction that maximizes the first-order increase in the loss; the stop-gradient operator treats this direction as fixed when differentiating $c$.
+
+Low loss is generally associated with good generalization, but the small validation set contains few examples from rare groups, making generalization to those groups difficult. The context distribution counteracts this imbalance by upweighting rare-group examples, while the perturbed loss favors parameter configurations that remain low-loss under a local worst-case perturbation. Such configurations are expected to generalize better to the upweighted rare-group context data.
+
+The stop-gradient operator changes the derivative used in optimization without changing the forward value of the perturbation. To make this explicit, let $\widetilde{\epsilon}(\theta, x_\mathrm{c}, y_\mathrm{c})$ denote the same normalized gradient as in Equation (30.8), but without stop-gradient, and let $\theta_t$ denote the current parameter iterate. Using column-vector gradients, holding $x_\mathrm{c}$ and $y_\mathrm{c}$ fixed, writing $J_{\widetilde{\epsilon}}(\theta_t)$ for the Jacobian of $\widetilde{\epsilon}$ with respect to $\theta$ at $\theta_t$, and using $\vartheta$ as a dummy parameter vector, the chain rule gives
+
+$$
+\begin{aligned}
+&\nabla_\theta \ell\big(y_\mathrm{c}, f(x_\mathrm{c}; \theta + \rho\, \widetilde{\epsilon}(\theta, x_\mathrm{c}, y_\mathrm{c}))\big)\big|_{\theta = \theta_t} \\
+&\quad = \big(\mathbf{I} + \rho J_{\widetilde{\epsilon}}(\theta_t)\big)^\top \nabla_\vartheta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \vartheta))\big|_{\vartheta = \theta_t + \rho\, \widetilde{\epsilon}(\theta_t, x_\mathrm{c}, y_\mathrm{c})}.
+\end{aligned} \tag{30.9}
+$$
+
+With stop-gradient, automatic differentiation omits the Jacobian contribution in Equation (30.9) and returns
+
+$$
+g_\mathrm{sg}(\theta_t) := \nabla_\vartheta \ell(y_\mathrm{c}, f(x_\mathrm{c}; \vartheta))\big|_{\vartheta = \theta_t + \rho\, \epsilon(\theta_t, x_\mathrm{c}, y_\mathrm{c})}. \tag{30.10}
+$$
+
+Thus, the forward value in Equation (30.7) still defines the cost used in the context observation model, but $g_\mathrm{sg}$ is a SAM-style surrogate gradient rather than the exact gradient of that forward scalar cost. Without additional integrability conditions, this surrogate vector field need not be the gradient of a globally defined alternative scalar potential.
+
+## 4. Summary
+
+The framework in this chapter constructs informative priors by conditioning a base prior on the event that the induced model exhibits a desired functional property. The uncertainty-aware construction combines out-of-distribution context inputs with a Mahalanobis cost that favors near-uniform predictions, whereas the group-aware construction combines an upweighted rare-group validation distribution with a SAM-style perturbed loss. In both cases, the quality of the prior depends on how faithfully the context distribution and cost encode the intended property; developing broader classes of well-specified context observation models remains an open direction.

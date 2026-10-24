@@ -1,0 +1,255 @@
+---
+title: "Tiên nghiệm trong không gian hàm"
+description: "Tiên nghiệm trên trọng số mạng nơ-ron cảm sinh tiên nghiệm trên hàm ra sao, vì sao nó có thể bệnh lý và cách khớp nó với tiên nghiệm quá trình Gauss."
+publishedAt: "2026-10-23"
+category: "AI and Machine Learning"
+tags:
+  - bayesian deep learning
+  - priors
+  - gaussian processes
+  - wasserstein distance
+series: bayesian-deep-learning
+seriesOrder: 38
+---
+
+import Figure from '../../../components/Figure.astro';
+import Bdl31SineManifold from '../../../components/diagrams/Bdl31SineManifold.astro';
+import Bdl31DepthPathology from '../../../components/diagrams/Bdl31DepthPathology.astro';
+import Bdl31PriorMatching from '../../../components/diagrams/Bdl31PriorMatching.astro';
+import Bdl31RegressionExample from '../../../components/diagrams/Bdl31RegressionExample.astro';
+
+Như đã thảo luận ở [Chương 28](/vi/blog/introduction-to-priors), trong thống kê Bayes, việc chọn các phân phối tiên nghiệm (prior) trên tham số mô hình là một phần cơ bản của quá trình mô hình hóa. Trong nhiều ứng dụng, việc khơi gợi tiên nghiệm (prior elicitation), tức thu nhận thông tin tiên nghiệm như vậy về tham số mô hình, có thể được thực hiện dựa trên kiến thức chuyên môn của lĩnh vực (xem, chẳng hạn, Lindley và cộng sự, O'Hagan).
+
+Tuy nhiên, với các mô hình học sâu, điều này không đơn giản, và đó là trọng tâm của chương này. Không mất tính tổng quát, chương này xét trường hợp các mô hình mạng nơ-ron (neural network, NN) kết nối đầy đủ; phần lớn thảo luận cũng áp dụng cho các kiến trúc khác. Gọi $f(x, \theta)$ là đầu ra mà một NN với tham số $\theta$ tạo ra cho đầu vào $x$. Có nhiều thách thức trong việc chọn các tiên nghiệm hợp lý cho $\theta$, do NN thường bị quá tham số hóa (over-parameterized). Quá tham số hóa trong NN có nghĩa là số tham số có thể rất lớn (dễ dàng vượt quá vài triệu), dẫn đến tính không khả định danh thống kê, và việc phải chọn một tiên nghiệm cho từng tham số một là một nhiệm vụ nặng nề. Các chiến lược phân khối có thể giảm nhẹ gánh nặng này, chẳng hạn bằng cách gán cùng một tiên nghiệm cho các tham số trong cùng một lớp. Tuy nhiên, một vấn đề cơ bản vẫn còn đó: *việc chọn một phân phối tiên nghiệm cụ thể trên $\theta$ tạo ra tác động gì lên phân phối tiên nghiệm trên $f(x, \theta)$?*
+
+Chương này dành cho việc nghiên cứu các phân phối tiên nghiệm như vậy trên $f(x, \theta)$. Mục 1 trình bày một số kiến thức nền về tiên nghiệm trong không gian hàm (function-space prior), được định nghĩa là các tiên nghiệm trên $f(x, \theta)$ được cảm sinh bởi việc chọn một tiên nghiệm trên $\theta$. Sau khi thảo luận về việc không thể đặc trưng hóa các tiên nghiệm này bằng giải tích ở Mục 1.1 và Mục 1.2, chương tập trung vào các cách lấy mẫu từ những tiên nghiệm này ở Mục 1.4. Sau đó, Mục 2 thảo luận việc chọn các tiên nghiệm thuận tiện có thể dẫn đến các tiên nghiệm bệnh lý trong không gian hàm như thế nào. Thật vậy, những người đọc tinh ý có nền tảng về thống kê Bayes có thể thấy dễ dàng né tránh bài toán đặc tả tiên nghiệm trên tham số NN bằng cách chọn các tiên nghiệm ít thông tin (weakly informative prior) trên $\theta$. Đáng tiếc là một cách tiếp cận ngây thơ và có vẻ vô hại như vậy có thể dẫn đến các tiên nghiệm trong không gian hàm trên $f(x, \theta)$ với những tính chất không mong muốn; xem Tran và cộng sự về một nghiên cứu lựa chọn mô hình Bayes trong bối cảnh các bài toán học không giám sát.
+
+Chương khép lại với Mục 3, nghiên cứu các cách chọn tiên nghiệm trên $\theta$ sao cho chúng cảm sinh các tiên nghiệm trong không gian hàm có những tính chất mong muốn. Phần lớn trọng tâm của mục sau cùng này là khớp tiên nghiệm trong không gian hàm của NN với các tiên nghiệm trong không gian hàm được quan tâm và dễ lấy mẫu. Điều này được thực hiện bằng cách đưa nhiệm vụ khớp về bài toán tối ưu một hàm mục tiêu thích hợp, và một số lựa chọn được trình bày dựa trên tài liệu về các độ phân kỳ và các metric xác suất tích phân (integral probability metric). Tóm lại, chương này sẽ thuyết phục người đọc rằng cần cẩn trọng khi chọn tiên nghiệm cho học sâu Bayes, và rằng có những chiến lược thực tế có thể áp dụng để làm điều đó.
+
+## 1. Từ tiên nghiệm trên tham số đến tiên nghiệm trên hàm
+
+Để trình bày đơn giản, xét trường hợp một bài toán học có giám sát, trong đó mục tiêu là thiết lập một ánh xạ giữa đầu vào $x \in \mathcal{X}$, với $\mathcal{X} \subset \mathbb{R}^D$, và nhãn $y \in \mathcal{Y}$ khi cho trước một tập các cặp $(x_i, y_i)$ với $i = 1, \ldots, N$. Xét định nghĩa sau về một mô hình dựa trên NN với tham số $\theta$:
+
+$$
+f(x, \theta) \in \mathbb{R}^C, \qquad \text{with} \qquad \theta \in \mathbb{R}^P, \tag{31.1}
+$$
+
+mô hình này có thể được dùng, cùng với một mô hình quan sát, để định nghĩa một hàm hợp lý $p(y_1, \ldots y_N \mid x_1, \ldots, x_N, \theta)$ đo mức độ khớp của mô hình với dữ liệu cho trước (một cách tương đương, có thể viết $p(y_{1:N} \mid x_{1:N}, \theta; f)$ để làm rõ sự phụ thuộc vào ánh xạ của mạng). Hiện tại chưa viết một dạng cụ thể nào cho hàm hợp lý, vì đó không phải trọng tâm của thảo luận. Để hoàn tất đặc tả mô hình NN Bayes cho dữ liệu đã cho, cần chọn một tiên nghiệm cho $\theta$:
+
+$$
+\theta \sim p(\theta). \tag{31.2}
+$$
+
+Với một đặc tả mô hình đầy đủ, có thể dễ dàng nhận ra rằng phân phối hậu nghiệm (posterior) trên $\theta$ không tính được và cần đến các phép xấp xỉ. Điểm quan trọng này được quay lại ở phần sau của chương, nhưng trước mắt thảo luận tập trung vào cách chọn $p(\theta)$ một cách hợp lý.
+
+Việc chọn một tiên nghiệm trên $\theta$ cảm sinh một phân phối trên $f(x, \theta)$, nghĩa là nó cho ra một phân phối tiên nghiệm trên đầu ra của NN với bất kỳ đầu vào $x$ nào. Chính thức hơn, ký hiệu $F_{1:n} = (F_1, \ldots, F_n)$ với $F_i \in \mathbb{R}^C$ là tập các biến ngẫu nhiên biểu diễn hàm NN ứng với các đầu vào $x_1, \ldots, x_n$. Lưu ý rằng ở đây các đầu vào không nhất thiết là các đầu vào huấn luyện, nên số đầu vào như vậy được ký hiệu là $n$ thay vì $N$. Phân phối tiên nghiệm trên $F_{1:n}$ có thể thu được bằng cách lấy biên theo $\theta$ như sau:
+
+$$
+p(F_{1:n}) = \int p(F_{1:n} \mid \theta) p(\theta) d\theta = \int \delta(F_{1:n} - (f(x_1, \theta), \ldots, f(x_n, \theta))) p(\theta) d\theta. \tag{31.3}
+$$
+
+Hàm $\delta(\cdot)$ biểu diễn hàm delta Dirac, và được dùng ở đây để làm nổi bật tính tất định của các phép tính truyền xuôi của NN, vốn cho ra các thành phần $f(x_i, \theta)$ với một đầu vào $x_i$ và $\theta$ cho trước.
+
+### 1.1 Tiên nghiệm trong không gian hàm đáng mong muốn nhưng không tính được
+
+Phương trình 31.3 biểu diễn phân phối trên đầu ra của NN. Vì sao điều này đáng quan tâm? Và nên kỳ vọng phân phối này có những tính chất gì? Phần trước đã thảo luận rằng trong suy luận Bayes, việc đưa tri thức tiên nghiệm từ các chuyên gia vào một bài toán mô hình hóa là quan trọng như thế nào, và nguyên tắc này giúp được rất ít trong việc định hướng lựa chọn tiên nghiệm trên tham số NN $\theta$. Ngược lại, thường dễ hơn nhiều khi suy xét về loại hàm mà người ta muốn mô hình hóa *a priori*. Nói cách khác, tiên nghiệm trong không gian hàm "dễ diễn giải" hơn; suy xét về các tính chất vĩ mô muốn mã hóa vào các hàm mà NN biểu diễn, chẳng hạn mức độ trơn, tính tuần hoàn và phương sai biên, dễ hơn nhiều so với làm việc với từng tham số riêng lẻ của NN. Thật vậy, tính không khả định danh thống kê và tính phi tuyến do quá tham số hóa của NN gây ra khiến việc nghiên cứu độ nhạy của tiên nghiệm trong không gian hàm đối với tiên nghiệm trên từng tham số riêng lẻ trở nên khó khăn.
+
+Đáng tiếc là tích phân trong Phương trình 31.3 nói chung không tính được, cũng do tính không khả định danh và tính phi tuyến của cách tham số hóa NN, và không thể ngay lập tức suy xét về tiên nghiệm trong không gian hàm của chúng. Chẳng hạn, xét một tiên nghiệm Gauss $p(\theta)$, dễ thấy rằng sự phụ thuộc phi tuyến của $f(x, \theta)$ vào $\theta$ khiến tích phân này không tính được. Mục 3 thảo luận các chiến lược xác định phân phối tiên nghiệm trên $\theta$ sao cho tiên nghiệm trong không gian hàm có các tính chất được quan tâm. Trước đó, phần sau trình bày thêm những hiểu biết về tiên nghiệm trong không gian hàm được cảm sinh bởi một tiên nghiệm trên tham số, bằng cách xem Phương trình 31.3 như một phép đổi biến và nghiên cứu nó trong bối cảnh các quá trình nơ-ron (neural processes).
+
+### 1.2 Diễn giải tiên nghiệm trong không gian hàm như một phép đổi biến
+
+Một cách khác để diễn giải phép toán thực hiện trong Phương trình 31.3 là xem nó như một phép đổi biến (change of variables), trong đó độ đo tiên nghiệm trên $\theta$ được biến đổi thành một độ đo trên $F_{1:n}$. Ở đây $n$ là số vị trí đầu vào tại đó tiên nghiệm trong không gian hàm được định giá. Nhắc lại rằng $x_i \in \mathcal{X}$ với $\mathcal{X} \subset \mathbb{R}^D$; nếu muốn phân tích hành vi của hàm $f(x, \theta)$ tại $n$ vị trí đầu vào, thì đối tượng cần quan tâm là phân phối của $F_{1:n}$. Để tham chiếu, nếu $T$ là một song ánh khả vi giữa hai không gian cùng số chiều và $F = T(\theta)$, công thức đổi biến thông thường sẽ cho
+
+$$
+p_F(f) = p_\theta(T^{-1}(f)) \left| \det J_{T^{-1}}(f) \right|.
+$$
+
+Ánh xạ mà một mạng nơ-ron cảm sinh tại các đầu vào cố định, $T_{x_{1:n}}(\theta) = (f(x_1, \theta), \ldots, f(x_n, \theta))$, hiếm khi thỏa mãn các giả thiết này: nó thường là nhiều – một và thường ánh xạ không gian tham số vào một không gian đầu ra có số chiều khác. Rõ ràng ánh xạ nhận $\theta$ làm đầu vào và ánh xạ chúng vào $F_{1:n}$ nói chung không phải là một song ánh, điều này khiến ma trận Jacobi bị hụt hạng (hạng tối đa bằng giá trị nhỏ hơn giữa $P$ và $nC$).
+
+Tuy vậy, cách nhìn này hé lộ một điều thú vị về các tính chất có thể kỳ vọng quan sát được ở tiên nghiệm trên $F_{1:n}$. Giả sử $nC > P$, công thức đổi biến chỉ ra rằng tiên nghiệm trên $F_{1:n}$ sẽ nằm trên một đa tạp ít chiều có $P$ chiều. Có thể muốn tiếp tục đặc trưng hóa sự thay đổi độ đo trên đa tạp này bằng cách tính định thức của ma trận Jacobi thông qua việc tính $P$ trị riêng lớn nhất của nó; tuy nhiên, điều này đòi hỏi phải tính và phân tích ma trận Jacobi, vốn là một ma trận $(nC) \times P$, cần $\mathcal{O}(nCP^2) + \mathcal{O}(P^3)$ phép tính. Vì vậy cách nhìn đổi biến chủ yếu hữu ích như một công cụ chẩn đoán: nó giải thích vì sao việc định giá mật độ trong không gian hàm là khó và vì sao phân phối được cảm sinh có thể tập trung trên một tập ít chiều. Do đó, các phương pháp thực tế dưới đây dựa vào các mẫu từ $p(F_{1:n})$ thay vì các phép định giá tại từng điểm của mật độ này.
+
+<Figure caption="Hình 31.1: Minh họa ánh xạ (F₁, F₂) = (sin(θ x₁), sin(θ x₂)) với θ ∼ N(0, 1) tại các vị trí đầu vào x₁ = 1 và x₂ = 2. (Trái) Các mẫu Monte Carlo cho thấy mọi điểm đều nằm trên một đường cong hình sin một chiều trong [−1, 1]²; (Phải) Mật độ được cảm sinh chính xác dọc theo đường cong này, tính bằng công thức đổi biến cho mật độ trên đa tạp p(F₁:₂) = p(θ)/‖dg(θ)/dθ‖₂. Bản tái hiện được tính từ công thức này: 400 mẫu ở bên trái; ở bên phải, mật độ, bị chặn trên ở 0.4, được biểu thị bằng độ đậm của đường cong.">
+  <Bdl31SineManifold />
+</Figure>
+
+Để hình dung hiện tượng này rõ hơn, xét một mạng hình sin có một tham số được định giá tại hai điểm đầu vào $x_1, x_2 \in \mathbb{R}$, tức là $g : \theta \mapsto (F_1, F_2) = (\sin(\theta x_1), \sin(\theta x_2))$. Lưu ý rằng đây là trường hợp đã thảo luận ở trên, khi số điểm đầu vào ($n = 2$) lớn hơn số tham số ($P = 1$). Hình 31.1 cho thấy điều gì xảy ra với $p(F_{1:2})$. Khi lấy mẫu $\theta \sim \mathcal{N}(0, 1)$ và vẽ các cặp $(F_1, F_2)$ thu được trên mặt phẳng, các điểm tập trung dọc theo một đường cong kín, trơn trong $[-1, 1]^2$ thay vì lấp đầy hình vuông, đúng như dạng hạng thấp của ma trận Jacobi cho thấy. Trong trường hợp đơn giản này, mật độ được cảm sinh dọc theo đường cong cũng có thể được suy ra một cách tường minh bằng các công thức đổi biến.
+
+### 1.3 Liên hệ với các quá trình nơ-ron
+
+Các quá trình ngẫu nhiên cung cấp một hình thức luận tự nhiên để đặc tả tiên nghiệm trên hàm. Một cách hình thức, một quá trình ngẫu nhiên được đánh chỉ số bởi $x \in \mathcal{X}$ là một tập các biến ngẫu nhiên $\{F(x)\}_{x \in \mathcal{X}}$ sao cho, với mọi tập chỉ số hữu hạn $x_1, \ldots, x_n$, vector ngẫu nhiên $F_{1:n} = (F(x_1), \ldots, F(x_n))$ có một phân phối đồng thời $p(F_{1:n})$ được định nghĩa tốt. Các phân phối đồng thời này là *các phân phối biên hữu hạn chiều* (finite-dimensional marginals) của quá trình, và theo định lý mở rộng Kolmogorov (Kolmogorov extension theorem), một họ các phân phối biên như vậy mà nhất quán và khả hoán sẽ xác định một quá trình duy nhất trên toàn bộ tập chỉ số $\mathcal{X}$. Quá trình Gauss (Gaussian process, GP) ở Mục 3 là ví dụ chuẩn tắc, với các phân phối biên hữu hạn chiều là các phân phối Gauss được xác định hoàn toàn bởi một hàm trung bình và một hàm hiệp phương sai. Câu hỏi đặt ra là với những điều kiện nào thì cách xây dựng tiên nghiệm trong không gian hàm ở Phương trình 31.3 cho ra một quá trình ngẫu nhiên. Tài liệu về quá trình ngẫu nhiên cho một câu trả lời đầy đủ cho câu hỏi này, dựa trên yêu cầu phải thỏa mãn tính khả hoán (exchangeability) và tính nhất quán (consistency). Tính khả hoán đòi hỏi phân phối đồng thời bất biến đối với các phép hoán vị đầu vào:
+
+$$
+p(F_{1:n}) = p(\tilde{F}_{1:n}) \tag{31.4}
+$$
+
+trong đó $\tilde{F}_{1:n}$ ký hiệu các phiên bản hoán vị của $F_{1:n}$. Tính nhất quán đòi hỏi một dạng "đóng" nào đó đối với phép lấy biên; cụ thể, nó đòi hỏi:
+
+$$
+p(F_{1:m}) = \int p(F_{1:n}) dF_{m+1:n} \tag{31.5}
+$$
+
+Với một tiên nghiệm cố định trên $\theta$ và một mạng nơ-ron tất định đo được, các phân phối biên hữu hạn chiều được cảm sinh bởi Phương trình 31.3 bất biến với phép hoán vị và nhất quán theo phép lấy biên, do đó xác định một quá trình ngẫu nhiên theo nghĩa hình thức này. Nhận xét này hữu ích về mặt khái niệm, nhưng không loại bỏ vấn đề tính toán chính: các mật độ hữu hạn chiều nói chung vẫn không có ở dạng đóng. Trong tài liệu, Garnelo và cộng sự đã đề xuất một cách xây dựng dùng NN để học các phân phối hữu hạn chiều giống như của một quá trình. Các quá trình nơ-ron (Neural Processes) này có một số tính chất thú vị, vì chúng cho phép dùng trực tiếp làm tiên nghiệm trong không gian hàm. Về mặt trực giác, một quá trình nơ-ron học cách hành xử trực tiếp như một quá trình ngẫu nhiên: cho một tập *ngữ cảnh* (context) gồm các cặp đầu vào – đầu ra, một mạng mã hóa tóm tắt chúng thành một biến ẩn toàn cục, và một mạng giải mã ánh xạ biến ẩn này, cùng với một đầu vào đích, thành một phân phối dự đoán trên đầu ra tương ứng. Việc dùng chung biến ẩn cho mọi đầu vào đích là điều gắn kết các dự đoán và đem lại cho mô hình hành vi giống một quá trình, nhất quán nội tại, còn việc huấn luyện trên nhiều cách chia ngữ cảnh/đích được lấy mẫu ngẫu nhiên khuyến khích tính khả hoán và tính nhất quán (xấp xỉ). Kết quả là một tiên nghiệm linh hoạt, học được trên hàm, mà các phân phối biên hữu hạn chiều được tạo ra bằng một lượt truyền xuôi duy nhất, thay vì bằng cách lấy biên một tiên nghiệm trên trọng số như ở Phương trình 31.3. Tuy nhiên, trong phần còn lại của chương này, không cần dùng tường minh toàn bộ cấu trúc quá trình ngẫu nhiên để xác định tiên nghiệm trên tham số.
+
+### 1.4 Lấy mẫu từ tiên nghiệm trong không gian hàm
+
+Việc tiên nghiệm trong không gian hàm ở Phương trình 31.3 không tính được không ngăn cản việc lấy mẫu từ nó. Khi xem các NN Bayes như những mô hình phân cấp được đặc trưng bởi $p(\theta)$ và $p(F_{1:n} \mid \theta)$, việc thiết lập một sơ đồ lấy mẫu để thu được các mẫu của $f(x, \theta)$ tại một tập hữu hạn vị trí $x_1, \ldots, x_n$ là đơn giản. Điều này có thể đạt được bằng cách lặp lại việc lấy mẫu $\theta' \sim p(\theta)$ rồi $F_i \sim p(F_i \mid \theta')$, tức là đơn giản $f(x_i, \theta')$ với $i = 1, \ldots, n$. Bằng cách lặp lại việc lấy mẫu $\theta'$ và định giá $f(x_i, \theta')$ tương ứng với $i = 1, \ldots, n$, sẽ thu được các mẫu từ phân phối đồng thời của $(\theta, F_{1:n})$; sau đó chỉ cần bỏ đi các mẫu của $\theta$ để còn lại các mẫu từ phân phối biên $p(F_{1:n})$.
+
+## 2. Các bệnh lý của tiên nghiệm trong không gian hàm
+
+Đã xác lập rằng mật độ tiên nghiệm trong không gian hàm $p(F_{1:n})$ của Phương trình 31.3 nói chung không tính được bằng giải tích, nên có thể lấy mẫu từ nó nhưng không thể định giá nó ở dạng đóng, mục này giờ nghiên cứu hành vi của các tiên nghiệm trong không gian hàm. Phân tích này nhằm làm nổi bật một số bệnh lý nảy sinh từ những lựa chọn đơn giản và có vẻ vô hại cho tiên nghiệm trên tham số $\theta$. Cụ thể, tiên nghiệm trong không gian hàm được nghiên cứu cho nhiều kiến trúc NN khác nhau bằng cách thay đổi độ sâu của chúng.
+
+### 2.1 Các tiên nghiệm khả dĩ trên θ
+
+Lựa chọn phổ biến nhất là một tiên nghiệm Gauss độc lập trên các trọng số, $\theta \sim \mathcal{N}(0, \sigma^2 I)$. Các phương án linh hoạt hơn gồm tiên nghiệm Gauss *phân cấp*, đặt siêu tiên nghiệm (hyperprior) lên phương sai của từng lớp và nhờ đó cảm sinh các phân phối biên của trọng số có đuôi nặng hơn (heavier-tailed), và tiên nghiệm *luồng chuẩn hóa* (normalizing flow), biến đổi một phân phối cơ sở đơn giản qua một mạng nơ-ron khả nghịch để thu được một họ phân phối trọng số phong phú hơn nhiều. Hai họ sau cùng này xuất hiện trở lại ở Mục 3, nơi tính linh hoạt của chúng được khai thác để khớp với một tiên nghiệm trong không gian hàm mục tiêu; trong mục hiện tại, vốn chỉ nhằm minh họa các bệnh lý, trọng tâm là trường hợp Gauss đơn giản nhất. Trong mọi trường hợp, tiên nghiệm được chuẩn hóa bằng cách co giãn phương sai tiên nghiệm theo số chiều của lớp liền trước. Điều này được gợi ý từ tài liệu về khởi tạo tham số NN nhằm tránh các hiệu ứng bão hòa gây ra hiện tượng gradient bùng nổ/triệt tiêu (xem, chẳng hạn, He và cộng sự). Hàng trên của Hình 31.2 minh họa các hàm được sinh ra bởi một mạng kết nối đầy đủ với hàm kích hoạt tanh, có trọng số được rút từ một tiên nghiệm Gauss co giãn theo số đầu vào (fan-in) với phương sai cơ sở bằng một, khi độ sâu tăng dần (2, 4 và 8 lớp). Tăng độ sâu dẫn đến các hàm ngày càng bệnh lý. Điều thú vị là phương sai biên của tiên nghiệm trong không gian hàm có thể được giữ trong tầm kiểm soát, nhưng hiệp phương sai giữa các giá trị của hàm $f(x, \theta)$ tại các đầu vào khác nhau ngày càng lớn, dẫn đến các hàm gần như hằng. Điều này khó có thể mong muốn trong bất kỳ ứng dụng nào mà người ta kỳ vọng quan sát được một hành vi đáng chú ý nào đó trong dữ liệu. Tiên nghiệm này đặt một trọng số đáng kể vào các hàm gần như hằng "không thú vị"; Mục 3 thảo luận cách xử lý vấn đề này.
+
+Tăng độ rộng của mỗi lớp dẫn đến các tiên nghiệm trong không gian hàm giống với quá trình Gauss. Điều này có thể kiểm chứng bằng cách xem các phân phối hữu hạn chiều của $f(x, \theta)$ tại một tập đầu vào cố định bất kỳ, vốn ngày càng giống phân phối Gauss khi độ rộng tăng. Tuy nhiên, hiệu ứng này chỉ thấy được ở các kiến trúc nông, trừ khi đưa vào các kết nối tắt (skip connections).
+
+## 3. Khớp tiên nghiệm của mạng nơ-ron với tiên nghiệm mục tiêu trong không gian hàm
+
+Mục này nghiên cứu các cách đặt tiên nghiệm trên $\theta$ sao cho phân phối được cảm sinh trên đầu ra của mạng khớp với một tiên nghiệm trong không gian hàm mục tiêu nào đó được quan tâm. Giả thiết làm việc duy nhất là có thể dễ dàng lấy mẫu từ tiên nghiệm mục tiêu trong không gian hàm. Điều này khiến cách tiếp cận trình bày ở đây khá tổng quát và áp dụng được trong nhiều tình huống.
+
+### 3.1 Các ứng viên cho tiên nghiệm trong không gian hàm
+
+Mục này đề xuất một vài ý tưởng về các tiên nghiệm trong không gian hàm khả dĩ mà việc lấy mẫu từ chúng là dễ, không nhất thiết phải biết dạng giải tích của chúng.
+
+<Figure caption="Hình 31.2: (Trên) Các hàm mẫu của một BNN kết nối đầy đủ với (từ trái sang phải) 2, 4 và 8 lớp, thu được bằng cách đặt một tiên nghiệm Gauss co giãn theo số đầu vào (fan-in) với phương sai cơ sở bằng một lên các trọng số, với hàm kích hoạt tanh; tăng độ sâu đẩy tiên nghiệm về phía các hàm ngày càng bệnh lý, gần như hằng. (Dưới) Các mẫu từ một tiên nghiệm GP với hàm nhân RBF (trái) và Matérn-3/2 (phải), vốn giữ được thang độ dài và phương sai biên trong tầm kiểm soát. Trục hoành là đầu vào một chiều và trục tung là giá trị hàm. Hai hàng được đặt cạnh nhau để đối chiếu các bệnh lý của tiên nghiệm BNN sâu với các tiên nghiệm GP có hành vi tốt. Bản tái hiện được tính cho trang này: 14 lần rút mỗi khung từ các mạng tanh có độ rộng 24 với độ chệch có phương sai đơn vị, và từ các tiên nghiệm GP có phương sai đơn vị và thang độ dài 1.6; đường nét đứt là trung bình bằng không và dải tô bóng trải rộng hai độ lệch chuẩn.">
+  <Bdl31DepthPathology />
+</Figure>
+
+#### Tiên nghiệm quá trình Gauss
+
+Làm ứng viên cho một tiên nghiệm trong không gian hàm dễ diễn giải, có thể dùng các quá trình Gauss, vốn dễ lấy mẫu. Cụ thể, xét lại một tập $n$ điểm đầu vào $x_i \in \mathcal{X} \subset \mathbb{R}^D$, một quá trình Gauss có thể được định nghĩa thông qua việc chọn một hàm hiệp phương sai $k(\cdot, \cdot)$ và một hàm trung bình $\mu(\cdot)$. Các hàm này xác định hành vi và tính chất của các mẫu trong không gian hàm, như được minh họa ở hàng thứ hai của Hình 31.2. Để rút mẫu từ tiên nghiệm quá trình Gauss, trước hết tính ma trận hiệp phương sai $K$ với các phần tử $k_{ij} = k(x_i, x_j)$ và vector trung bình với các phần tử $\mu_i = \mu(x_i)$, sau đó phân tích ma trận này bằng phép phân tích Cholesky thành $K = LL^\top$. Thừa số tam giác dưới $L$ cho phép thu được một mẫu từ tiên nghiệm quá trình Gauss bằng cách rút $n$ biến ngẫu nhiên Gauss độc lập $\nu \sim \mathcal{N}(0, I)$ rồi đặt $f = L\nu + \mu$. Quá trình này có thể được lặp lại bao nhiêu lần tùy ý để thu được nhiều mẫu $f$ từ tiên nghiệm quá trình Gauss. Khi $K$ đã được phân tích (chi phí $\mathcal{O}(n^3)$), chi phí rút một mẫu là $\mathcal{O}(n^2)$. Quá trình Gauss còn có lợi thế bổ sung là cung cấp một dạng giải tích cho mật độ của chúng, nhưng điều này không được dùng cụ thể ở đây.
+
+#### Mô phỏng dựa trên vật lý
+
+Ngoài các tiên nghiệm tường minh trong không gian hàm như quá trình Gauss, các mô phỏng dựa trên vật lý cung cấp một phương tiện tinh vi để định nghĩa tiên nghiệm trong không gian hàm, đặc biệt khi động lực học của hệ bên dưới tuân theo các định luật vật lý đã biết. Các mô phỏng này có thể được điều khiển bởi các phương trình vi phân (xem, chẳng hạn, Lorenzi và Filippone) cùng các điều kiện biên/điều kiện đầu cụ thể, và tự bản chất giới hạn không gian các hàm chấp nhận được vào những hàm nhất quán và hợp lý về mặt vật lý. Bằng cách chạy các mô phỏng này với các tham số đầu vào hoặc trạng thái ban đầu đa dạng nhưng vẫn thực tế về mặt vật lý, có thể sinh ra các mẫu tiên nghiệm trong không gian hàm mã hóa ngầm cấu trúc, các đối xứng và các định luật bảo toàn do vật lý quy định. Cách tiếp cận này đặc biệt có giá trị khi dạng giải tích của tiên nghiệm trong không gian hàm không có sẵn hoặc quá đơn giản hóa, cho phép lấy mẫu các hàm phức tạp nắm bắt được hành vi thực của hệ, qua đó cung cấp một tiên nghiệm phong phú và có thông tin cho mạng nơ-ron.
+
+#### Trường hợp học không giám sát
+
+Để làm nổi bật tính tổng quát của cách tiếp cận này, lưu ý rằng việc chọn tiên nghiệm trên $\theta$ từ các *mẫu* của phân phối mục tiêu mở rộng một cách tự nhiên từ học có giám sát sang học không giám sát. Trong các bài toán học không giám sát, NN có thể được dùng để mô hình hóa phân phối xác suất thực bên dưới trên các đầu vào $\pi(x)$, hoặc để có một mô hình lấy mẫu từ $\pi(x)$ mà không cần mô hình hóa nó một cách tường minh. Trong những trường hợp này, NN hiện thực các hàm $f(x, \theta)$ nhằm tái tạo chính các đầu vào. Khi đó, tiên nghiệm trong không gian hàm được quan tâm là $\pi(x)$ và các mẫu chính là dữ liệu đầu vào cho trước $x_i$, như được nghiên cứu trong Tran và cộng sự cho các bộ tự mã hóa Bayes (Bayesian Auto-Encoders). Điểm cần lưu ý ở đây là, đúng như trong trường hợp có giám sát, các hàm mục tiêu khớp ở Mục 3 chỉ cần các mẫu từ phân phối mục tiêu, ở đây chính là dữ liệu, và không bao giờ cần một dạng giải tích của nó.
+
+### 3.2 Bài toán khớp và các hàm mục tiêu
+
+Giả sử có thể lấy mẫu từ một tiên nghiệm trong không gian hàm được quan tâm, chẳng hạn $p_{\text{target}}(F_{1:n})$, mục tiêu là chọn một tiên nghiệm trên $\theta$ sao cho tiên nghiệm được cảm sinh $p_{\text{nn}}(F_{1:n})$ (trong đó chỉ số dưới "nn" là viết tắt của "neural network", mạng nơ-ron) khớp với tiên nghiệm mục tiêu trong không gian hàm $p_{\text{target}}(F_{1:n})$ càng sát càng tốt. Nếu chỉ có các mẫu từ $p_{\text{target}}(F_{1:n})$, chỉ có thể hy vọng đạt được một sự khớp sát có điều kiện theo một tập vị trí đầu vào $x_1, \ldots, x_n$; kỳ vọng hai phân phối khớp hoàn hảo khi $n$ lớn nói chung là không thực tế.
+
+Hướng đến một sự khớp "mềm" giữa các phân phối này, mục này giờ nghiên cứu các hàm mục tiêu đo độ khác biệt giữa các phân phối trên hàm được định giá tại $n$ vị trí đầu vào. Ký hiệu $\psi$ là các tham số (còn gọi là siêu tham số) của tiên nghiệm trên $\theta$, tức là $p(\theta \mid \psi)$. Chẳng hạn, với một tiên nghiệm Gauss, $\psi$ có thể gồm trung bình và phương sai của nó. Tiên nghiệm trong không gian hàm được cảm sinh ở Phương trình 31.3 giờ có dạng:
+
+$$
+p_{\text{nn}}(F_{1:n} \mid \psi) = \int p(F_{1:n} \mid \theta) p(\theta \mid \psi) d\theta. \tag{31.6}
+$$
+
+Mục tiêu là cực tiểu hóa một hàm mục tiêu đo độ khác biệt giữa $p_{\text{nn}}(F_{1:n} \mid \psi)$ và tiên nghiệm mục tiêu trong không gian hàm $p_{\text{target}}(F_{1:n})$ như sau:
+
+$$
+\arg\min_{\psi} \left\{ \mathcal{D}[p_{\text{nn}}(F_{1:n} \mid \psi), p_{\text{target}}(F_{1:n})] \right\}, \tag{31.7}
+$$
+
+trong đó $\mathcal{D}(\cdot, \cdot)$ là một thước đo độ khác biệt giữa hai đối số.
+
+Mục này bắt đầu bằng cách chọn $\mathcal{D}(\cdot, \cdot)$ là độ phân kỳ Kullback–Leibler (KL). Như sẽ thấy ngay sau đây, những khó khăn bắt nguồn từ việc dùng độ phân kỳ này cho thấy sự cần thiết phải xét các phương án thay thế, và hai metric xác suất tích phân được trình bày cho mục đích này, cụ thể là khoảng cách Wasserstein (Wasserstein distance) và độ sai khác trung bình cực đại (Maximum Mean Discrepancy).
+
+#### Độ phân kỳ KL
+
+Hàm mục tiêu độ phân kỳ KL có dạng:
+
+$$
+\mathcal{D}_{\text{KL}}[p_{\text{nn}} \| p_{\text{target}}] = \int p_{\text{nn}}(F_{1:n} \mid \psi) \log \left( \frac{p_{\text{nn}}(F_{1:n} \mid \psi)}{p_{\text{target}}(F_{1:n})} \right) dF_{1:n} \tag{31.8}
+$$
+
+Việc tính độ phân kỳ KL này không thực hiện được bằng giải tích, và xấp xỉ nó qua các mẫu nổi tiếng là khó với các phân phối nhiều chiều. Để thấy điều này, độ phân kỳ KL có thể được viết lại thành:
+
+$$
+\mathcal{D}_{\text{KL}}[p_{\text{nn}} \| p_{\text{target}}] = \mathcal{H}[p_{\text{nn}}] - \mathcal{CH}[p_{\text{nn}} \| p_{\text{target}}] \tag{31.9}
+$$
+
+trong đó $\mathcal{H}$ và $\mathcal{CH}$ lần lượt ký hiệu entropy và entropy chéo (cross-entropy). Các bộ ước lượng entropy của các phân phối nhiều chiều qua mẫu nói chung có phương sai lớn, khiến việc tối ưu hàm mục tiêu KL theo $\psi$ trở nên khó khăn. Những vấn đề tương tự nảy sinh với các độ phân kỳ $f$ ($f$-divergences) và độ phân kỳ $\alpha$ ($\alpha$-divergences). Một phương án thay thế là xét các thước đo độ khác biệt khác dễ ước lượng dựa trên các mẫu từ hai phân phối. Đó là nội dung được thảo luận tiếp theo, qua việc xét hai metric xác suất tích phân.
+
+#### Khoảng cách Wasserstein
+
+Khoảng cách Wasserstein là một metric xác suất tích phân phổ biến, thường được dùng trong các bài toán vận chuyển tối ưu (optimal transport). Cho $\mathcal{F} \subset \mathbb{R}^C$ và $\mathcal{F}' \subset \mathbb{R}^C$, và cho $p_1(f)$ và $p_2(f')$ là hai độ đo xác suất (Borel). Các ký hiệu chung $p_1$ và $p_2$ được dùng trong khi giới thiệu khoảng cách; chúng sẽ được cụ thể hóa thành các tiên nghiệm trong không gian hàm của BNN và của mục tiêu, $p_1 = p_{\text{nn}}$ và $p_2 = p_{\text{target}}$, ở Phương trình 31.13 bên dưới. Khoảng cách $p$-Wasserstein được định nghĩa là[^1]
+
+$$
+W_p(p_1, p_2) = \left( \inf_{\gamma \in \Gamma(p_1, p_2)} \int_{\mathcal{F} \times \mathcal{F}'} D(f, f')^p \gamma(f, f') df df' \right)^{1/p}, \tag{31.10}
+$$
+
+trong đó $D(f, f')$ là một metric khoảng cách đúng nghĩa giữa $f, f' \in \mathcal{F} \times \mathcal{F}'$ và $\Gamma(p_1, p_2)$ là tập mọi phân phối đồng thời (các phép ghép cặp, coupling) có các phân phối biên $p_1$ và $p_2$.
+
+Khi $\mathcal{F} = \mathcal{F}'$, dạng phổ biến nhất là khoảng cách 1-Wasserstein với $D(\cdot, \cdot)$ được lấy là chuẩn Euclid:
+
+$$
+W(p_1, p_2) = \inf_{\gamma \in \Gamma(p_1, p_2)} \int_{\mathcal{F} \times \mathcal{F}} \|f - f'\| \gamma(f, f') df df', \tag{31.11}
+$$
+
+Ý nghĩa trực giác của khoảng cách này là đo lượng khối lượng tối thiểu cần được vận chuyển để biến đổi phân phối $p_1$ thành phân phối $p_2$. Đó là lý do khoảng cách 1-Wasserstein còn được gọi là khoảng cách Earth-Mover (Earth-Mover distance).
+
+Một cách viết lại thuận tiện của khoảng cách 1-Wasserstein dẫn đến một dạng đối ngẫu thích hợp cho việc ước lượng khả thi:
+
+$$
+W(p_1, p_2) = \sup_{\|g\|_L \leq 1} \int_{\mathcal{F}} g(f) p_1(f) df - \int_{\mathcal{F}} g(f') p_2(f') df' \tag{31.12}
+$$
+
+trong đó $g$ là một hàm liên tục 1-Lipschitz xác định trên $\mathcal{F} \to \mathbb{R}$. Thật vậy, việc tính khoảng cách 1-Wasserstein giờ có thể được xem như một bài toán tối ưu một hàm mục tiêu đơn giản theo các hàm liên tục 1-Lipschitz. Hàm mục tiêu chỉ là hiệu của hai kỳ vọng, có thể được ước lượng bằng Monte Carlo, còn việc tối ưu theo $g$ có thể được xử lý bằng cách tham số hóa $g$ dưới dạng một mạng nơ-ron.
+
+Khoảng cách 1-Wasserstein có thể được dùng làm hàm mục tiêu khớp giữa $p_{\text{nn}}(F_{1:n} \mid \psi)$ và $p_{\text{target}}(F_{1:n})$:
+
+$$
+W(p_{\text{nn}}, p_{\text{target}}) = \sup_{\|g\|_L \leq 1} \int_{\mathcal{F}} g(f) p_{\text{nn}}(f \mid \psi) df - \int_{\mathcal{F}} g(f') p_{\text{target}}(f') df' \tag{31.13}
+$$
+
+#### Độ sai khác trung bình cực đại
+
+Một ví dụ kinh điển khác về metric xác suất tích phân là độ sai khác trung bình cực đại (Maximum Mean Discrepancy, MMD). Cách trình bày khoảng cách Wasserstein ở mục trước cho phép nhìn MMD theo một hướng tương tự, vì nó dẫn đến cùng một hàm mục tiêu, chỉ khác ở chỗ cận trên đúng được lấy theo các hàm thuộc một không gian Hilbert hàm nhân tái sinh (Reproducing Kernel Hilbert Space, RKHS) $\mathcal{H}$ và có chuẩn bị chặn. MMD giữa $p_{\text{target}}$ và $p_{\text{nn}}$ được định nghĩa như sau
+
+$$
+\operatorname{MMD}(p_{\text{nn}}, p_{\text{target}}) = \sup_{\|g\|_{\mathcal{H}} \leq 1} \int_{\mathcal{F}} g(f) p_{\text{nn}}(f \mid \psi) df - \int_{\mathcal{F}} g(f') p_{\text{target}}(f') df' \tag{31.14}
+$$
+
+Không gian Hilbert $\mathcal{H}$ được cảm sinh bởi việc chọn một hàm nhân (kernel) $k(\cdot, \cdot)$, và nên xét các hàm nhân cảm sinh không gian Hilbert vô hạn chiều, có khả năng nắm bắt sự khác biệt giữa vô số mô-men (moment) của hai phân phối. Nhờ cái gọi là thủ thuật hàm nhân (kernel trick), có thể biểu diễn bình phương MMD theo cách không đòi hỏi trực tiếp $g(f)$ mà chỉ cần các tích vô hướng giữa các phần tử của RKHS, tức là hàm nhân được định giá tại các cặp $f$, dẫn đến:
+
+$$
+\operatorname{MMD}^2(p_{\text{nn}}, p_{\text{target}}) = \mathbb{E}_{f, f' \sim p_{\text{target}}, h, h' \sim p_{\text{nn}}(\cdot \mid \psi)} \left[ k(f, f') + k(h, h') - 2k(f, h') \right]. \tag{31.15}
+$$
+
+Tất cả các kỳ vọng này có thể được ước lượng không chệch bằng Monte Carlo, dùng các mẫu từ $p_{\text{target}}$ và $p_{\text{nn}}$. Hơn nữa, cách viết này thích hợp cho việc chia lô nhỏ (mini-batch) mà vẫn giữ được tính không chệch.
+
+### 3.3 Áp đặt tiên nghiệm GP lên mạng nơ-ron Bayes bằng khoảng cách Wasserstein
+
+Mục này trình bày một cách hiện thực thực tế để áp đặt tiên nghiệm GP lên mạng nơ-ron Bayes (Bayesian neural network, BNN) trong không gian hàm, dùng khoảng cách 1-Wasserstein đã giới thiệu ở trên. Hai quá trình ngẫu nhiên được khớp tại các điểm đo (measurement points) $Z = [z_1, \ldots, z_M]^\top$ được lấy mẫu từ một phân phối $q(z)$. Với đầu vào ít chiều, $Z$ có thể được lấy từ một lưới hoặc lấy mẫu đều. Với số chiều cao hơn, các mẫu có thể được lấy từ tập huấn luyện, có thể bổ sung thêm nhiễu. Nếu biết vùng đầu vào kiểm tra, có thể chọn $q(z)$ để phủ vùng đó.
+
+Để khớp tiên nghiệm trong không gian hàm của BNN $p_{\text{nn}}$ với tiên nghiệm GP mục tiêu $p_{\text{gp}}$ tại các điểm đo này, một cách tiếp cận dựa trên mẫu được sử dụng, lấy khoảng cách 1-Wasserstein của Phương trình 31.13 làm hàm mục tiêu:
+
+$$
+\min_{\psi} \max_{\omega} \mathbb{E}_q \Big[ \underbrace{\mathbb{E}_{p_{\text{nn}}(\cdot \mid \psi)}[g(f_M, \omega)] - \mathbb{E}_{p_{\text{gp}}}[g(f_M, \omega)]}_{\mathcal{L}(\psi, \omega)} \Big], \tag{31.16}
+$$
+
+trong đó $f_M$ ký hiệu tập các biến ngẫu nhiên ứng với các đầu vào $Z$, và $g(\cdot, \omega)$ là một hàm 1-Lipschitz được tham số hóa bằng một mạng nơ-ron với tham số $\omega$. Sự phụ thuộc vào các siêu tham số tiên nghiệm $\psi$ đi vào qua tiên nghiệm trong không gian hàm của BNN $p_{\text{nn}}(\cdot \mid \psi)$: các mẫu $f_M$ của nó được tạo ra bằng cách trước hết rút $\theta \sim p(\theta \mid \psi)$ rồi định giá mạng tại $Z$, sao cho việc cực tiểu hóa theo $\psi$ định hình lại tiên nghiệm BNN để khớp với mục tiêu.
+
+<Figure caption="Hình 31.3: Biểu diễn dạng sơ đồ của quá trình áp đặt tiên nghiệm GP lên BNN thông qua việc cực tiểu hóa khoảng cách Wasserstein. Bản tái hiện dạng sơ đồ, được vẽ lại cho trang này.">
+  <Bdl31PriorMatching />
+</Figure>
+
+Về việc tối ưu các tham số $\psi$ và $\omega$, thủ tục luân phiên giữa $n_{\text{Lipschitz}}$ bước cực đại hóa $\mathcal{L}$ theo các tham số $\omega$ của hàm Lipschitz và một bước cực tiểu hóa khoảng cách Wasserstein theo các tham số $\psi$ của tiên nghiệm. Do đó, hai bộ tối ưu độc lập được dùng cho $\psi$ và $\omega$. Hình 31.3 đưa ra một biểu diễn sơ đồ ở mức cao của thủ tục được đề xuất. Cho các mẫu từ hai quá trình ngẫu nhiên, khoảng cách Wasserstein được ước lượng bằng cách xét bài toán cực đại hóa bên trong của Phương trình 31.16, cho ra một $g^*$ tối ưu. Bước tối ưu bên trong này được lặp lại ở mọi bước của vòng lặp tối ưu bên ngoài. Lưu ý rằng hàm mục tiêu hoàn toàn dựa trên mẫu. Do đó, không cần biết dạng đóng của mật độ biên $p_{\text{nn}}(\mathbf{f}; \psi)$. Có thể xét bất kỳ quá trình ngẫu nhiên nào làm tiên nghiệm mục tiêu trên hàm, miễn là có thể rút mẫu từ nó.
+
+Để áp đặt ràng buộc Lipschitz lên $g_\omega$, Arjovsky và cộng sự đề xuất cắt các trọng số $\omega$ để chúng nằm trong một tập compact $[-c, c]$, bảo đảm mọi hàm $g_\omega$ đều là $K$-Lipschitz. Tuy nhiên, cách này thường khiến $g_\omega$ thiên về các hàm quá đơn giản. Dựa trên thực tế rằng một hàm khả vi là 1-Lipschitz khi và chỉ khi chuẩn của gradient của nó không vượt quá một ở mọi nơi, Gulrajani và cộng sự đề xuất phạt độ lệch của chuẩn gradient so với 1. Cụ thể, họ bổ sung vào hàm mất mát một số hạng phạt gradient (gradient penalty):
+
+$$
+\mathcal{L}_R(\psi, \omega) = \mathcal{L}(\psi, \omega) + \lambda \, \mathbb{E}_{p_{\hat{\mathbf{f}}}} \left[ \left( \left\| \nabla_{\hat{\mathbf{f}}} g(\hat{\mathbf{f}}) \right\|_2 - 1 \right)^2 \right], \tag{31.17}
+$$
+
+trong đó $p_{\hat{\mathbf{f}}}$ là phân phối của các hàm nội suy $\hat{\mathbf{f}} = \varepsilon \mathbf{f}_{\text{nn}} + (1 - \varepsilon) \mathbf{f}_{\text{gp}}$, với $\varepsilon \sim \mathcal{U}[0, 1]$, và $\mathbf{f}_{\text{nn}} \sim p_{\text{nn}}$, $\mathbf{f}_{\text{gp}} \sim p_{\text{gp}}$ lần lượt được rút từ tiên nghiệm BNN và tiên nghiệm GP. Hệ số $\lambda$ điều khiển cường độ của số hạng chính quy hóa.
+
+### 3.4 Ví dụ trên một bộ dữ liệu hồi quy tổng hợp một chiều
+
+Bộ dữ liệu được xây dựng như sau: (1) lấy mẫu đều 64 vị trí đầu vào $\mathbf{x}$ trong khoảng $[-10, 10]$; (2) sắp xếp lại các vị trí này để tạo ra một khoảng trống trong không gian đầu vào; (3) lấy mẫu các giá trị hàm $\mathbf{f}$ từ một tiên nghiệm GP với thang độ dài $l = 0.6$ và biên độ $\alpha = 1$, được định giá tại $\mathbf{x}$; (4) làm nhiễu các giá trị mục tiêu bằng nhiễu Gauss độc lập cùng phân phối (i.i.d.) với phương sai $\sigma_\epsilon^2 = 0.1$. Mô hình được dùng là một perceptron nhiều lớp (multilayer perceptron, MLP) ba lớp. Hình 31.4 trình bày kết quả, được sắp xếp thành năm hàng, với quá trình Gauss tham chiếu luôn được vẽ ở cột ngoài cùng bên trái. Ba tiên nghiệm BNN được cảm sinh từ GP (GP-induced, GPi) được xét: GPi-Gaussian, GPi-Hierarchical và GPi-NFlow, có tiên nghiệm trên $\theta$ lần lượt được tham số hóa bằng các phân phối Gauss, phân cấp và luồng chuẩn hóa. Hàng đầu tiên cho thấy các mẫu từ những tiên nghiệm này khi các siêu tham số được giữ *cố định* ở các giá trị mặc định hợp lý, tức là *không* được khớp với GP (ghi nhãn "Fixed"), còn hàng thứ hai cho thấy các mẫu sau khi các siêu tham số $\psi$ đã được *tối ưu* để khớp với tiên nghiệm GP bằng cách cực tiểu hóa khoảng cách Wasserstein (ghi nhãn "Optim"). Hàng thứ ba thể hiện sự hội tụ của bài toán tối ưu khớp tiên nghiệm này. Hai hàng cuối lần lượt cho thấy các phân phối hậu nghiệm thu được với tiên nghiệm cố định và tiên nghiệm đã tối ưu.
+
+Do đó, thủ tục gồm hai giai đoạn, và không nên nhầm lẫn hai giai đoạn này. Ở giai đoạn thứ nhất (khớp tiên nghiệm), bài toán tối ưu của Phương trình 31.16 được giải để thu được các siêu tham số tiên nghiệm $\psi^\star$; giai đoạn này hoạt động hoàn toàn trong không gian hàm và chỉ cần các *mẫu* từ $p_{\text{nn}}$ và $p_{\text{gp}}$. Ở giai đoạn thứ hai (suy luận), $\psi = \psi^\star$ được cố định và các mẫu hậu nghiệm được rút bằng Monte Carlo Hamilton gradient ngẫu nhiên (stochastic gradient Hamiltonian Monte Carlo, SGHMC; [Chương 2](/vi/blog/stochastic-gradient-mcmc)). Cần nhấn mạnh vì sao giai đoạn thứ hai không gặp vấn đề dù mật độ tiên nghiệm *trong không gian hàm* không tính được: việc lấy mẫu hậu nghiệm được thực hiện trong không gian *tham số*, nơi tiên nghiệm $p(\theta \mid \psi^\star)$, một mật độ Gauss, Gauss phân cấp hoặc luồng chuẩn hóa trên $\theta$, có dạng đóng và khả vi. Do đó, bộ lấy mẫu nhắm tới phân phối hậu nghiệm chưa chuẩn hóa trong không gian tham số $p(y \mid x, \theta) \, p(\theta \mid \psi^\star)$ và không bao giờ cần định giá phân phối biên không tính được $p_{\text{nn}}(F_{1:n})$; việc tối ưu Phương trình 31.16 được thực hiện một lần, từ trước, và không thuộc vòng lặp bên trong của bộ lấy mẫu.
+
+Từ việc phân tích các đồ thị này, lợi ích của việc đặt tiên nghiệm trên hàm thay vì trên tham số thể hiện rõ. Thứ nhất, các đồ thị khoảng cách Wasserstein cho thấy sự hội tụ thỏa đáng, với tiên nghiệm luồng chuẩn hóa khớp sát tiên nghiệm GP nhờ tính linh hoạt của nó. Thứ hai, đúng như kỳ vọng, các phân phối hậu nghiệm có hành vi tương tự tùy theo các lời giải có thể hiện thực từ tiên nghiệm: các tiên nghiệm cổ điển có xu hướng cho ra các hàm suy biến, dẫn đến sự quá tự tin (overconfidence) ở những vùng không có dữ liệu, trong khi các tiên nghiệm được cảm sinh từ GP giữ được thông tin về thang độ dài và biên độ.
+
+Nhìn chung, các ví dụ cho thấy vì sao sự thuận tiện trong không gian tham số là chưa đủ cho học sâu Bayes: những tiên nghiệm trọng số tưởng chừng vô hại có thể cảm sinh các tiên nghiệm rất hạn chế trên hàm. Việc khớp trong không gian hàm cung cấp một cách thực tế để mã hóa các giả định dễ diễn giải như thang độ dài, biên độ và độ trơn, trong khi vẫn thực hiện suy luận hậu nghiệm trong không gian tham số.
+
+<Figure caption="Hình 31.4: Minh họa một ví dụ hồi quy một chiều với một MLP ba lớp. Ở mọi hàng, cột bên trái là quá trình Gauss tham chiếu, trục hoành và trục tung lần lượt là đầu vào và giá trị hàm. Hàng thứ nhất cho thấy các mẫu tiên nghiệm BNN với các siêu tham số cố định (mặc định, chưa được khớp), còn hàng thứ hai với các siêu tham số đã được tối ưu để khớp với tiên nghiệm GP; hàng giữa cho thấy sự hội tụ của bài toán tối ưu khớp tiên nghiệm này. Hai hàng cuối lần lượt cho thấy các phân phối hậu nghiệm thu được với tiên nghiệm cố định và tiên nghiệm đã tối ưu, được lấy mẫu bằng SGHMC. Đường nét đứt và các vùng tô bóng biểu thị trung bình hậu nghiệm và các khoảng khả tín 95%. Bản tái hiện dạng sơ đồ, được vẽ lại cho trang này; nó không tái hiện thí nghiệm của cuốn sách hay các kết quả của thí nghiệm đó. Chỉ các khung tiên nghiệm GP và hậu nghiệm GP được tính toán (hàm nhân RBF, phương sai 2, thang độ dài 1.4, trên dữ liệu tổng hợp có một khoảng trống). Các mẫu tiên nghiệm cố định đến từ các mạng tanh nhỏ, và các mẫu tiên nghiệm được cảm sinh từ GP đến từ các mạng đặc trưng ngẫu nhiên đóng vai trò thay thế cho các tiên nghiệm đã tối ưu. Các đường khoảng cách Wasserstein là các đường suy giảm mang tính minh họa, không phải kết quả tối ưu. Sáu khung hậu nghiệm BNN chỉ mang tính minh họa, không phải các phân phối hậu nghiệm BNN được tính toán: mỗi khung là phân phối hậu nghiệm GP với dải khả tín được thu hẹp lại (nhiều đối với các tiên nghiệm cố định, ít đối với các tiên nghiệm được cảm sinh từ GP) để mô tả hành vi được nêu trong văn bản.">
+  <Bdl31RegressionExample />
+</Figure>
+
+[^1]: Định nghĩa của khoảng cách $p$-Wasserstein đúng tổng quát hơn với mọi không gian metric khả ly đầy đủ $\mathcal{F}$ và $\mathcal{F}'$.
