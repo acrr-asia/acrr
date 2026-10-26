@@ -109,3 +109,5 @@ Optional:
 | L3 | | | |
 | L4 | | | |
 | L5 | | | |
+
+Re-review 2026-10-24 (live captures of `7e20c2c`, run https://github.com/acrr-asia/acrr/actions/runs/40085671258, after the site-wide fix in PR #57): the code-ligature finding is closed; code shows `|=`, `->`, `!=` and `>=` as typed characters.

@@ -66,7 +66,7 @@ function measure() {
     return false;
   };
   const label = (el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''}`;
-  const overflowing = [...main.querySelectorAll('img, svg, table, pre, figure, .katex-display, iframe, video')]
+  const overflowing = [...main.querySelectorAll('img, svg, table, pre, figure, .katex-display, :not(.katex-display) > .katex, iframe, video')]
     .filter((el) => el.getBoundingClientRect().right > vw + 1 && !scrollsX(el))
     .slice(0, 20)
     .map((el) => `${label(el)} (right edge ${Math.round(el.getBoundingClientRect().right)} px)`);
